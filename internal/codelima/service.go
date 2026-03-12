@@ -35,6 +35,7 @@ type ProjectCreateInput struct {
 
 type ProjectUpdateInput struct {
 	Slug          *string
+	WorkspacePath *string
 	AgentProfile  *string
 	SetupCommands []string
 	ClearSetup    bool
@@ -244,28 +245,9 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 		_ = lockSet.Close()
 	}()
 
-	workspacePath, err := canonicalPath(input.WorkspacePath)
+	workspacePath, err := s.resolveProjectWorkspacePath(input.WorkspacePath, "")
 	if err != nil {
-		return Project{}, invalidArgument("workspace path must be resolvable", map[string]any{"path": input.WorkspacePath})
-	}
-
-	info, err := os.Stat(workspacePath)
-	if err != nil {
-		return Project{}, invalidArgument("workspace path must exist", map[string]any{"path": workspacePath})
-	}
-
-	if !info.IsDir() {
-		return Project{}, invalidArgument("workspace path must be a directory", map[string]any{"path": workspacePath})
-	}
-
-	if strings.HasPrefix(workspacePath, s.cfg.MetadataRoot+string(os.PathSeparator)) {
-		return Project{}, invalidArgument("workspace path must not be inside CODELIMA_HOME", map[string]any{"path": workspacePath})
-	}
-
-	if existing, found, err := s.store.ProjectByWorkspacePath(workspacePath); err != nil {
 		return Project{}, err
-	} else if found {
-		return Project{}, preconditionFailed("workspace is already registered", map[string]any{"project_id": existing.ID, "workspace_path": workspacePath})
 	}
 
 	slug := input.Slug
@@ -273,8 +255,8 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 		slug = slugify(filepath.Base(workspacePath))
 	}
 
-	if _, err := s.store.ProjectByIDOrSlug(slug); err == nil {
-		return Project{}, preconditionFailed("project slug already exists", map[string]any{"slug": slug})
+	if err := s.ensureUniqueProjectSlug(slug, ""); err != nil {
+		return Project{}, err
 	}
 
 	now := s.now()
@@ -338,7 +320,7 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 		return Project{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
 	if err != nil {
 		return Project{}, err
 	}
@@ -352,8 +334,8 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 	}
 
 	if input.Slug != nil && *input.Slug != "" && *input.Slug != project.Slug {
-		if _, err := s.store.ProjectByIDOrSlug(*input.Slug); err == nil {
-			return Project{}, preconditionFailed("project slug already exists", map[string]any{"slug": *input.Slug})
+		if err := s.ensureUniqueProjectSlug(*input.Slug, project.ID); err != nil {
+			return Project{}, err
 		}
 
 		project.Slug = *input.Slug
@@ -361,6 +343,28 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 
 	if input.AgentProfile != nil {
 		project.AgentProfileName = *input.AgentProfile
+	}
+
+	if input.WorkspacePath != nil {
+		workspacePath, err := s.resolveProjectWorkspacePath(*input.WorkspacePath, project.ID)
+		if err != nil {
+			return Project{}, err
+		}
+
+		if filepath.Clean(workspacePath) != filepath.Clean(project.WorkspacePath) {
+			nodes, err := s.store.ProjectNodes(project.ID, false)
+			if err != nil {
+				return Project{}, err
+			}
+
+			for _, node := range nodes {
+				if node.Status != NodeStatusTerminated {
+					return Project{}, preconditionFailed("project workspace cannot be changed while nodes are live", map[string]any{"project_id": project.ID, "node_id": node.ID, "node_slug": node.Slug})
+				}
+			}
+
+			project.WorkspacePath = workspacePath
+		}
 	}
 
 	if input.ClearSetup {
@@ -555,8 +559,8 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 		slug = slugify(filepath.Base(destinationPath))
 	}
 
-	if _, err := s.store.ProjectByIDOrSlug(slug); err == nil {
-		return Project{}, preconditionFailed("project slug already exists", map[string]any{"slug": slug})
+	if err := s.ensureUniqueProjectSlug(slug, ""); err != nil {
+		return Project{}, err
 	}
 
 	child := Project{
@@ -610,6 +614,10 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, 
 
 	project, err := s.store.ProjectByIDOrSlug(input.Project)
 	if err != nil {
+		return Node{}, err
+	}
+
+	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
 		return Node{}, err
 	}
 
@@ -729,6 +737,15 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 
 	node, err := s.store.NodeByIDOrSlug(value)
 	if err != nil {
+		return Node{}, err
+	}
+
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return Node{}, err
+	}
+
+	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
 		return Node{}, err
 	}
 
@@ -1034,6 +1051,15 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 
 	node, err := s.store.NodeByIDOrSlug(value)
 	if err != nil {
+		return err
+	}
+
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return err
+	}
+
+	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
 		return err
 	}
 
@@ -1363,6 +1389,21 @@ func (s *Service) ensureUniqueNodeSlug(slug string) error {
 	return nil
 }
 
+func (s *Service) ensureUniqueProjectSlug(slug, currentProjectID string) error {
+	projects, err := s.store.ListProjects(false)
+	if err != nil {
+		return err
+	}
+
+	for _, project := range projects {
+		if project.Slug == slug && project.ID != currentProjectID {
+			return preconditionFailed("project slug already exists", map[string]any{"slug": slug})
+		}
+	}
+
+	return nil
+}
+
 func (s *Service) generateInstanceName(projectSlug, nodeSlug, nodeID string) (string, error) {
 	prefix := fmt.Sprintf("%s-%s-%s", projectSlug, nodeSlug, shortID(nodeID))
 	instanceName := slugify(prefix)
@@ -1446,6 +1487,47 @@ func (s *Service) nodeWorkspaceMountPath(node Node) string {
 	}
 
 	return project.WorkspacePath
+}
+
+func (s *Service) resolveProjectWorkspacePath(input string, currentProjectID string) (string, error) {
+	workspacePath, err := canonicalPath(input)
+	if err != nil {
+		return "", invalidArgument("workspace path must be resolvable", map[string]any{"path": input})
+	}
+
+	info, err := os.Stat(workspacePath)
+	if err != nil {
+		return "", invalidArgument("workspace path must exist", map[string]any{"path": workspacePath})
+	}
+
+	if !info.IsDir() {
+		return "", invalidArgument("workspace path must be a directory", map[string]any{"path": workspacePath})
+	}
+
+	if strings.HasPrefix(workspacePath, s.cfg.MetadataRoot+string(os.PathSeparator)) {
+		return "", invalidArgument("workspace path must not be inside CODELIMA_HOME", map[string]any{"path": workspacePath})
+	}
+
+	if existing, found, err := s.store.ProjectByWorkspacePath(workspacePath); err != nil {
+		return "", err
+	} else if found && existing.ID != currentProjectID {
+		return "", preconditionFailed("workspace is already registered", map[string]any{"project_id": existing.ID, "workspace_path": workspacePath})
+	}
+
+	return workspacePath, nil
+}
+
+func (s *Service) ensureProjectWorkspaceAvailable(project Project) error {
+	info, err := os.Stat(project.WorkspacePath)
+	if err != nil {
+		return preconditionFailed("registered workspace path no longer exists on the host; update the project workspace before creating, starting, or shelling into nodes", map[string]any{"project_id": project.ID, "workspace_path": project.WorkspacePath})
+	}
+
+	if !info.IsDir() {
+		return preconditionFailed("registered workspace path is no longer a directory on the host; update the project workspace before creating, starting, or shelling into nodes", map[string]any{"project_id": project.ID, "workspace_path": project.WorkspacePath})
+	}
+
+	return nil
 }
 
 func (s *Service) reconcileNode(ctx context.Context, node Node, persist bool) (Node, error) {

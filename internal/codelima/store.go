@@ -253,7 +253,7 @@ func (s *Store) ProjectByIDOrSlug(value string) (Project, error) {
 		return s.ProjectByID(strings.TrimSpace(string(data)))
 	}
 
-	projects, err := s.ListProjects(true)
+	projects, err := s.ListProjects(false)
 	if err != nil {
 		return Project{}, err
 	}
@@ -262,6 +262,23 @@ func (s *Store) ProjectByIDOrSlug(value string) (Project, error) {
 		if project.Slug == value {
 			return project, nil
 		}
+	}
+
+	projects, err = s.ListProjects(true)
+	if err != nil {
+		return Project{}, err
+	}
+
+	var deletedMatch *Project
+	for _, project := range projects {
+		if project.Slug == value {
+			projectCopy := project
+			deletedMatch = &projectCopy
+		}
+	}
+
+	if deletedMatch != nil {
+		return *deletedMatch, nil
 	}
 
 	return Project{}, notFound("project not found", map[string]any{"query": value})
@@ -465,7 +482,7 @@ func (s *Store) NodeByIDOrSlug(value string) (Node, error) {
 		return s.NodeByID(value)
 	}
 
-	nodes, err := s.ListNodes(true)
+	nodes, err := s.ListNodes(false)
 	if err != nil {
 		return Node{}, err
 	}
@@ -474,6 +491,23 @@ func (s *Store) NodeByIDOrSlug(value string) (Node, error) {
 		if node.Slug == value {
 			return node, nil
 		}
+	}
+
+	nodes, err = s.ListNodes(true)
+	if err != nil {
+		return Node{}, err
+	}
+
+	var deletedMatch *Node
+	for _, node := range nodes {
+		if node.Slug == value {
+			nodeCopy := node
+			deletedMatch = &nodeCopy
+		}
+	}
+
+	if deletedMatch != nil {
+		return *deletedMatch, nil
 	}
 
 	return Node{}, notFound("node not found", map[string]any{"query": value})

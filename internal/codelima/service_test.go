@@ -477,6 +477,200 @@ func TestShellUsesWorkspaceMountPathForInteractiveEntry(t *testing.T) {
 	}
 }
 
+func TestProjectUpdateWorkspacePath(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	newWorkspace := filepath.Join(t.TempDir(), "moved-workspace")
+	if err := os.MkdirAll(newWorkspace, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	updated, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
+		WorkspacePath: &newWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectUpdate() error = %v", err)
+	}
+
+	if updated.WorkspacePath != newWorkspace {
+		t.Fatalf("expected workspace path %q, got %q", newWorkspace, updated.WorkspacePath)
+	}
+}
+
+func TestProjectUpdateWorkspacePathRejectsLiveNodes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	if _, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	}); err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	newWorkspace := filepath.Join(t.TempDir(), "moved-workspace")
+	if err := os.MkdirAll(newWorkspace, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	if _, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
+		WorkspacePath: &newWorkspace,
+	}); err == nil {
+		t.Fatalf("expected ProjectUpdate() to reject workspace rebind while nodes are live")
+	}
+}
+
+func TestShellFailsWhenProjectWorkspacePathIsMissing(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if err := os.RemoveAll(workspace); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+
+	if err := service.Shell(ctx, node.ID, nil); err == nil {
+		t.Fatalf("expected Shell() to fail when the registered workspace path is missing")
+	}
+
+	if len(service.lima.(*fakeLima).shellCalls) != 0 {
+		t.Fatalf("expected shell delegation to be skipped when workspace is missing")
+	}
+}
+
+func TestNodeDeleteBySlugTargetsActiveNodeWhenDeletedNodeSharesSlug(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	oldNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "design",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(old) error = %v", err)
+	}
+
+	oldNode, err = service.NodeDelete(ctx, oldNode.ID)
+	if err != nil {
+		t.Fatalf("NodeDelete(old) error = %v", err)
+	}
+
+	if oldNode.DeletedAt == nil {
+		t.Fatalf("expected old node to be tombstoned")
+	}
+
+	newNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "design",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(new) error = %v", err)
+	}
+
+	deletedNode, err := service.NodeDelete(ctx, "design")
+	if err != nil {
+		t.Fatalf("NodeDelete(by slug) error = %v", err)
+	}
+
+	if deletedNode.ID != newNode.ID {
+		t.Fatalf("expected delete by slug to target active node %q, got %q", newNode.ID, deletedNode.ID)
+	}
+}
+
+func TestProjectCreateAllowsSlugReuseAfterProjectDeleted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(initial) error = %v", err)
+	}
+
+	project, err = service.ProjectDelete(project.ID)
+	if err != nil {
+		t.Fatalf("ProjectDelete() error = %v", err)
+	}
+
+	if project.DeletedAt == nil {
+		t.Fatalf("expected deleted project to be tombstoned")
+	}
+
+	recreatedWorkspace := filepath.Join(t.TempDir(), "workspace-recreated")
+	if err := os.MkdirAll(recreatedWorkspace, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	recreated, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: recreatedWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(recreated) error = %v", err)
+	}
+
+	if recreated.ID == project.ID {
+		t.Fatalf("expected recreated project to get a new id")
+	}
+}
+
 func newTestService(t *testing.T) (*Service, string) {
 	t.Helper()
 

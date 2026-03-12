@@ -22,6 +22,8 @@ When work is complete the code needs to be run and verified locally.
 
 Manual verification must be performed for every verification flow defined in QA.md.
 
+Keep temporary work local to the project under a project-rooted temp directory such as `./tmp/` instead of using system temp directories.
+
 Instructions for how to setup the development environment, run the project, run the tests, and run other tooling will be documented in the README.md
 
 The README.md must also stay current with an outline of the user-facing capabilities and a user guide that includes practical examples for common workflows and useful command invocations.

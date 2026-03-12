@@ -89,6 +89,15 @@ codelima shell root-node -- uname -a
 
 Interactive shells and one-off commands enter the node at the mounted project workspace, so the command can be launched from any host directory.
 
+If the host workspace is moved after registration, `node create`, `node start`, and `shell` fail fast with a clear error instead of entering a broken mount. Rebind the project first:
+
+```sh
+codelima node delete root-node
+codelima project update root --workspace /new/host/path
+codelima node create --project root --slug root-node
+codelima node start root-node
+```
+
 5. Fork the project or clone the node into a child lineage.
 
 ```sh
@@ -148,6 +157,14 @@ Review a patch without applying it:
 codelima patch list
 codelima patch show <patch-id>
 codelima patch reject <patch-id> --actor you --note "needs more work"
+```
+
+Rebind a project after moving its workspace on the host:
+
+```sh
+codelima node delete root-node
+codelima project update root --workspace /Users/you/Projects/codelima/test-project-dir
+codelima project show root
 ```
 
 Clean up a node while keeping historical metadata:

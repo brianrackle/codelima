@@ -169,6 +169,7 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		flags := flag.NewFlagSet("project update", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		slug := flags.String("slug", "", "")
+		workspace := flags.String("workspace", "", "")
 		agentProfile := flags.String("agent-profile", "", "")
 		template := flags.String("template", "", "")
 		clearSetup := flags.Bool("clear-setup-commands", false, "")
@@ -192,9 +193,12 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		if target == "" {
 			return nil, invalidArgument("project update requires <project>", nil)
 		}
-		var slugPtr, agentPtr, templatePtr *string
+		var slugPtr, workspacePtr, agentPtr, templatePtr *string
 		if *slug != "" {
 			slugPtr = slug
+		}
+		if *workspace != "" {
+			workspacePtr = workspace
 		}
 		if *agentProfile != "" {
 			agentPtr = agentProfile
@@ -208,6 +212,7 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		}
 		return service.ProjectUpdate(target, ProjectUpdateInput{
 			Slug:          slugPtr,
+			WorkspacePath: workspacePtr,
 			AgentProfile:  agentPtr,
 			SetupCommands: []string(setupCommands),
 			ClearSetup:    *clearSetup,
