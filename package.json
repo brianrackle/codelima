@@ -1,0 +1,12 @@
+{
+  "name": "test-lima",
+  "private": true,
+  "scripts": {
+    "sync:ghostty": "mkdir -p priv/static && cp node_modules/ghostty-web/ghostty-vt.wasm priv/static/ghostty-vt.wasm"
+  },
+  "dependencies": {
+    "@lydell/node-pty": "^1.1.0",
+    "ghostty-web": "^0.4.0",
+    "ws": "^8.18.3"
+  }
+}

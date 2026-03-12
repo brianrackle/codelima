@@ -1,0 +1,22 @@
+defmodule Mix.Tasks.Compile.TestLimaBuild do
+  use Mix.Task.Compiler
+
+  @recursive true
+
+  @impl Mix.Task
+  def run(_args) do
+    colocated_dir()
+    |> File.mkdir_p!()
+
+    {:ok, []}
+  end
+
+  defp colocated_dir do
+    app =
+      Mix.Project.config()
+      |> Keyword.fetch!(:app)
+      |> Atom.to_string()
+
+    Path.join([Mix.Project.build_path(), "phoenix-colocated", app])
+  end
+end
