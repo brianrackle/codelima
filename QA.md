@@ -2,7 +2,7 @@
 
 ## Shell Verification
 
-This flow verifies that `codelima shell` enters a healthy node in the mounted project workspace instead of inheriting an unrelated host working directory.
+This flow verifies that `codelima shell` enters a healthy node in the guest-local project workspace copy instead of inheriting an unrelated host working directory.
 
 Prerequisites:
 
@@ -38,6 +38,18 @@ Expected result:
 - command exits successfully
 - output is `$ROOT_DIR/test-project-dir`
 
+Isolation verification:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" shell qa-shell-node -- sh -lc 'printf vm-only > .vm-isolated'
+test ! -e "$ROOT_DIR/test-project-dir/.vm-isolated"
+```
+
+Expected result:
+
+- the guest command succeeds
+- the host command succeeds because the marker file was not written into the host workspace
+
 Interactive verification:
 
 ```sh
@@ -60,6 +72,70 @@ Cleanup:
 
 ```sh
 ./bin/codelima --home "$CODELIMA_HOME" node delete qa-shell-node
+rm -rf "$WORK_ROOT"
+```
+
+## Clone Verification
+
+This flow verifies that `node clone` is a Lima VM copy that keeps the source guest workspace path and can clone a running source node by stopping and restarting it internally.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-clone"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT/root"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
+```
+
+Create and start the source node:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-clone-root --workspace "$WORK_ROOT/root" --setup-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-clone-root --slug qa-clone-root-node
+./bin/codelima --home "$CODELIMA_HOME" node start qa-clone-root-node
+```
+
+Clone the running source node and inspect both nodes:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node clone qa-clone-root-node --project-slug qa-clone-child --node-slug qa-clone-child-node --workspace "$WORK_ROOT/child"
+./bin/codelima --home "$CODELIMA_HOME" node show qa-clone-root-node
+./bin/codelima --home "$CODELIMA_HOME" node show qa-clone-child-node
+```
+
+Expected result:
+
+- `node clone` succeeds even though the source node was running
+- `node show qa-clone-root-node` reports `status: running`
+- `node show qa-clone-child-node` reports `guest_workspace_path: $WORK_ROOT/root`
+- `node show qa-clone-child-node` reports `workspace_seeded: true`
+- `node show qa-clone-child-node` reports `bootstrap_completed: true`
+
+Start the child node and verify its shell path:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node start qa-clone-child-node
+./bin/codelima --home "$CODELIMA_HOME" shell qa-clone-child-node -- pwd
+```
+
+Expected result:
+
+- both commands succeed
+- `pwd` prints `$WORK_ROOT/root`
+
+Cleanup:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-clone-child-node
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-clone-root-node
 rm -rf "$WORK_ROOT"
 ```
 

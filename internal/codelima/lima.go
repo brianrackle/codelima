@@ -18,7 +18,6 @@ type ShellStreams struct {
 }
 
 type CloneOptions struct {
-	MountPath string
 	Resources Resources
 }
 
@@ -30,6 +29,7 @@ type LimaClient interface {
 	Stop(ctx context.Context, instanceName string) error
 	Delete(ctx context.Context, instanceName string) error
 	Clone(ctx context.Context, sourceInstance, targetInstance string, options CloneOptions) error
+	CopyToGuest(ctx context.Context, instanceName, sourcePath, targetPath string, recursive bool) error
 	Shell(ctx context.Context, instanceName string, command []string, workdir string, interactive bool, streams ShellStreams) error
 }
 
@@ -168,16 +168,31 @@ func (c *ExecLimaClient) Clone(ctx context.Context, sourceInstance, targetInstan
 		args = append(args, "--disk", fmt.Sprintf("%d", options.Resources.DiskGiB))
 	}
 
-	if options.MountPath != "" {
-		args = append(args, "--mount-only", options.MountPath+":w")
-	}
-
 	_, stderr, err := c.run(ctx, 20*time.Minute, args...)
 	if err != nil {
 		return externalCommandFailed(
 			"limactl clone failed",
 			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
 			map[string]any{"source_instance": sourceInstance, "target_instance": targetInstance},
+		)
+	}
+
+	return nil
+}
+
+func (c *ExecLimaClient) CopyToGuest(ctx context.Context, instanceName, sourcePath, targetPath string, recursive bool) error {
+	args := []string{"copy"}
+	if recursive {
+		args = append(args, "-r")
+	}
+
+	args = append(args, sourcePath, fmt.Sprintf("%s:%s", instanceName, targetPath))
+	_, stderr, err := c.run(ctx, 20*time.Minute, args...)
+	if err != nil {
+		return externalCommandFailed(
+			"limactl copy failed",
+			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
+			map[string]any{"instance_name": instanceName, "source_path": sourcePath, "target_path": targetPath},
 		)
 	}
 

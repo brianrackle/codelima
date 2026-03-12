@@ -25,7 +25,17 @@ Later config changes do not retroactively mutate existing nodes.
 Shell entry always normalizes the documented `--` separator before delegating to Lima.
 Interactive shells and one-off commands pass the node workspace through `limactl shell --workdir` so shell entry is stable regardless of the host directory where `codelima` is launched.
 
+## Guest Workspace Seed
+
+New nodes do not mount the host project workspace into the guest.
+Instead, the first successful start copies the host workspace into the guest at the same absolute path, which keeps guest edits isolated while preserving the expected path layout for setup commands and shell entry.
+
+## Clone Is VM Copy
+
+Node clone uses `limactl clone` as a full-VM copy.
+If the source node is running, CodeLima stops it, clones it, and starts it again. The child node keeps the same guest workspace path and bootstrap state as the source VM; the clone command's `--workspace` flag only defines the child project's host workspace.
+
 ## Workspace Rebind Guard
 
 Project workspace paths are treated as durable host bindings.
-Rebinding a project to a new workspace path is allowed only after all nodes for that project are terminated, which keeps runtime mounts, node metadata, and project metadata from drifting out of sync.
+Rebinding a project to a new workspace path is allowed only after all nodes for that project are terminated, which keeps seed inputs, node metadata, and project metadata from drifting out of sync.

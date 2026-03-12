@@ -14,6 +14,7 @@ type fakeLima struct {
 	observations map[string]RuntimeObservation
 	calls        []string
 	shellCalls   []fakeShellCall
+	copyCalls    []fakeCopyCall
 	failCommand  string
 }
 
@@ -24,12 +25,20 @@ type fakeShellCall struct {
 	interactive  bool
 }
 
+type fakeCopyCall struct {
+	instanceName string
+	sourcePath   string
+	targetPath   string
+	recursive    bool
+}
+
 func newFakeLima() *fakeLima {
 	return &fakeLima{
 		baseTemplate: []byte("arch: aarch64\nimages: []\nmounts: []\n"),
 		observations: map[string]RuntimeObservation{},
 		calls:        []string{},
 		shellCalls:   []fakeShellCall{},
+		copyCalls:    []fakeCopyCall{},
 	}
 }
 
@@ -78,9 +87,20 @@ func (f *fakeLima) Delete(_ context.Context, instanceName string) error {
 	return nil
 }
 
-func (f *fakeLima) Clone(_ context.Context, sourceInstance, targetInstance string, options CloneOptions) error {
-	f.calls = append(f.calls, "clone:"+sourceInstance+"->"+targetInstance+":"+options.MountPath)
+func (f *fakeLima) Clone(_ context.Context, sourceInstance, targetInstance string, _ CloneOptions) error {
+	f.calls = append(f.calls, "clone:"+sourceInstance+"->"+targetInstance)
 	f.observations[targetInstance] = RuntimeObservation{Name: targetInstance, Exists: true, Status: "stopped", Dir: "/fake/" + targetInstance}
+	return nil
+}
+
+func (f *fakeLima) CopyToGuest(_ context.Context, instanceName, sourcePath, targetPath string, recursive bool) error {
+	f.calls = append(f.calls, "copy:"+instanceName+":"+sourcePath+"->"+targetPath)
+	f.copyCalls = append(f.copyCalls, fakeCopyCall{
+		instanceName: instanceName,
+		sourcePath:   sourcePath,
+		targetPath:   targetPath,
+		recursive:    recursive,
+	})
 	return nil
 }
 
@@ -179,6 +199,15 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 		t.Fatalf("expected limactl create delegation")
 	}
 
+	templateBytes, err := os.ReadFile(node.GeneratedTemplatePath)
+	if err != nil {
+		t.Fatalf("ReadFile(template) error = %v", err)
+	}
+
+	if strings.Contains(string(templateBytes), "location: "+workspace) {
+		t.Fatalf("expected generated template to avoid mounting host workspace, got %s", string(templateBytes))
+	}
+
 	node, err = service.NodeStart(ctx, node.ID)
 	if err != nil {
 		t.Fatalf("NodeStart() error = %v", err)
@@ -190,6 +219,10 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 
 	if !containsCall(service.lima.(*fakeLima).calls, "shell:"+node.LimaInstanceName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
 		t.Fatalf("expected setup command delegation, calls = %v", service.lima.(*fakeLima).calls)
+	}
+
+	if !containsCall(service.lima.(*fakeLima).calls, "copy:"+node.LimaInstanceName+":"+workspace+"->"+workspace) {
+		t.Fatalf("expected workspace copy delegation, calls = %v", service.lima.(*fakeLima).calls)
 	}
 
 	if !containsSubstring(service.lima.(*fakeLima).calls, "command -v sh") {
@@ -254,8 +287,48 @@ func TestNodeCloneCreatesChildProjectAndNode(t *testing.T) {
 		t.Fatalf("expected child node parent id %q, got %q", node.ID, childNode.ParentNodeID)
 	}
 
+	if childNode.GuestWorkspacePath != workspace {
+		t.Fatalf("expected child node guest workspace path %q, got %q", workspace, childNode.GuestWorkspacePath)
+	}
+
+	if childNode.WorkspaceSeeded {
+		t.Fatalf("expected unstarted source clone to remain unseeded")
+	}
+
 	if !containsPrefix(service.lima.(*fakeLima).calls, "clone:"+node.LimaInstanceName+"->"+childNode.LimaInstanceName) {
 		t.Fatalf("expected limactl clone delegation, calls = %v", service.lima.(*fakeLima).calls)
+	}
+}
+
+func TestNodeCloneRejectsAgentProfileOverride(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "root-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	_, _, err = service.NodeClone(ctx, NodeCloneInput{
+		SourceNode:    node.ID,
+		ProjectSlug:   "child",
+		NodeSlug:      "child-node",
+		WorkspacePath: filepath.Join(t.TempDir(), "child"),
+		AgentProfile:  "other-profile",
+	})
+	if err == nil {
+		t.Fatalf("expected NodeClone() to reject agent profile overrides")
 	}
 }
 
@@ -431,7 +504,7 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 	}
 }
 
-func TestShellUsesWorkspaceMountPathForInteractiveEntry(t *testing.T) {
+func TestShellUsesGuestWorkspacePathForInteractiveEntry(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -543,7 +616,7 @@ func TestProjectUpdateWorkspacePathRejectsLiveNodes(t *testing.T) {
 	}
 }
 
-func TestShellFailsWhenProjectWorkspacePathIsMissing(t *testing.T) {
+func TestNodeStartFailsWhenProjectWorkspacePathIsMissingBeforeSeed(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -570,12 +643,145 @@ func TestShellFailsWhenProjectWorkspacePathIsMissing(t *testing.T) {
 		t.Fatalf("RemoveAll() error = %v", err)
 	}
 
-	if err := service.Shell(ctx, node.ID, nil); err == nil {
-		t.Fatalf("expected Shell() to fail when the registered workspace path is missing")
+	if _, err := service.NodeStart(ctx, node.ID); err == nil {
+		t.Fatalf("expected NodeStart() to fail when the registered workspace path is missing before the guest copy is seeded")
 	}
 
 	if len(service.lima.(*fakeLima).shellCalls) != 0 {
-		t.Fatalf("expected shell delegation to be skipped when workspace is missing")
+		t.Fatalf("expected guest workspace preparation to be skipped when workspace is missing")
+	}
+}
+
+func TestShellAllowsSeededNodeWhenProjectWorkspacePathIsMissing(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	if !node.WorkspaceSeeded {
+		t.Fatalf("expected guest workspace to be seeded")
+	}
+
+	if err := os.RemoveAll(workspace); err != nil {
+		t.Fatalf("RemoveAll() error = %v", err)
+	}
+
+	if err := service.Shell(ctx, node.ID, []string{"pwd"}); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	lastCall := service.lima.(*fakeLima).shellCalls[len(service.lima.(*fakeLima).shellCalls)-1]
+	if lastCall.workdir != workspace {
+		t.Fatalf("expected shell workdir %q, got %q", workspace, lastCall.workdir)
+	}
+}
+
+func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	parentNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	parentNode, err = service.NodeStart(ctx, parentNode.ID)
+	if err != nil {
+		t.Fatalf("NodeStart(parent) error = %v", err)
+	}
+
+	_, childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode:    parentNode.ID,
+		ProjectSlug:   "child",
+		NodeSlug:      "child-node",
+		WorkspacePath: filepath.Join(t.TempDir(), "child", "workspace"),
+	})
+	if err != nil {
+		t.Fatalf("NodeClone() error = %v", err)
+	}
+
+	if childNode.GuestWorkspacePath != workspace {
+		t.Fatalf("expected cloned node guest workspace path %q, got %q", workspace, childNode.GuestWorkspacePath)
+	}
+
+	if !childNode.WorkspaceSeeded {
+		t.Fatalf("expected cloned node guest workspace to remain seeded")
+	}
+
+	if !childNode.BootstrapCompleted {
+		t.Fatalf("expected cloned node bootstrap to remain completed")
+	}
+
+	childBootstrap, err := service.store.LoadBootstrapState(childNode.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState(child) error = %v", err)
+	}
+
+	if !childBootstrap.Completed {
+		t.Fatalf("expected cloned bootstrap state to remain completed")
+	}
+
+	if !containsCall(service.lima.(*fakeLima).calls, "stop:"+parentNode.LimaInstanceName) {
+		t.Fatalf("expected running source node to be stopped before clone, calls = %v", service.lima.(*fakeLima).calls)
+	}
+
+	if !containsCall(service.lima.(*fakeLima).calls, "clone:"+parentNode.LimaInstanceName+"->"+childNode.LimaInstanceName) {
+		t.Fatalf("expected limactl clone delegation, calls = %v", service.lima.(*fakeLima).calls)
+	}
+
+	if !containsCall(service.lima.(*fakeLima).calls, "start:"+parentNode.LimaInstanceName) {
+		t.Fatalf("expected running source node to be restarted after clone, calls = %v", service.lima.(*fakeLima).calls)
+	}
+
+	callsBeforeChildStart := len(service.lima.(*fakeLima).calls)
+	childNode, err = service.NodeStart(ctx, childNode.ID)
+	if err != nil {
+		t.Fatalf("NodeStart(child) error = %v", err)
+	}
+
+	newCalls := append([]string(nil), service.lima.(*fakeLima).calls[callsBeforeChildStart:]...)
+	if containsCall(newCalls, "copy:"+childNode.LimaInstanceName+":"+workspace+"->"+workspace) {
+		t.Fatalf("expected cloned node start to avoid reseeding the guest workspace, calls = %v", newCalls)
+	}
+
+	if containsCall(newCalls, "shell:"+childNode.LimaInstanceName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
+		t.Fatalf("expected cloned node start to avoid rerunning setup, calls = %v", newCalls)
 	}
 }
 

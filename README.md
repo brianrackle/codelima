@@ -36,7 +36,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - register host workspaces as lineage-aware projects
 - capture immutable snapshots when projects are created or forked
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
-- open an interactive shell or run one-off commands inside a node, starting in the mounted project workspace
+- open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 
@@ -87,9 +87,9 @@ codelima shell root-node
 codelima shell root-node -- uname -a
 ```
 
-Interactive shells and one-off commands enter the node at the mounted project workspace, so the command can be launched from any host directory.
+On first start, CodeLima copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
 
-If the host workspace is moved after registration, `node create`, `node start`, and `shell` fail fast with a clear error instead of entering a broken mount. Rebind the project first:
+`node create` and the first `node start` still require the registered host workspace to exist so the guest copy can be seeded. After that seed is in place, `shell` and later restarts use the guest-local copy without re-mounting the host workspace. Rebind the project before creating a replacement node from a moved host workspace:
 
 ```sh
 codelima node delete root-node
@@ -104,6 +104,8 @@ codelima node start root-node
 codelima project fork root --slug child --workspace /tmp/codelima-child
 codelima node clone root-node --project-slug child --node-slug child-node --workspace /tmp/codelima-child
 ```
+
+`node clone` copies the source VM at the Lima layer. If the source node is running, CodeLima stops it, clones it, and starts it again. The child node keeps the same guest workspace path as the source VM; `--workspace` only defines the child project's host workspace.
 
 6. Move changes back across the lineage with a patch proposal.
 
@@ -142,10 +144,8 @@ Create a three-layer VM lineage from `test-project-dir`:
 codelima project create --slug root --workspace ./test-project-dir --setup-command ./script/setup
 codelima node create --project root --slug root-node
 codelima node start root-node
-codelima node stop root-node
 codelima node clone root-node --project-slug child --node-slug child-node --workspace /tmp/codelima-child
 codelima node start child-node
-codelima node stop child-node
 codelima node clone child-node --project-slug grandchild --node-slug grandchild-node --workspace /tmp/codelima-grandchild
 codelima project tree
 codelima node list

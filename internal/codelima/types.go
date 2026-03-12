@@ -89,7 +89,9 @@ type Node struct {
 	AgentProfileName       string              `json:"agent_profile_name" yaml:"agent_profile_name"`
 	BootstrapCommands      []string            `json:"bootstrap_commands" yaml:"bootstrap_commands"`
 	GeneratedTemplatePath  string              `json:"generated_template_path" yaml:"generated_template_path"`
-	WorkspaceMountPath     string              `json:"workspace_mount_path" yaml:"workspace_mount_path"`
+	GuestWorkspacePath     string              `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath     string              `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded        bool                `json:"workspace_seeded" yaml:"workspace_seeded"`
 	BootstrapCompleted     bool                `json:"bootstrap_completed" yaml:"bootstrap_completed"`
 	BootstrapCompletedAt   *time.Time          `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
 	CreatedAt              time.Time           `json:"created_at" yaml:"created_at"`

@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -676,7 +677,8 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, 
 		AgentProfileName:      profileName,
 		BootstrapCommands:     bootstrap.CombinedCommands(),
 		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		WorkspaceMountPath:    project.WorkspacePath,
+		GuestWorkspacePath:    project.WorkspacePath,
+		WorkspaceSeeded:       false,
 		BootstrapCompleted:    false,
 		CreatedAt:             s.now(),
 		UpdatedAt:             s.now(),
@@ -745,10 +747,6 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 		return Node{}, err
 	}
 
-	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
-		return Node{}, err
-	}
-
 	bootstrap, err := s.store.LoadBootstrapState(node.ID)
 	if err != nil {
 		return Node{}, err
@@ -777,6 +775,22 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 	}
 
 	if !bootstrap.Completed {
+		if !node.WorkspaceSeeded {
+			if err := s.prepareGuestWorkspace(ctx, project, node); err != nil {
+				node.Status = NodeStatusFailed
+				node.UpdatedAt = s.now()
+				_ = s.store.SaveNode(node, bootstrap, nil)
+				_ = s.store.AppendNodeEvent(node.ID, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"workspace_path": project.WorkspacePath, "error": err.Error()}})
+				return Node{}, err
+			}
+
+			node.WorkspaceSeeded = true
+			node.UpdatedAt = s.now()
+			if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+				return Node{}, err
+			}
+		}
+
 		for _, command := range bootstrap.CombinedCommands() {
 			if err := s.runGuestCommand(ctx, node, command); err != nil {
 				node.Status = NodeStatusFailed
@@ -869,7 +883,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
 	return s.reconcileNode(ctx, node, true)
 }
 
-func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Project, Node, error) {
+func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childProject Project, childNode Node, err error) {
 	if err := s.EnsureReady(true); err != nil {
 		return Project{}, Node{}, err
 	}
@@ -892,8 +906,8 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Project,
 		return Project{}, Node{}, err
 	}
 
-	if sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == "running" {
-		return Project{}, Node{}, preconditionFailed("source node must be stopped before clone", map[string]any{"node_id": sourceNode.ID})
+	if input.AgentProfile != "" && input.AgentProfile != sourceNode.AgentProfileName {
+		return Project{}, Node{}, preconditionFailed("node clone copies the source VM and does not support agent profile overrides", map[string]any{"source_node_id": sourceNode.ID, "agent_profile_name": input.AgentProfile})
 	}
 
 	sourceProject, err := s.store.ProjectByID(sourceNode.ProjectID)
@@ -901,7 +915,33 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Project,
 		return Project{}, Node{}, err
 	}
 
-	childProject, err := s.projectForkUnlocked(ctx, ProjectForkInput{
+	sourceBootstrap, err := s.store.LoadBootstrapState(sourceNode.ID)
+	if err != nil {
+		return Project{}, Node{}, err
+	}
+
+	sourceWasRunning := sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == "running"
+	if sourceWasRunning {
+		if err := s.lima.Stop(ctx, sourceNode.LimaInstanceName); err != nil {
+			return Project{}, Node{}, err
+		}
+	}
+	defer func() {
+		if !sourceWasRunning {
+			return
+		}
+
+		if restartErr := s.lima.Start(ctx, sourceNode.LimaInstanceName); restartErr != nil {
+			err = errors.Join(err, restartErr)
+			return
+		}
+
+		if _, reconcileErr := s.reconcileNode(ctx, sourceNode, true); reconcileErr != nil {
+			err = errors.Join(err, reconcileErr)
+		}
+	}()
+
+	childProject, err = s.projectForkUnlocked(ctx, ProjectForkInput{
 		SourceProject: sourceProject.ID,
 		Slug:          input.ProjectSlug,
 		WorkspacePath: input.WorkspacePath,
@@ -915,12 +955,6 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Project,
 		return Project{}, Node{}, err
 	}
 
-	profileName := coalesce(input.AgentProfile, childProject.AgentProfileName, s.cfg.DefaultAgentProfile)
-	profile, err := s.store.LoadAgentProfile(profileName)
-	if err != nil {
-		return Project{}, Node{}, err
-	}
-
 	resources := input.Resources.ApplyDefaults(sourceNode.RequestedResources)
 	nodeID := newID()
 	instanceName, err := s.generateInstanceName(childProject.Slug, childNodeSlug, nodeID)
@@ -929,27 +963,22 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Project,
 	}
 
 	if err := s.lima.Clone(ctx, sourceNode.LimaInstanceName, instanceName, CloneOptions{
-		MountPath: childProject.WorkspacePath,
 		Resources: resources,
 	}); err != nil {
 		return Project{}, Node{}, err
 	}
 
-	bootstrap := BootstrapState{
-		AgentProfileName:  profile.Name,
-		InstallCommands:   append([]string(nil), profile.InstallCommands...),
-		SetupCommands:     append([]string(nil), childProject.SetupCommands...),
-		ValidationCommand: profile.ValidationCommand,
-		LaunchCommand:     profile.LaunchCommand,
-		Environment:       cloneMap(profile.Environment),
-	}
+	bootstrap := sourceBootstrap
+	bootstrap.InstallCommands = append([]string(nil), sourceBootstrap.InstallCommands...)
+	bootstrap.SetupCommands = append([]string(nil), sourceBootstrap.SetupCommands...)
+	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
 	template, err := s.renderTemplate(ctx, childProject, resources, bootstrap)
 	if err != nil {
 		return Project{}, Node{}, err
 	}
 
-	childNode := Node{
+	childNode = Node{
 		ID:                    nodeID,
 		Slug:                  childNodeSlug,
 		ProjectID:             childProject.ID,
@@ -959,10 +988,13 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Project,
 		LimaInstanceName:      instanceName,
 		RequestedResources:    resources,
 		Status:                NodeStatusCreated,
-		AgentProfileName:      profileName,
-		BootstrapCommands:     bootstrap.CombinedCommands(),
+		AgentProfileName:      sourceNode.AgentProfileName,
+		BootstrapCommands:     append([]string(nil), sourceNode.BootstrapCommands...),
 		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		WorkspaceMountPath:    childProject.WorkspacePath,
+		GuestWorkspacePath:    s.nodeGuestWorkspacePath(sourceNode),
+		WorkspaceSeeded:       sourceNode.WorkspaceSeeded,
+		BootstrapCompleted:    bootstrap.Completed,
+		BootstrapCompletedAt:  bootstrap.CompletedAt,
 		CreatedAt:             s.now(),
 		UpdatedAt:             s.now(),
 	}
@@ -1054,17 +1086,8 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 		return err
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
-	if err != nil {
-		return err
-	}
-
-	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
-		return err
-	}
-
 	command = normalizeShellCommand(command)
-	workdir := s.nodeWorkspaceMountPath(node)
+	workdir := s.nodeGuestWorkspacePath(node)
 	return s.lima.Shell(ctx, node.LimaInstanceName, command, workdir, len(command) == 0, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
@@ -1439,13 +1462,7 @@ func (s *Service) renderTemplate(ctx context.Context, project Project, resources
 	document["cpus"] = resources.CPUs
 	document["memory"] = fmt.Sprintf("%dGiB", resources.MemoryGiB)
 	document["disk"] = fmt.Sprintf("%dGiB", resources.DiskGiB)
-	document["mounts"] = []map[string]any{
-		{
-			"location":   project.WorkspacePath,
-			"mountPoint": project.WorkspacePath,
-			"writable":   true,
-		},
-	}
+	document["mounts"] = []map[string]any{}
 
 	templateBytes, err := yaml.Marshal(document)
 	if err != nil {
@@ -1460,12 +1477,36 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		return nil
 	}
 
-	workdir := s.nodeWorkspaceMountPath(node)
+	workdir := s.nodeGuestWorkspacePath(node)
 	script := command
 	if workdir != "" {
 		script = fmt.Sprintf("cd %q && %s", workdir, command)
 	}
 	return s.lima.Shell(ctx, node.LimaInstanceName, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+}
+
+func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, node Node) error {
+	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
+		return err
+	}
+
+	return s.seedGuestWorkspace(ctx, project, node)
+}
+
+func (s *Service) seedGuestWorkspace(ctx context.Context, project Project, node Node) error {
+	targetPath := s.nodeGuestWorkspacePath(node)
+	targetParent := filepath.Dir(targetPath)
+	prepareScript := fmt.Sprintf(
+		`sudo rm -rf %q && sudo mkdir -p %q && sudo chown "$(id -un)":"$(id -gn)" %q`,
+		targetPath,
+		targetParent,
+		targetParent,
+	)
+	if err := s.lima.Shell(ctx, node.LimaInstanceName, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
+		return err
+	}
+
+	return s.lima.CopyToGuest(ctx, node.LimaInstanceName, project.WorkspacePath, targetPath, true)
 }
 
 func normalizeShellCommand(command []string) []string {
@@ -1476,7 +1517,11 @@ func normalizeShellCommand(command []string) []string {
 	return append([]string(nil), command...)
 }
 
-func (s *Service) nodeWorkspaceMountPath(node Node) string {
+func (s *Service) nodeGuestWorkspacePath(node Node) string {
+	if node.GuestWorkspacePath != "" {
+		return node.GuestWorkspacePath
+	}
+
 	if node.WorkspaceMountPath != "" {
 		return node.WorkspaceMountPath
 	}
