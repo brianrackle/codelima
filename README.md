@@ -36,7 +36,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - register host workspaces as lineage-aware projects
 - capture immutable snapshots when projects are created or forked
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
-- open an interactive shell or run one-off commands inside a node
+- open an interactive shell or run one-off commands inside a node, starting in the mounted project workspace
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 
@@ -86,6 +86,8 @@ codelima node status root-node
 codelima shell root-node
 codelima shell root-node -- uname -a
 ```
+
+Interactive shells and one-off commands enter the node at the mounted project workspace, so the command can be launched from any host directory.
 
 5. Fork the project or clone the node into a child lineage.
 

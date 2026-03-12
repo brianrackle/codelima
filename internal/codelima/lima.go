@@ -30,7 +30,7 @@ type LimaClient interface {
 	Stop(ctx context.Context, instanceName string) error
 	Delete(ctx context.Context, instanceName string) error
 	Clone(ctx context.Context, sourceInstance, targetInstance string, options CloneOptions) error
-	Shell(ctx context.Context, instanceName string, command []string, interactive bool, streams ShellStreams) error
+	Shell(ctx context.Context, instanceName string, command []string, workdir string, interactive bool, streams ShellStreams) error
 }
 
 type ExecLimaClient struct {
@@ -184,8 +184,12 @@ func (c *ExecLimaClient) Clone(ctx context.Context, sourceInstance, targetInstan
 	return nil
 }
 
-func (c *ExecLimaClient) Shell(ctx context.Context, instanceName string, command []string, interactive bool, streams ShellStreams) error {
-	args := []string{"shell", instanceName}
+func (c *ExecLimaClient) Shell(ctx context.Context, instanceName string, command []string, workdir string, interactive bool, streams ShellStreams) error {
+	args := []string{"shell"}
+	if workdir != "" {
+		args = append(args, "--workdir", workdir)
+	}
+	args = append(args, instanceName)
 	if len(command) > 0 {
 		args = append(args, "--")
 		args = append(args, command...)

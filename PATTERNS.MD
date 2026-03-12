@@ -19,3 +19,8 @@ Patch apply stages changes in a temporary tree, validates with `git apply --chec
 
 Node creation resolves an `AgentProfile` once and stores the concrete bootstrap inputs in `bootstrap.json`.
 Later config changes do not retroactively mutate existing nodes.
+
+## Workspace-Aware Shell Delegation
+
+Shell entry always normalizes the documented `--` separator before delegating to Lima.
+Interactive shells and one-off commands pass the node workspace through `limactl shell --workdir` so shell entry is stable regardless of the host directory where `codelima` is launched.

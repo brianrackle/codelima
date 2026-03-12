@@ -13,7 +13,15 @@ type fakeLima struct {
 	baseTemplate []byte
 	observations map[string]RuntimeObservation
 	calls        []string
+	shellCalls   []fakeShellCall
 	failCommand  string
+}
+
+type fakeShellCall struct {
+	instanceName string
+	command      []string
+	workdir      string
+	interactive  bool
 }
 
 func newFakeLima() *fakeLima {
@@ -21,6 +29,7 @@ func newFakeLima() *fakeLima {
 		baseTemplate: []byte("arch: aarch64\nimages: []\nmounts: []\n"),
 		observations: map[string]RuntimeObservation{},
 		calls:        []string{},
+		shellCalls:   []fakeShellCall{},
 	}
 }
 
@@ -75,8 +84,14 @@ func (f *fakeLima) Clone(_ context.Context, sourceInstance, targetInstance strin
 	return nil
 }
 
-func (f *fakeLima) Shell(_ context.Context, instanceName string, command []string, _ bool, _ ShellStreams) error {
+func (f *fakeLima) Shell(_ context.Context, instanceName string, command []string, workdir string, interactive bool, _ ShellStreams) error {
 	f.calls = append(f.calls, "shell:"+instanceName+":"+strings.Join(command, " "))
+	f.shellCalls = append(f.shellCalls, fakeShellCall{
+		instanceName: instanceName,
+		command:      append([]string(nil), command...),
+		workdir:      workdir,
+		interactive:  interactive,
+	})
 	if f.failCommand != "" && strings.Contains(strings.Join(command, " "), f.failCommand) {
 		return errors.New("forced shell failure")
 	}
@@ -389,12 +404,76 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
 
-	if _, err := dispatch(ctx, service, []string{"shell", node.ID, "uname", "-a"}); err != nil {
+	if _, err := dispatch(ctx, service, []string{"shell", node.ID, "--", "uname", "-a"}); err != nil {
 		t.Fatalf("dispatch(shell) error = %v", err)
 	}
 
 	if !containsCall(service.lima.(*fakeLima).calls, "shell:"+node.LimaInstanceName+":uname -a") {
 		t.Fatalf("expected shell alias delegation, calls = %v", service.lima.(*fakeLima).calls)
+	}
+
+	shellCalls := service.lima.(*fakeLima).shellCalls
+	if len(shellCalls) == 0 {
+		t.Fatalf("expected shell call to be recorded")
+	}
+
+	lastCall := shellCalls[len(shellCalls)-1]
+	if strings.Join(lastCall.command, " ") != "uname -a" {
+		t.Fatalf("expected shell command to strip leading --, got %q", strings.Join(lastCall.command, " "))
+	}
+
+	if lastCall.workdir != workspace {
+		t.Fatalf("expected shell workdir %q, got %q", workspace, lastCall.workdir)
+	}
+
+	if lastCall.interactive {
+		t.Fatalf("expected non-interactive shell call")
+	}
+}
+
+func TestShellUsesWorkspaceMountPathForInteractiveEntry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if err := service.Shell(ctx, node.ID, nil); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	shellCalls := service.lima.(*fakeLima).shellCalls
+	if len(shellCalls) == 0 {
+		t.Fatalf("expected shell call to be recorded")
+	}
+
+	lastCall := shellCalls[len(shellCalls)-1]
+	if lastCall.workdir != workspace {
+		t.Fatalf("expected interactive shell workdir %q, got %q", workspace, lastCall.workdir)
+	}
+
+	if !lastCall.interactive {
+		t.Fatalf("expected interactive shell call")
+	}
+
+	if len(lastCall.command) != 0 {
+		t.Fatalf("expected interactive shell without command, got %v", lastCall.command)
 	}
 }
 

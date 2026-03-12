@@ -1037,7 +1037,9 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 		return err
 	}
 
-	return s.lima.Shell(ctx, node.LimaInstanceName, command, len(command) == 0, ShellStreams{
+	command = normalizeShellCommand(command)
+	workdir := s.nodeWorkspaceMountPath(node)
+	return s.lima.Shell(ctx, node.LimaInstanceName, command, workdir, len(command) == 0, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
 		Stderr: s.stderr,
@@ -1417,8 +1419,33 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		return nil
 	}
 
-	script := fmt.Sprintf("cd %q && %s", node.WorkspaceMountPath, command)
-	return s.lima.Shell(ctx, node.LimaInstanceName, []string{"sh", "-lc", script}, false, ShellStreams{})
+	workdir := s.nodeWorkspaceMountPath(node)
+	script := command
+	if workdir != "" {
+		script = fmt.Sprintf("cd %q && %s", workdir, command)
+	}
+	return s.lima.Shell(ctx, node.LimaInstanceName, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+}
+
+func normalizeShellCommand(command []string) []string {
+	if len(command) > 0 && command[0] == "--" {
+		command = command[1:]
+	}
+
+	return append([]string(nil), command...)
+}
+
+func (s *Service) nodeWorkspaceMountPath(node Node) string {
+	if node.WorkspaceMountPath != "" {
+		return node.WorkspaceMountPath
+	}
+
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return ""
+	}
+
+	return project.WorkspacePath
 }
 
 func (s *Service) reconcileNode(ctx context.Context, node Node, persist bool) (Node, error) {
