@@ -1,70 +1,219 @@
-# TestLima
+# CodeLima M1
 
-`TestLima` is a Phoenix + LiveView orchestrator for Lima-backed Codex development threads.
+`CodeLima M1` is a Go CLI that implements the Milestone 1 control plane from [SPEC_M1.md](/Users/brianrackle/Projects/test_lima/SPEC_M1.md).
 
-Each tracked thread is tied to:
+The CLI manages:
 
-- a registered project directory on the host
-- a dedicated Lima VM name
-- a browser terminal powered by `ghostty-web`
-- a persisted lifecycle timeline plus a JSONL terminal transcript
-
-When a thread starts, the app launches a local PTY bridge, boots the VM, and runs the Codex flow inside Lima:
-
-```bash
-limactl start --set '.nestedVirtualization=true' --mount-only .:w
-lima sudo snap install node --classic
-lima sudo npm install -g @openai/codex
-lima codex
-```
-
-The implementation scopes those commands to a per-thread VM by setting `LIMA_INSTANCE` and creating the VM from `template:default` when needed.
+- projects and immutable workspace snapshots under `CODELIMA_HOME`
+- Lima-backed nodes delegated through `limactl`
+- bidirectional patch proposals along direct project lineage edges
+- a canonical shell surface that passes through to `limactl shell`
 
 ## Prerequisites
 
-- Elixir and Erlang
-- Node.js and npm
-- Lima installed on the host (`limactl` and `lima` in `PATH`)
-- a working Lima guest environment with `snap` available inside the VM
+- macOS or Linux
+- `curl`, `tar`, `git`, and `make`
+- Lima installed and working on the host
 
-On Linux hosts, `./script/setup` installs Lima from the official release archive when `apt` does not provide a `lima` package.
+The Go toolchain and `golangci-lint` are installed locally by `make init`; a system Go install is not required.
 
 ## Setup
 
-```bash
-./script/setup
-mix phx.server
+```sh
+make init
+make build
 ```
 
-On Linux, the setup script prefers `apt-get` for system packages and falls back to the official Lima binary release for `lima`/`limactl` instead of using Homebrew.
+The binary is written to `./bin/codelima`.
 
-Open `http://localhost:4000`.
+## User Guide
 
-If you already manage host dependencies yourself, you can skip package installation:
+The examples in this guide assume `codelima` is installed and available on `PATH`.
+For repository-local development, use `make run ARGS="..."` or `./bin/codelima ...`.
 
-```bash
-./script/setup --skip-system-packages
+### Capabilities
+
+- register host workspaces as lineage-aware projects
+- capture immutable snapshots when projects are created or forked
+- create, start, stop, clone, inspect, and delete Lima-backed nodes
+- open an interactive shell or run one-off commands inside a node
+- propose, approve, apply, reject, and inspect patches across direct project lineage edges
+- inspect local control-plane health with `doctor` and resolved defaults with `config show`
+
+### Command Structure
+
+Most commands follow this shape:
+
+```sh
+codelima [--home PATH] [--json] <group> <command> [flags]
 ```
 
-## What the App Does
+Useful global flags:
 
-- Add projects by absolute or relative directory path.
-- Store optional per-project VM setup commands that run before Codex starts.
-- Create multiple conversation threads per project.
-- Start and stop thread-specific Lima/Codex sessions.
-- Reconnect to active terminals through a `ghostty-web` terminal surface.
-- Persist thread metadata in SQLite.
-- Persist terminal transcript chunks to `tmp/test_lima/thread_logs/*.jsonl`.
+- `--home PATH` points the CLI at a specific `CODELIMA_HOME`
+- `--json` returns structured output for automation
+- `--log-level LEVEL` reserves a verbosity setting for future CLI logging
 
-## Runtime Notes
+### Typical Workflow
 
-- The PTY bridge is a small Node process started by Phoenix for each active thread.
-- The browser terminal connects to that bridge over a local WebSocket using a per-thread access token.
-- If Phoenix restarts, active threads are marked as stopped so the UI does not claim the terminal bridge is still attached.
+1. Check host readiness and inspect the active config.
 
-## Verification
-
-```bash
-mix test
-mix assets.build
+```sh
+codelima doctor
+codelima config show
 ```
+
+2. Register a workspace as a project.
+
+```sh
+codelima project create \
+  --slug root \
+  --workspace ./test-project-dir \
+  --setup-command ./script/setup
+```
+
+3. Create and start a Lima-backed node for that project.
+
+```sh
+codelima node create --project root --slug root-node
+codelima node start root-node
+codelima node status root-node
+```
+
+4. Open a shell or run a one-off command inside the node.
+
+```sh
+codelima shell root-node
+codelima shell root-node -- uname -a
+```
+
+5. Fork the project or clone the node into a child lineage.
+
+```sh
+codelima project fork root --slug child --workspace /tmp/codelima-child
+codelima node clone root-node --project-slug child --node-slug child-node --workspace /tmp/codelima-child
+```
+
+6. Move changes back across the lineage with a patch proposal.
+
+```sh
+codelima patch propose --source child --target root
+codelima patch approve <patch-id> --actor you
+codelima patch apply <patch-id>
+```
+
+### Useful Examples
+
+Create an isolated metadata root for a temporary session:
+
+```sh
+codelima --home /tmp/codelima-dev doctor
+```
+
+List projects and print the lineage tree:
+
+```sh
+codelima project list
+codelima project tree
+```
+
+Inspect node history and runtime state:
+
+```sh
+codelima node show root-node
+codelima node logs root-node
+codelima node status root-node
+```
+
+Create a three-layer VM lineage from `test-project-dir`:
+
+```sh
+codelima project create --slug root --workspace ./test-project-dir --setup-command ./script/setup
+codelima node create --project root --slug root-node
+codelima node start root-node
+codelima node stop root-node
+codelima node clone root-node --project-slug child --node-slug child-node --workspace /tmp/codelima-child
+codelima node start child-node
+codelima node stop child-node
+codelima node clone child-node --project-slug grandchild --node-slug grandchild-node --workspace /tmp/codelima-grandchild
+codelima project tree
+codelima node list
+```
+
+Review a patch without applying it:
+
+```sh
+codelima patch list
+codelima patch show <patch-id>
+codelima patch reject <patch-id> --actor you --note "needs more work"
+```
+
+Clean up a node while keeping historical metadata:
+
+```sh
+codelima node stop root-node
+codelima node delete root-node
+```
+
+## Make Shortcuts
+
+```sh
+make run ARGS="doctor"
+make run ARGS="config show"
+make run ARGS="project create --slug root --workspace ./test-project-dir --setup-command ./script/setup"
+make run ARGS="node create --project root --slug root-node"
+make run ARGS="node start root-node"
+make run ARGS="shell root-node -- uname -a"
+```
+
+## Tooling
+
+```sh
+make fmt
+make lint
+make test
+make build
+make verify
+```
+
+## Documentation
+
+Keep `README.md` focused on user-facing setup, capabilities, workflows, and command examples.
+Internal documentation for design, maintenance, and tooling should live in `BUILD.md`.
+
+## Smoke Test
+
+The smoke test uses the real `limactl` binary and the repository fixture in `test-project-dir` to create and manage three VM layers from a single lineage:
+
+```sh
+make smoke
+```
+
+The script:
+
+1. creates a root project bound to `test-project-dir`
+2. creates and starts a root Lima-backed node
+3. clones that node into a child project and child node
+4. clones the child node into a grandchild project and grandchild node
+5. prints the resulting project tree and node list
+
+## Metadata Layout
+
+By default the CLI stores metadata in `~/.codelima`:
+
+```text
+~/.codelima/
+  _config/
+  _locks/
+  _index/
+  projects/
+  nodes/
+  patches/
+```
+
+Override the location with `--home` or `CODELIMA_HOME`.
+
+## Notes
+
+- `config show` displays the active defaults and resolved paths.
+- Built-in `codex-cli` and `claude-code` profiles are smoke-friendly defaults. Replace the profile YAML files under `CODELIMA_HOME/_config/agent-profiles/` when you want real install commands.
