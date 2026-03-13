@@ -208,6 +208,60 @@ Cleanup:
 rm -rf "$WORK_ROOT"
 ```
 
+## TUI Verification
+
+This flow verifies that `codelima tui` renders the chosen shell-first layout, auto-switches the visible terminal when node selection changes, and preserves each node session while the TUI process is running.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-tui"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT/root"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
+```
+
+Create one project and two running nodes:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui --workspace "$WORK_ROOT/root" --setup-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui --slug qa-tui-a
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui --slug qa-tui-b
+./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-a
+./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-b
+```
+
+Run the TUI:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" tui
+```
+
+Inside the TUI verify:
+
+- the left pane renders the project and both nodes, and the right pane renders one visible terminal
+- selecting `qa-tui-a` opens its shell session automatically
+- `Tab` or `Enter` focuses the terminal, and `Alt-\`` returns focus to the tree
+- in the `qa-tui-a` terminal, type `echo pending-a` without pressing `Enter`
+- return to the tree, select `qa-tui-b`, and confirm the visible terminal switches to the `qa-tui-b` session
+- in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
+- return to the tree, select `qa-tui-a` again, and confirm the partially typed `echo pending-a` input is still present
+
+Cleanup:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-a
+rm -rf "$WORK_ROOT"
+```
+
 ## Clone Verification
 
 This flow verifies that `node clone` is a Lima VM copy that keeps the source guest workspace path and can clone a running source node by stopping and restarting it internally.

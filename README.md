@@ -8,6 +8,7 @@ The CLI manages:
 - Lima-backed nodes delegated through `limactl`
 - bidirectional patch proposals along direct project lineage edges
 - a canonical shell surface that passes through to `limactl shell`
+- a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
 
 ## Prerequisites
 
@@ -37,6 +38,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - capture immutable snapshots when projects are created or forked
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
+- browse the project tree and jump between preserved per-node shell sessions in `codelima tui`
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
@@ -47,6 +49,12 @@ Most commands follow this shape:
 
 ```sh
 codelima [--home PATH] [--json] <group> <command> [flags]
+```
+
+The TUI is a top-level command:
+
+```sh
+codelima [--home PATH] tui
 ```
 
 Useful global flags:
@@ -90,6 +98,14 @@ codelima shell root-node
 codelima shell root-node -- uname -a
 ```
 
+Or open the shell-first TUI and switch between preserved per-node sessions from the project tree:
+
+```sh
+codelima tui
+```
+
+Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, and `Alt-\`` returns focus to the tree without destroying the shell session.
+
 On first start, CodeLima copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
 
 `node create` and the first `node start` still require the registered host workspace to exist so the guest copy can be seeded. After that seed is in place, `shell` and later restarts use the guest-local copy without re-mounting the host workspace. Rebind the project before creating a replacement node from a moved host workspace:
@@ -132,6 +148,7 @@ List projects and print the lineage tree with attached nodes:
 codelima project list
 codelima node list
 codelima project tree
+codelima tui
 ```
 
 Inspect node history and runtime state:
@@ -187,6 +204,7 @@ make run ARGS="project create --slug root --workspace ./test-project-dir --setup
 make run ARGS="node create --project root --slug root-node"
 make run ARGS="node start root-node"
 make run ARGS="shell root-node -- uname -a"
+make tui ARGS="--home /tmp/codelima-dev/.codelima"
 ```
 
 ## Tooling

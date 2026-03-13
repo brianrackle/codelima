@@ -100,6 +100,8 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 		return service.Doctor(ctx)
 	case "config":
 		return dispatchConfig(service, args[1:])
+	case "tui":
+		return nil, service.TUI(ctx)
 	case "project":
 		return dispatchProject(ctx, service, args[1:])
 	case "node":
@@ -654,6 +656,7 @@ Usage:
 Groups:
   doctor
   config show
+  tui
   project create|list|show|update|delete|tree|fork
   node create|list|show|start|stop|clone|delete|status|logs|shell
   patch propose|list|show|approve|apply|reject

@@ -25,6 +25,11 @@ Later config changes do not retroactively mutate existing nodes.
 Shell entry always normalizes the documented `--` separator before delegating to Lima.
 Interactive shells and one-off commands pass the node workspace through `limactl shell --workdir` so shell entry is stable regardless of the host directory where `codelima` is launched.
 
+## TUI Session Reuse
+
+The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal emulator per opened node.
+Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, and unsubmitted input stay attached to that node until the TUI exits.
+
 ## Guest Workspace Seed
 
 New nodes do not mount the host project workspace into the guest.

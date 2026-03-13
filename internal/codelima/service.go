@@ -19,6 +19,7 @@ type Service struct {
 	cfg    Config
 	store  *Store
 	lima   LimaClient
+	tui    TUIRunner
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
@@ -84,6 +85,7 @@ func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.
 		cfg:    cfg,
 		store:  NewStore(cfg),
 		lima:   lima,
+		tui:    newTUIRunner(),
 		stdin:  stdin,
 		stdout: stdout,
 		stderr: stderr,
@@ -91,6 +93,14 @@ func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.
 			return time.Now().UTC()
 		},
 	}
+}
+
+func (s *Service) TUI(ctx context.Context) error {
+	if s.tui == nil {
+		s.tui = newTUIRunner()
+	}
+
+	return s.tui.Run(ctx, s)
 }
 
 func (s *Service) EnsureReady(mutating bool) error {

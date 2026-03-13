@@ -9,7 +9,7 @@ export GOMODCACHE := $(TOOLS_DIR)/gopath/pkg/mod
 export GOCACHE := $(TOOLS_DIR)/gocache
 export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 
-.PHONY: init fmt lint test build run smoke verify clean
+.PHONY: init fmt lint test build run tui smoke verify clean
 
 init:
 	./scripts/install_go.sh $(GO_VERSION) $(TOOLS_DIR)
@@ -31,6 +31,9 @@ build: init
 
 run: build
 	./bin/codelima $(ARGS)
+
+tui: build
+	./bin/codelima $(ARGS) tui
 
 smoke: build
 	./scripts/smoke_3_layers.sh
