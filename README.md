@@ -38,7 +38,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - capture immutable snapshots when projects are created or forked
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
-- browse the project tree and jump between preserved per-node shell sessions in `codelima tui`
+- browse the project tree, manage selected projects and nodes, and jump between preserved per-node shell sessions in `codelima tui`
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
@@ -105,6 +105,14 @@ codelima tui
 ```
 
 Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, and `Alt-\`` returns focus to the tree without destroying the shell session.
+Selecting a project exposes project actions in the right pane: create a node, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into a child project and node, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
+Project creation is a global tree action, so you can add a new top-level project even when the tree is empty.
+
+The tree is keyboard and mouse driven. The right pane always shows the active action hotkeys for the selected item, so the common flow is to select a project or node in the tree and then press the matching letter key:
+
+- global tree action: `[a]` add project
+- project actions: `[n]` create node, `[u]` update project, `[x]` delete project
+- node actions: `[s]` start or stop node, `[d]` delete node, `[c]` clone node, `[p]` patch operations
 
 On first start, CodeLima copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
 

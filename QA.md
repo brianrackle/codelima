@@ -210,7 +210,7 @@ rm -rf "$WORK_ROOT"
 
 ## TUI Verification
 
-This flow verifies that `codelima tui` renders the chosen shell-first layout, auto-switches the visible terminal when node selection changes, and preserves each node session while the TUI process is running.
+This flow verifies that `codelima tui` renders the chosen shell-first layout, lets you manage selected projects and nodes from the tree, auto-switches the visible terminal when node selection changes, and preserves each node session while the TUI process is running.
 
 Prerequisites:
 
@@ -223,19 +223,17 @@ Setup:
 ROOT_DIR="$(pwd)"
 WORK_ROOT="$ROOT_DIR/tmp/qa-tui"
 rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT/root"
+mkdir -p "$WORK_ROOT/root" "$WORK_ROOT/extra"
 CODELIMA_HOME="$WORK_ROOT/.codelima"
 cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
 ```
 
-Create one project and two running nodes:
+Create one project and one running node:
 
 ```sh
 ./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui --workspace "$WORK_ROOT/root" --setup-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui --slug qa-tui-a
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui --slug qa-tui-b
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-a
-./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-b
 ```
 
 Run the TUI:
@@ -246,19 +244,51 @@ Run the TUI:
 
 Inside the TUI verify:
 
-- the left pane renders the project and both nodes, and the right pane renders one visible terminal
+- the left pane renders the project and node, and the right pane renders either node details or one visible terminal
+- press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, and confirm it appears as a second top-level project
+- select project `qa-tui`, press `n`, create node `qa-tui-b`, and confirm the new node appears under the project without opening a shell session
+- with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - selecting `qa-tui-a` opens its shell session automatically
 - `Tab` or `Enter` focuses the terminal, and `Alt-\`` returns focus to the tree
 - in the `qa-tui-a` terminal, type `echo pending-a` without pressing `Enter`
-- return to the tree, select `qa-tui-b`, and confirm the visible terminal switches to the `qa-tui-b` session
+- return to the tree, select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
 - return to the tree, select `qa-tui-a` again, and confirm the partially typed `echo pending-a` input is still present
+- select `qa-tui-b`, press `s`, and confirm the node stops while remaining selectable in the tree
+- with `qa-tui-b` selected, press `c`, clone it into project `qa-tui-child`, node `qa-tui-child-a`, and an empty workspace path such as `$WORK_ROOT/qa-tui-b-clone`, then confirm the child project and child node appear in the tree
+
+In a second host shell, create a host-side change in the cloned child project:
+
+```sh
+printf 'qa patch\n' > "$WORK_ROOT/qa-tui-b-clone/README.md"
+```
+
+Back in the TUI verify patch operations from the cloned child node:
+
+- select `qa-tui-child-a`, press `p`, choose propose, target project `qa-tui-root`, and record the new patch ID shown in the status line or related patch list
+- press `p` again, choose approve, enter that patch ID, and confirm the patch status becomes `approved`
+- press `p` again, choose apply, enter that patch ID, and confirm the patch status becomes `applied`
+- in the second host shell, confirm `cat "$WORK_ROOT/root/README.md"` now prints `qa patch`
+- change the child project again in the second host shell with `printf 'qa reject\n' > "$WORK_ROOT/qa-tui-b-clone/README.md"`
+- propose a second patch from `qa-tui-child-a` to `qa-tui-root`, then use `p` and reject on that second patch ID, and confirm the patch status becomes `rejected`
+- select `qa-tui-child-a`, press `d`, delete the child node, then select project `qa-tui-child`, press `x`, and confirm the child project disappears from the tree
+- select `qa-tui-b`, press `d`, delete it, and confirm it disappears from the tree
+- select project `qa-tui-extra`, press `x`, and confirm the standalone project disappears from the tree
+
+Cleanup the remaining root project from either the TUI or the CLI:
+
+- in the TUI, delete `qa-tui-a`, then select project `qa-tui-root` and delete it
+- or run the equivalent CLI cleanup commands below after quitting the TUI
 
 Cleanup:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b
 ./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-a
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-child-a
+./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-child || true
+./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-extra || true
+./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-root || true
 rm -rf "$WORK_ROOT"
 ```
 

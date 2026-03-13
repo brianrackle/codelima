@@ -29,6 +29,26 @@ type tuiSessionManager interface {
 	EnsureSession(node Node) error
 }
 
+type tuiActionID string
+
+const (
+	tuiActionProjectCreate     tuiActionID = "project.create"
+	tuiActionProjectCreateNode tuiActionID = "project.create_node"
+	tuiActionProjectUpdate     tuiActionID = "project.update"
+	tuiActionProjectDelete     tuiActionID = "project.delete"
+	tuiActionNodeStart         tuiActionID = "node.start"
+	tuiActionNodeStop          tuiActionID = "node.stop"
+	tuiActionNodeDelete        tuiActionID = "node.delete"
+	tuiActionNodeClone         tuiActionID = "node.clone"
+	tuiActionNodePatch         tuiActionID = "node.patch"
+)
+
+type tuiActionSpec struct {
+	ID     tuiActionID
+	Label  string
+	Hotkey rune
+}
+
 type tuiNoopSessionManager struct{}
 
 func (tuiNoopSessionManager) HasSession(string) bool {
@@ -232,13 +252,15 @@ func (s *tuiState) selectIndex(index int) error {
 		return nil
 	}
 
-	if !s.sessions.HasSession(entry.node.ID) {
-		if err := s.sessions.EnsureSession(entry.node); err != nil {
-			return fmt.Errorf("start shell for %s: %w", entry.node.Slug, err)
-		}
+	s.activeNodeID = entry.node.ID
+	if !nodeAutoStartsSession(entry.node) || s.sessions.HasSession(entry.node.ID) {
+		return nil
 	}
 
-	s.activeNodeID = entry.node.ID
+	if err := s.sessions.EnsureSession(entry.node); err != nil {
+		return fmt.Errorf("start shell for %s: %w", entry.node.Slug, err)
+	}
+
 	return nil
 }
 
@@ -283,13 +305,20 @@ func (s *tuiState) expandSelection() {
 
 func (s *tuiState) focusTerminal() error {
 	entry := s.selectedEntry()
-	if entry.kind == tuiTreeEntryNode {
+	if entry.kind != tuiTreeEntryNode {
+		return errors.New("select a node to focus the terminal")
+	}
+
+	if !s.sessions.HasSession(entry.node.ID) {
+		if !nodeAutoStartsSession(entry.node) {
+			return errors.New("selected node is not running; start it before focusing the terminal")
+		}
 		if err := s.selectIndex(s.selection); err != nil {
 			return err
 		}
 	}
 
-	if s.activeNodeID == "" {
+	if s.activeNodeID == "" || !s.sessions.HasSession(s.activeNodeID) {
 		return errors.New("no node session is active")
 	}
 
@@ -351,6 +380,10 @@ func (s *tuiState) viewportStart(height int) int {
 }
 
 func (s *tuiState) activeNode() (Node, bool) {
+	if entry := s.selectedEntry(); entry.kind == tuiTreeEntryNode {
+		return entry.node, true
+	}
+
 	node, ok := s.nodesByID[s.activeNodeID]
 	return node, ok
 }
@@ -370,4 +403,119 @@ func (s *tuiState) activeProject() (Project, bool) {
 	}
 
 	return Project{}, false
+}
+
+func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) error {
+	selectedKey := preferredKey
+	if selectedKey == "" {
+		selectedKey = s.selectedEntry().key()
+	}
+	expanded := cloneExpandedState(s.expanded)
+	s.tree = append([]ProjectTreeNode(nil), tree...)
+	s.expanded = expanded
+	s.projectsByID = map[string]Project{}
+	s.nodesByID = map[string]Node{}
+	s.indexTree(tree)
+	s.rebuildEntries()
+
+	if selectedKey != "" {
+		if index := s.findEntryByKey(selectedKey); index >= 0 {
+			return s.selectIndex(index)
+		}
+		if s.expandToKey(selectedKey) {
+			s.rebuildEntries()
+		}
+		if index := s.findEntryByKey(selectedKey); index >= 0 {
+			return s.selectIndex(index)
+		}
+	}
+
+	if len(s.entries) == 0 {
+		s.selection = -1
+		s.activeNodeID = ""
+		return nil
+	}
+
+	if s.selection < 0 || s.selection >= len(s.entries) {
+		return s.selectIndex(0)
+	}
+
+	return s.selectIndex(s.selection)
+}
+
+func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
+	actions := []tuiActionSpec{
+		{ID: tuiActionProjectCreate, Label: "Add Project", Hotkey: 'a'},
+	}
+
+	switch entry.kind {
+	case tuiTreeEntryProject:
+		actions = append(actions,
+			tuiActionSpec{ID: tuiActionProjectCreateNode, Label: "Create Node", Hotkey: 'n'},
+			tuiActionSpec{ID: tuiActionProjectUpdate, Label: "Update Project", Hotkey: 'u'},
+			tuiActionSpec{ID: tuiActionProjectDelete, Label: "Delete Project", Hotkey: 'x'},
+		)
+		return actions
+	case tuiTreeEntryNode:
+		if nodeAutoStartsSession(entry.node) {
+			actions = append(actions, tuiActionSpec{ID: tuiActionNodeStop, Label: "Stop Node", Hotkey: 's'})
+		} else {
+			actions = append(actions, tuiActionSpec{ID: tuiActionNodeStart, Label: "Start Node", Hotkey: 's'})
+		}
+		actions = append(actions,
+			tuiActionSpec{ID: tuiActionNodeDelete, Label: "Delete Node", Hotkey: 'd'},
+			tuiActionSpec{ID: tuiActionNodeClone, Label: "Clone Node", Hotkey: 'c'},
+			tuiActionSpec{ID: tuiActionNodePatch, Label: "Patch Ops", Hotkey: 'p'},
+		)
+		return actions
+	default:
+		return actions
+	}
+}
+
+func nodeAutoStartsSession(node Node) bool {
+	return nodeVMStatus(node) == "running" || node.Status == NodeStatusRunning
+}
+
+func cloneExpandedState(source map[string]bool) map[string]bool {
+	if len(source) == 0 {
+		return map[string]bool{}
+	}
+
+	target := make(map[string]bool, len(source))
+	for key, value := range source {
+		target[key] = value
+	}
+	return target
+}
+
+func (s *tuiState) expandToKey(key string) bool {
+	projectIDs, ok := projectLineageForKey(s.tree, key, nil)
+	if !ok {
+		return false
+	}
+
+	for _, projectID := range projectIDs {
+		s.expanded[projectID] = true
+	}
+	return true
+}
+
+func projectLineageForKey(nodes []ProjectTreeNode, key string, path []string) ([]string, bool) {
+	for _, projectNode := range nodes {
+		nextPath := append(append([]string(nil), path...), projectNode.Project.ID)
+		if key == "project:"+projectNode.Project.ID {
+			return nextPath, true
+		}
+		for _, childNode := range projectNode.Nodes {
+			if key == "node:"+childNode.ID {
+				return nextPath, true
+			}
+		}
+		if lineage, ok := projectLineageForKey(projectNode.Children, key, nextPath); ok {
+			return lineage, true
+		}
+	}
+
+	return nil, false
 }

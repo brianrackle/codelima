@@ -30,6 +30,11 @@ Interactive shells and one-off commands pass the node workspace through `limactl
 The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal emulator per opened node.
 Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, and unsubmitted input stay attached to that node until the TUI exits.
 
+## Contextual TUI Actions
+
+The TUI treats the tree selection as the context boundary for mutations.
+Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree and patch lists while preserving expansion state and the most relevant selection.
+
 ## Guest Workspace Seed
 
 New nodes do not mount the host project workspace into the guest.

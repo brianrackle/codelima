@@ -2,8 +2,12 @@ package codelima
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"git.sr.ht/~rockorager/vaxis"
 )
 
 type fakeTUIRunner struct {
@@ -166,6 +170,602 @@ func TestTUIStateCollapseAndExpandProjectBranches(t *testing.T) {
 	}
 }
 
+func TestTUIStateSelectsCreatedNodeWithoutOpeningShellSession(t *testing.T) {
+	t.Parallel()
+
+	tree := testTUITreeWithCreatedNode(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(tree, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	if err := state.moveSelection(2); err != nil {
+		t.Fatalf("moveSelection(created node) error = %v", err)
+	}
+
+	if got := state.selectedEntry().node.Slug; got != "created-node" {
+		t.Fatalf("expected selection to move to created-node, got %q", got)
+	}
+
+	if state.activeNodeID != "node-created" {
+		t.Fatalf("expected created node to become the selected active node, got %q", state.activeNodeID)
+	}
+
+	if sessions.ensured["node-created"] != 0 {
+		t.Fatalf("expected created node not to open a shell session, got %d creations", sessions.ensured["node-created"])
+	}
+
+	if err := state.focusTerminal(); err == nil {
+		t.Fatalf("expected focusTerminal() to fail for a node without a running shell session")
+	}
+}
+
+func TestTUIMouseMotionDoesNotFocusTerminal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:              ctx,
+		service:          service,
+		state:            state,
+		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
+	}
+
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       12,
+		Row:       7,
+		Button:    vaxis.MouseNoButton,
+		EventType: vaxis.EventMotion,
+	}); err != nil {
+		t.Fatalf("handleMouse(motion) error = %v", err)
+	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected mouse motion to keep tree focus, got %q", app.state.focus)
+	}
+
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       12,
+		Row:       7,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventPress,
+	}); err != nil {
+		t.Fatalf("handleMouse(press) error = %v", err)
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected mouse press to focus terminal, got %q", app.state.focus)
+	}
+}
+
+func TestTUIDialogCtrlLeftBracketCancels(t *testing.T) {
+	t.Parallel()
+
+	dialog := newTUIDialog(
+		"Create Project",
+		"Create",
+		nil,
+		[]tuiDialogField{newTUIInputField("slug", "Project Slug", "", false)},
+		nil,
+	)
+
+	completed, cancelled, err := dialog.Update(vaxis.Key{
+		Keycode:   '[',
+		Modifiers: vaxis.ModCtrl,
+	})
+	if err != nil {
+		t.Fatalf("dialog.Update(Ctrl+[) error = %v", err)
+	}
+	if completed {
+		t.Fatalf("expected Ctrl+[ to cancel, not complete")
+	}
+	if !cancelled {
+		t.Fatalf("expected Ctrl+[ to cancel the dialog")
+	}
+}
+
+func TestTUIHandleEventEscapeClosesDialog(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreate}); err != nil {
+		t.Fatalf("performAction(create project) error = %v", err)
+	}
+	if app.dialog == nil {
+		t.Fatalf("expected create project dialog to be open")
+	}
+
+	quit, err := app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEsc})
+	if err != nil {
+		t.Fatalf("handleEvent(Esc) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Esc to close the dialog, not quit the app")
+	}
+	if app.dialog != nil {
+		t.Fatalf("expected Esc to close the dialog")
+	}
+}
+
+func TestTUIHandleEventCtrlCQuitsWithDialogOpen(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreate}); err != nil {
+		t.Fatalf("performAction(create project) error = %v", err)
+	}
+	if app.dialog == nil {
+		t.Fatalf("expected create project dialog to be open")
+	}
+
+	quit, err := app.handleEvent(vaxis.Key{
+		Keycode:   'c',
+		Modifiers: vaxis.ModCtrl,
+	})
+	if err != nil {
+		t.Fatalf("handleEvent(Ctrl+c) error = %v", err)
+	}
+	if !quit {
+		t.Fatalf("expected Ctrl+c to quit while a dialog is open")
+	}
+}
+
+func TestTUIAvailableActionsDependOnSelectedEntry(t *testing.T) {
+	t.Parallel()
+
+	emptyActions := availableTUIActions(tuiTreeEntry{})
+	if got := actionIDs(emptyActions); got != "project.create" {
+		t.Fatalf("unexpected empty action set: %s", got)
+	}
+
+	projectActions := availableTUIActions(tuiTreeEntry{
+		kind:    tuiTreeEntryProject,
+		project: Project{Slug: "root"},
+	})
+
+	if got := actionIDs(projectActions); got != "project.create,project.create_node,project.update,project.delete" {
+		t.Fatalf("unexpected project action set: %s", got)
+	}
+
+	runningNodeActions := availableTUIActions(tuiTreeEntry{
+		kind: tuiTreeEntryNode,
+		node: Node{Slug: "root-node", Status: NodeStatusRunning},
+	})
+
+	if got := actionIDs(runningNodeActions); got != "project.create,node.stop,node.delete,node.clone,node.patch" {
+		t.Fatalf("unexpected running node action set: %s", got)
+	}
+
+	createdNodeActions := availableTUIActions(tuiTreeEntry{
+		kind: tuiTreeEntryNode,
+		node: Node{Slug: "created-node", Status: NodeStatusCreated},
+	})
+
+	if got := actionIDs(createdNodeActions); got != "project.create,node.start,node.delete,node.clone,node.patch" {
+		t.Fatalf("unexpected created node action set: %s", got)
+	}
+}
+
+func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	rootProject, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+
+	deleteWorkspace := filepath.Join(t.TempDir(), "delete-me")
+	writeFile(t, filepath.Join(deleteWorkspace, "README.md"), "delete me\n")
+
+	sessions := newFakeTUISessionManager()
+	app := newTestTUIApp(t, ctx, service, sessions)
+	selectTUIEntry(t, app, "project:"+rootProject.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreate}); err != nil {
+		t.Fatalf("performAction(create project) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Create Project" {
+		t.Fatalf("expected create project dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{
+		"slug":           "delete-me",
+		"workspace_path": deleteWorkspace,
+	})
+
+	deleteProject, err := service.ProjectShow("delete-me")
+	if err != nil {
+		t.Fatalf("ProjectShow(delete-me) error = %v", err)
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryProject || got.project.ID != deleteProject.ID {
+		t.Fatalf("expected created project to become selected, got %#v", got)
+	}
+
+	selectTUIEntry(t, app, "project:"+rootProject.ID)
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreateNode}); err != nil {
+		t.Fatalf("performAction(create node) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Create Node" {
+		t.Fatalf("expected create node dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{"slug": "root-node"})
+
+	rootNode, err := service.NodeShow(ctx, "root-node")
+	if err != nil {
+		t.Fatalf("NodeShow(root-node) error = %v", err)
+	}
+	if nodeAutoStartsSession(rootNode) {
+		t.Fatalf("expected newly created node to remain non-running, got status %q", rootNode.Status)
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != rootNode.ID {
+		t.Fatalf("expected created node to become selected, got %#v", got)
+	}
+	if sessions.ensured[rootNode.ID] != 0 {
+		t.Fatalf("expected created node to stay shell-free, got %d session creations", sessions.ensured[rootNode.ID])
+	}
+
+	selectTUIEntry(t, app, "project:"+rootProject.ID)
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectUpdate}); err != nil {
+		t.Fatalf("performAction(update project) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Update Project" {
+		t.Fatalf("expected update project dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{
+		"slug":           "root-renamed",
+		"workspace_path": workspace,
+	})
+
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryProject || got.project.ID != rootProject.ID || got.project.Slug != "root-renamed" {
+		t.Fatalf("expected updated project to remain selected, got %#v", got)
+	}
+
+	updatedProject, err := service.store.ProjectByID(rootProject.ID)
+	if err != nil {
+		t.Fatalf("ProjectByID(root) error = %v", err)
+	}
+	if updatedProject.Slug != "root-renamed" {
+		t.Fatalf("expected updated project slug root-renamed, got %q", updatedProject.Slug)
+	}
+
+	selectTUIEntry(t, app, "project:"+deleteProject.ID)
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectDelete}); err != nil {
+		t.Fatalf("performAction(delete project) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Delete Project" {
+		t.Fatalf("expected delete project dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{})
+
+	deletedProject, err := service.store.ProjectByID(deleteProject.ID)
+	if err != nil {
+		t.Fatalf("ProjectByID(delete-me) error = %v", err)
+	}
+	if deletedProject.DeletedAt == nil {
+		t.Fatalf("expected project %q to be marked deleted", deleteProject.Slug)
+	}
+	if index := app.state.findEntryByKey("project:" + deleteProject.ID); index >= 0 {
+		t.Fatalf("expected deleted project to disappear from the visible tree, still found at %d", index)
+	}
+}
+
+func TestTUIAddProjectActionCreatesProjectFromEmptyTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	workspace := filepath.Join(t.TempDir(), "first-project")
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+
+	if got := actionIDs(availableTUIActions(app.state.selectedEntry())); got != "project.create" {
+		t.Fatalf("unexpected empty-tree action set: %s", got)
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreate}); err != nil {
+		t.Fatalf("performAction(create project) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Create Project" {
+		t.Fatalf("expected create project dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{
+		"slug":           "first-project",
+		"workspace_path": workspace,
+	})
+
+	project, err := service.ProjectShow("first-project")
+	if err != nil {
+		t.Fatalf("ProjectShow(first-project) error = %v", err)
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryProject || got.project.ID != project.ID {
+		t.Fatalf("expected first project to become selected, got %#v", got)
+	}
+}
+
+func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	rootNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+
+	sessions := newFakeTUISessionManager()
+	app := newTestTUIApp(t, ctx, service, sessions)
+	selectTUIEntry(t, app, "node:"+rootNode.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeStart}); err != nil {
+		t.Fatalf("performAction(start node) error = %v", err)
+	}
+
+	startedNode, err := service.NodeShow(ctx, rootNode.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(started root-node) error = %v", err)
+	}
+	if startedNode.Status != NodeStatusRunning {
+		t.Fatalf("expected running node status, got %q", startedNode.Status)
+	}
+	if sessions.ensured[rootNode.ID] != 1 {
+		t.Fatalf("expected one shell session creation for running node, got %d", sessions.ensured[rootNode.ID])
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != rootNode.ID || got.node.Status != NodeStatusRunning {
+		t.Fatalf("expected running root node to remain selected, got %#v", got)
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeStop}); err != nil {
+		t.Fatalf("performAction(stop node) error = %v", err)
+	}
+
+	stoppedNode, err := service.NodeShow(ctx, rootNode.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(stopped root-node) error = %v", err)
+	}
+	if stoppedNode.Status != NodeStatusStopped {
+		t.Fatalf("expected stopped node status, got %q", stoppedNode.Status)
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != rootNode.ID || got.node.Status != NodeStatusStopped {
+		t.Fatalf("expected stopped root node to remain selected, got %#v", got)
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeClone}); err != nil {
+		t.Fatalf("performAction(clone node) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Clone Node" {
+		t.Fatalf("expected clone node dialog, got %#v", app.dialog)
+	}
+	childWorkspace := filepath.Join(t.TempDir(), "child")
+	submitTUIDialog(t, app, map[string]string{
+		"project_slug":   "child",
+		"node_slug":      "child-node",
+		"workspace_path": childWorkspace,
+	})
+
+	childNode, err := service.NodeShow(ctx, "child-node")
+	if err != nil {
+		t.Fatalf("NodeShow(child-node) error = %v", err)
+	}
+	if childNode.ParentNodeID != rootNode.ID {
+		t.Fatalf("expected cloned node parent id %q, got %q", rootNode.ID, childNode.ParentNodeID)
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != childNode.ID {
+		t.Fatalf("expected cloned child node to become selected, got %#v", got)
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeDelete}); err != nil {
+		t.Fatalf("performAction(delete node) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Delete Node" {
+		t.Fatalf("expected delete node dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{})
+
+	deletedChild, err := service.NodeShow(ctx, childNode.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(deleted child-node) error = %v", err)
+	}
+	if deletedChild.Status != NodeStatusTerminated || deletedChild.DeletedAt == nil {
+		t.Fatalf("expected deleted child node to be terminated, got status=%q deleted_at=%v", deletedChild.Status, deletedChild.DeletedAt)
+	}
+	if index := app.state.findEntryByKey("node:" + childNode.ID); index >= 0 {
+		t.Fatalf("expected deleted node to disappear from the visible tree, still found at %d", index)
+	}
+}
+
+func TestTUINodePatchActionsProposeApproveApplyAndReject(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "file.txt"), "root\n")
+
+	rootProject, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+
+	childWorkspace := filepath.Join(t.TempDir(), "child")
+	childProject, err := service.ProjectFork(ctx, ProjectForkInput{
+		SourceProject: rootProject.ID,
+		Slug:          "child",
+		WorkspacePath: childWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectFork(child) error = %v", err)
+	}
+
+	rootNode, err := service.NodeCreate(ctx, NodeCreateInput{Project: rootProject.ID, Slug: "root-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+	childNode, err := service.NodeCreate(ctx, NodeCreateInput{Project: childProject.ID, Slug: "child-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate(child-node) error = %v", err)
+	}
+
+	writeFile(t, filepath.Join(childWorkspace, "file.txt"), "child change\n")
+
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+	selectTUIEntry(t, app, "node:"+childNode.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
+		t.Fatalf("performAction(patch menu) error = %v", err)
+	}
+	if app.menu == nil || app.menu.Title != "Patch Operations" {
+		t.Fatalf("expected patch operations menu, got %#v", app.menu)
+	}
+	chooseTUIMenuEntry(t, app, "Propose Patch")
+	if app.dialog == nil || app.dialog.Title != "Propose Patch" {
+		t.Fatalf("expected propose patch dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{
+		"target_project": rootProject.Slug,
+		"target_node":    rootNode.Slug,
+	})
+
+	patches, err := service.PatchList("")
+	if err != nil {
+		t.Fatalf("PatchList() after propose error = %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("expected one patch after proposal, got %d", len(patches))
+	}
+	firstPatch := patches[0]
+	if firstPatch.Status != PatchStatusSubmitted {
+		t.Fatalf("expected submitted patch status, got %q", firstPatch.Status)
+	}
+	if firstPatch.SourceNodeID != childNode.ID || firstPatch.TargetNodeID != rootNode.ID {
+		t.Fatalf("expected patch to track child->root nodes, got source=%q target=%q", firstPatch.SourceNodeID, firstPatch.TargetNodeID)
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
+		t.Fatalf("performAction(patch menu approve) error = %v", err)
+	}
+	chooseTUIMenuEntry(t, app, "Approve Patch")
+	submitTUIDialog(t, app, map[string]string{
+		"patch_id": firstPatch.ID,
+		"actor":    "tui-test",
+		"note":     "ready",
+	})
+
+	approvedPatch, _, err := service.PatchShow(firstPatch.ID)
+	if err != nil {
+		t.Fatalf("PatchShow(approved) error = %v", err)
+	}
+	if approvedPatch.Status != PatchStatusApproved {
+		t.Fatalf("expected approved patch status, got %q", approvedPatch.Status)
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
+		t.Fatalf("performAction(patch menu apply) error = %v", err)
+	}
+	chooseTUIMenuEntry(t, app, "Apply Patch")
+	submitTUIDialog(t, app, map[string]string{
+		"patch_id": firstPatch.ID,
+	})
+
+	appliedPatch, _, err := service.PatchShow(firstPatch.ID)
+	if err != nil {
+		t.Fatalf("PatchShow(applied) error = %v", err)
+	}
+	if appliedPatch.Status != PatchStatusApplied {
+		t.Fatalf("expected applied patch status, got %q", appliedPatch.Status)
+	}
+
+	rootContents, err := os.ReadFile(filepath.Join(workspace, "file.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile(root file) error = %v", err)
+	}
+	if string(rootContents) != "child change\n" {
+		t.Fatalf("expected root workspace to receive applied patch, got %q", string(rootContents))
+	}
+
+	writeFile(t, filepath.Join(childWorkspace, "file.txt"), "rejected change\n")
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
+		t.Fatalf("performAction(patch menu repropose) error = %v", err)
+	}
+	chooseTUIMenuEntry(t, app, "Propose Patch")
+	submitTUIDialog(t, app, map[string]string{
+		"target_project": rootProject.Slug,
+		"target_node":    rootNode.Slug,
+	})
+
+	patches, err = service.PatchList("")
+	if err != nil {
+		t.Fatalf("PatchList() after repropose error = %v", err)
+	}
+	if len(patches) != 2 {
+		t.Fatalf("expected two patches after reproposal, got %d", len(patches))
+	}
+
+	var secondPatch PatchProposal
+	for _, patch := range patches {
+		if patch.ID != firstPatch.ID {
+			secondPatch = patch
+			break
+		}
+	}
+	if secondPatch.ID == "" {
+		t.Fatalf("expected to find a second patch proposal")
+	}
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
+		t.Fatalf("performAction(patch menu reject) error = %v", err)
+	}
+	chooseTUIMenuEntry(t, app, "Reject Patch")
+	submitTUIDialog(t, app, map[string]string{
+		"patch_id": secondPatch.ID,
+		"actor":    "tui-test",
+		"note":     "not yet",
+	})
+
+	rejectedPatch, _, err := service.PatchShow(secondPatch.ID)
+	if err != nil {
+		t.Fatalf("PatchShow(rejected) error = %v", err)
+	}
+	if rejectedPatch.Status != PatchStatusRejected {
+		t.Fatalf("expected rejected patch status, got %q", rejectedPatch.Status)
+	}
+}
+
 func testTUITree(t *testing.T) []ProjectTreeNode {
 	t.Helper()
 
@@ -199,6 +799,48 @@ func testTUITree(t *testing.T) []ProjectTreeNode {
 							ID:                 "node-child",
 							Slug:               "child-node",
 							GuestWorkspacePath: childWorkspace,
+							Status:             NodeStatusRunning,
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func testTUITreeWithCreatedNode(t *testing.T) []ProjectTreeNode {
+	t.Helper()
+
+	rootWorkspace := filepath.Join(t.TempDir(), "root")
+	childWorkspace := filepath.Join(t.TempDir(), "child")
+
+	return []ProjectTreeNode{
+		{
+			Project: Project{
+				ID:            "project-root",
+				Slug:          "root",
+				WorkspacePath: rootWorkspace,
+			},
+			Nodes: []Node{
+				{
+					ID:                 "node-root",
+					Slug:               "root-node",
+					GuestWorkspacePath: rootWorkspace,
+					Status:             NodeStatusRunning,
+				},
+			},
+			Children: []ProjectTreeNode{
+				{
+					Project: Project{
+						ID:            "project-child",
+						Slug:          "child",
+						WorkspacePath: childWorkspace,
+					},
+					Nodes: []Node{
+						{
+							ID:                 "node-created",
+							Slug:               "created-node",
+							GuestWorkspacePath: childWorkspace,
 							Status:             NodeStatusCreated,
 						},
 					},
@@ -206,4 +848,83 @@ func testTUITree(t *testing.T) []ProjectTreeNode {
 			},
 		},
 	}
+}
+
+func actionIDs(actions []tuiActionSpec) string {
+	values := make([]string, 0, len(actions))
+	for _, action := range actions {
+		values = append(values, string(action.ID))
+	}
+	return strings.Join(values, ",")
+}
+
+func newTestTUIApp(t *testing.T, ctx context.Context, service *Service, sessions tuiSessionManager) *vaxisTUIApp {
+	t.Helper()
+
+	tree, err := service.ProjectTree("", false)
+	if err != nil {
+		t.Fatalf("ProjectTree() error = %v", err)
+	}
+
+	state, err := newTUIState(tree, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	if err := app.reloadPatches(); err != nil {
+		t.Fatalf("reloadPatches() error = %v", err)
+	}
+
+	return app
+}
+
+func selectTUIEntry(t *testing.T, app *vaxisTUIApp, key string) {
+	t.Helper()
+
+	index := app.state.findEntryByKey(key)
+	if index < 0 {
+		t.Fatalf("expected tree entry %q to exist", key)
+	}
+	if err := app.state.selectIndex(index); err != nil {
+		t.Fatalf("selectIndex(%q) error = %v", key, err)
+	}
+}
+
+func submitTUIDialog(t *testing.T, app *vaxisTUIApp, values map[string]string) {
+	t.Helper()
+
+	if app.dialog == nil {
+		t.Fatalf("expected dialog to be open")
+	}
+	if err := app.dialog.OnSubmit(values); err != nil {
+		t.Fatalf("dialog submit error = %v", err)
+	}
+	app.dialog = nil
+}
+
+func chooseTUIMenuEntry(t *testing.T, app *vaxisTUIApp, label string) {
+	t.Helper()
+
+	if app.menu == nil {
+		t.Fatalf("expected menu to be open")
+	}
+
+	for _, entry := range app.menu.Entries {
+		if entry.Label != label {
+			continue
+		}
+		if err := entry.Action(); err != nil {
+			t.Fatalf("menu action %q error = %v", label, err)
+		}
+		app.menu = nil
+		return
+	}
+
+	t.Fatalf("expected menu entry %q", label)
 }
