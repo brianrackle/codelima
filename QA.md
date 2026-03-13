@@ -1,5 +1,138 @@
 # QA
 
+## List Verification
+
+This flow verifies that the default `project list` and `node list` output is a concise table with the expected columns, including live VM state for nodes, while `--json` remains available for automation.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-list"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+```
+
+Create a project and node:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-list --workspace "$ROOT_DIR/test-project-dir" --setup-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-list --slug qa-list-node
+```
+
+Verify the default table output:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project list
+./bin/codelima --home "$CODELIMA_HOME" node list
+```
+
+Expected result:
+
+- `project list` prints a table with the columns `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`
+- the `project list` row includes `qa-list`, `$ROOT_DIR/test-project-dir`, `vm`, and `codex-cli`
+- `node list` prints a table with the columns `slug`, `uuid`, `workspace_path`, `runtime`, `vm_status`, and `agent`
+- the `node list` row includes `qa-list-node`, `$ROOT_DIR/test-project-dir`, `vm`, `created`, and `codex-cli`
+
+Start the node and verify the VM status updates:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node start qa-list-node
+./bin/codelima --home "$CODELIMA_HOME" node list
+```
+
+Expected result:
+
+- both commands succeed
+- the `node list` row for `qa-list-node` now shows `running` under `vm_status`
+
+Verify structured output still works:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" --json project list
+./bin/codelima --home "$CODELIMA_HOME" --json node list
+```
+
+Expected result:
+
+- both commands succeed
+- both commands return JSON with `"ok": true`
+
+Cleanup:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-list-node
+rm -rf "$WORK_ROOT"
+```
+
+## Tree Verification
+
+This flow verifies that `project tree` includes both lineage projects and the nodes attached to each project.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-tree"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT/root" "$WORK_ROOT/child"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
+```
+
+Create a root project, a child project, and one node for each:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tree-root --workspace "$WORK_ROOT/root" --setup-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tree-root --slug qa-tree-root-node
+./bin/codelima --home "$CODELIMA_HOME" project fork qa-tree-root --slug qa-tree-child --workspace "$WORK_ROOT/child"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tree-child --slug qa-tree-child-node
+```
+
+Verify the default tree output:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project tree
+```
+
+Expected result:
+
+- the tree includes `qa-tree-root`
+- the tree includes `node: qa-tree-root-node` under `qa-tree-root`
+- the tree includes `qa-tree-child` under `qa-tree-root`
+- the tree includes `node: qa-tree-child-node` under `qa-tree-child`
+
+Verify structured output still includes nodes:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" --json project tree
+```
+
+Expected result:
+
+- the JSON result includes a `nodes` array on each project tree node
+- the root `nodes` array includes `qa-tree-root-node`
+- the child `nodes` array includes `qa-tree-child-node`
+
+Cleanup:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tree-child-node
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tree-root-node
+rm -rf "$WORK_ROOT"
+```
+
 ## Shell Verification
 
 This flow verifies that `codelima shell` enters a healthy node in the guest-local project workspace copy instead of inheriting an unrelated host working directory.

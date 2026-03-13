@@ -39,3 +39,13 @@ If the source node is running, CodeLima stops it, clones it, and starts it again
 
 Project workspace paths are treated as durable host bindings.
 Rebinding a project to a new workspace path is allowed only after all nodes for that project are terminated, which keeps seed inputs, node metadata, and project metadata from drifting out of sync.
+
+## Default List Tables
+
+Human-facing list commands should render concise tables by default instead of dumping full YAML records.
+Keep the column contract stable for quick scanning. When a list represents live infrastructure, include the runtime state directly in the table instead of forcing a second `show` command. Reserve `--json` for full structured output used by automation.
+
+## Project Tree Includes Nodes
+
+Lineage views should expose both projects and their attached nodes.
+Keep nodes scoped under their owning project in both the human tree render and the structured JSON tree so operators can see the full topology from one command.

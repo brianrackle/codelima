@@ -7,6 +7,7 @@ GOLANGCI_LINT := $(TOOLS_DIR)/bin/golangci-lint
 export PATH := $(TOOLS_DIR)/go/$(GO_VERSION)/bin:$(TOOLS_DIR)/bin:$(PATH)
 export GOMODCACHE := $(TOOLS_DIR)/gopath/pkg/mod
 export GOCACHE := $(TOOLS_DIR)/gocache
+export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 
 .PHONY: init fmt lint test build run smoke verify clean
 

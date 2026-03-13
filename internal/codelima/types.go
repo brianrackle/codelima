@@ -206,5 +206,6 @@ type DoctorCheck struct {
 
 type ProjectTreeNode struct {
 	Project  Project           `json:"project"`
+	Nodes    []Node            `json:"nodes,omitempty"`
 	Children []ProjectTreeNode `json:"children"`
 }

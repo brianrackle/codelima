@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"text/tabwriter"
 
 	"gopkg.in/yaml.v3"
 )
@@ -495,6 +496,10 @@ func writeSuccess(stdout io.Writer, asJSON bool, value any) {
 	}
 
 	switch data := value.(type) {
+	case []Project:
+		_, _ = fmt.Fprint(stdout, renderProjectList(data))
+	case []Node:
+		_, _ = fmt.Fprint(stdout, renderNodeList(data))
 	case []ProjectTreeNode:
 		_, _ = fmt.Fprint(stdout, renderProjectTree(data, ""))
 	case DoctorReport:
@@ -532,22 +537,113 @@ func writeError(stdout, stderr io.Writer, asJSON bool, err error) {
 	_, _ = fmt.Fprintf(stderr, "%s: %s\n", appErr.Category, appErr.Message)
 }
 
+func renderProjectList(projects []Project) string {
+	rows := make([][]string, 0, len(projects))
+	for _, project := range projects {
+		rows = append(rows, []string{
+			project.Slug,
+			project.ID,
+			project.WorkspacePath,
+			project.DefaultRuntime,
+			project.AgentProfileName,
+		})
+	}
+
+	return renderTable([]string{"slug", "uuid", "workspace_path", "runtime", "agent"}, rows)
+}
+
+func renderNodeList(nodes []Node) string {
+	rows := make([][]string, 0, len(nodes))
+	for _, node := range nodes {
+		rows = append(rows, []string{
+			node.Slug,
+			node.ID,
+			nodeWorkspacePath(node),
+			node.Runtime,
+			nodeVMStatus(node),
+			node.AgentProfileName,
+		})
+	}
+
+	return renderTable([]string{"slug", "uuid", "workspace_path", "runtime", "vm_status", "agent"}, rows)
+}
+
+func nodeWorkspacePath(node Node) string {
+	if node.GuestWorkspacePath != "" {
+		return node.GuestWorkspacePath
+	}
+
+	return node.WorkspaceMountPath
+}
+
+func nodeVMStatus(node Node) string {
+	if node.LastRuntimeObservation != nil {
+		if node.LastRuntimeObservation.Status != "" {
+			return node.LastRuntimeObservation.Status
+		}
+		if !node.LastRuntimeObservation.Exists {
+			return "missing"
+		}
+	}
+
+	return node.Status
+}
+
+func renderTable(headers []string, rows [][]string) string {
+	var builder strings.Builder
+	writer := tabwriter.NewWriter(&builder, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(writer, strings.Join(headers, "\t"))
+	for _, row := range rows {
+		_, _ = fmt.Fprintln(writer, strings.Join(row, "\t"))
+	}
+	_ = writer.Flush()
+	return builder.String()
+}
+
 func renderProjectTree(nodes []ProjectTreeNode, prefix string) string {
 	var builder strings.Builder
 	for index, node := range nodes {
-		connector := "├── "
-		nextPrefix := prefix + "│   "
-		if index == len(nodes)-1 {
-			connector = "└── "
-			nextPrefix = prefix + "    "
-		}
-		builder.WriteString(prefix)
-		builder.WriteString(connector)
-		builder.WriteString(node.Project.Slug)
-		builder.WriteString("\n")
-		builder.WriteString(renderProjectTree(node.Children, nextPrefix))
+		renderProjectTreeNode(&builder, node, prefix, index == len(nodes)-1)
 	}
 	return builder.String()
+}
+
+func renderProjectTreeNode(builder *strings.Builder, node ProjectTreeNode, prefix string, last bool) {
+	connector, nextPrefix := treeConnector(prefix, last)
+	builder.WriteString(prefix)
+	builder.WriteString(connector)
+	builder.WriteString(node.Project.Slug)
+	builder.WriteString("\n")
+
+	entries := len(node.Nodes) + len(node.Children)
+	entryIndex := 0
+	for _, projectNode := range node.Nodes {
+		entryIndex++
+		renderProjectTreeLeaf(builder, "node: "+projectNode.Slug, nextPrefix, entryIndex == entries)
+	}
+	for _, child := range node.Children {
+		entryIndex++
+		renderProjectTreeNode(builder, child, nextPrefix, entryIndex == entries)
+	}
+}
+
+func renderProjectTreeLeaf(builder *strings.Builder, label string, prefix string, last bool) {
+	connector, _ := treeConnector(prefix, last)
+	builder.WriteString(prefix)
+	builder.WriteString(connector)
+	builder.WriteString(label)
+	builder.WriteString("\n")
+}
+
+func treeConnector(prefix string, last bool) (string, string) {
+	connector := "├── "
+	nextPrefix := prefix + "│   "
+	if last {
+		connector = "└── "
+		nextPrefix = prefix + "    "
+	}
+
+	return connector, nextPrefix
 }
 
 func usage() string {

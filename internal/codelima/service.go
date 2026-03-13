@@ -456,11 +456,21 @@ func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectT
 		return nil, err
 	}
 
+	nodes, err := s.store.ListNodes(includeDeleted)
+	if err != nil {
+		return nil, err
+	}
+
 	projectMap := map[string]Project{}
 	childrenByParent := map[string][]Project{}
 	for _, project := range projects {
 		projectMap[project.ID] = project
 		childrenByParent[project.ParentProjectID] = append(childrenByParent[project.ParentProjectID], project)
+	}
+
+	nodesByProject := map[string][]Node{}
+	for _, node := range nodes {
+		nodesByProject[node.ProjectID] = append(nodesByProject[node.ProjectID], node)
 	}
 
 	var roots []Project
@@ -481,7 +491,12 @@ func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectT
 			return children[i].Slug < children[j].Slug
 		})
 
-		node := ProjectTreeNode{Project: project}
+		projectNodes := append([]Node(nil), nodesByProject[project.ID]...)
+		sort.Slice(projectNodes, func(i, j int) bool {
+			return projectNodes[i].Slug < projectNodes[j].Slug
+		})
+
+		node := ProjectTreeNode{Project: project, Nodes: projectNodes}
 		for _, child := range children {
 			node.Children = append(node.Children, build(child))
 		}

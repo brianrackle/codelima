@@ -39,6 +39,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
+- view project lineage with attached project nodes via `project tree`
 
 ### Command Structure
 
@@ -53,6 +54,8 @@ Useful global flags:
 - `--home PATH` points the CLI at a specific `CODELIMA_HOME`
 - `--json` returns structured output for automation
 - `--log-level LEVEL` reserves a verbosity setting for future CLI logging
+
+`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `vm_status` so the live VM state is visible without switching to `node show`. Use `--json` when you need the full structured payload for scripts.
 
 ### Typical Workflow
 
@@ -123,10 +126,11 @@ Create an isolated metadata root for a temporary session:
 codelima --home /tmp/codelima-dev doctor
 ```
 
-List projects and print the lineage tree:
+List projects and print the lineage tree with attached nodes:
 
 ```sh
 codelima project list
+codelima node list
 codelima project tree
 ```
 
