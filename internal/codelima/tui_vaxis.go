@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -33,6 +32,8 @@ type tuiSessionStore struct {
 	nodeByTerminal map[*term.Model]string
 }
 
+const tuiEmbeddedTermEnv = "xterm-256color"
+
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
 	return &tuiSessionStore{
 		ctx:            ctx,
@@ -41,6 +42,17 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 		sessions:       map[string]*tuiSession{},
 		nodeByTerminal: map[*term.Model]string{},
 	}
+}
+
+// Advertise a conservative terminal type inside the embedded shell session.
+// The widget terminal does not fully emulate xterm-kitty, and richer
+// terminfo targets can provoke incompatible redraw behavior in interactive
+// programs such as apt/dpkg progress views.
+func newTUITerminal(postEvent func(vaxis.Event)) *term.Model {
+	terminal := term.New()
+	terminal.TERM = tuiEmbeddedTermEnv
+	terminal.Attach(postEvent)
+	return terminal
 }
 
 func (s *tuiSessionStore) HasSession(nodeID string) bool {
@@ -61,8 +73,7 @@ func (s *tuiSessionStore) EnsureSession(node Node) error {
 	command := exec.CommandContext(s.ctx, executable, "--home", s.service.cfg.MetadataRoot, "shell", node.ID)
 	command.Env = os.Environ()
 
-	terminal := term.New()
-	terminal.Attach(s.postEvent)
+	terminal := newTUITerminal(s.postEvent)
 	if err := terminal.Start(command); err != nil {
 		return err
 	}
@@ -725,17 +736,10 @@ func (a *vaxisTUIApp) finishOperation(event tuiOperationCompleteEvent) {
 }
 
 func (a *vaxisTUIApp) openCreateProjectDialog() {
-	defaultSlug := ""
-	defaultWorkspace := ""
 	description := []string{
 		"Create a top-level project rooted at a host workspace.",
 		"Use project fork when you want a child project copied from an existing workspace snapshot.",
 		"Use the Environment Configs field to choose shared defaults for future nodes from the selector.",
-	}
-
-	if project, ok := a.state.activeProject(); ok {
-		defaultSlug = project.Slug + "-new"
-		defaultWorkspace = filepath.Join(filepath.Dir(project.WorkspacePath), project.Slug+"-new")
 	}
 
 	dialog := newTUIDialog(
@@ -743,8 +747,8 @@ func (a *vaxisTUIApp) openCreateProjectDialog() {
 		"Create",
 		description,
 		[]tuiDialogField{
-			newTUIInputField("slug", "Project Slug", defaultSlug, false),
-			newTUIInputField("workspace_path", "Workspace Path", defaultWorkspace, true),
+			newTUIInputField("slug", "Project Slug", "", false),
+			newTUIInputField("workspace_path", "Workspace Path", "", true),
 			newTUISelectorField("environment_configs", "Environment Configs", "", false, nil),
 		},
 		func(values map[string]string) error {

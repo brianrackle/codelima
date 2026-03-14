@@ -82,6 +82,15 @@ func TestTUIMutedStyleUsesBrighterSecondaryColor(t *testing.T) {
 	}
 }
 
+func TestNewTUITerminalUsesCompatibleTERM(t *testing.T) {
+	t.Parallel()
+
+	terminal := newTUITerminal(func(vaxis.Event) {})
+	if terminal.TERM != tuiEmbeddedTermEnv {
+		t.Fatalf("expected embedded terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TERM)
+	}
+}
+
 func TestTUIStateAutoSwitchesAndReusesPerNodeSessions(t *testing.T) {
 	t.Parallel()
 
@@ -810,6 +819,7 @@ func TestTUICreateProjectDialogUsesEnvironmentConfigSelector(t *testing.T) {
 		t.Fatalf("expected environment config selector, got %#v", app.selector)
 	}
 	chooseTUISelector(t, app, "shared-dev")
+	app.dialog.SetFieldValue("workspace_path", filepath.Join(t.TempDir(), "child-project"))
 
 	values, err := app.dialog.Values()
 	if err != nil {
@@ -889,6 +899,39 @@ func TestTUIAddProjectActionCreatesProjectFromEmptyTree(t *testing.T) {
 	}
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryProject || got.project.ID != project.ID {
 		t.Fatalf("expected first project to become selected, got %#v", got)
+	}
+}
+
+func TestTUICreateProjectDialogDefaultsStayBlankWithExistingProjectSelected(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "codelima-codex",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+	selectTUIEntry(t, app, "project:"+project.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreate}); err != nil {
+		t.Fatalf("performAction(create project) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Create Project" {
+		t.Fatalf("expected create project dialog, got %#v", app.dialog)
+	}
+
+	if got := app.dialog.Fields[0].rawValue(); got != "" {
+		t.Fatalf("expected project slug default to stay blank, got %q", got)
+	}
+	if got := app.dialog.Fields[1].rawValue(); got != "" {
+		t.Fatalf("expected workspace path default to stay blank, got %q", got)
 	}
 }
 
