@@ -54,7 +54,7 @@
       - project create/list/show/update/delete/tree/fork
       - node create/list/show/start/stop/clone/delete/status/logs/shell
       - patch propose/list/show/approve/apply/reject
-      - Define node clone as “fork the source node’s project lineage and create a child node from that fork.”
+      - Define node clone as “copy the source VM into a new node in the same project.”
   - Enums and statuses
       - NodeRuntime = vm | container
       - NodeProvider = lima | colima

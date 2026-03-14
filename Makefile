@@ -33,7 +33,7 @@ run: build
 	./bin/codelima $(ARGS)
 
 tui: build
-	./bin/codelima $(ARGS) tui
+	./bin/codelima $(ARGS)
 
 smoke: build
 	./scripts/smoke_3_layers.sh

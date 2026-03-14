@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -16,6 +17,7 @@ type globalOptions struct {
 	Home     string
 	JSON     bool
 	LogLevel string
+	Help     bool
 }
 
 type stringSliceFlag []string
@@ -36,9 +38,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitCodeForError(err)
 	}
 
-	if len(rest) == 0 {
-		_, _ = fmt.Fprintln(stderr, usage())
-		return ExitInvalidArgument
+	if options.Help {
+		_, _ = fmt.Fprint(stdout, usage())
+		return ExitSuccess
 	}
 
 	cfg, err := LoadConfig(options.Home)
@@ -81,6 +83,8 @@ func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 				return globalOptions{}, nil, invalidArgument("--log-level requires a value", nil)
 			}
 			options.LogLevel = args[index]
+		case "--help", "-h":
+			options.Help = true
 		default:
 			rest = args[index:]
 			return options, rest, nil
@@ -92,7 +96,7 @@ func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 
 func dispatch(ctx context.Context, service *Service, args []string) (any, error) {
 	if len(args) == 0 {
-		return nil, invalidArgument("missing command group", nil)
+		return nil, service.TUI(ctx)
 	}
 
 	switch args[0] {
@@ -100,8 +104,8 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 		return service.Doctor(ctx)
 	case "config":
 		return dispatchConfig(service, args[1:])
-	case "tui":
-		return nil, service.TUI(ctx)
+	case "environment":
+		return dispatchEnvironment(service, args[1:])
 	case "project":
 		return dispatchProject(ctx, service, args[1:])
 	case "node":
@@ -123,6 +127,79 @@ func dispatchConfig(service *Service, args []string) (any, error) {
 	return nil, invalidArgument("unknown config command", map[string]any{"command": strings.Join(args, " ")})
 }
 
+func dispatchEnvironment(service *Service, args []string) (any, error) {
+	if len(args) == 0 {
+		return nil, invalidArgument("missing environment command", nil)
+	}
+
+	switch args[0] {
+	case "create":
+		flags := flag.NewFlagSet("environment create", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		slug := flags.String("slug", "", "")
+		var commands stringSliceFlag
+		flags.Var(&commands, "setup-command", "")
+		flags.Var(&commands, "env-command", "")
+		if err := flags.Parse(args[1:]); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		if *slug == "" {
+			return nil, invalidArgument("--slug is required", nil)
+		}
+		return service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+			Slug:     *slug,
+			Commands: []string(commands),
+		})
+	case "list":
+		flags := flag.NewFlagSet("environment list", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		includeDeleted := flags.Bool("include-deleted", false, "")
+		if err := flags.Parse(args[1:]); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		return service.EnvironmentConfigList(*includeDeleted)
+	case "show":
+		if len(args) < 2 {
+			return nil, invalidArgument("environment show requires <config>", nil)
+		}
+		return service.EnvironmentConfigShow(args[1])
+	case "update":
+		flags := flag.NewFlagSet("environment update", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		clearSetup := flags.Bool("clear-setup-commands", false, "")
+		clearEnvironment := flags.Bool("clear-env-commands", false, "")
+		var commands stringSliceFlag
+		flags.Var(&commands, "setup-command", "")
+		flags.Var(&commands, "env-command", "")
+		remaining := args[1:]
+		target := ""
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			target = remaining[0]
+			remaining = remaining[1:]
+		}
+		if err := flags.Parse(remaining); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		if target == "" && flags.NArg() > 0 {
+			target = flags.Arg(0)
+		}
+		if target == "" {
+			return nil, invalidArgument("environment update requires <config>", nil)
+		}
+		return service.EnvironmentConfigUpdate(target, EnvironmentConfigUpdateInput{
+			Commands:      []string(commands),
+			ClearCommands: *clearSetup || *clearEnvironment,
+		})
+	case "delete":
+		if len(args) < 2 {
+			return nil, invalidArgument("environment delete requires <config>", nil)
+		}
+		return service.EnvironmentConfigDelete(args[1])
+	default:
+		return nil, invalidArgument("unknown environment command", map[string]any{"command": strings.Join(args, " ")})
+	}
+}
+
 func dispatchProject(ctx context.Context, service *Service, args []string) (any, error) {
 	if len(args) == 0 {
 		return nil, invalidArgument("missing project command", nil)
@@ -139,8 +216,11 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		cpus := flags.Int("cpus", 0, "")
 		memoryGiB := flags.Int("memory-gib", 0, "")
 		diskGiB := flags.Int("disk-gib", 0, "")
+		var environmentConfigs stringSliceFlag
 		var setupCommands stringSliceFlag
+		flags.Var(&environmentConfigs, "env-config", "")
 		flags.Var(&setupCommands, "setup-command", "")
+		flags.Var(&setupCommands, "env-command", "")
 		if err := flags.Parse(args[1:]); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
@@ -148,12 +228,13 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 			return nil, invalidArgument("--workspace is required", nil)
 		}
 		return service.ProjectCreate(ctx, ProjectCreateInput{
-			Slug:          *slug,
-			WorkspacePath: *workspace,
-			AgentProfile:  *agentProfile,
-			SetupCommands: []string(setupCommands),
-			Template:      *template,
-			Resources:     Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
+			Slug:               *slug,
+			WorkspacePath:      *workspace,
+			AgentProfile:       *agentProfile,
+			EnvironmentConfigs: []string(environmentConfigs),
+			SetupCommands:      []string(setupCommands),
+			Template:           *template,
+			Resources:          Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
 		})
 	case "list":
 		flags := flag.NewFlagSet("project list", flag.ContinueOnError)
@@ -176,11 +257,16 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		agentProfile := flags.String("agent-profile", "", "")
 		template := flags.String("template", "", "")
 		clearSetup := flags.Bool("clear-setup-commands", false, "")
+		clearEnvironment := flags.Bool("clear-env-commands", false, "")
+		clearEnvironmentConfigs := flags.Bool("clear-env-configs", false, "")
 		cpus := flags.Int("cpus", 0, "")
 		memoryGiB := flags.Int("memory-gib", 0, "")
 		diskGiB := flags.Int("disk-gib", 0, "")
+		var environmentConfigs stringSliceFlag
 		var setupCommands stringSliceFlag
+		flags.Var(&environmentConfigs, "env-config", "")
 		flags.Var(&setupCommands, "setup-command", "")
+		flags.Var(&setupCommands, "env-command", "")
 		remaining := args[1:]
 		target := ""
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
@@ -214,13 +300,15 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 			resources = &Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB}
 		}
 		return service.ProjectUpdate(target, ProjectUpdateInput{
-			Slug:          slugPtr,
-			WorkspacePath: workspacePtr,
-			AgentProfile:  agentPtr,
-			SetupCommands: []string(setupCommands),
-			ClearSetup:    *clearSetup,
-			Template:      templatePtr,
-			Resources:     resources,
+			Slug:                    slugPtr,
+			WorkspacePath:           workspacePtr,
+			AgentProfile:            agentPtr,
+			EnvironmentConfigs:      []string(environmentConfigs),
+			ClearEnvironmentConfigs: *clearEnvironmentConfigs,
+			SetupCommands:           []string(setupCommands),
+			ClearSetup:              *clearSetup || *clearEnvironment,
+			Template:                templatePtr,
+			Resources:               resources,
 		})
 	case "delete":
 		if len(args) < 2 {
@@ -325,9 +413,7 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 	case "clone":
 		flags := flag.NewFlagSet("node clone", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
-		projectSlug := flags.String("project-slug", "", "")
 		nodeSlug := flags.String("node-slug", "", "")
-		workspace := flags.String("workspace", "", "")
 		agentProfile := flags.String("agent-profile", "", "")
 		cpus := flags.Int("cpus", 0, "")
 		memoryGiB := flags.Int("memory-gib", 0, "")
@@ -347,21 +433,16 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		if sourceNode == "" {
 			return nil, invalidArgument("node clone requires <source-node>", nil)
 		}
-		if *workspace == "" {
-			return nil, invalidArgument("--workspace is required", nil)
-		}
-		project, node, err := service.NodeClone(ctx, NodeCloneInput{
-			SourceNode:    sourceNode,
-			ProjectSlug:   *projectSlug,
-			NodeSlug:      *nodeSlug,
-			WorkspacePath: *workspace,
-			AgentProfile:  *agentProfile,
-			Resources:     Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
+		node, err := service.NodeClone(ctx, NodeCloneInput{
+			SourceNode:   sourceNode,
+			NodeSlug:     *nodeSlug,
+			AgentProfile: *agentProfile,
+			Resources:    Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
 		})
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"project": project, "node": node}, nil
+		return node, nil
 	case "delete":
 		if len(args) < 2 {
 			return nil, invalidArgument("node delete requires <node>", nil)
@@ -500,6 +581,8 @@ func writeSuccess(stdout io.Writer, asJSON bool, value any) {
 	switch data := value.(type) {
 	case []Project:
 		_, _ = fmt.Fprint(stdout, renderProjectList(data))
+	case []EnvironmentConfig:
+		_, _ = fmt.Fprint(stdout, renderEnvironmentConfigList(data))
 	case []Node:
 		_, _ = fmt.Fprint(stdout, renderNodeList(data))
 	case []ProjectTreeNode:
@@ -568,6 +651,19 @@ func renderNodeList(nodes []Node) string {
 	}
 
 	return renderTable([]string{"slug", "uuid", "workspace_path", "runtime", "vm_status", "agent"}, rows)
+}
+
+func renderEnvironmentConfigList(configs []EnvironmentConfig) string {
+	rows := make([][]string, 0, len(configs))
+	for _, config := range configs {
+		rows = append(rows, []string{
+			config.Slug,
+			config.ID,
+			strconv.Itoa(len(config.Commands)),
+		})
+	}
+
+	return renderTable([]string{"slug", "uuid", "command_count"}, rows)
 }
 
 func nodeWorkspacePath(node Node) string {
@@ -651,15 +747,18 @@ func treeConnector(prefix string, last bool) (string, string) {
 func usage() string {
 	return strings.TrimSpace(`
 Usage:
+  codelima [--home PATH] [--json] [--log-level LEVEL]
   codelima [--home PATH] [--json] [--log-level LEVEL] <group> <command> [flags]
 
 Groups:
   doctor
   config show
-  tui
+  environment create|list|show|update|delete
   project create|list|show|update|delete|tree|fork
   node create|list|show|start|stop|clone|delete|status|logs|shell
   patch propose|list|show|approve|apply|reject
   shell <node> [-- command...]
+
+Running with no command opens the TUI.
 `) + "\n"
 }

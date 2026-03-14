@@ -27,22 +27,25 @@ type Service struct {
 }
 
 type ProjectCreateInput struct {
-	Slug          string
-	WorkspacePath string
-	AgentProfile  string
-	SetupCommands []string
-	Template      string
-	Resources     Resources
+	Slug               string
+	WorkspacePath      string
+	AgentProfile       string
+	EnvironmentConfigs []string
+	SetupCommands      []string
+	Template           string
+	Resources          Resources
 }
 
 type ProjectUpdateInput struct {
-	Slug          *string
-	WorkspacePath *string
-	AgentProfile  *string
-	SetupCommands []string
-	ClearSetup    bool
-	Template      *string
-	Resources     *Resources
+	Slug                    *string
+	WorkspacePath           *string
+	AgentProfile            *string
+	EnvironmentConfigs      []string
+	ClearEnvironmentConfigs bool
+	SetupCommands           []string
+	ClearSetup              bool
+	Template                *string
+	Resources               *Resources
 }
 
 type ProjectForkInput struct {
@@ -61,12 +64,10 @@ type NodeCreateInput struct {
 }
 
 type NodeCloneInput struct {
-	SourceNode    string
-	ProjectSlug   string
-	NodeSlug      string
-	WorkspacePath string
-	AgentProfile  string
-	Resources     Resources
+	SourceNode   string
+	NodeSlug     string
+	AgentProfile string
+	Resources    Resources
 }
 
 type PatchProposeInput struct {
@@ -79,6 +80,10 @@ type PatchProposeInput struct {
 func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
 	if lima == nil {
 		lima = NewExecLimaClient()
+	}
+	if execLima, ok := lima.(*ExecLimaClient); ok {
+		execLima.Stdout = stdout
+		execLima.Stderr = stderr
 	}
 
 	return &Service{
@@ -181,6 +186,12 @@ func (s *Service) Doctor(ctx context.Context) (DoctorReport, error) {
 		report.Warnings = append(report.Warnings, missing...)
 	}
 
+	if missing, err := s.store.MissingEnvironmentConfigIndexes(); err != nil {
+		return DoctorReport{}, err
+	} else {
+		report.Warnings = append(report.Warnings, missing...)
+	}
+
 	if missing, err := s.store.MissingNodeIndexes(); err != nil {
 		return DoctorReport{}, err
 	} else {
@@ -270,12 +281,18 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 		return Project{}, err
 	}
 
+	environmentConfigs, err := s.resolveEnvironmentConfigRefs(input.EnvironmentConfigs)
+	if err != nil {
+		return Project{}, err
+	}
+
 	now := s.now()
 	project := Project{
 		ID:                  newID(),
 		Slug:                slug,
 		WorkspacePath:       workspacePath,
 		AgentProfileName:    coalesce(input.AgentProfile, s.cfg.DefaultAgentProfile),
+		EnvironmentConfigs:  environmentConfigs,
 		SetupCommands:       append([]string(nil), input.SetupCommands...),
 		DefaultRuntime:      RuntimeVM,
 		DefaultProvider:     ProviderLima,
@@ -382,6 +399,16 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 		project.SetupCommands = []string{}
 	} else if input.SetupCommands != nil {
 		project.SetupCommands = append([]string(nil), input.SetupCommands...)
+	}
+
+	if input.ClearEnvironmentConfigs {
+		project.EnvironmentConfigs = []string{}
+	} else if input.EnvironmentConfigs != nil {
+		environmentConfigs, err := s.resolveEnvironmentConfigRefs(input.EnvironmentConfigs)
+		if err != nil {
+			return Project{}, err
+		}
+		project.EnvironmentConfigs = environmentConfigs
 	}
 
 	if input.Template != nil {
@@ -596,6 +623,7 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 		ParentProjectID:     source.ID,
 		ForkBaseSnapshotID:  baseSnapshot.ID,
 		AgentProfileName:    source.AgentProfileName,
+		EnvironmentConfigs:  append([]string(nil), source.EnvironmentConfigs...),
 		SetupCommands:       append([]string(nil), source.SetupCommands...),
 		DefaultRuntime:      source.DefaultRuntime,
 		DefaultProvider:     source.DefaultProvider,
@@ -663,6 +691,11 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, 
 		return Node{}, err
 	}
 
+	projectCommands, err := s.resolveProjectEnvironmentCommands(project)
+	if err != nil {
+		return Node{}, err
+	}
+
 	nodeID := newID()
 	nodeSlug := coalesce(input.Slug, slugify(project.Slug+"-node"))
 	if err := s.ensureUniqueNodeSlug(nodeSlug); err != nil {
@@ -678,7 +711,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, 
 	bootstrap := BootstrapState{
 		AgentProfileName:  profile.Name,
 		InstallCommands:   append([]string(nil), profile.InstallCommands...),
-		SetupCommands:     append([]string(nil), project.SetupCommands...),
+		SetupCommands:     projectCommands,
 		ValidationCommand: profile.ValidationCommand,
 		LaunchCommand:     profile.LaunchCommand,
 		Environment:       cloneMap(profile.Environment),
@@ -908,14 +941,14 @@ func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
 	return s.reconcileNode(ctx, node, true)
 }
 
-func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childProject Project, childNode Node, err error) {
+func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
 	if err := s.EnsureReady(true); err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 	defer func() {
 		_ = lockSet.Close()
@@ -923,32 +956,32 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childPro
 
 	sourceNode, err := s.store.NodeByIDOrSlug(input.SourceNode)
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	sourceNode, err = s.reconcileNode(ctx, sourceNode, false)
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	if input.AgentProfile != "" && input.AgentProfile != sourceNode.AgentProfileName {
-		return Project{}, Node{}, preconditionFailed("node clone copies the source VM and does not support agent profile overrides", map[string]any{"source_node_id": sourceNode.ID, "agent_profile_name": input.AgentProfile})
+		return Node{}, preconditionFailed("node clone copies the source VM and does not support agent profile overrides", map[string]any{"source_node_id": sourceNode.ID, "agent_profile_name": input.AgentProfile})
 	}
 
 	sourceProject, err := s.store.ProjectByID(sourceNode.ProjectID)
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	sourceBootstrap, err := s.store.LoadBootstrapState(sourceNode.ID)
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	sourceWasRunning := sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == "running"
 	if sourceWasRunning {
 		if err := s.lima.Stop(ctx, sourceNode.LimaInstanceName); err != nil {
-			return Project{}, Node{}, err
+			return Node{}, err
 		}
 	}
 	defer func() {
@@ -966,31 +999,22 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childPro
 		}
 	}()
 
-	childProject, err = s.projectForkUnlocked(ctx, ProjectForkInput{
-		SourceProject: sourceProject.ID,
-		Slug:          input.ProjectSlug,
-		WorkspacePath: input.WorkspacePath,
-	})
-	if err != nil {
-		return Project{}, Node{}, err
-	}
-
-	childNodeSlug := coalesce(input.NodeSlug, slugify(childProject.Slug+"-node"))
+	childNodeSlug := coalesce(input.NodeSlug, slugify(sourceNode.Slug+"-clone"))
 	if err := s.ensureUniqueNodeSlug(childNodeSlug); err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	resources := input.Resources.ApplyDefaults(sourceNode.RequestedResources)
 	nodeID := newID()
-	instanceName, err := s.generateInstanceName(childProject.Slug, childNodeSlug, nodeID)
+	instanceName, err := s.generateInstanceName(sourceProject.Slug, childNodeSlug, nodeID)
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	if err := s.lima.Clone(ctx, sourceNode.LimaInstanceName, instanceName, CloneOptions{
 		Resources: resources,
 	}); err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	bootstrap := sourceBootstrap
@@ -998,15 +1022,15 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childPro
 	bootstrap.SetupCommands = append([]string(nil), sourceBootstrap.SetupCommands...)
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
-	template, err := s.renderTemplate(ctx, childProject, resources, bootstrap)
+	template, err := s.renderTemplate(ctx, sourceProject, resources, bootstrap)
 	if err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	childNode = Node{
 		ID:                    nodeID,
 		Slug:                  childNodeSlug,
-		ProjectID:             childProject.ID,
+		ProjectID:             sourceProject.ID,
 		ParentNodeID:          sourceNode.ID,
 		Runtime:               RuntimeVM,
 		Provider:              ProviderLima,
@@ -1025,14 +1049,14 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childPro
 	}
 
 	if err := s.store.SaveNode(childNode, bootstrap, template); err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
 	if err := s.store.AppendNodeEvent(childNode.ID, Event{Timestamp: s.now(), Type: "node.cloned", Fields: map[string]any{"source_node_id": sourceNode.ID}}); err != nil {
-		return Project{}, Node{}, err
+		return Node{}, err
 	}
 
-	return childProject, childNode, nil
+	return childNode, nil
 }
 
 func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
@@ -1450,6 +1474,69 @@ func (s *Service) ensureUniqueProjectSlug(slug, currentProjectID string) error {
 	}
 
 	return nil
+}
+
+func (s *Service) ensureUniqueEnvironmentConfigSlug(slug, currentConfigID string) error {
+	configs, err := s.store.ListEnvironmentConfigs(false)
+	if err != nil {
+		return err
+	}
+
+	for _, config := range configs {
+		if config.Slug == slug && config.ID != currentConfigID {
+			return preconditionFailed("environment config slug already exists", map[string]any{"slug": slug})
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) resolveEnvironmentConfigRefs(refs []string) ([]string, error) {
+	if refs == nil {
+		return nil, nil
+	}
+
+	resolved := make([]string, 0, len(refs))
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			return nil, invalidArgument("environment config slug is required", nil)
+		}
+
+		config, err := s.store.EnvironmentConfigByIDOrSlug(ref)
+		if err != nil {
+			return nil, err
+		}
+		if config.DeletedAt != nil {
+			return nil, notFound("environment config not found", map[string]any{"query": ref})
+		}
+		if seen[config.Slug] {
+			continue
+		}
+
+		resolved = append(resolved, config.Slug)
+		seen[config.Slug] = true
+	}
+
+	return resolved, nil
+}
+
+func (s *Service) resolveProjectEnvironmentCommands(project Project) ([]string, error) {
+	commands := make([]string, 0, len(project.SetupCommands))
+	for _, slug := range project.EnvironmentConfigs {
+		config, err := s.store.EnvironmentConfigByIDOrSlug(slug)
+		if err != nil {
+			return nil, err
+		}
+		if config.DeletedAt != nil {
+			return nil, notFound("environment config not found", map[string]any{"query": slug})
+		}
+		commands = append(commands, config.Commands...)
+	}
+
+	commands = append(commands, project.SetupCommands...)
+	return commands, nil
 }
 
 func (s *Service) generateInstanceName(projectSlug, nodeSlug, nodeID string) (string, error) {

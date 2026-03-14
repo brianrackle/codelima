@@ -10,11 +10,14 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
-WORK_ROOT="$(mktemp -d)"
+WORK_ROOT="$ROOT_DIR/tmp/smoke-3-layers"
+ROOT_WORKSPACE="$WORK_ROOT/root"
 CODELIMA_HOME="$WORK_ROOT/.codelima"
-CHILD_WORKSPACE="$WORK_ROOT/child"
-GRANDCHILD_WORKSPACE="$WORK_ROOT/grandchild"
 export CODELIMA_HOME
+
+rm -rf "$WORK_ROOT"
+mkdir -p "$ROOT_WORKSPACE"
+cp -R "$FIXTURE/." "$ROOT_WORKSPACE"
 
 cleanup() {
   "$BIN" --home "$CODELIMA_HOME" node delete grandchild-node >/dev/null 2>&1 || true
@@ -26,7 +29,7 @@ trap cleanup EXIT INT TERM
 
 "$BIN" --home "$CODELIMA_HOME" project create \
   --slug root \
-  --workspace "$FIXTURE" \
+  --workspace "$ROOT_WORKSPACE" \
   --setup-command "./script/setup" >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node create \
@@ -37,17 +40,13 @@ trap cleanup EXIT INT TERM
 "$BIN" --home "$CODELIMA_HOME" node stop root-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node clone root-node \
-  --project-slug child \
-  --node-slug child-node \
-  --workspace "$CHILD_WORKSPACE" >/dev/null
+  --node-slug child-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node start child-node >/dev/null
 "$BIN" --home "$CODELIMA_HOME" node stop child-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node clone child-node \
-  --project-slug grandchild \
-  --node-slug grandchild-node \
-  --workspace "$GRANDCHILD_WORKSPACE" >/dev/null
+  --node-slug grandchild-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node start grandchild-node >/dev/null
 "$BIN" --home "$CODELIMA_HOME" node stop grandchild-node >/dev/null

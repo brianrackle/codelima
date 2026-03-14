@@ -37,8 +37,9 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - register host workspaces as lineage-aware projects
 - capture immutable snapshots when projects are created or forked
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
+- create reusable environment configs and assign them to multiple projects as shared bootstrap defaults
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
-- browse the project tree, manage selected projects and nodes, and jump between preserved per-node shell sessions in `codelima tui`
+- browse the project tree, manage selected projects and nodes, and jump between preserved per-node shell sessions by running `codelima` with no command
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
@@ -51,10 +52,10 @@ Most commands follow this shape:
 codelima [--home PATH] [--json] <group> <command> [flags]
 ```
 
-The TUI is a top-level command:
+Running `codelima` with no command opens the TUI:
 
 ```sh
-codelima [--home PATH] tui
+codelima [--home PATH]
 ```
 
 Useful global flags:
@@ -74,13 +75,30 @@ codelima doctor
 codelima config show
 ```
 
-2. Register a workspace as a project.
+2. Create a reusable environment config, then register a workspace as a project.
 
 ```sh
+codelima environment create \
+  --slug shared-dev \
+  --env-command ./script/setup \
+  --env-command "direnv allow"
+
 codelima project create \
   --slug root \
   --workspace ./test-project-dir \
-  --setup-command ./script/setup
+  --env-config shared-dev
+```
+
+Projects can combine shared environment configs with project-specific environment commands that run the first time new VMs for that project are bootstrapped:
+
+```sh
+codelima environment update shared-dev --env-command "mise install"
+codelima environment list
+codelima environment show shared-dev
+codelima project update root --env-command ./script/setup --env-command "direnv allow"
+codelima project update root --env-config shared-dev
+codelima project update root --clear-env-configs
+codelima project update root --clear-env-commands
 ```
 
 3. Create and start a Lima-backed node for that project.
@@ -101,17 +119,18 @@ codelima shell root-node -- uname -a
 Or open the shell-first TUI and switch between preserved per-node sessions from the project tree:
 
 ```sh
-codelima tui
+codelima
 ```
 
 Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, and `Alt-\`` returns focus to the tree without destroying the shell session.
-Selecting a project exposes project actions in the right pane: create a node, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into a child project and node, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
-Project creation is a global tree action, so you can add a new top-level project even when the tree is empty.
+Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into another node in the same project, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
+Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty.
+Long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, the mouse wheel is forwarded to the guest session, and `Shift`-drag copies the currently visible terminal text to the host clipboard.
 
 The tree is keyboard and mouse driven. The right pane always shows the active action hotkeys for the selected item, so the common flow is to select a project or node in the tree and then press the matching letter key:
 
-- global tree action: `[a]` add project
-- project actions: `[n]` create node, `[u]` update project, `[x]` delete project
+- global tree actions: `[a]` add project, `[g]` manage reusable environment configs
+- project actions: `[n]` create node, `[e]` manage environment commands and config refs, `[u]` update project, `[x]` delete project
 - node actions: `[s]` start or stop node, `[d]` delete node, `[c]` clone node, `[p]` patch operations
 
 On first start, CodeLima copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
@@ -125,16 +144,22 @@ codelima node create --project root --slug root-node
 codelima node start root-node
 ```
 
-5. Fork the project or clone the node into a child lineage.
+5. Fork the project when you need a child workspace and direct project lineage.
 
 ```sh
 codelima project fork root --slug child --workspace /tmp/codelima-child
-codelima node clone root-node --project-slug child --node-slug child-node --workspace /tmp/codelima-child
+codelima node create --project child --slug child-node
 ```
 
-`node clone` copies the source VM at the Lima layer. If the source node is running, CodeLima stops it, clones it, and starts it again. The child node keeps the same guest workspace path as the source VM; `--workspace` only defines the child project's host workspace.
+6. Clone a node when you want another VM in the same project.
 
-6. Move changes back across the lineage with a patch proposal.
+```sh
+codelima node clone root-node --node-slug root-node-clone
+```
+
+`node clone` copies the source VM at the Lima layer. If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project and keeps the same guest workspace path and bootstrap state as the source VM.
+
+7. Move changes back across the lineage with a patch proposal.
 
 ```sh
 codelima patch propose --source child --target root
@@ -156,7 +181,7 @@ List projects and print the lineage tree with attached nodes:
 codelima project list
 codelima node list
 codelima project tree
-codelima tui
+codelima
 ```
 
 Inspect node history and runtime state:
@@ -167,15 +192,16 @@ codelima node logs root-node
 codelima node status root-node
 ```
 
-Create a three-layer VM lineage from `test-project-dir`:
+Create three cloned VMs in one project from `test-project-dir`:
 
 ```sh
-codelima project create --slug root --workspace ./test-project-dir --setup-command ./script/setup
+codelima environment create --slug shared-dev --env-command ./script/setup
+codelima project create --slug root --workspace ./test-project-dir --env-config shared-dev
 codelima node create --project root --slug root-node
 codelima node start root-node
-codelima node clone root-node --project-slug child --node-slug child-node --workspace /tmp/codelima-child
+codelima node clone root-node --node-slug child-node
 codelima node start child-node
-codelima node clone child-node --project-slug grandchild --node-slug grandchild-node --workspace /tmp/codelima-grandchild
+codelima node clone child-node --node-slug grandchild-node
 codelima project tree
 codelima node list
 ```
@@ -208,7 +234,8 @@ codelima node delete root-node
 ```sh
 make run ARGS="doctor"
 make run ARGS="config show"
-make run ARGS="project create --slug root --workspace ./test-project-dir --setup-command ./script/setup"
+make run ARGS="environment create --slug shared-dev --env-command ./script/setup"
+make run ARGS="project create --slug root --workspace ./test-project-dir --env-config shared-dev"
 make run ARGS="node create --project root --slug root-node"
 make run ARGS="node start root-node"
 make run ARGS="shell root-node -- uname -a"
@@ -232,7 +259,7 @@ Internal documentation for design, maintenance, and tooling should live in `BUIL
 
 ## Smoke Test
 
-The smoke test uses the real `limactl` binary and the repository fixture in `test-project-dir` to create and manage three VM layers from a single lineage:
+The smoke test uses the real `limactl` binary and the repository fixture in `test-project-dir` to create and manage three VM layers inside one project:
 
 ```sh
 make smoke
@@ -242,8 +269,8 @@ The script:
 
 1. creates a root project bound to `test-project-dir`
 2. creates and starts a root Lima-backed node
-3. clones that node into a child project and child node
-4. clones the child node into a grandchild project and grandchild node
+3. clones that node into a second node in the same project
+4. clones the second node into a third node in the same project
 5. prints the resulting project tree and node list
 
 ## Metadata Layout

@@ -32,15 +32,17 @@ type tuiSessionManager interface {
 type tuiActionID string
 
 const (
-	tuiActionProjectCreate     tuiActionID = "project.create"
-	tuiActionProjectCreateNode tuiActionID = "project.create_node"
-	tuiActionProjectUpdate     tuiActionID = "project.update"
-	tuiActionProjectDelete     tuiActionID = "project.delete"
-	tuiActionNodeStart         tuiActionID = "node.start"
-	tuiActionNodeStop          tuiActionID = "node.stop"
-	tuiActionNodeDelete        tuiActionID = "node.delete"
-	tuiActionNodeClone         tuiActionID = "node.clone"
-	tuiActionNodePatch         tuiActionID = "node.patch"
+	tuiActionProjectCreate           tuiActionID = "project.create"
+	tuiActionEnvironmentConfigManage tuiActionID = "environment_config.manage"
+	tuiActionProjectCreateNode       tuiActionID = "project.create_node"
+	tuiActionProjectEnvironment      tuiActionID = "project.environment"
+	tuiActionProjectUpdate           tuiActionID = "project.update"
+	tuiActionProjectDelete           tuiActionID = "project.delete"
+	tuiActionNodeStart               tuiActionID = "node.start"
+	tuiActionNodeStop                tuiActionID = "node.stop"
+	tuiActionNodeDelete              tuiActionID = "node.delete"
+	tuiActionNodeClone               tuiActionID = "node.clone"
+	tuiActionNodePatch               tuiActionID = "node.patch"
 )
 
 type tuiActionSpec struct {
@@ -446,12 +448,14 @@ func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) erro
 func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
 	actions := []tuiActionSpec{
 		{ID: tuiActionProjectCreate, Label: "Add Project", Hotkey: 'a'},
+		{ID: tuiActionEnvironmentConfigManage, Label: "Env Configs", Hotkey: 'g'},
 	}
 
 	switch entry.kind {
 	case tuiTreeEntryProject:
 		actions = append(actions,
 			tuiActionSpec{ID: tuiActionProjectCreateNode, Label: "Create Node", Hotkey: 'n'},
+			tuiActionSpec{ID: tuiActionProjectEnvironment, Label: "Environment", Hotkey: 'e'},
 			tuiActionSpec{ID: tuiActionProjectUpdate, Label: "Update Project", Hotkey: 'u'},
 			tuiActionSpec{ID: tuiActionProjectDelete, Label: "Delete Project", Hotkey: 'x'},
 		)

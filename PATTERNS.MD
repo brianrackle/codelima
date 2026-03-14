@@ -18,6 +18,7 @@ Patch apply stages changes in a temporary tree, validates with `git apply --chec
 ## Bootstrap State Freeze
 
 Node creation resolves an `AgentProfile` once and stores the concrete bootstrap inputs in `bootstrap.json`.
+That resolution now includes both the project's direct environment commands and any referenced reusable environment configs.
 Later config changes do not retroactively mutate existing nodes.
 
 ## Workspace-Aware Shell Delegation
@@ -33,17 +34,22 @@ Changing the selected node only swaps which emulator is visible, so scrollback, 
 ## Contextual TUI Actions
 
 The TUI treats the tree selection as the context boundary for mutations.
-Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree and patch lists while preserving expansion state and the most relevant selection.
+Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree and patch lists while preserving expansion state and the most relevant selection. Project-scoped environment commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry.
+
+## Async Lima Progress In TUI
+
+Lima-backed TUI actions run asynchronously and stream `limactl` plus non-interactive guest-command output into a transient overlay.
+That keeps the event loop responsive while long-running start, stop, create, clone, or delete operations are in flight, and reuses the same `ExecLimaClient` streaming path that the CLI writes to stdout or stderr.
 
 ## Guest Workspace Seed
 
 New nodes do not mount the host project workspace into the guest.
-Instead, the first successful start copies the host workspace into the guest at the same absolute path, which keeps guest edits isolated while preserving the expected path layout for setup commands and shell entry.
+Instead, the first successful start copies the host workspace into the guest at the same absolute path, which keeps guest edits isolated while preserving the expected path layout for project environment commands and shell entry.
 
 ## Clone Is VM Copy
 
 Node clone uses `limactl clone` as a full-VM copy.
-If the source node is running, CodeLima stops it, clones it, and starts it again. The child node keeps the same guest workspace path and bootstrap state as the source VM; the clone command's `--workspace` flag only defines the child project's host workspace.
+If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project, keeps the same guest workspace path, and keeps the source VM's bootstrap state.
 
 ## Workspace Rebind Guard
 

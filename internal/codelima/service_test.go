@@ -248,7 +248,7 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 	}
 }
 
-func TestNodeCloneCreatesChildProjectAndNode(t *testing.T) {
+func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -268,19 +268,16 @@ func TestNodeCloneCreatesChildProjectAndNode(t *testing.T) {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
 
-	childWorkspace := filepath.Join(t.TempDir(), "child")
-	childProject, childNode, err := service.NodeClone(ctx, NodeCloneInput{
-		SourceNode:    node.ID,
-		ProjectSlug:   "child",
-		NodeSlug:      "child-node",
-		WorkspacePath: childWorkspace,
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: node.ID,
+		NodeSlug:   "child-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeClone() error = %v", err)
 	}
 
-	if childProject.ParentProjectID != project.ID {
-		t.Fatalf("expected child project parent id %q, got %q", project.ID, childProject.ParentProjectID)
+	if childNode.ProjectID != project.ID {
+		t.Fatalf("expected child node project id %q, got %q", project.ID, childNode.ProjectID)
 	}
 
 	if childNode.ParentNodeID != node.ID {
@@ -297,6 +294,14 @@ func TestNodeCloneCreatesChildProjectAndNode(t *testing.T) {
 
 	if !containsPrefix(service.lima.(*fakeLima).calls, "clone:"+node.LimaInstanceName+"->"+childNode.LimaInstanceName) {
 		t.Fatalf("expected limactl clone delegation, calls = %v", service.lima.(*fakeLima).calls)
+	}
+
+	projects, err := service.ProjectList(false)
+	if err != nil {
+		t.Fatalf("ProjectList() error = %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("expected clone to keep a single project, got %d", len(projects))
 	}
 }
 
@@ -320,12 +325,10 @@ func TestNodeCloneRejectsAgentProfileOverride(t *testing.T) {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
 
-	_, _, err = service.NodeClone(ctx, NodeCloneInput{
-		SourceNode:    node.ID,
-		ProjectSlug:   "child",
-		NodeSlug:      "child-node",
-		WorkspacePath: filepath.Join(t.TempDir(), "child"),
-		AgentProfile:  "other-profile",
+	_, err = service.NodeClone(ctx, NodeCloneInput{
+		SourceNode:   node.ID,
+		NodeSlug:     "child-node",
+		AgentProfile: "other-profile",
 	})
 	if err == nil {
 		t.Fatalf("expected NodeClone() to reject agent profile overrides")
@@ -501,6 +504,261 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 
 	if lastCall.interactive {
 		t.Fatalf("expected non-interactive shell call")
+	}
+}
+
+func TestDispatchProjectCreateAndUpdateEnvironmentCommandFlags(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	if _, err := dispatch(ctx, service, []string{
+		"project", "create",
+		"--slug", "root",
+		"--workspace", workspace,
+		"--env-command", "./script/setup",
+		"--env-command", "direnv allow",
+	}); err != nil {
+		t.Fatalf("dispatch(project create --env-command) error = %v", err)
+	}
+
+	project, err := service.ProjectShow("root")
+	if err != nil {
+		t.Fatalf("ProjectShow(root) error = %v", err)
+	}
+	if strings.Join(project.SetupCommands, "|") != "./script/setup|direnv allow" {
+		t.Fatalf("expected environment commands from create, got %v", project.SetupCommands)
+	}
+
+	if _, err := dispatch(ctx, service, []string{
+		"project", "update", "root",
+		"--env-command", "mise install",
+		"--env-command", "make init",
+	}); err != nil {
+		t.Fatalf("dispatch(project update --env-command) error = %v", err)
+	}
+
+	project, err = service.ProjectShow("root")
+	if err != nil {
+		t.Fatalf("ProjectShow(updated root) error = %v", err)
+	}
+	if strings.Join(project.SetupCommands, "|") != "mise install|make init" {
+		t.Fatalf("expected environment commands from update, got %v", project.SetupCommands)
+	}
+
+	if _, err := dispatch(ctx, service, []string{
+		"project", "update", "root",
+		"--clear-env-commands",
+	}); err != nil {
+		t.Fatalf("dispatch(project update --clear-env-commands) error = %v", err)
+	}
+
+	project, err = service.ProjectShow("root")
+	if err != nil {
+		t.Fatalf("ProjectShow(cleared root) error = %v", err)
+	}
+	if len(project.SetupCommands) != 0 {
+		t.Fatalf("expected cleared environment commands, got %v", project.SetupCommands)
+	}
+}
+
+func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	config, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+		Slug:     "shared-dev",
+		Commands: []string{"./script/setup", "direnv allow"},
+	})
+	if err != nil {
+		t.Fatalf("EnvironmentConfigCreate() error = %v", err)
+	}
+
+	if got := strings.Join(config.Commands, "|"); got != "./script/setup|direnv allow" {
+		t.Fatalf("expected created commands, got %q", got)
+	}
+
+	configs, err := service.EnvironmentConfigList(false)
+	if err != nil {
+		t.Fatalf("EnvironmentConfigList() error = %v", err)
+	}
+	if len(configs) != 1 || configs[0].Slug != "shared-dev" {
+		t.Fatalf("expected shared-dev to be listed, got %#v", configs)
+	}
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:               "root",
+		WorkspacePath:      workspace,
+		EnvironmentConfigs: []string{"shared-dev"},
+		SetupCommands:      []string{"make init"},
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	if got := strings.Join(project.EnvironmentConfigs, "|"); got != "shared-dev" {
+		t.Fatalf("expected project environment configs to be assigned, got %q", got)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState(root-node) error = %v", err)
+	}
+	if got := strings.Join(bootstrap.SetupCommands, "|"); got != "./script/setup|direnv allow|make init" {
+		t.Fatalf("expected resolved bootstrap commands, got %q", got)
+	}
+
+	if _, err := service.EnvironmentConfigDelete("shared-dev"); err == nil {
+		t.Fatalf("expected delete to reject referenced environment config")
+	}
+
+	config, err = service.EnvironmentConfigUpdate("shared-dev", EnvironmentConfigUpdateInput{
+		Commands: []string{"mise install"},
+	})
+	if err != nil {
+		t.Fatalf("EnvironmentConfigUpdate() error = %v", err)
+	}
+	if got := strings.Join(config.Commands, "|"); got != "mise install" {
+		t.Fatalf("expected updated commands, got %q", got)
+	}
+
+	node, err = service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node-2",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node-2) error = %v", err)
+	}
+
+	bootstrap, err = service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState(root-node-2) error = %v", err)
+	}
+	if got := strings.Join(bootstrap.SetupCommands, "|"); got != "mise install|make init" {
+		t.Fatalf("expected updated config commands to apply to future nodes, got %q", got)
+	}
+
+	project, err = service.ProjectUpdate(project.ID, ProjectUpdateInput{ClearEnvironmentConfigs: true})
+	if err != nil {
+		t.Fatalf("ProjectUpdate(clear env configs) error = %v", err)
+	}
+	if len(project.EnvironmentConfigs) != 0 {
+		t.Fatalf("expected project environment configs to be cleared, got %v", project.EnvironmentConfigs)
+	}
+
+	deleted, err := service.EnvironmentConfigDelete("shared-dev")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigDelete() error = %v", err)
+	}
+	if deleted.DeletedAt == nil {
+		t.Fatalf("expected deleted environment config to be tombstoned")
+	}
+
+	configs, err = service.EnvironmentConfigList(false)
+	if err != nil {
+		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected deleted environment config to be filtered from list, got %#v", configs)
+	}
+}
+
+func TestDispatchEnvironmentConfigCommandsAndProjectEnvConfigFlags(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	if _, err := dispatch(ctx, service, []string{
+		"environment", "create",
+		"--slug", "shared-dev",
+		"--env-command", "./script/setup",
+		"--env-command", "direnv allow",
+	}); err != nil {
+		t.Fatalf("dispatch(environment create) error = %v", err)
+	}
+
+	config, err := service.EnvironmentConfigShow("shared-dev")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigShow(shared-dev) error = %v", err)
+	}
+	if got := strings.Join(config.Commands, "|"); got != "./script/setup|direnv allow" {
+		t.Fatalf("expected created environment config commands, got %q", got)
+	}
+
+	if _, err := dispatch(ctx, service, []string{
+		"project", "create",
+		"--slug", "root",
+		"--workspace", workspace,
+		"--env-config", "shared-dev",
+	}); err != nil {
+		t.Fatalf("dispatch(project create --env-config) error = %v", err)
+	}
+
+	project, err := service.ProjectShow("root")
+	if err != nil {
+		t.Fatalf("ProjectShow(root) error = %v", err)
+	}
+	if got := strings.Join(project.EnvironmentConfigs, "|"); got != "shared-dev" {
+		t.Fatalf("expected assigned environment config refs, got %q", got)
+	}
+
+	if _, err := dispatch(ctx, service, []string{
+		"environment", "update", "shared-dev",
+		"--env-command", "mise install",
+	}); err != nil {
+		t.Fatalf("dispatch(environment update) error = %v", err)
+	}
+
+	config, err = service.EnvironmentConfigShow("shared-dev")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigShow(updated shared-dev) error = %v", err)
+	}
+	if got := strings.Join(config.Commands, "|"); got != "mise install" {
+		t.Fatalf("expected updated environment config commands, got %q", got)
+	}
+
+	if _, err := dispatch(ctx, service, []string{
+		"project", "update", "root",
+		"--clear-env-configs",
+	}); err != nil {
+		t.Fatalf("dispatch(project update --clear-env-configs) error = %v", err)
+	}
+
+	project, err = service.ProjectShow("root")
+	if err != nil {
+		t.Fatalf("ProjectShow(cleared root) error = %v", err)
+	}
+	if len(project.EnvironmentConfigs) != 0 {
+		t.Fatalf("expected cleared environment config refs, got %v", project.EnvironmentConfigs)
+	}
+
+	if _, err := dispatch(ctx, service, []string{
+		"environment", "delete", "shared-dev",
+	}); err != nil {
+		t.Fatalf("dispatch(environment delete) error = %v", err)
+	}
+
+	configs, err := service.EnvironmentConfigList(false)
+	if err != nil {
+		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected deleted environment config to disappear from list, got %#v", configs)
 	}
 }
 
@@ -726,11 +984,9 @@ func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
 		t.Fatalf("NodeStart(parent) error = %v", err)
 	}
 
-	_, childNode, err := service.NodeClone(ctx, NodeCloneInput{
-		SourceNode:    parentNode.ID,
-		ProjectSlug:   "child",
-		NodeSlug:      "child-node",
-		WorkspacePath: filepath.Join(t.TempDir(), "child", "workspace"),
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: parentNode.ID,
+		NodeSlug:   "child-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeClone() error = %v", err)

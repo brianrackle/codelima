@@ -167,7 +167,7 @@ func bootstrapComment(state BootstrapState) string {
 		lines = append(lines, fmt.Sprintf("#     - %s", command))
 	}
 
-	lines = append(lines, "#   setup_commands:")
+	lines = append(lines, "#   environment_commands:")
 	for _, command := range state.SetupCommands {
 		lines = append(lines, fmt.Sprintf("#     - %s", command))
 	}

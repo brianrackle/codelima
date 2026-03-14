@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
@@ -112,5 +113,34 @@ func TestWriteSuccessRendersNodeListAsTableUsingMountWorkspaceFallback(t *testin
 
 	if !strings.Contains(output, NodeStatusCreated) {
 		t.Fatalf("expected output to fall back to node status, got %q", output)
+	}
+}
+
+func TestRunHelpPrintsUsageAndExitsSuccess(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := Run(context.Background(), []string{"--help"}, strings.NewReader(""), &stdout, &stderr)
+	if exitCode != ExitSuccess {
+		t.Fatalf("expected ExitSuccess, got %d", exitCode)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Usage:\n  codelima [--home PATH] [--json] [--log-level LEVEL]") {
+		t.Fatalf("expected help output to include usage header, got %q", output)
+	}
+	if !strings.Contains(output, "environment create|list|show|update|delete") {
+		t.Fatalf("expected help output to include the environment group, got %q", output)
+	}
+	if !strings.Contains(output, "Running with no command opens the TUI.") {
+		t.Fatalf("expected help output to describe the default TUI launch, got %q", output)
+	}
+	if strings.Contains(output, "\n  tui\n") {
+		t.Fatalf("expected help output to omit the removed tui command, got %q", output)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got %q", stderr.String())
 	}
 }

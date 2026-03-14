@@ -460,17 +460,16 @@ Behavior:
 
 Definition:
 
-- fork the source node's project lineage and create a child node from that fork
+- copy the source node's VM into a new node in the same project
 
 Behavior:
 
-- requires the source node to be in a non-running state in Milestone 1
-- forks the source node's project into a new child project using snapshot semantics
+- stops and restarts the source node internally when the source VM is running
 - invokes `limactl clone <old> <new>` as the VM duplication primitive
-- applies mount/resource overrides necessary for the cloned instance to point at the child workspace
-- persists a child node with `parent_node_id` set and `status=created`
+- keeps the cloned node in the source project
+- persists a cloned node with `parent_node_id` set, `project_id` unchanged, and `status=created`
 
-If Lima cannot honor a required mount override during clone, the command must fail rather than leaving a node pointed at the wrong workspace.
+If Lima clone fails, the command must fail rather than leaving partially-written node metadata behind.
 
 #### `node delete`
 
@@ -740,7 +739,7 @@ Milestone 1 has no daemon. Coordination is per-command and local.
 Required coordination rules:
 
 - mutating commands must use advisory file locks under `CODELIMA_HOME/_locks`
-- operations affecting two entities, such as `patch propose` or `node clone`, must lock both entities in a deterministic order to avoid deadlock
+- operations affecting multiple metadata namespaces, such as `patch propose` or `node clone`, must lock them in a deterministic order to avoid deadlock
 - indexes must be updated within the same critical section as the owning metadata
 
 Required reconciliation rules:

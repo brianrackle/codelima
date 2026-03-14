@@ -35,6 +35,8 @@ type LimaClient interface {
 
 type ExecLimaClient struct {
 	Binary string
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 func NewExecLimaClient() *ExecLimaClient {
@@ -226,14 +228,13 @@ func (c *ExecLimaClient) Shell(ctx context.Context, instanceName string, command
 		return nil
 	}
 
-	stdout, stderr, err := c.run(ctx, 10*time.Minute, args...)
-	if streams.Stdout != nil {
-		_, _ = streams.Stdout.Write(stdout)
-	}
-
-	if streams.Stderr != nil && len(stderr) > 0 {
-		_, _ = streams.Stderr.Write(stderr)
-	}
+	_, stderr, err := c.runWithOutputs(
+		ctx,
+		10*time.Minute,
+		multiWriter(streams.Stdout, c.Stdout),
+		multiWriter(streams.Stderr, c.Stderr),
+		args...,
+	)
 
 	if err != nil {
 		return externalCommandFailed(
@@ -247,6 +248,10 @@ func (c *ExecLimaClient) Shell(ctx context.Context, instanceName string, command
 }
 
 func (c *ExecLimaClient) run(ctx context.Context, timeout time.Duration, args ...string) ([]byte, []byte, error) {
+	return c.runWithOutputs(ctx, timeout, c.Stdout, c.Stderr, args...)
+}
+
+func (c *ExecLimaClient) runWithOutputs(ctx context.Context, timeout time.Duration, stdoutWriter io.Writer, stderrWriter io.Writer, args ...string) ([]byte, []byte, error) {
 	runCtx := ctx
 	cancel := func() {}
 	if timeout > 0 {
@@ -257,9 +262,28 @@ func (c *ExecLimaClient) run(ctx context.Context, timeout time.Duration, args ..
 	cmd := exec.CommandContext(runCtx, c.Binary, args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = multiWriter(&stdout, stdoutWriter)
+	cmd.Stderr = multiWriter(&stderr, stderrWriter)
 	err := cmd.Run()
 
 	return stdout.Bytes(), stderr.Bytes(), err
+}
+
+func multiWriter(writers ...io.Writer) io.Writer {
+	filtered := make([]io.Writer, 0, len(writers))
+	for _, writer := range writers {
+		if writer == nil {
+			continue
+		}
+		filtered = append(filtered, writer)
+	}
+
+	switch len(filtered) {
+	case 0:
+		return nil
+	case 1:
+		return filtered[0]
+	default:
+		return io.MultiWriter(filtered...)
+	}
 }
