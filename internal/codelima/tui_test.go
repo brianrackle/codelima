@@ -711,11 +711,28 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	if app.dialog == nil || app.dialog.Title != "Update Project" {
 		t.Fatalf("expected update project dialog, got %#v", app.dialog)
 	}
-	submitTUIDialog(t, app, map[string]string{
-		"slug":                "root",
-		"workspace_path":      workspace,
-		"environment_configs": "shared-dev",
-	})
+	app.dialog.FieldIndex = 2
+	quit, err := app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEnter})
+	if err != nil {
+		t.Fatalf("handleEvent(open selector) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected selector open to keep app running")
+	}
+	if app.selector == nil || app.selector.Title != "Select Environment Configs" {
+		t.Fatalf("expected environment config selector, got %#v", app.selector)
+	}
+	chooseTUISelector(t, app, "shared-dev")
+	quit, err = app.handleEvent(vaxis.Key{Keycode: 's', Modifiers: vaxis.ModCtrl})
+	if err != nil {
+		t.Fatalf("handleEvent(Ctrl+s) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Ctrl+s submit to keep app running")
+	}
+	if app.dialog != nil {
+		t.Fatalf("expected update project dialog to close after submit")
+	}
 
 	updated, err := service.ProjectShow(project.ID)
 	if err != nil {
@@ -732,7 +749,11 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	if app.menu == nil || app.menu.Title != "Project Environment" {
 		t.Fatalf("expected project environment menu, got %#v", app.menu)
 	}
-	chooseTUIMenuEntry(t, app, "Clear Configs")
+	chooseTUIMenuEntry(t, app, "Set Configs")
+	if app.selector == nil || app.selector.Title != "Set Environment Configs" {
+		t.Fatalf("expected set configs selector, got %#v", app.selector)
+	}
+	chooseTUISelector(t, app)
 
 	updated, err = service.ProjectShow(project.ID)
 	if err != nil {
@@ -740,6 +761,100 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	}
 	if len(updated.EnvironmentConfigs) != 0 {
 		t.Fatalf("expected cleared environment config refs, got %v", updated.EnvironmentConfigs)
+	}
+}
+
+func TestTUICreateProjectDialogUsesEnvironmentConfigSelector(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+	if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+		Slug:     "shared-dev",
+		Commands: []string{"./script/setup"},
+	}); err != nil {
+		t.Fatalf("EnvironmentConfigCreate(shared-dev) error = %v", err)
+	}
+
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+	selectTUIEntry(t, app, "project:"+project.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectCreate}); err != nil {
+		t.Fatalf("performAction(create project) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Create Project" {
+		t.Fatalf("expected create project dialog, got %#v", app.dialog)
+	}
+	if app.dialog.Fields[2].Input != nil {
+		t.Fatalf("expected environment config field to use selector, not text input")
+	}
+
+	app.dialog.FieldIndex = 2
+	quit, err := app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEnter})
+	if err != nil {
+		t.Fatalf("handleEvent(open create selector) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected selector open to keep app running")
+	}
+	if app.selector == nil || app.selector.Title != "Select Environment Configs" {
+		t.Fatalf("expected environment config selector, got %#v", app.selector)
+	}
+	chooseTUISelector(t, app, "shared-dev")
+
+	values, err := app.dialog.Values()
+	if err != nil {
+		t.Fatalf("dialog.Values() error = %v", err)
+	}
+	if values["environment_configs"] != "shared-dev" {
+		t.Fatalf("expected selected environment config to be stored, got %q", values["environment_configs"])
+	}
+}
+
+func TestTUIManageEnvironmentConfigUsesSelector(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	if _, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	}); err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+	if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+		Slug:     "shared-dev",
+		Commands: []string{"./script/setup"},
+	}); err != nil {
+		t.Fatalf("EnvironmentConfigCreate(shared-dev) error = %v", err)
+	}
+
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionEnvironmentConfigManage}); err != nil {
+		t.Fatalf("performAction(environment config manage) error = %v", err)
+	}
+	if app.menu == nil || app.menu.Title != "Environment Configs" {
+		t.Fatalf("expected environment config menu, got %#v", app.menu)
+	}
+	chooseTUIMenuEntry(t, app, "Manage Config")
+	if app.selector == nil || app.selector.Title != "Manage Environment Config" {
+		t.Fatalf("expected manage config selector, got %#v", app.selector)
+	}
+	chooseTUISelector(t, app, "shared-dev")
+	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
+		t.Fatalf("expected environment config command menu, got %#v", app.menu)
 	}
 }
 
@@ -1199,4 +1314,53 @@ func chooseTUIMenuEntry(t *testing.T, app *vaxisTUIApp, label string) {
 	}
 
 	t.Fatalf("expected menu entry %q", label)
+}
+
+func chooseTUISelector(t *testing.T, app *vaxisTUIApp, values ...string) {
+	t.Helper()
+
+	if app.selector == nil {
+		t.Fatalf("expected selector to be open")
+	}
+
+	if app.selector.Multi {
+		app.selector.Selected = map[string]bool{}
+	}
+
+	for _, value := range values {
+		found := false
+		for index, option := range app.selector.Options {
+			if option.Value != value && option.Label != value {
+				continue
+			}
+			app.selector.Index = index
+			if app.selector.Multi {
+				app.selector.Selected[option.Value] = true
+			}
+			found = true
+			break
+		}
+		if !found {
+			t.Fatalf("expected selector option %q", value)
+		}
+	}
+
+	if !app.selector.Multi && len(values) > 0 {
+		for index, option := range app.selector.Options {
+			if option.Value != values[0] && option.Label != values[0] {
+				continue
+			}
+			app.selector.Index = index
+			break
+		}
+	}
+
+	completed, cancelled, err := app.selector.Update(vaxis.Key{Keycode: vaxis.KeyEnter})
+	if err != nil {
+		t.Fatalf("selector submit error = %v", err)
+	}
+	if !completed || cancelled {
+		t.Fatalf("expected selector to complete, completed=%v cancelled=%v", completed, cancelled)
+	}
+	app.selector = nil
 }
