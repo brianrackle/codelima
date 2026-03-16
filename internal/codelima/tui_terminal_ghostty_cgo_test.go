@@ -4,12 +4,16 @@ package codelima
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 )
@@ -135,6 +139,20 @@ func TestGhosttyTerminalSuppressesUnknownParserWarningsFromStderr(t *testing.T) 
 	}
 }
 
+func TestGhosttyTerminalRoundTripsSttyRawPrompt(t *testing.T) {
+	script := newSttyRawPromptScript(t)
+	runGhosttySttyRawPrompt(t, exec.Command("bash", "-lc", script.body), script.readyPath, script.resultPath)
+}
+
+func TestGhosttyTerminalRoundTripsSttyRawPromptThroughNestedPTY(t *testing.T) {
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skipf("script utility unavailable: %v", err)
+	}
+
+	script := newSttyRawPromptScript(t)
+	runGhosttySttyRawPrompt(t, exec.Command("script", "-q", "/dev/null", "bash", "-lc", script.body), script.readyPath, script.resultPath)
+}
+
 func captureGhosttyProcessStderr(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -176,4 +194,83 @@ func captureGhosttyProcessStderr(t *testing.T, fn func()) string {
 	_ = syscall.Close(savedFD)
 
 	return <-outputCh
+}
+
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %s", path)
+}
+
+type sttyRawPromptScript struct {
+	body       string
+	readyPath  string
+	resultPath string
+}
+
+func newSttyRawPromptScript(t *testing.T) sttyRawPromptScript {
+	t.Helper()
+
+	tempDir := t.TempDir()
+	readyPath := filepath.Join(tempDir, "ready")
+	resultPath := filepath.Join(tempDir, "result")
+	errorPath := filepath.Join(tempDir, "restore.err")
+	return sttyRawPromptScript{
+		body: fmt.Sprintf(`
+save_state="$(/bin/stty -g)"
+printf ready > %q
+/bin/stty raw -echo
+IFS='' read -r -n 1 -d '' c
+if /bin/stty "${save_state}" 2>%q; then
+  printf 'ok:%%s' "$c" > %q
+else
+  printf 'fail:%%s\nstate=%%s\n' "$(/bin/cat %q)" "${save_state}" > %q
+fi
+`, readyPath, errorPath, resultPath, errorPath, resultPath),
+		readyPath:  readyPath,
+		resultPath: resultPath,
+	}
+}
+
+func runGhosttySttyRawPrompt(t *testing.T, cmd *exec.Cmd, readyPath string, resultPath string) {
+	t.Helper()
+
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+
+	waitForFile(t, readyPath, 5*time.Second)
+	ghostty.Update(vaxis.Key{Keycode: vaxis.KeyEnter})
+	waitForFile(t, resultPath, 5*time.Second)
+
+	output, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("ReadFile(result) error = %v", err)
+	}
+
+	if got := strings.TrimSpace(string(output)); !strings.HasPrefix(got, "ok:") {
+		t.Fatalf("expected stty restore to succeed, got %q", got)
+	}
 }

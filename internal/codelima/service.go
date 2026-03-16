@@ -1152,7 +1152,11 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 
 	command = normalizeShellCommand(command)
 	workdir := s.nodeGuestWorkspacePath(node)
-	return s.lima.Shell(ctx, node.LimaInstanceName, command, workdir, len(command) == 0, ShellStreams{
+	interactive := len(command) == 0
+	if interactive {
+		command = interactiveShellLaunchCommand()
+	}
+	return s.lima.Shell(ctx, node.LimaInstanceName, command, workdir, interactive, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
 		Stderr: s.stderr,
@@ -1642,6 +1646,18 @@ func normalizeShellCommand(command []string) []string {
 	}
 
 	return append([]string(nil), command...)
+}
+
+func interactiveShellLaunchCommand() []string {
+	script := strings.Join([]string{
+		`if [ -x /usr/bin/gnustty ] && /bin/stty --version 2>/dev/null | grep -qi 'uutils coreutils'; then`,
+		`  sudo -n ln -sf /usr/bin/gnustty /bin/stty >/dev/null 2>&1 || true`,
+		`  sudo -n ln -sf /usr/bin/gnustty /usr/bin/stty >/dev/null 2>&1 || true`,
+		`fi`,
+		`exec "${SHELL:-/bin/bash}" -l`,
+	}, "\n")
+
+	return []string{"sh", "-lc", script}
 }
 
 func (s *Service) nodeGuestWorkspacePath(node Node) string {

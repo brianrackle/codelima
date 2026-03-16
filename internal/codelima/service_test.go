@@ -809,8 +809,23 @@ func TestShellUsesGuestWorkspacePathForInteractiveEntry(t *testing.T) {
 		t.Fatalf("expected interactive shell call")
 	}
 
-	if len(lastCall.command) != 0 {
-		t.Fatalf("expected interactive shell without command, got %v", lastCall.command)
+	if got, want := strings.Join(lastCall.command, " "), strings.Join(interactiveShellLaunchCommand(), " "); got != want {
+		t.Fatalf("expected interactive shell bootstrap command %q, got %q", want, got)
+	}
+}
+
+func TestInteractiveShellLaunchCommandRepairsGNUSttyBeforeExec(t *testing.T) {
+	t.Parallel()
+
+	got := strings.Join(interactiveShellLaunchCommand(), " ")
+	if !strings.Contains(got, "/usr/bin/gnustty") {
+		t.Fatalf("expected interactive shell command to reference gnustty, got %q", got)
+	}
+	if !strings.Contains(got, "uutils coreutils") {
+		t.Fatalf("expected interactive shell command to detect uutils stty, got %q", got)
+	}
+	if !strings.Contains(got, `exec "${SHELL:-/bin/bash}" -l`) {
+		t.Fatalf("expected interactive shell command to exec the user's login shell, got %q", got)
 	}
 }
 

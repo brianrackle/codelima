@@ -52,3 +52,29 @@ Disadvantages:
 - Adds maintenance overhead for test tooling.
 - May require terminal-emulator-specific setup or image-diff infrastructure.
 - Could slow down verification if used too broadly.
+
+### 3. Surface failures in the interactive shell `stty` repair path
+
+Problem:
+
+- Interactive `codelima shell` now repairs broken guest `uutils` `stty` symlinks before launching the login shell.
+- That repair is currently best-effort and silent.
+- If a node lacks passwordless `sudo` or does not provide `/usr/bin/gnustty`, users can still hit the broken `stty -g` round-trip without seeing why the repair did not apply.
+
+Suggested solution:
+
+- Detect when the guest still exposes `uutils` `stty` after the repair attempt.
+- Emit a short warning in the interactive shell preflight that explains why the shell may remain incompatible with `stty -g` round-trip users.
+- Consider a richer doctor or node-status check that reports the guest `stty` state proactively.
+
+Advantages:
+
+- Makes remaining shell breakage diagnosable instead of silent.
+- Reduces confusion when the repair path cannot run on a particular node.
+- Gives operators a clearer path to repair nodes manually.
+
+Disadvantages:
+
+- Adds more shell-startup logic and output in a path that should stay lightweight.
+- Requires care to avoid noisy warnings once a node is already healthy.
+- A doctor check would add another piece of guest-state probing to maintain.
