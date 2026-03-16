@@ -47,6 +47,7 @@ typedef struct {
 	void (*terminal_resize)(GhosttyTerminal term, int cols, int rows);
 	void (*terminal_write)(GhosttyTerminal term, const uint8_t* data, size_t len);
 	GhosttyDirty (*render_state_update)(GhosttyTerminal term);
+	uint32_t (*render_state_get_bg_color)(GhosttyTerminal term);
 	bool (*render_state_get_cursor_visible)(GhosttyTerminal term);
 	int (*render_state_get_cursor_x)(GhosttyTerminal term);
 	int (*render_state_get_cursor_y)(GhosttyTerminal term);
@@ -115,6 +116,7 @@ static int ghostty_bridge_load(const char* path) {
 	LOAD_GHOSTTY_SYMBOL(terminal_resize, "ghostty_terminal_resize", void (*)(GhosttyTerminal, int, int));
 	LOAD_GHOSTTY_SYMBOL(terminal_write, "ghostty_terminal_write", void (*)(GhosttyTerminal, const uint8_t*, size_t));
 	LOAD_GHOSTTY_SYMBOL(render_state_update, "ghostty_render_state_update", GhosttyDirty (*)(GhosttyTerminal));
+	LOAD_GHOSTTY_SYMBOL(render_state_get_bg_color, "ghostty_render_state_get_bg_color", uint32_t (*)(GhosttyTerminal));
 	LOAD_GHOSTTY_SYMBOL(render_state_get_cursor_visible, "ghostty_render_state_get_cursor_visible", bool (*)(GhosttyTerminal));
 	LOAD_GHOSTTY_SYMBOL(render_state_get_cursor_x, "ghostty_render_state_get_cursor_x", int (*)(GhosttyTerminal));
 	LOAD_GHOSTTY_SYMBOL(render_state_get_cursor_y, "ghostty_render_state_get_cursor_y", int (*)(GhosttyTerminal));
@@ -160,6 +162,10 @@ static void ghostty_bridge_terminal_write(GhosttyTerminal term, const uint8_t* d
 
 static GhosttyDirty ghostty_bridge_render_state_update(GhosttyTerminal term) {
 	return ghostty.render_state_update(term);
+}
+
+static uint32_t ghostty_bridge_render_state_get_bg_color(GhosttyTerminal term) {
+	return ghostty.render_state_get_bg_color(term);
 }
 
 static bool ghostty_bridge_render_state_get_cursor_visible(GhosttyTerminal term) {
@@ -277,12 +283,53 @@ type ghosttyAPILoadState struct {
 
 var ghosttyAPI ghosttyAPILoadState
 
+type ghosttyStderrState struct {
+	once sync.Once
+	mu   sync.Mutex
+	file *os.File
+	err  error
+}
+
+var ghosttyStderr ghosttyStderrState
+
+// Ghostty currently logs parser warnings to process stderr, so contain them
+// around backend calls instead of letting them spill into the TUI chrome.
+func withGhosttyStderrSuppressed[T any](fn func() T) T {
+	ghosttyStderr.mu.Lock()
+	defer ghosttyStderr.mu.Unlock()
+
+	ghosttyStderr.once.Do(func() {
+		ghosttyStderr.file, ghosttyStderr.err = os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	})
+	if ghosttyStderr.err != nil || ghosttyStderr.file == nil {
+		return fn()
+	}
+
+	stderrFD := int(os.Stderr.Fd())
+	savedFD, err := syscall.Dup(stderrFD)
+	if err != nil {
+		return fn()
+	}
+	if err := syscall.Dup2(int(ghosttyStderr.file.Fd()), stderrFD); err != nil {
+		_ = syscall.Close(savedFD)
+		return fn()
+	}
+	defer func() {
+		_ = syscall.Dup2(savedFD, stderrFD)
+		_ = syscall.Close(savedFD)
+	}()
+
+	return fn()
+}
+
 func newGhosttyTUITerminal(nodeID string, postEvent func(vaxis.Event)) (tuiTerminal, error) {
 	if err := loadGhosttyVT(); err != nil {
 		return nil, err
 	}
 
-	term := C.ghostty_bridge_terminal_new(80, 24)
+	term := withGhosttyStderrSuppressed(func() C.GhosttyTerminal {
+		return C.ghostty_bridge_terminal_new(80, 24)
+	})
 	if term == nil {
 		return nil, fmt.Errorf("create ghostty terminal: %s", C.GoString(C.ghostty_bridge_last_error()))
 	}
@@ -369,21 +416,22 @@ type ghosttyTUITerminal struct {
 	postEvent func(vaxis.Event)
 	term      C.GhosttyTerminal
 
-	mu            sync.Mutex
-	cmd           *exec.Cmd
-	pty           *os.File
-	cols          int
-	rows          int
-	focused       bool
-	scrollOffset  int
-	snapshot      string
-	drawRows      []ghosttyRowSource
-	closed        bool
-	suppressEvent bool
-	redrawPending bool
-	waitOnce      sync.Once
-	waitErr       error
-	closeOnce     sync.Once
+	mu                   sync.Mutex
+	cmd                  *exec.Cmd
+	pty                  *os.File
+	cols                 int
+	rows                 int
+	focused              bool
+	scrollOffset         int
+	snapshot             string
+	drawRows             []ghosttyRowSource
+	defaultBackgroundRGB uint32
+	closed               bool
+	suppressEvent        bool
+	redrawPending        bool
+	waitOnce             sync.Once
+	waitErr              error
+	closeOnce            sync.Once
 }
 
 func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
@@ -466,22 +514,32 @@ func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
 		return
 	}
 
-	C.ghostty_bridge_terminal_write(
-		t.term,
-		(*C.uint8_t)(unsafe.Pointer(&data[0])),
-		C.size_t(len(data)),
-	)
-	t.drainResponsesLocked()
+	withGhosttyStderrSuppressed(func() struct{} {
+		C.ghostty_bridge_terminal_write(
+			t.term,
+			(*C.uint8_t)(unsafe.Pointer(&data[0])),
+			C.size_t(len(data)),
+		)
+		t.drainResponsesLockedRaw()
 
-	if C.ghostty_bridge_terminal_is_alternate_screen(t.term) {
-		t.scrollOffset = 0
-	} else {
-		t.clampScrollLocked()
-	}
+		if C.ghostty_bridge_terminal_is_alternate_screen(t.term) {
+			t.scrollOffset = 0
+		} else {
+			t.clampScrollLockedRaw()
+		}
+		return struct{}{}
+	})
 	t.invalidateLocked()
 }
 
 func (t *ghosttyTUITerminal) drainResponsesLocked() {
+	withGhosttyStderrSuppressed(func() struct{} {
+		t.drainResponsesLockedRaw()
+		return struct{}{}
+	})
+}
+
+func (t *ghosttyTUITerminal) drainResponsesLockedRaw() {
 	if t.pty == nil || t.term == nil {
 		return
 	}
@@ -508,6 +566,12 @@ func (t *ghosttyTUITerminal) readPendingResponses() string {
 		return ""
 	}
 
+	return withGhosttyStderrSuppressed(func() string {
+		return t.readPendingResponsesLockedRaw()
+	})
+}
+
+func (t *ghosttyTUITerminal) readPendingResponsesLockedRaw() string {
 	buffer := make([]byte, 4096)
 	var output bytes.Buffer
 	for C.ghostty_bridge_terminal_has_response(t.term) {
@@ -566,7 +630,10 @@ func (t *ghosttyTUITerminal) handleMouseLocked(event vaxis.Mouse) {
 		}
 	}
 
-	if !bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term)) {
+	hasMouseTracking := withGhosttyStderrSuppressed(func() bool {
+		return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
+	})
+	if !hasMouseTracking {
 		return
 	}
 
@@ -583,10 +650,14 @@ func (t *ghosttyTUITerminal) handleWheelLocked(button vaxis.MouseButton) bool {
 	if t.term == nil {
 		return false
 	}
-	if bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term)) {
+	if withGhosttyStderrSuppressed(func() bool {
+		return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
+	}) {
 		return false
 	}
-	if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
+	if withGhosttyStderrSuppressed(func() bool {
+		return bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term))
+	}) {
 		if t.getModeLocked(ghosttyModeAltScroll, false) {
 			switch button {
 			case vaxis.MouseWheelUp:
@@ -600,7 +671,9 @@ func (t *ghosttyTUITerminal) handleWheelLocked(button vaxis.MouseButton) bool {
 		return false
 	}
 
-	maxOffset := int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
+	maxOffset := withGhosttyStderrSuppressed(func() int {
+		return int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
+	})
 	if maxOffset <= 0 && t.scrollOffset == 0 {
 		return false
 	}
@@ -647,99 +720,105 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 	if width <= 0 || height <= 0 {
 		return
 	}
-	if width != t.cols || height != t.rows {
-		t.cols = width
-		t.rows = height
-		C.ghostty_bridge_terminal_resize(t.term, C.int(width), C.int(height))
-		if t.pty != nil {
-			_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
+	if !withGhosttyStderrSuppressed(func() bool {
+		if width != t.cols || height != t.rows {
+			t.cols = width
+			t.rows = height
+			C.ghostty_bridge_terminal_resize(t.term, C.int(width), C.int(height))
+			if t.pty != nil {
+				_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
+			}
+			t.clampScrollLockedRaw()
 		}
-		t.clampScrollLocked()
-	}
 
-	C.ghostty_bridge_render_state_update(t.term)
+		C.ghostty_bridge_render_state_update(t.term)
+		t.defaultBackgroundRGB = uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
 
-	viewport := make([]C.GhosttyCell, width*height)
-	if len(viewport) > 0 {
-		count := int(C.ghostty_bridge_render_state_get_viewport(
-			t.term,
-			(*C.GhosttyCell)(unsafe.Pointer(&viewport[0])),
-			C.size_t(len(viewport)),
-		))
-		if count < 0 {
-			return
-		}
-	}
-
-	scrollbackLength := int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
-	if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
-		t.scrollOffset = 0
-	} else if t.scrollOffset > scrollbackLength {
-		t.scrollOffset = scrollbackLength
-	}
-
-	rows := make([]ghosttyRowSource, 0, height)
-	totalLines := scrollbackLength + height
-	start := totalLines - height - t.scrollOffset
-	if start < 0 {
-		start = 0
-	}
-
-	scrollbackRowBuffer := make([]C.GhosttyCell, width)
-	lineTexts := make([]string, 0, height)
-	for visibleRow := 0; visibleRow < height; visibleRow++ {
-		virtualRow := start + visibleRow
-		rowSource := ghosttyRowSource{}
-		var cells []C.GhosttyCell
-		if virtualRow < scrollbackLength {
-			rowSource = ghosttyRowSource{scrollback: true, index: virtualRow}
-			count := int(C.ghostty_bridge_terminal_get_scrollback_line(
+		viewport := make([]C.GhosttyCell, width*height)
+		if len(viewport) > 0 {
+			count := int(C.ghostty_bridge_render_state_get_viewport(
 				t.term,
-				C.int(virtualRow),
-				(*C.GhosttyCell)(unsafe.Pointer(&scrollbackRowBuffer[0])),
-				C.size_t(len(scrollbackRowBuffer)),
+				(*C.GhosttyCell)(unsafe.Pointer(&viewport[0])),
+				C.size_t(len(viewport)),
 			))
 			if count < 0 {
-				continue
+				return false
 			}
-			cells = scrollbackRowBuffer
-		} else {
-			rowSource = ghosttyRowSource{index: virtualRow - scrollbackLength}
-			offset := rowSource.index * width
-			if offset+width > len(viewport) {
-				continue
-			}
-			cells = viewport[offset : offset+width]
 		}
 
-		lineTexts = append(lineTexts, t.drawCellsLocked(win, visibleRow, rowSource, cells))
-		rows = append(rows, rowSource)
-	}
-
-	t.drawRows = rows
-	t.snapshot = strings.Join(lineTexts, "\n")
-
-	if t.focused && t.scrollOffset == 0 && bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term)) {
-		cursorRow := int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
-		cursorCol := int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
-		for rowIndex, rowSource := range rows {
-			if rowSource.scrollback || rowSource.index != cursorRow {
-				continue
-			}
-			win.ShowCursor(cursorCol, rowIndex, vaxis.CursorBlock)
-			break
+		scrollbackLength := int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
+		if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
+			t.scrollOffset = 0
+		} else if t.scrollOffset > scrollbackLength {
+			t.scrollOffset = scrollbackLength
 		}
-	}
 
-	C.ghostty_bridge_render_state_mark_clean(t.term)
-	t.redrawPending = false
+		rows := make([]ghosttyRowSource, 0, height)
+		totalLines := scrollbackLength + height
+		start := totalLines - height - t.scrollOffset
+		if start < 0 {
+			start = 0
+		}
+
+		scrollbackRowBuffer := make([]C.GhosttyCell, width)
+		lineTexts := make([]string, 0, height)
+		for visibleRow := 0; visibleRow < height; visibleRow++ {
+			virtualRow := start + visibleRow
+			rowSource := ghosttyRowSource{}
+			var cells []C.GhosttyCell
+			if virtualRow < scrollbackLength {
+				rowSource = ghosttyRowSource{scrollback: true, index: virtualRow}
+				count := int(C.ghostty_bridge_terminal_get_scrollback_line(
+					t.term,
+					C.int(virtualRow),
+					(*C.GhosttyCell)(unsafe.Pointer(&scrollbackRowBuffer[0])),
+					C.size_t(len(scrollbackRowBuffer)),
+				))
+				if count < 0 {
+					continue
+				}
+				cells = scrollbackRowBuffer
+			} else {
+				rowSource = ghosttyRowSource{index: virtualRow - scrollbackLength}
+				offset := rowSource.index * width
+				if offset+width > len(viewport) {
+					continue
+				}
+				cells = viewport[offset : offset+width]
+			}
+
+			lineTexts = append(lineTexts, t.drawCellsLocked(win, visibleRow, rowSource, cells))
+			rows = append(rows, rowSource)
+		}
+
+		t.drawRows = rows
+		t.snapshot = strings.Join(lineTexts, "\n")
+
+		if t.focused && t.scrollOffset == 0 && bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term)) {
+			cursorRow := int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
+			cursorCol := int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
+			for rowIndex, rowSource := range rows {
+				if rowSource.scrollback || rowSource.index != cursorRow {
+					continue
+				}
+				win.ShowCursor(cursorCol, rowIndex, vaxis.CursorBlock)
+				break
+			}
+		}
+
+		C.ghostty_bridge_render_state_mark_clean(t.term)
+		t.redrawPending = false
+		return true
+	}) {
+		return
+	}
 }
 
 func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSource ghosttyRowSource, cells []C.GhosttyCell) string {
 	var line strings.Builder
 	for col := 0; col < t.cols; col++ {
 		cell := cells[col]
-		style := ghosttyCellStyle(cell)
+		style := ghosttyCellStyle(cell, t.defaultBackgroundRGB)
 		if cell.hyperlink_id != 0 {
 			if target, ok := t.hyperlinkAtLocked(rowSource, col); ok {
 				style.Hyperlink = target
@@ -783,11 +862,12 @@ func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSourc
 	return line.String()
 }
 
-func ghosttyCellStyle(cell C.GhosttyCell) vaxis.Style {
-	style := vaxis.Style{
-		Foreground: vaxis.RGBColor(uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)),
-		Background: vaxis.RGBColor(uint8(cell.bg_r), uint8(cell.bg_g), uint8(cell.bg_b)),
-	}
+func ghosttyCellStyle(cell C.GhosttyCell, defaultBackgroundRGB uint32) vaxis.Style {
+	style := ghosttyStyleForColors(
+		ghosttyRGB(uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)),
+		ghosttyRGB(uint8(cell.bg_r), uint8(cell.bg_g), uint8(cell.bg_b)),
+		defaultBackgroundRGB,
+	)
 	if cell.flags&C.GHOSTTY_CELL_BOLD != 0 {
 		style.Attribute |= vaxis.AttrBold
 	}
@@ -813,6 +893,20 @@ func ghosttyCellStyle(cell C.GhosttyCell) vaxis.Style {
 		style.Attribute |= vaxis.AttrBlink
 	}
 	return style
+}
+
+func ghosttyStyleForColors(foregroundRGB, backgroundRGB, defaultBackgroundRGB uint32) vaxis.Style {
+	style := vaxis.Style{
+		Foreground: vaxis.HexColor(foregroundRGB),
+	}
+	if backgroundRGB != defaultBackgroundRGB {
+		style.Background = vaxis.HexColor(backgroundRGB)
+	}
+	return style
+}
+
+func ghosttyRGB(r, g, b uint8) uint32 {
+	return uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 }
 
 func (t *ghosttyTUITerminal) graphemeLocked(rowSource ghosttyRowSource, col int, cell C.GhosttyCell) string {
@@ -876,7 +970,10 @@ func (t *ghosttyTUITerminal) Close() {
 		}
 		_ = t.wait()
 		if term != nil {
-			C.ghostty_bridge_terminal_free(term)
+			withGhosttyStderrSuppressed(func() struct{} {
+				C.ghostty_bridge_terminal_free(term)
+				return struct{}{}
+			})
 		}
 	})
 }
@@ -918,7 +1015,10 @@ func (t *ghosttyTUITerminal) HyperlinkAt(col, row int) (string, bool) {
 	if row < 0 || row >= len(t.drawRows) || col < 0 || col >= t.cols || t.term == nil {
 		return "", false
 	}
-	return t.hyperlinkAtLocked(t.drawRows[row], col)
+	return withGhosttyStderrSuppressed(func() hyperlinkResult {
+		target, ok := t.hyperlinkAtLocked(t.drawRows[row], col)
+		return hyperlinkResult{target: target, ok: ok}
+	}).unpack()
 }
 
 func (t *ghosttyTUITerminal) hyperlinkAtLocked(rowSource ghosttyRowSource, col int) (string, bool) {
@@ -961,7 +1061,10 @@ func (t *ghosttyTUITerminal) finish(err error) {
 	t.mu.Unlock()
 
 	if term != nil {
-		C.ghostty_bridge_terminal_free(term)
+		withGhosttyStderrSuppressed(func() struct{} {
+			C.ghostty_bridge_terminal_free(term)
+			return struct{}{}
+		})
 	}
 	if postEvent && t.postEvent != nil {
 		t.postEvent(tuiTerminalClosedEvent{NodeID: t.nodeID, Err: err})
@@ -982,10 +1085,19 @@ func (t *ghosttyTUITerminal) getModeLocked(mode int, isANSI bool) bool {
 	if t.term == nil {
 		return false
 	}
-	return bool(C.ghostty_bridge_terminal_get_mode(t.term, C.int(mode), C.bool(isANSI)))
+	return withGhosttyStderrSuppressed(func() bool {
+		return bool(C.ghostty_bridge_terminal_get_mode(t.term, C.int(mode), C.bool(isANSI)))
+	})
 }
 
 func (t *ghosttyTUITerminal) clampScrollLocked() {
+	withGhosttyStderrSuppressed(func() struct{} {
+		t.clampScrollLockedRaw()
+		return struct{}{}
+	})
+}
+
+func (t *ghosttyTUITerminal) clampScrollLockedRaw() {
 	if t.term == nil {
 		t.scrollOffset = 0
 		return
@@ -997,6 +1109,15 @@ func (t *ghosttyTUITerminal) clampScrollLocked() {
 	if t.scrollOffset < 0 {
 		t.scrollOffset = 0
 	}
+}
+
+type hyperlinkResult struct {
+	target string
+	ok     bool
+}
+
+func (r hyperlinkResult) unpack() (string, bool) {
+	return r.target, r.ok
 }
 
 func (t *ghosttyTUITerminal) invalidateLocked() {

@@ -16,6 +16,27 @@ import (
 
 var ghosttyStderrCaptureMu sync.Mutex
 
+func TestGhosttyStyleForColorsLeavesDefaultBackgroundTransparent(t *testing.T) {
+	t.Parallel()
+
+	style := ghosttyStyleForColors(0xAABBCC, 0x000000, 0x000000)
+	if style.Foreground != vaxis.HexColor(0xAABBCC) {
+		t.Fatalf("foreground = %v, want %v", style.Foreground, vaxis.HexColor(0xAABBCC))
+	}
+	if style.Background != vaxis.ColorDefault {
+		t.Fatalf("background = %v, want default background", style.Background)
+	}
+}
+
+func TestGhosttyStyleForColorsPreservesNonDefaultBackground(t *testing.T) {
+	t.Parallel()
+
+	style := ghosttyStyleForColors(0xAABBCC, 0x112233, 0x000000)
+	if style.Background != vaxis.HexColor(0x112233) {
+		t.Fatalf("background = %v, want %v", style.Background, vaxis.HexColor(0x112233))
+	}
+}
+
 func TestGhosttyTerminalDoesNotWriteOSCWarningsToStderr(t *testing.T) {
 	ghosttyStderrCaptureMu.Lock()
 	defer ghosttyStderrCaptureMu.Unlock()
@@ -88,6 +109,29 @@ func TestGhosttyTerminalIgnoresVimTitleStackQueriesWithoutWarnings(t *testing.T)
 	})
 	if strings.TrimSpace(stderrOutput) != "" {
 		t.Fatalf("expected no Ghostty parser warnings, got %q", stderrOutput)
+	}
+}
+
+func TestGhosttyTerminalSuppressesUnknownParserWarningsFromStderr(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	stderrOutput := captureGhosttyProcessStderr(t, func() {
+		ghostty.ingestPTY([]byte("\x1b[?5m"))
+	})
+	if strings.TrimSpace(stderrOutput) != "" {
+		t.Fatalf("expected Ghostty parser warnings to stay contained, got %q", stderrOutput)
 	}
 }
 
