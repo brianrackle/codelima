@@ -1048,6 +1048,21 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		UpdatedAt:             s.now(),
 	}
 
+	reconciledChildNode, err := s.reconcileNode(ctx, childNode, false)
+	if err != nil {
+		return Node{}, err
+	}
+	if reconciledChildNode.LastRuntimeObservation != nil && reconciledChildNode.LastRuntimeObservation.Status == "running" {
+		if err := s.lima.Stop(ctx, childNode.LimaInstanceName); err != nil {
+			return Node{}, err
+		}
+		reconciledChildNode, err = s.reconcileNode(ctx, childNode, false)
+		if err != nil {
+			return Node{}, err
+		}
+	}
+	childNode = reconciledChildNode
+
 	if err := s.store.SaveNode(childNode, bootstrap, template); err != nil {
 		return Node{}, err
 	}

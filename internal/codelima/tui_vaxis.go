@@ -217,6 +217,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.finishOperation(event)
 		a.draw()
 		return false, nil
+	case tuiTerminalClosedEvent:
+		a.handleTerminalClosed(event)
+		a.draw()
+		return false, nil
+	case tuiTerminalErrorEvent:
+		a.status = event.Err.Error()
+		a.draw()
+		return false, nil
 	}
 
 	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && (a.dialog != nil || a.menu != nil || a.selector != nil) {
@@ -293,12 +301,6 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 	case term.EventNotify:
 		a.vx.Notify(event.Title, event.Body)
-	case tuiTerminalClosedEvent:
-		a.handleTerminalClosed(event)
-		a.draw()
-	case tuiTerminalErrorEvent:
-		a.status = event.Err.Error()
-		a.draw()
 	case vaxis.QuitEvent:
 		return true, nil
 	}
@@ -520,20 +522,11 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 		return nil
 	}
 
-	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton && mouse.Modifiers&vaxis.ModShift == 0 {
-		if target, ok := a.terminalLinkTargetAt(mouse); ok {
-			if err := a.openHyperlink(target); err != nil {
-				a.status = err.Error()
-				return nil
-			}
-			a.status = "opened " + target
-			return nil
-		}
-	}
-
 	translated := a.terminalBodyRect.translateMouse(mouse)
-	if mouse.Modifiers&vaxis.ModShift != 0 && mouse.Button == vaxis.MouseLeftButton {
-		a.handleTerminalSelection(entry.node.ID, entry.node.Slug, session.terminal.String(), translated)
+	if a.usesLocalTerminalSelection(session.terminal, mouse, entry.node.ID) {
+		if err := a.handleTerminalMouseSelection(entry.node.ID, entry.node.Slug, session.terminal.String(), mouse, translated); err != nil {
+			a.status = err.Error()
+		}
 		return nil
 	}
 
@@ -557,6 +550,48 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 	a.status = ""
 	a.syncSessionFocus()
 	a.forwardSessionEvent(entry.node.ID, translated)
+	return nil
+}
+
+func (a *vaxisTUIApp) usesLocalTerminalSelection(terminal tuiTerminal, mouse vaxis.Mouse, nodeID string) bool {
+	if terminal == nil {
+		return false
+	}
+	if mouse.Button == vaxis.MouseLeftButton {
+		return mouse.Modifiers&vaxis.ModShift != 0 || !terminal.CapturesMouse()
+	}
+	if mouse.Button != vaxis.MouseNoButton || mouse.EventType == vaxis.EventPress || a.selection == nil || a.selection.nodeID != nodeID {
+		return false
+	}
+	return mouse.Modifiers&vaxis.ModShift != 0 || !terminal.CapturesMouse()
+}
+
+func (a *vaxisTUIApp) handleTerminalMouseSelection(nodeID string, nodeSlug string, snapshot string, mouse vaxis.Mouse, translated vaxis.Mouse) error {
+	switch mouse.EventType {
+	case vaxis.EventPress:
+		a.beginTerminalSelection(nodeID, translated)
+		return nil
+	case vaxis.EventMotion:
+		a.updateTerminalSelection(nodeID, translated)
+		return nil
+	case vaxis.EventRelease:
+		dragged := a.finishTerminalSelection(nodeID, nodeSlug, snapshot, translated)
+		if dragged || mouse.Modifiers&vaxis.ModShift != 0 {
+			return nil
+		}
+		if target, ok := a.terminalLinkTargetAt(mouse); ok {
+			if err := a.openHyperlink(target); err != nil {
+				return err
+			}
+			a.status = "opened " + target
+			return nil
+		}
+		if err := a.state.focusTerminal(); err != nil {
+			return err
+		}
+		a.status = ""
+		a.syncSessionFocus()
+	}
 	return nil
 }
 
@@ -1382,44 +1417,74 @@ func (a *vaxisTUIApp) forwardSessionEvent(nodeID string, event vaxis.Event) {
 }
 
 func (a *vaxisTUIApp) handleTerminalSelection(nodeID string, nodeSlug string, snapshot string, mouse vaxis.Mouse) {
-	point := tuiPoint{col: mouse.Col, row: mouse.Row}
 	switch mouse.EventType {
 	case vaxis.EventPress:
-		a.selection = &tuiTerminalSelection{
-			nodeID: nodeID,
-			start:  point,
-			end:    point,
-		}
+		a.beginTerminalSelection(nodeID, mouse)
 	case vaxis.EventMotion:
-		if a.selection == nil || a.selection.nodeID != nodeID {
-			return
-		}
-		a.selection.end = point
+		a.updateTerminalSelection(nodeID, mouse)
 	case vaxis.EventRelease:
-		if a.selection == nil || a.selection.nodeID != nodeID {
-			return
-		}
-		a.selection.end = point
-		text := extractTerminalSelection(snapshot, *a.selection)
-		if strings.TrimSpace(text) != "" {
-			copySelection := a.copySelection
-			if copySelection == nil {
-				copySelection = func(text string) error {
-					if a.vx != nil {
-						return copyTextToClipboard(text, a.vx.ClipboardPush)
-					}
-					return copyTextToClipboard(text, nil)
-				}
-			}
-			if err := copySelection(text); err != nil {
-				a.status = err.Error()
-				a.selection = nil
-				return
-			}
-			a.status = fmt.Sprintf("copied %d bytes from %s", len(text), nodeSlug)
-		}
-		a.selection = nil
+		a.finishTerminalSelection(nodeID, nodeSlug, snapshot, mouse)
 	}
+}
+
+func (a *vaxisTUIApp) beginTerminalSelection(nodeID string, mouse vaxis.Mouse) {
+	point := tuiPoint{col: mouse.Col, row: mouse.Row}
+	a.selection = &tuiTerminalSelection{
+		nodeID: nodeID,
+		start:  point,
+		end:    point,
+	}
+}
+
+func (a *vaxisTUIApp) updateTerminalSelection(nodeID string, mouse vaxis.Mouse) {
+	if a.selection == nil || a.selection.nodeID != nodeID {
+		return
+	}
+
+	point := tuiPoint{col: mouse.Col, row: mouse.Row}
+	if point != a.selection.start {
+		a.selection.dragged = true
+	}
+	a.selection.end = point
+}
+
+func (a *vaxisTUIApp) finishTerminalSelection(nodeID string, nodeSlug string, snapshot string, mouse vaxis.Mouse) bool {
+	if a.selection == nil || a.selection.nodeID != nodeID {
+		return false
+	}
+
+	point := tuiPoint{col: mouse.Col, row: mouse.Row}
+	if point != a.selection.start {
+		a.selection.dragged = true
+	}
+	a.selection.end = point
+	selection := *a.selection
+	a.selection = nil
+
+	if !selection.dragged {
+		return false
+	}
+
+	text := extractTerminalSelection(snapshot, selection)
+	if strings.TrimSpace(text) == "" {
+		return true
+	}
+
+	copySelection := a.copySelection
+	if copySelection == nil {
+		copySelection = func(text string) error {
+			if a.vx != nil {
+				return copyTextToClipboard(text, a.vx.ClipboardPush)
+			}
+			return copyTextToClipboard(text, nil)
+		}
+	}
+	if err := copySelection(text); err != nil {
+		a.status = err.Error()
+		return true
+	}
+	a.status = fmt.Sprintf("copied %d bytes from %s", len(text), nodeSlug)
+	return true
 }
 
 func (a *vaxisTUIApp) syncSessionFocus() {
@@ -1827,13 +1892,13 @@ func renderActionHints(actions []tuiActionSpec) string {
 
 func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		return "Terminal focused: wheel scrolls guest apps, Shift-drag copies visible text, Alt-` returns to the tree"
+		return "Terminal focused: drag copies when the guest is not capturing the mouse, Shift-drag forces local copy, Alt-` returns to the tree"
 	}
 	if entry.kind == "" {
 		return "Press [a] to add a project   q quit"
 	}
 	if entry.kind == tuiTreeEntryNode {
-		return "Up/Down move   Left/Right collapse   Tab/Enter shell   wheel scroll   Shift-drag copy   q quit"
+		return "Up/Down move   Left/Right collapse   Tab/Enter shell   wheel scroll   drag copy   q quit"
 	}
 	return "Up/Down move   Left/Right collapse   Use action hotkeys in the right pane   q quit"
 }

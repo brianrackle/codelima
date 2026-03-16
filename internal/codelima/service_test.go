@@ -16,6 +16,7 @@ type fakeLima struct {
 	shellCalls   []fakeShellCall
 	copyCalls    []fakeCopyCall
 	failCommand  string
+	cloneStatus  string
 }
 
 type fakeShellCall struct {
@@ -39,6 +40,7 @@ func newFakeLima() *fakeLima {
 		calls:        []string{},
 		shellCalls:   []fakeShellCall{},
 		copyCalls:    []fakeCopyCall{},
+		cloneStatus:  "stopped",
 	}
 }
 
@@ -89,7 +91,11 @@ func (f *fakeLima) Delete(_ context.Context, instanceName string) error {
 
 func (f *fakeLima) Clone(_ context.Context, sourceInstance, targetInstance string, _ CloneOptions) error {
 	f.calls = append(f.calls, "clone:"+sourceInstance+"->"+targetInstance)
-	f.observations[targetInstance] = RuntimeObservation{Name: targetInstance, Exists: true, Status: "stopped", Dir: "/fake/" + targetInstance}
+	status := f.cloneStatus
+	if strings.TrimSpace(status) == "" {
+		status = "stopped"
+	}
+	f.observations[targetInstance] = RuntimeObservation{Name: targetInstance, Exists: true, Status: status, Dir: "/fake/" + targetInstance}
 	return nil
 }
 
@@ -1038,6 +1044,52 @@ func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
 
 	if containsCall(newCalls, "shell:"+childNode.LimaInstanceName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
 		t.Fatalf("expected cloned node start to avoid rerunning setup, calls = %v", newCalls)
+	}
+}
+
+func TestNodeCloneStopsCloneWhenProviderLeavesItRunning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	service.lima.(*fakeLima).cloneStatus = "running"
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	parentNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	parentNode, err = service.NodeStart(ctx, parentNode.ID)
+	if err != nil {
+		t.Fatalf("NodeStart(parent) error = %v", err)
+	}
+
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: parentNode.ID,
+		NodeSlug:   "child-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeClone() error = %v", err)
+	}
+
+	if childNode.Status != NodeStatusStopped {
+		t.Fatalf("expected cloned node to be normalized to stopped, got %q", childNode.Status)
+	}
+
+	if !containsCall(service.lima.(*fakeLima).calls, "stop:"+childNode.LimaInstanceName) {
+		t.Fatalf("expected running clone instance to be stopped, calls = %v", service.lima.(*fakeLima).calls)
 	}
 }
 

@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"os/exec"
+	"reflect"
 
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/widgets/term"
@@ -74,4 +75,33 @@ func (t *vaxisTUITerminal) TermEnv() string {
 
 func (t *vaxisTUITerminal) HyperlinkAt(int, int) (string, bool) {
 	return "", false
+}
+
+func (t *vaxisTUITerminal) CapturesMouse() bool {
+	if t == nil || t.model == nil {
+		return false
+	}
+
+	value := reflect.ValueOf(t.model)
+	if !value.IsValid() || value.IsNil() {
+		return false
+	}
+
+	mode := value.Elem().FieldByName("mode")
+	if !mode.IsValid() {
+		return false
+	}
+
+	return vaxisTerminalModeField(mode, "mouseButtons") ||
+		vaxisTerminalModeField(mode, "mouseDrag") ||
+		vaxisTerminalModeField(mode, "mouseMotion") ||
+		vaxisTerminalModeField(mode, "mouseSGR")
+}
+
+func vaxisTerminalModeField(mode reflect.Value, name string) bool {
+	field := mode.FieldByName(name)
+	if !field.IsValid() || field.Kind() != reflect.Bool {
+		return false
+	}
+	return field.Bool()
 }

@@ -16,6 +16,7 @@ type tuiTerminal interface {
 	String() string
 	TermEnv() string
 	HyperlinkAt(col, row int) (string, bool)
+	CapturesMouse() bool
 }
 
 type tuiTerminalClosedEvent struct {

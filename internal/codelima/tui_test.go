@@ -24,13 +24,27 @@ type fakeTUISessionManager struct {
 	ensured map[string]int
 }
 
+type sharedFakeTUISessionManager struct {
+	store   *tuiSessionStore
+	ensured map[string]int
+}
+
 type fakeTUITerminal struct {
-	snapshot string
-	termEnv  string
+	snapshot      string
+	termEnv       string
+	capturesMouse bool
+	events        []vaxis.Event
 }
 
 func newFakeTUISessionManager() *fakeTUISessionManager {
 	return &fakeTUISessionManager{ensured: map[string]int{}}
+}
+
+func newSharedFakeTUISessionManager(store *tuiSessionStore) *sharedFakeTUISessionManager {
+	return &sharedFakeTUISessionManager{
+		store:   store,
+		ensured: map[string]int{},
+	}
 }
 
 func newFakeTUITerminal() *fakeTUITerminal {
@@ -41,7 +55,9 @@ func (f *fakeTUITerminal) Start(*exec.Cmd) error {
 	return nil
 }
 
-func (f *fakeTUITerminal) Update(vaxis.Event) {}
+func (f *fakeTUITerminal) Update(event vaxis.Event) {
+	f.events = append(f.events, event)
+}
 
 func (f *fakeTUITerminal) Draw(vaxis.Window) {}
 
@@ -63,12 +79,29 @@ func (f *fakeTUITerminal) HyperlinkAt(int, int) (string, bool) {
 	return "", false
 }
 
+func (f *fakeTUITerminal) CapturesMouse() bool {
+	return f.capturesMouse
+}
+
 func (f *fakeTUISessionManager) HasSession(nodeID string) bool {
 	return f.ensured[nodeID] > 0
 }
 
 func (f *fakeTUISessionManager) EnsureSession(node Node) error {
 	f.ensured[node.ID]++
+	return nil
+}
+
+func (f *sharedFakeTUISessionManager) HasSession(nodeID string) bool {
+	return f.store.HasSession(nodeID)
+}
+
+func (f *sharedFakeTUISessionManager) EnsureSession(node Node) error {
+	f.ensured[node.ID]++
+	f.store.sessions[node.ID] = &tuiSession{
+		node:     node,
+		terminal: newFakeTUITerminal(),
+	}
 	return nil
 }
 
@@ -331,12 +364,24 @@ func TestTUIMouseMotionDoesNotFocusTerminal(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("handleMouse(press) error = %v", err)
 	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected mouse press to keep tree focus until release, got %q", app.state.focus)
+	}
+
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       12,
+		Row:       7,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventRelease,
+	}); err != nil {
+		t.Fatalf("handleMouse(release) error = %v", err)
+	}
 	if app.state.focus != tuiFocusTerminal {
-		t.Fatalf("expected mouse press to focus terminal, got %q", app.state.focus)
+		t.Fatalf("expected mouse release to focus terminal, got %q", app.state.focus)
 	}
 }
 
-func TestTUIMousePressOpensTerminalHyperlink(t *testing.T) {
+func TestTUIMouseReleaseOpensTerminalHyperlinkWithoutDrag(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -370,6 +415,18 @@ func TestTUIMousePressOpensTerminalHyperlink(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("handleMouse(link press) error = %v", err)
 	}
+	if opened != "" {
+		t.Fatalf("expected press to defer opening terminal hyperlink, got %q", opened)
+	}
+
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       12,
+		Row:       7,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventRelease,
+	}); err != nil {
+		t.Fatalf("handleMouse(link release) error = %v", err)
+	}
 
 	if opened != "https://auth.openai.com/example" {
 		t.Fatalf("expected terminal hyperlink to open, got %q", opened)
@@ -379,6 +436,169 @@ func TestTUIMousePressOpensTerminalHyperlink(t *testing.T) {
 	}
 	if app.state.focus != tuiFocusTree {
 		t.Fatalf("expected opening a terminal hyperlink to keep tree focus, got %q", app.state.focus)
+	}
+}
+
+func TestTUIMouseDragCopiesTerminalSelectionWithoutShift(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	terminal := newFakeTUITerminal()
+	terminal.snapshot = "pwd\n/workspace/demo\n"
+
+	var copied string
+	app := &vaxisTUIApp{
+		ctx:              ctx,
+		service:          service,
+		copySelection:    func(text string) error { copied = text; return nil },
+		state:            state,
+		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: terminal,
+	}
+
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       11,
+		Row:       6,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventPress,
+	}); err != nil {
+		t.Fatalf("handleMouse(selection press) error = %v", err)
+	}
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       14,
+		Row:       6,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventMotion,
+	}); err != nil {
+		t.Fatalf("handleMouse(selection motion) error = %v", err)
+	}
+	if err := app.handleMouse(vaxis.Mouse{
+		Col:       14,
+		Row:       6,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventRelease,
+	}); err != nil {
+		t.Fatalf("handleMouse(selection release) error = %v", err)
+	}
+
+	if copied != "work" {
+		t.Fatalf("expected copied selection, got %q", copied)
+	}
+	if app.status != "copied 4 bytes from root-node" {
+		t.Fatalf("expected copy status, got %q", app.status)
+	}
+	if len(terminal.events) != 0 {
+		t.Fatalf("expected local selection to avoid forwarding mouse events, got %d events", len(terminal.events))
+	}
+}
+
+func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	terminal := newFakeTUITerminal()
+	terminal.capturesMouse = true
+	terminal.snapshot = "pwd\n/workspace/demo\n"
+
+	var copied string
+	app := &vaxisTUIApp{
+		ctx:              ctx,
+		service:          service,
+		copySelection:    func(text string) error { copied = text; return nil },
+		state:            state,
+		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: terminal,
+	}
+
+	for _, eventType := range []vaxis.EventType{vaxis.EventPress, vaxis.EventMotion, vaxis.EventRelease} {
+		if err := app.handleMouse(vaxis.Mouse{
+			Col:       11,
+			Row:       6,
+			Button:    vaxis.MouseLeftButton,
+			EventType: eventType,
+		}); err != nil {
+			t.Fatalf("handleMouse(%v) error = %v", eventType, err)
+		}
+	}
+
+	if copied != "" {
+		t.Fatalf("expected mouse-capturing terminal to skip local copy, got %q", copied)
+	}
+	if len(terminal.events) != 3 {
+		t.Fatalf("expected guest mouse forwarding, got %d events", len(terminal.events))
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected mouse press to focus terminal, got %q", app.state.focus)
+	}
+}
+
+func TestTUIShiftDragCopiesTerminalSelectionWhenTerminalCapturesMouse(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	terminal := newFakeTUITerminal()
+	terminal.capturesMouse = true
+	terminal.snapshot = "pwd\n/workspace/demo\n"
+
+	var copied string
+	app := &vaxisTUIApp{
+		ctx:              ctx,
+		service:          service,
+		copySelection:    func(text string) error { copied = text; return nil },
+		state:            state,
+		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: terminal,
+	}
+
+	events := []vaxis.Mouse{
+		{Col: 11, Row: 6, Button: vaxis.MouseLeftButton, EventType: vaxis.EventPress, Modifiers: vaxis.ModShift},
+		{Col: 13, Row: 6, Button: vaxis.MouseLeftButton, EventType: vaxis.EventMotion, Modifiers: vaxis.ModShift},
+		{Col: 13, Row: 6, Button: vaxis.MouseLeftButton, EventType: vaxis.EventRelease, Modifiers: vaxis.ModShift},
+	}
+	for _, event := range events {
+		if err := app.handleMouse(event); err != nil {
+			t.Fatalf("handleMouse(shift %+v) error = %v", event, err)
+		}
+	}
+
+	if copied != "wor" {
+		t.Fatalf("expected shift-drag to force local copy, got %q", copied)
+	}
+	if len(terminal.events) != 0 {
+		t.Fatalf("expected shift-drag selection to avoid guest mouse forwarding, got %d events", len(terminal.events))
 	}
 }
 
@@ -498,6 +718,110 @@ func TestTUIHandleEventCtrlCQuitsWithDialogOpen(t *testing.T) {
 	}
 	if !quit {
 		t.Fatalf("expected Ctrl+c to quit while a dialog is open")
+	}
+}
+
+func TestTUITerminalClosedEventIsHandledWhileOperationActive(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	state, err := newTUIState(testTUITree(t), tuiNoopSessionManager{})
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state.sessions = sessions
+	state.focus = tuiFocusTerminal
+
+	node := state.selectedEntry().node
+	sessions.sessions[node.ID] = &tuiSession{
+		node:     node,
+		terminal: newFakeTUITerminal(),
+	}
+
+	app := &vaxisTUIApp{
+		ctx:       ctx,
+		service:   service,
+		state:     state,
+		sessions:  sessions,
+		operation: &tuiOperationState{Title: "Cloning " + node.Slug},
+	}
+
+	quit, err := app.handleEvent(tuiTerminalClosedEvent{NodeID: node.ID})
+	if err != nil {
+		t.Fatalf("handleEvent(tuiTerminalClosedEvent) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected terminal close during operation to stay in app")
+	}
+	if sessions.HasSession(node.ID) {
+		t.Fatalf("expected closed terminal session to be removed during operation")
+	}
+	if state.activeNodeID != "" {
+		t.Fatalf("expected closed active node id to be cleared, got %q", state.activeNodeID)
+	}
+	if state.focus != tuiFocusTree {
+		t.Fatalf("expected focus to return to tree after terminal close, got %q", state.focus)
+	}
+	if app.status != "shell exited for "+node.Slug {
+		t.Fatalf("expected shell exit status, got %q", app.status)
+	}
+}
+
+func TestTUISourceNodeSessionIsRecreatedAfterCloneClosesIt(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	sessionManager := newSharedFakeTUISessionManager(sessions)
+
+	state, err := newTUIState(testTUITree(t), sessionManager)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	state.focus = tuiFocusTerminal
+
+	rootNode := state.selectedEntry().node
+	if !sessions.HasSession(rootNode.ID) {
+		t.Fatalf("expected initial source-node session to exist")
+	}
+
+	app := &vaxisTUIApp{
+		ctx:       ctx,
+		service:   service,
+		state:     state,
+		sessions:  sessions,
+		operation: &tuiOperationState{Title: "Cloning " + rootNode.Slug},
+	}
+
+	quit, err := app.handleEvent(tuiTerminalClosedEvent{NodeID: rootNode.ID})
+	if err != nil {
+		t.Fatalf("handleEvent(tuiTerminalClosedEvent) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected terminal close during clone to stay in app")
+	}
+	if sessions.HasSession(rootNode.ID) {
+		t.Fatalf("expected source-node session to be removed after shell exit")
+	}
+
+	if err := state.moveSelection(1); err != nil {
+		t.Fatalf("moveSelection(to child) error = %v", err)
+	}
+	if err := state.moveSelection(-1); err != nil {
+		t.Fatalf("moveSelection(back to source) error = %v", err)
+	}
+
+	if !sessions.HasSession(rootNode.ID) {
+		t.Fatalf("expected source-node session to be recreated after reselection")
+	}
+	if sessionManager.ensured[rootNode.ID] < 2 {
+		t.Fatalf("expected source-node session to be ensured again after reselection, got %d", sessionManager.ensured[rootNode.ID])
 	}
 }
 
@@ -1082,6 +1406,63 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	}
 	if index := app.state.findEntryByKey("node:" + childNode.ID); index >= 0 {
 		t.Fatalf("expected deleted node to disappear from the visible tree, still found at %d", index)
+	}
+}
+
+func TestTUINodeCloneLeavesProviderStartedCloneStoppedUntilExplicitStart(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	service.lima.(*fakeLima).cloneStatus = "running"
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	rootNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+
+	if _, err := service.NodeStart(ctx, rootNode.ID); err != nil {
+		t.Fatalf("NodeStart(root-node) error = %v", err)
+	}
+
+	sessions := newFakeTUISessionManager()
+	app := newTestTUIApp(t, ctx, service, sessions)
+	selectTUIEntry(t, app, "node:"+rootNode.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeClone}); err != nil {
+		t.Fatalf("performAction(clone node) error = %v", err)
+	}
+	if app.dialog == nil || app.dialog.Title != "Clone Node" {
+		t.Fatalf("expected clone node dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{
+		"node_slug": "child-node",
+	})
+
+	childNode, err := service.NodeShow(ctx, "child-node")
+	if err != nil {
+		t.Fatalf("NodeShow(child-node) error = %v", err)
+	}
+	if childNode.Status != NodeStatusStopped {
+		t.Fatalf("expected cloned child node to be stopped until explicitly started, got %q", childNode.Status)
+	}
+	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != childNode.ID || got.node.Status != NodeStatusStopped {
+		t.Fatalf("expected stopped cloned child node to become selected, got %#v", got)
+	}
+	if sessions.ensured[childNode.ID] != 0 {
+		t.Fatalf("expected stopped cloned child node to avoid auto-opening a shell session, got %d session creations", sessions.ensured[childNode.ID])
 	}
 }
 

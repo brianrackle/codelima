@@ -26,9 +26,10 @@ type tuiPoint struct {
 }
 
 type tuiTerminalSelection struct {
-	nodeID string
-	start  tuiPoint
-	end    tuiPoint
+	nodeID  string
+	start   tuiPoint
+	end     tuiPoint
+	dragged bool
 }
 
 type tuiOperationState struct {

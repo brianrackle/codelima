@@ -1021,6 +1021,18 @@ func (t *ghosttyTUITerminal) HyperlinkAt(col, row int) (string, bool) {
 	}).unpack()
 }
 
+func (t *ghosttyTUITerminal) CapturesMouse() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed || t.term == nil {
+		return false
+	}
+	return withGhosttyStderrSuppressed(func() bool {
+		return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
+	})
+}
+
 func (t *ghosttyTUITerminal) hyperlinkAtLocked(rowSource ghosttyRowSource, col int) (string, bool) {
 	buffer := make([]byte, 2048)
 	var n int
