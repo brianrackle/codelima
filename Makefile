@@ -1,4 +1,6 @@
-TOOLS_DIR := $(CURDIR)/.tooling
+PLATFORM_TAG := $(shell uname -s | tr '[:upper:]' '[:lower:]')-$(shell uname -m | tr '[:upper:]' '[:lower:]')
+TOOLS_ROOT := $(CURDIR)/.tooling
+TOOLS_DIR := $(TOOLS_ROOT)/$(PLATFORM_TAG)
 GO_VERSION ?= 1.24.1
 GOLANGCI_LINT_VERSION ?= 1.64.8
 ZIG_VERSION ?= 0.15.2

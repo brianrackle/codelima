@@ -17,7 +17,7 @@ The CLI manages:
 - a working C toolchain for Go's `cgo` path (`clang` via Xcode Command Line Tools on macOS, or the equivalent build tools on Linux)
 - Lima installed and working on the host
 
-`make init` installs the Go toolchain, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling`; system Go or Zig installs are not required.
+`make init` installs the Go toolchain, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling/<os>-<arch>`; system Go or Zig installs are not required. The per-platform layout avoids host and guest toolchain collisions when the same repository is used from both macOS and a Linux VM.
 
 ## Setup
 
