@@ -1,0 +1,113 @@
+diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -439,7 +439,7 @@ pub fn newWithConfig(
+     wrapper.handler = ResponseHandler.init(alloc, &wrapper.terminal, &wrapper.response_buffer);
+ 
+     // Initialize stream with the handler
+-    wrapper.stream = ResponseStream.init(wrapper.handler);
++    wrapper.stream = ResponseStream.initAlloc(alloc, wrapper.handler);
+ 
+     wrapper.* = .{
+         .alloc = alloc,
+@@ -162,6 +162,12 @@ const ResponseHandler = struct {
+                     else => {},
+                 }
+             },
++            .query_modify_key_format => {
++                const mode: u8 = if (self.terminal.flags.modify_other_keys_2) 2 else 0;
++                var buf: [16]u8 = undefined;
++                const resp = std.fmt.bufPrint(&buf, "\x1B[>4;{}m", .{mode}) catch return;
++                try self.response_buffer.appendSlice(self.alloc, resp);
++            },
+             .active_status_display => self.terminal.status_display = value,
+             .decaln => try self.terminal.decaln(),
+             .full_reset => self.terminal.fullReset(),
+diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
+--- a/src/terminal/stream.zig
++++ b/src/terminal/stream.zig
+@@ -89,6 +89,7 @@ pub const Action = union(Key) {
+     save_cursor,
+     restore_cursor,
+     modify_key_format: ansi.ModifyKeyFormat,
++    query_modify_key_format,
+     mouse_shift_capture: bool,
+     protected_mode_off,
+     protected_mode_iso,
+@@ -190,6 +191,7 @@ pub const Action = union(Key) {
+             "save_cursor",
+             "restore_cursor",
+             "modify_key_format",
++            "query_modify_key_format",
+             "mouse_shift_capture",
+             "protected_mode_off",
+             "protected_mode_iso",
+@@ -1504,6 +1506,14 @@ pub fn Stream(comptime Handler: type) type {
+ 
+                                 try self.handler.vt(.modify_key_format, format);
+                             },
++                            '?' => blk: {
++                                if (input.params.len == 1 and input.params[0] == 4) {
++                                    try self.handler.vt(.query_modify_key_format, {});
++                                    break :blk;
++                                }
++
++                                log.warn("invalid XTQMODKEYS command: {f}", .{input});
++                            },
+ 
+                             else => log.warn(
+                                 "unknown CSI m with intermediate: {}",
+@@ -1825,8 +1827,10 @@ pub fn Stream(comptime Handler: type) type {
+                                 ),
+                                 inline 22, 23 => |number| if ((input.params.len == 2 or
+                                     input.params.len == 3) and
+-                                    // we only support window title
++                                    // We treat icon-title and window-title push/pop requests
++                                    // as the same title stack operation in the embedded VT.
+                                     (input.params[1] == 0 or
++                                        input.params[1] == 1 or
+                                         input.params[1] == 2))
+                                 {
+                                     // push/pop title
+diff --git a/src/termio/stream_handler.zig b/src/termio/stream_handler.zig
+--- a/src/termio/stream_handler.zig
++++ b/src/termio/stream_handler.zig
+@@ -268,6 +268,7 @@ pub const StreamHandler = struct {
+             .save_cursor => try self.saveCursor(),
+             .restore_cursor => try self.restoreCursor(),
+             .modify_key_format => try self.setModifyKeyFormat(value),
++            .query_modify_key_format => try self.queryModifyKeyFormat(),
+             .protected_mode_off => self.terminal.setProtectedMode(.off),
+             .protected_mode_iso => self.terminal.setProtectedMode(.iso),
+             .protected_mode_dec => self.terminal.setProtectedMode(.dec),
+@@ -522,6 +523,19 @@ pub const StreamHandler = struct {
+         }
+     }
+ 
++    pub fn queryModifyKeyFormat(self: *StreamHandler) !void {
++        var data: termio.Message.WriteReq.Small.Array = undefined;
++        const mode: u8 = if (self.terminal.flags.modify_other_keys_2) 2 else 0;
++        const resp = try std.fmt.bufPrint(&data, "\x1b[>4;{}m", .{mode});
++
++        self.messageWriter(.{
++            .write_small = .{
++                .data = data,
++                .len = @intCast(resp.len),
++            },
++        });
++    }
++
+     fn requestMode(self: *StreamHandler, mode: terminal.Mode) !void {
+         const tag: terminal.modes.ModeTag = @bitCast(@intFromEnum(mode));
+         const code: u8 = if (self.terminal.modes.get(mode)) 1 else 2;
+diff --git a/src/terminal/stream_readonly.zig b/src/terminal/stream_readonly.zig
+--- a/src/terminal/stream_readonly.zig
++++ b/src/terminal/stream_readonly.zig
+@@ -189,6 +189,7 @@ pub const Handler = struct {
+             .device_attributes,
+             .device_status,
+             .kitty_keyboard_query,
++            .query_modify_key_format,
+             .window_title,
+             .report_pwd,
+             .show_desktop_notification,

@@ -3,12 +3,12 @@ package codelima
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"git.sr.ht/~rockorager/vaxis"
-	"git.sr.ht/~rockorager/vaxis/widgets/term"
 )
 
 type fakeTUIRunner struct {
@@ -24,8 +24,43 @@ type fakeTUISessionManager struct {
 	ensured map[string]int
 }
 
+type fakeTUITerminal struct {
+	snapshot string
+	termEnv  string
+}
+
 func newFakeTUISessionManager() *fakeTUISessionManager {
 	return &fakeTUISessionManager{ensured: map[string]int{}}
+}
+
+func newFakeTUITerminal() *fakeTUITerminal {
+	return &fakeTUITerminal{termEnv: tuiEmbeddedTermEnv}
+}
+
+func (f *fakeTUITerminal) Start(*exec.Cmd) error {
+	return nil
+}
+
+func (f *fakeTUITerminal) Update(vaxis.Event) {}
+
+func (f *fakeTUITerminal) Draw(vaxis.Window) {}
+
+func (f *fakeTUITerminal) Close() {}
+
+func (f *fakeTUITerminal) Focus() {}
+
+func (f *fakeTUITerminal) Blur() {}
+
+func (f *fakeTUITerminal) String() string {
+	return f.snapshot
+}
+
+func (f *fakeTUITerminal) TermEnv() string {
+	return f.termEnv
+}
+
+func (f *fakeTUITerminal) HyperlinkAt(int, int) (string, bool) {
+	return "", false
 }
 
 func (f *fakeTUISessionManager) HasSession(nodeID string) bool {
@@ -85,9 +120,23 @@ func TestTUIMutedStyleUsesBrighterSecondaryColor(t *testing.T) {
 func TestNewTUITerminalUsesCompatibleTERM(t *testing.T) {
 	t.Parallel()
 
-	terminal := newTUITerminal(func(vaxis.Event) {})
-	if terminal.TERM != tuiEmbeddedTermEnv {
-		t.Fatalf("expected embedded terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TERM)
+	terminal := newTUITerminal("node-root", func(vaxis.Event) {})
+	if terminal.TermEnv() != tuiEmbeddedTermEnv {
+		t.Fatalf("expected embedded terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TermEnv())
+	}
+}
+
+func TestNewGhosttyTUITerminalLoadsWhenLibraryInstalled(t *testing.T) {
+	t.Parallel()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	if terminal.TermEnv() != tuiEmbeddedTermEnv {
+		t.Fatalf("expected ghostty terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TermEnv())
 	}
 }
 
@@ -259,7 +308,7 @@ func TestTUIMouseMotionDoesNotFocusTerminal(t *testing.T) {
 	}
 	app.sessions.sessions["node-root"] = &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: term.New(),
+		terminal: newFakeTUITerminal(),
 	}
 
 	if err := app.handleMouse(vaxis.Mouse{
@@ -310,7 +359,7 @@ func TestTUIMousePressOpensTerminalHyperlink(t *testing.T) {
 	}
 	app.sessions.sessions["node-root"] = &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: term.New(),
+		terminal: newFakeTUITerminal(),
 	}
 
 	if err := app.handleMouse(vaxis.Mouse{

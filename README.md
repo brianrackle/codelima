@@ -14,9 +14,10 @@ The CLI manages:
 
 - macOS or Linux
 - `curl`, `tar`, `git`, and `make`
+- a working C toolchain for Go's `cgo` path (`clang` via Xcode Command Line Tools on macOS, or the equivalent build tools on Linux)
 - Lima installed and working on the host
 
-The Go toolchain and `golangci-lint` are installed locally by `make init`; a system Go install is not required.
+`make init` installs the Go toolchain, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling`; system Go or Zig installs are not required.
 
 ## Setup
 
@@ -39,7 +40,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
-- browse the project tree, manage selected projects and nodes, and jump between preserved per-node shell sessions by running `codelima` with no command
+- browse the project tree, manage selected projects and nodes, and jump between preserved per-node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
@@ -125,7 +126,7 @@ codelima
 Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, and `Alt-\`` returns focus to the tree without destroying the shell session.
 Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into another node in the same project, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
 Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty. The project create and update dialogs use an environment-config selector instead of asking you to type config slugs, and `[g]` manage config opens a selector before the config command menu.
-Long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, the mouse wheel is forwarded to the guest session, and `Shift`-drag copies the currently visible terminal text to the host clipboard.
+Long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, `Shift`-drag copies the currently visible terminal text to the host clipboard. The mouse wheel scrolls local terminal scrollback when the guest is not actively capturing the mouse, and falls through to the guest when mouse tracking or alternate-screen scroll handling is enabled.
 
 The tree is keyboard and mouse driven. The right pane always shows the active action hotkeys for the selected item, so the common flow is to select a project or node in the tree and then press the matching letter key:
 

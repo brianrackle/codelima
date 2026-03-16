@@ -291,7 +291,7 @@ rm -rf "$WORK_ROOT"
 
 ## TUI Verification
 
-This flow verifies that running `codelima` with no command renders the chosen shell-first layout, lets you manage selected projects and nodes from the tree, auto-switches the visible terminal when node selection changes, and preserves each node session while the TUI process is running.
+This flow verifies that running `codelima` with no command renders the chosen shell-first layout, lets you manage selected projects and nodes from the tree, auto-switches the visible terminal when node selection changes, and preserves each node session while the TUI process is running. It also verifies the preferred Ghostty-backed terminal path, including scrollback, hyperlink handling, and the apt/dpkg progress case that previously froze the app.
 
 Prerequisites:
 
@@ -343,11 +343,13 @@ Inside the TUI verify:
 - return to the tree, select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
 - `Shift`-drag over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
+- with the `qa-tui-b` terminal focused and the guest at a normal shell prompt, spin the mouse wheel up and down and confirm local scrollback moves without freezing the app
 - return to the tree, select `qa-tui-a` again, and confirm the partially typed `echo pending-a` input is still present
 - select `qa-tui-b`, press `s`, and confirm the node stops while remaining selectable in the tree
 - with `qa-tui-b` selected, press `c`, clone it into node `qa-tui-b-clone`, then confirm the cloned node appears under project `qa-tui-root`
 - click a visible workspace path in the right pane and confirm the host opens that path or dispatches it to the default `file://` handler
 - refocus the `qa-tui-a` or `qa-tui-b` terminal, print an OSC 8 hyperlink such as `printf '\033]8;;https://example.com\033\\example\033]8;;\033\\\n'`, click the visible link text, and confirm the host opens it
+- in a focused node terminal, run `sudo apt-get install -y sl` and confirm the embedded terminal remains responsive past the `Reading database ...` progress output and returns to a prompt
 
 In a second host shell, create a host-side change in the forked child project:
 

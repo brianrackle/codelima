@@ -28,8 +28,8 @@ Interactive shells and one-off commands pass the node workspace through `limactl
 
 ## TUI Session Reuse
 
-The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal emulator per opened node.
-Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, and unsubmitted input stay attached to that node until the TUI exits.
+The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal backend per opened node.
+The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits.
 
 ## Contextual TUI Actions
 

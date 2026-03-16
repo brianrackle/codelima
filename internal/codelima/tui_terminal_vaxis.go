@@ -1,0 +1,77 @@
+package codelima
+
+import (
+	"os/exec"
+
+	"git.sr.ht/~rockorager/vaxis"
+	"git.sr.ht/~rockorager/vaxis/widgets/term"
+)
+
+const tuiEmbeddedTermEnv = "xterm-256color"
+
+// Advertise a conservative terminal type inside the embedded shell session.
+// The richer xterm-kitty terminfo target is not fully emulated by the Vaxis
+// fallback widget and can provoke incompatible redraw behavior in interactive
+// programs such as apt/dpkg progress views.
+func newTUITerminal(nodeID string, postEvent func(vaxis.Event)) tuiTerminal {
+	if terminal, err := newGhosttyTUITerminal(nodeID, postEvent); err == nil {
+		return terminal
+	}
+	return newTUIVaxisTerminal(nodeID, postEvent)
+}
+
+func newTUIVaxisTerminal(nodeID string, postEvent func(vaxis.Event)) tuiTerminal {
+	model := term.New()
+	model.TERM = tuiEmbeddedTermEnv
+	model.Attach(func(event vaxis.Event) {
+		switch event := event.(type) {
+		case term.EventClosed:
+			postEvent(tuiTerminalClosedEvent{NodeID: nodeID, Err: event.Error})
+		case term.EventPanic:
+			postEvent(tuiTerminalErrorEvent{NodeID: nodeID, Err: error(event)})
+		default:
+			postEvent(event)
+		}
+	})
+	return &vaxisTUITerminal{model: model}
+}
+
+type vaxisTUITerminal struct {
+	model *term.Model
+}
+
+func (t *vaxisTUITerminal) Start(cmd *exec.Cmd) error {
+	return t.model.Start(cmd)
+}
+
+func (t *vaxisTUITerminal) Update(event vaxis.Event) {
+	t.model.Update(event)
+}
+
+func (t *vaxisTUITerminal) Draw(win vaxis.Window) {
+	t.model.Draw(win)
+}
+
+func (t *vaxisTUITerminal) Close() {
+	t.model.Close()
+}
+
+func (t *vaxisTUITerminal) Focus() {
+	t.model.Focus()
+}
+
+func (t *vaxisTUITerminal) Blur() {
+	t.model.Blur()
+}
+
+func (t *vaxisTUITerminal) String() string {
+	return t.model.String()
+}
+
+func (t *vaxisTUITerminal) TermEnv() string {
+	return t.model.TERM
+}
+
+func (t *vaxisTUITerminal) HyperlinkAt(int, int) (string, bool) {
+	return "", false
+}

@@ -3,6 +3,7 @@ set -eu
 
 VERSION="${1:?golangci-lint version is required}"
 TOOLS_DIR="${2:?tools dir is required}"
+WORK_ROOT="${3:-./tmp}"
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
@@ -35,7 +36,10 @@ if [ ! -f "$ARCHIVE" ]; then
   curl -fsSL "$URL" -o "$ARCHIVE"
 fi
 
-TMP_DIR="$(mktemp -d)"
+mkdir -p "$WORK_ROOT"
+TMP_DIR="$WORK_ROOT/install-golangci-lint.$$"
+rm -rf "$TMP_DIR"
+mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
 tar -C "$TMP_DIR" -xzf "$ARCHIVE"
 cp "$TMP_DIR/golangci-lint-${VERSION}-${OS}-${ARCH}/golangci-lint" "$BIN_DIR/golangci-lint"

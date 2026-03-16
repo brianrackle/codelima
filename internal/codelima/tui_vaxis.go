@@ -21,38 +21,23 @@ func newTUIRunner() TUIRunner {
 
 type tuiSession struct {
 	node     Node
-	terminal *term.Model
+	terminal tuiTerminal
 }
 
 type tuiSessionStore struct {
-	ctx            context.Context
-	service        *Service
-	postEvent      func(vaxis.Event)
-	sessions       map[string]*tuiSession
-	nodeByTerminal map[*term.Model]string
+	ctx       context.Context
+	service   *Service
+	postEvent func(vaxis.Event)
+	sessions  map[string]*tuiSession
 }
-
-const tuiEmbeddedTermEnv = "xterm-256color"
 
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
 	return &tuiSessionStore{
-		ctx:            ctx,
-		service:        service,
-		postEvent:      postEvent,
-		sessions:       map[string]*tuiSession{},
-		nodeByTerminal: map[*term.Model]string{},
+		ctx:       ctx,
+		service:   service,
+		postEvent: postEvent,
+		sessions:  map[string]*tuiSession{},
 	}
-}
-
-// Advertise a conservative terminal type inside the embedded shell session.
-// The widget terminal does not fully emulate xterm-kitty, and richer
-// terminfo targets can provoke incompatible redraw behavior in interactive
-// programs such as apt/dpkg progress views.
-func newTUITerminal(postEvent func(vaxis.Event)) *term.Model {
-	terminal := term.New()
-	terminal.TERM = tuiEmbeddedTermEnv
-	terminal.Attach(postEvent)
-	return terminal
 }
 
 func (s *tuiSessionStore) HasSession(nodeID string) bool {
@@ -73,14 +58,13 @@ func (s *tuiSessionStore) EnsureSession(node Node) error {
 	command := exec.CommandContext(s.ctx, executable, "--home", s.service.cfg.MetadataRoot, "shell", node.ID)
 	command.Env = os.Environ()
 
-	terminal := newTUITerminal(s.postEvent)
+	terminal := newTUITerminal(node.ID, s.postEvent)
 	if err := terminal.Start(command); err != nil {
 		return err
 	}
 
 	session := &tuiSession{node: node, terminal: terminal}
 	s.sessions[node.ID] = session
-	s.nodeByTerminal[terminal] = node.ID
 	return nil
 }
 
@@ -89,22 +73,18 @@ func (s *tuiSessionStore) Session(nodeID string) (*tuiSession, bool) {
 	return session, ok
 }
 
-func (s *tuiSessionStore) RemoveClosed(terminal *term.Model) (*tuiSession, string, bool) {
-	nodeID, ok := s.nodeByTerminal[terminal]
-	if !ok {
-		return nil, "", false
-	}
-
+func (s *tuiSessionStore) RemoveNode(nodeID string) (*tuiSession, bool) {
 	session := s.sessions[nodeID]
-	delete(s.nodeByTerminal, terminal)
+	if session == nil {
+		return nil, false
+	}
 	delete(s.sessions, nodeID)
-	return session, nodeID, true
+	return session, true
 }
 
 func (s *tuiSessionStore) Close() {
 	for nodeID, session := range s.sessions {
 		session.terminal.Close()
-		delete(s.nodeByTerminal, session.terminal)
 		delete(s.sessions, nodeID)
 	}
 }
@@ -115,7 +95,6 @@ func (s *tuiSessionStore) CloseNode(nodeID string) {
 		return
 	}
 
-	delete(s.nodeByTerminal, session.terminal)
 	delete(s.sessions, nodeID)
 	session.terminal.Close()
 }
@@ -314,11 +293,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 	case term.EventNotify:
 		a.vx.Notify(event.Title, event.Body)
-	case term.EventClosed:
+	case tuiTerminalClosedEvent:
 		a.handleTerminalClosed(event)
 		a.draw()
-	case term.EventPanic:
-		a.status = error(event).Error()
+	case tuiTerminalErrorEvent:
+		a.status = event.Err.Error()
 		a.draw()
 	case vaxis.QuitEvent:
 		return true, nil
@@ -581,13 +560,13 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 	return nil
 }
 
-func (a *vaxisTUIApp) handleTerminalClosed(event term.EventClosed) {
-	session, nodeID, ok := a.sessions.RemoveClosed(event.Term)
+func (a *vaxisTUIApp) handleTerminalClosed(event tuiTerminalClosedEvent) {
+	session, ok := a.sessions.RemoveNode(event.NodeID)
 	if !ok {
 		return
 	}
 
-	if a.state.activeNodeID == nodeID {
+	if a.state.activeNodeID == event.NodeID {
 		a.state.activeNodeID = ""
 		if a.state.focus == tuiFocusTerminal {
 			a.state.focusTree()
@@ -595,8 +574,8 @@ func (a *vaxisTUIApp) handleTerminalClosed(event term.EventClosed) {
 	}
 
 	message := fmt.Sprintf("shell exited for %s", session.node.Slug)
-	if event.Error != nil {
-		message = fmt.Sprintf("%s: %s", message, event.Error)
+	if event.Err != nil {
+		message = fmt.Sprintf("%s: %s", message, event.Err)
 	}
 	a.status = message
 	a.syncSessionFocus()
@@ -627,6 +606,13 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 	}
 	if !a.sessions.HasSession(entry.node.ID) {
 		return "", false
+	}
+
+	if session, ok := a.sessions.Session(entry.node.ID); ok {
+		localMouse := a.terminalBodyRect.translateMouse(mouse)
+		if target, ok := session.terminal.HyperlinkAt(localMouse.Col, localMouse.Row); ok {
+			return target, true
+		}
 	}
 
 	return a.renderedHyperlinkAt(mouse.Col, mouse.Row)
