@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -484,6 +485,89 @@ func (a *vaxisTUIApp) openEnvironmentConfigSelector(title string, description []
 	return nil
 }
 
+func commandSelectorOptions(commands []string) []tuiSelectorOption {
+	options := make([]tuiSelectorOption, 0, len(commands))
+	for index, command := range commands {
+		options = append(options, tuiSelectorOption{
+			Label: fmt.Sprintf("%d. %s", index+1, command),
+			Value: strconv.Itoa(index),
+		})
+	}
+	return options
+}
+
+func parseSelectorIndices(values []string, length int) ([]int, error) {
+	indices := make([]int, 0, len(values))
+	seen := map[int]bool{}
+	for _, value := range values {
+		index, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid command selection")
+		}
+		if index < 0 || index >= length {
+			return nil, fmt.Errorf("selected command is out of range")
+		}
+		if seen[index] {
+			continue
+		}
+		indices = append(indices, index)
+		seen[index] = true
+	}
+	sort.Ints(indices)
+	return indices, nil
+}
+
+func removeCommandsByIndex(commands []string, indices []int) []string {
+	if len(indices) == 0 {
+		return append([]string(nil), commands...)
+	}
+
+	filtered := make([]string, 0, len(commands)-len(indices))
+	selected := map[int]bool{}
+	for _, index := range indices {
+		selected[index] = true
+	}
+	for index, command := range commands {
+		if selected[index] {
+			continue
+		}
+		filtered = append(filtered, command)
+	}
+	return filtered
+}
+
+func moveCommand(commands []string, index int, delta int) []string {
+	target := index + delta
+	if index < 0 || index >= len(commands) || target < 0 || target >= len(commands) {
+		return append([]string(nil), commands...)
+	}
+
+	moved := append([]string(nil), commands...)
+	moved[index], moved[target] = moved[target], moved[index]
+	return moved
+}
+
+func (a *vaxisTUIApp) reloadProjectAndOpenEnvironmentMenu(projectID string) error {
+	if err := a.reloadData("project:" + projectID); err != nil {
+		return err
+	}
+	project, err := a.service.ProjectShow(projectID)
+	if err != nil {
+		return err
+	}
+	a.openProjectEnvironmentMenu(project)
+	return nil
+}
+
+func (a *vaxisTUIApp) reopenEnvironmentConfigCommandMenu(configID string) error {
+	config, err := a.service.EnvironmentConfigShow(configID)
+	if err != nil {
+		return err
+	}
+	a.openEnvironmentConfigCommandMenu(config)
+	return nil
+}
+
 func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
 		if target, ok := a.linkTargetAt(mouse.Col, mouse.Row); ok {
@@ -773,16 +857,25 @@ func (a *vaxisTUIApp) openCreateProjectDialog() {
 			newTUISelectorField("environment_configs", "Environment Configs", "", false, nil),
 		},
 		func(values map[string]string) error {
-			project, err := a.service.ProjectCreate(a.ctx, ProjectCreateInput{
-				Slug:               values["slug"],
-				WorkspacePath:      values["workspace_path"],
-				EnvironmentConfigs: parseCommaSeparatedValues(values["environment_configs"]),
-			})
-			if err != nil {
-				return err
+			title := "Creating project"
+			if values["slug"] != "" {
+				title += " " + values["slug"]
 			}
-			a.status = "created project " + project.Slug
-			return a.reloadData("project:" + project.ID)
+			return a.startOperation(title, func(ctx context.Context) (tuiOperationResult, error) {
+				project, err := a.service.ProjectCreate(ctx, ProjectCreateInput{
+					Slug:               values["slug"],
+					WorkspacePath:      values["workspace_path"],
+					EnvironmentConfigs: parseCommaSeparatedValues(values["environment_configs"]),
+				})
+				if err != nil {
+					return tuiOperationResult{}, err
+				}
+				return tuiOperationResult{
+					Status:       "created project " + project.Slug,
+					PreferredKey: "project:" + project.ID,
+					ReloadData:   true,
+				}, nil
+			})
 		},
 	)
 	dialog.Fields[2].Value = commaSeparatedValues([]string{})
@@ -858,15 +951,21 @@ func (a *vaxisTUIApp) openProjectEnvironmentMenu(project Project) {
 		Entries: []tuiMenuEntry{
 			{Key: 'g', Label: "Set Configs", Action: func() error { return a.openSetProjectEnvironmentConfigsDialog(project) }},
 			{Key: 'l', Label: "Clear Configs", Action: func() error {
-				updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{ClearEnvironmentConfigs: true})
-				if err != nil {
-					return err
-				}
-				a.status = "cleared environment configs for " + updated.Slug
-				return a.reloadData("project:" + updated.ID)
+				return a.startOperation("Clearing configs for "+project.Slug, func(context.Context) (tuiOperationResult, error) {
+					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{ClearEnvironmentConfigs: true})
+					if err != nil {
+						return tuiOperationResult{}, err
+					}
+					return tuiOperationResult{
+						Status:       "cleared environment configs for " + updated.Slug,
+						PreferredKey: "project:" + updated.ID,
+						ReloadData:   true,
+					}, nil
+				})
 			}},
 			{Key: 'a', Label: "Add Command", Action: func() error { a.openAddProjectEnvironmentCommandDialog(project); return nil }},
 			{Key: 'r', Label: "Remove Command", Action: func() error { return a.openRemoveProjectEnvironmentCommandDialog(project) }},
+			{Key: 'm', Label: "Move Command", Action: func() error { return a.openMoveProjectEnvironmentCommandDialog(project) }},
 			{Key: 'c', Label: "Clear Commands", Action: func() error { a.openClearProjectEnvironmentCommandsDialog(project); return nil }},
 		},
 	}
@@ -879,14 +978,19 @@ func (a *vaxisTUIApp) openSetProjectEnvironmentConfigsDialog(project Project) er
 		project.EnvironmentConfigs,
 		true,
 		func(values []string) error {
-			updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{
-				EnvironmentConfigs: values,
+			return a.startOperation("Updating configs for "+project.Slug, func(context.Context) (tuiOperationResult, error) {
+				updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{
+					EnvironmentConfigs: values,
+				})
+				if err != nil {
+					return tuiOperationResult{}, err
+				}
+				return tuiOperationResult{
+					Status:       "updated environment configs for " + updated.Slug,
+					PreferredKey: "project:" + updated.ID,
+					ReloadData:   true,
+				}, nil
 			})
-			if err != nil {
-				return err
-			}
-			a.status = "updated environment configs for " + updated.Slug
-			return a.reloadData("project:" + updated.ID)
 		},
 	)
 }
@@ -906,7 +1010,7 @@ func (a *vaxisTUIApp) openAddProjectEnvironmentCommandDialog(project Project) {
 				return err
 			}
 			a.status = "updated environment for " + updated.Slug
-			return a.reloadData("project:" + updated.ID)
+			return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
 		},
 	)
 }
@@ -916,34 +1020,97 @@ func (a *vaxisTUIApp) openRemoveProjectEnvironmentCommandDialog(project Project)
 		return fmt.Errorf("project %s has no environment commands", project.Slug)
 	}
 
-	description := []string{"Enter the command number to remove."}
-	for index, command := range project.SetupCommands {
-		description = append(description, fmt.Sprintf("%d. %s", index+1, command))
-	}
-
-	a.dialog = newTUIDialog(
-		"Remove Environment Command",
-		"Remove",
-		description,
-		[]tuiDialogField{
-			newTUIInputField("index", "Command Number", "", true),
-		},
-		func(values map[string]string) error {
-			index, err := strconv.Atoi(values["index"])
-			if err != nil {
-				return fmt.Errorf("command number must be an integer")
-			}
-			if index < 1 || index > len(project.SetupCommands) {
-				return fmt.Errorf("command number must be between 1 and %d", len(project.SetupCommands))
-			}
-			commands := append([]string(nil), project.SetupCommands...)
-			commands = append(commands[:index-1], commands[index:]...)
-			updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: commands})
+	a.selector = newTUISelector(
+		"Remove Environment Commands",
+		[]string{"Choose one or more project environment commands to remove."},
+		commandSelectorOptions(project.SetupCommands),
+		nil,
+		true,
+		func(values []string) error {
+			indices, err := parseSelectorIndices(values, len(project.SetupCommands))
 			if err != nil {
 				return err
 			}
-			a.status = "updated environment for " + updated.Slug
-			return a.reloadData("project:" + updated.ID)
+			if len(indices) == 0 {
+				return fmt.Errorf("select at least one command to remove")
+			}
+
+			description := []string{"Remove the selected project environment commands?"}
+			for _, index := range indices {
+				description = append(description, fmt.Sprintf("%d. %s", index+1, project.SetupCommands[index]))
+			}
+
+			a.dialog = newTUIDialog(
+				"Remove Environment Commands",
+				"Remove",
+				description,
+				nil,
+				func(map[string]string) error {
+					commands := removeCommandsByIndex(project.SetupCommands, indices)
+					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: commands})
+					if err != nil {
+						return err
+					}
+					a.status = "updated environment for " + updated.Slug
+					return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
+				},
+			)
+			return nil
+		},
+	)
+	return nil
+}
+
+func (a *vaxisTUIApp) openMoveProjectEnvironmentCommandDialog(project Project) error {
+	if len(project.SetupCommands) < 2 {
+		return fmt.Errorf("project %s needs at least two environment commands to change order", project.Slug)
+	}
+
+	a.selector = newTUISelector(
+		"Move Environment Command",
+		[]string{"Choose a project environment command to move up or down."},
+		commandSelectorOptions(project.SetupCommands),
+		nil,
+		false,
+		func(values []string) error {
+			indices, err := parseSelectorIndices(values, len(project.SetupCommands))
+			if err != nil {
+				return err
+			}
+			if len(indices) != 1 {
+				return fmt.Errorf("select a single command to move")
+			}
+			index := indices[0]
+			command := project.SetupCommands[index]
+
+			entries := []tuiMenuEntry{}
+			if index > 0 {
+				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
+					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: moveCommand(project.SetupCommands, index, -1)})
+					if err != nil {
+						return err
+					}
+					a.status = "updated environment for " + updated.Slug
+					return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
+				}})
+			}
+			if index < len(project.SetupCommands)-1 {
+				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
+					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: moveCommand(project.SetupCommands, index, 1)})
+					if err != nil {
+						return err
+					}
+					a.status = "updated environment for " + updated.Slug
+					return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
+				}})
+			}
+
+			a.menu = &tuiMenu{
+				Title:       "Move Environment Command: " + command,
+				Description: []string{"Choose how to reposition the selected project environment command."},
+				Entries:     entries,
+			}
+			return nil
 		},
 	)
 	return nil
@@ -961,7 +1128,7 @@ func (a *vaxisTUIApp) openClearProjectEnvironmentCommandsDialog(project Project)
 				return err
 			}
 			a.status = "cleared environment for " + updated.Slug
-			return a.reloadData("project:" + updated.ID)
+			return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
 		},
 	)
 }
@@ -982,16 +1149,21 @@ func (a *vaxisTUIApp) openUpdateProjectDialog(project Project) {
 		func(values map[string]string) error {
 			slug := values["slug"]
 			workspacePath := values["workspace_path"]
-			updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{
-				Slug:               &slug,
-				WorkspacePath:      &workspacePath,
-				EnvironmentConfigs: parseCommaSeparatedValues(values["environment_configs"]),
+			return a.startOperation("Saving project "+project.Slug, func(context.Context) (tuiOperationResult, error) {
+				updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{
+					Slug:               &slug,
+					WorkspacePath:      &workspacePath,
+					EnvironmentConfigs: parseCommaSeparatedValues(values["environment_configs"]),
+				})
+				if err != nil {
+					return tuiOperationResult{}, err
+				}
+				return tuiOperationResult{
+					Status:       "updated project " + updated.Slug,
+					PreferredKey: "project:" + updated.ID,
+					ReloadData:   true,
+				}, nil
 			})
-			if err != nil {
-				return err
-			}
-			a.status = "updated project " + updated.Slug
-			return a.reloadData("project:" + updated.ID)
 		},
 	)
 	dialog.Fields[2].Display = func(value string) string {
@@ -1047,32 +1219,26 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 }
 
 func (a *vaxisTUIApp) openCreateEnvironmentConfigDialog() {
-	selectedKey := a.state.selectedEntry().key()
 	a.dialog = newTUIDialog(
 		"Create Environment Config",
 		"Create",
 		[]string{
 			"Create a reusable environment config for project bootstrap commands.",
-			"Add an optional first command now; you can manage more commands later from the environment config manager.",
+			"Create the config first, then add or reorder as many commands as you need from the command editor.",
 		},
 		[]tuiDialogField{
 			newTUIInputField("slug", "Config Slug", "", true),
-			newTUIInputField("initial_command", "Initial Command", "", false),
 		},
 		func(values map[string]string) error {
-			commands := []string{}
-			if command := strings.TrimSpace(values["initial_command"]); command != "" {
-				commands = append(commands, command)
-			}
 			config, err := a.service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-				Slug:     values["slug"],
-				Commands: commands,
+				Slug: values["slug"],
 			})
 			if err != nil {
 				return err
 			}
 			a.status = "created environment config " + config.Slug
-			return a.reloadData(selectedKey)
+			a.openEnvironmentConfigCommandMenu(config)
+			return nil
 		},
 	)
 }
@@ -1120,6 +1286,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig)
 		Entries: []tuiMenuEntry{
 			{Key: 'a', Label: "Add Command", Action: func() error { a.openAddEnvironmentConfigCommandDialog(config); return nil }},
 			{Key: 'r', Label: "Remove Command", Action: func() error { return a.openRemoveEnvironmentConfigCommandDialog(config) }},
+			{Key: 'm', Label: "Move Command", Action: func() error { return a.openMoveEnvironmentConfigCommandDialog(config) }},
 			{Key: 'c', Label: "Clear Commands", Action: func() error { a.openClearEnvironmentConfigCommandsDialog(config); return nil }},
 			{Key: 'd', Label: "Delete Config", Action: func() error { a.openDeleteEnvironmentConfigDialog(config); return nil }},
 		},
@@ -1141,7 +1308,7 @@ func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentCo
 				return err
 			}
 			a.status = "updated environment config " + updated.Slug
-			return a.reloadData(a.state.selectedEntry().key())
+			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 		},
 	)
 }
@@ -1151,37 +1318,105 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 		return fmt.Errorf("environment config %s has no commands", config.Slug)
 	}
 
-	description := []string{"Enter the command number to remove."}
-	for index, command := range config.Commands {
-		description = append(description, fmt.Sprintf("%d. %s", index+1, command))
-	}
-
-	a.dialog = newTUIDialog(
-		"Remove Environment Config Command",
-		"Remove",
-		description,
-		[]tuiDialogField{
-			newTUIInputField("index", "Command Number", "", true),
-		},
-		func(values map[string]string) error {
-			index, err := strconv.Atoi(values["index"])
-			if err != nil {
-				return fmt.Errorf("command number must be an integer")
-			}
-			if index < 1 || index > len(config.Commands) {
-				return fmt.Errorf("command number must be between 1 and %d", len(config.Commands))
-			}
-			commands := append([]string(nil), config.Commands...)
-			commands = append(commands[:index-1], commands[index:]...)
-			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{Commands: commands})
+	a.selector = newTUISelector(
+		"Remove Environment Config Commands",
+		[]string{"Choose one or more reusable environment config commands to remove."},
+		commandSelectorOptions(config.Commands),
+		nil,
+		true,
+		func(values []string) error {
+			indices, err := parseSelectorIndices(values, len(config.Commands))
 			if err != nil {
 				return err
 			}
-			a.status = "updated environment config " + updated.Slug
-			return a.reloadData(a.state.selectedEntry().key())
+			if len(indices) == 0 {
+				return fmt.Errorf("select at least one command to remove")
+			}
+
+			description := []string{"Remove the selected reusable environment config commands?"}
+			for _, index := range indices {
+				description = append(description, fmt.Sprintf("%d. %s", index+1, config.Commands[index]))
+			}
+
+			a.dialog = newTUIDialog(
+				"Remove Environment Config Commands",
+				"Remove",
+				description,
+				nil,
+				func(map[string]string) error {
+					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+						Commands: removeCommandsByIndex(config.Commands, indices),
+					})
+					if err != nil {
+						return err
+					}
+					a.status = "updated environment config " + updated.Slug
+					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+				},
+			)
+			return nil
 		},
 	)
 
+	return nil
+}
+
+func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentConfig) error {
+	if len(config.Commands) < 2 {
+		return fmt.Errorf("environment config %s needs at least two commands to change order", config.Slug)
+	}
+
+	a.selector = newTUISelector(
+		"Move Environment Config Command",
+		[]string{"Choose a reusable environment config command to move up or down."},
+		commandSelectorOptions(config.Commands),
+		nil,
+		false,
+		func(values []string) error {
+			indices, err := parseSelectorIndices(values, len(config.Commands))
+			if err != nil {
+				return err
+			}
+			if len(indices) != 1 {
+				return fmt.Errorf("select a single command to move")
+			}
+			index := indices[0]
+			command := config.Commands[index]
+
+			entries := []tuiMenuEntry{}
+			if index > 0 {
+				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
+					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+						Commands: moveCommand(config.Commands, index, -1),
+					})
+					if err != nil {
+						return err
+					}
+					a.status = "updated environment config " + updated.Slug
+					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+				}})
+			}
+			if index < len(config.Commands)-1 {
+				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
+					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+						Commands: moveCommand(config.Commands, index, 1),
+					})
+					if err != nil {
+						return err
+					}
+					a.status = "updated environment config " + updated.Slug
+					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+				}})
+			}
+
+			a.menu = &tuiMenu{
+				Title:       "Move Environment Config Command: " + command,
+				Description: []string{"Choose how to reposition the selected reusable environment config command."},
+				Entries:     entries,
+			}
+			return nil
+		},
+	)
 	return nil
 }
 
@@ -1197,7 +1432,7 @@ func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config Environmen
 				return err
 			}
 			a.status = "cleared environment config " + updated.Slug
-			return a.reloadData(a.state.selectedEntry().key())
+			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 		},
 	)
 }

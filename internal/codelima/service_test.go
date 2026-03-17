@@ -17,6 +17,8 @@ type fakeLima struct {
 	copyCalls    []fakeCopyCall
 	failCommand  string
 	cloneStatus  string
+	listCalls    int
+	listErr      error
 }
 
 type fakeShellCall struct {
@@ -50,6 +52,10 @@ func (f *fakeLima) BaseTemplate(_ context.Context, _ string) ([]byte, error) {
 }
 
 func (f *fakeLima) List(_ context.Context) ([]RuntimeObservation, error) {
+	f.listCalls++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	observations := make([]RuntimeObservation, 0, len(f.observations))
 	for _, observation := range f.observations {
 		observations = append(observations, observation)
@@ -124,7 +130,7 @@ func (f *fakeLima) Shell(_ context.Context, instanceName string, command []strin
 	return nil
 }
 
-func TestProjectCreateAndForkCapturesSnapshots(t *testing.T) {
+func TestProjectCreateSkipsInitialSnapshotAndForkCapturesBaseSnapshot(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -143,13 +149,16 @@ func TestProjectCreateAndForkCapturesSnapshots(t *testing.T) {
 		t.Fatalf("expected project metadata to be written")
 	}
 
-	initialSnapshot, err := service.store.LatestSnapshot(project.ID)
-	if err != nil {
-		t.Fatalf("LatestSnapshot() error = %v", err)
-	}
-
-	if initialSnapshot.Kind != "initial" {
-		t.Fatalf("expected initial snapshot, got %q", initialSnapshot.Kind)
+	if _, err := service.store.LatestSnapshot(project.ID); err == nil {
+		t.Fatalf("expected project create to skip the initial snapshot")
+	} else {
+		var appErr *AppError
+		if !As(err, &appErr) {
+			t.Fatalf("expected AppError when snapshot is missing, got %T", err)
+		}
+		if appErr.Category != "NotFound" {
+			t.Fatalf("expected NotFound when snapshot is missing, got %q", appErr.Category)
+		}
 	}
 
 	childWorkspace := filepath.Join(t.TempDir(), "child")
@@ -173,6 +182,58 @@ func TestProjectCreateAndForkCapturesSnapshots(t *testing.T) {
 
 	if string(content) != "hello\n" {
 		t.Fatalf("expected forked workspace content to match source, got %q", string(content))
+	}
+}
+
+func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireLima(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	fake := service.lima.(*fakeLima)
+	fake.listErr = errors.New("lima should not be queried for metadata-only mutations")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	newWorkspace := filepath.Join(t.TempDir(), "moved-workspace")
+	if err := os.MkdirAll(newWorkspace, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	if _, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
+		WorkspacePath: &newWorkspace,
+	}); err != nil {
+		t.Fatalf("ProjectUpdate() error = %v", err)
+	}
+
+	config, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+		Slug:     "shared-dev",
+		Commands: []string{"./script/setup"},
+	})
+	if err != nil {
+		t.Fatalf("EnvironmentConfigCreate() error = %v", err)
+	}
+
+	if _, err := service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+		Commands: []string{"./script/setup", "direnv allow"},
+	}); err != nil {
+		t.Fatalf("EnvironmentConfigUpdate() error = %v", err)
+	}
+
+	if _, err := service.EnvironmentConfigDelete(config.ID); err != nil {
+		t.Fatalf("EnvironmentConfigDelete() error = %v", err)
+	}
+
+	if fake.listCalls != 0 {
+		t.Fatalf("expected metadata-only mutations to avoid lima.List, got %d calls", fake.listCalls)
 	}
 }
 

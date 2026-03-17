@@ -34,7 +34,7 @@ The preferred backend is Ghostty VT, with the older Vaxis terminal widget retain
 ## Contextual TUI Actions
 
 The TUI treats the tree selection as the context boundary for mutations.
-Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree and patch lists while preserving expansion state and the most relevant selection. Project-scoped environment commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry. When a dialog needs a reusable config reference, it opens a selector overlay instead of asking the operator to type slugs manually.
+Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree and patch lists while preserving expansion state and the most relevant selection. Project-scoped environment commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry. Command removal uses selectors plus explicit confirmation instead of typed indexes, and command reordering is expressed as single-step move actions so order-sensitive bootstrap lists stay editable without freeform text parsing. When a dialog needs a reusable config reference, it opens a selector overlay instead of asking the operator to type slugs manually.
 
 ## Async Lima Progress In TUI
 

@@ -11,7 +11,7 @@ type EnvironmentConfigUpdateInput struct {
 }
 
 func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (EnvironmentConfig, error) {
-	if err := s.EnsureReady(true); err != nil {
+	if err := s.EnsureReady(false); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
@@ -64,7 +64,7 @@ func (s *Service) EnvironmentConfigShow(value string) (EnvironmentConfig, error)
 }
 
 func (s *Service) EnvironmentConfigUpdate(value string, input EnvironmentConfigUpdateInput) (EnvironmentConfig, error) {
-	if err := s.EnsureReady(true); err != nil {
+	if err := s.EnsureReady(false); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
@@ -96,7 +96,7 @@ func (s *Service) EnvironmentConfigUpdate(value string, input EnvironmentConfigU
 }
 
 func (s *Service) EnvironmentConfigDelete(value string) (EnvironmentConfig, error) {
-	if err := s.EnsureReady(true); err != nil {
+	if err := s.EnsureReady(false); err != nil {
 		return EnvironmentConfig{}, err
 	}
 

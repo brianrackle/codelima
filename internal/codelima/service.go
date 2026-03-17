@@ -255,7 +255,8 @@ func (s *Service) ConfigSummary() map[string]any {
 }
 
 func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (Project, error) {
-	if err := s.EnsureReady(true); err != nil {
+	_ = ctx
+	if err := s.EnsureReady(false); err != nil {
 		return Project{}, err
 	}
 
@@ -306,21 +307,7 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 		return Project{}, err
 	}
 
-	if err := s.store.AppendProjectEvent(project.ID, Event{Timestamp: now, Type: "project.create.started"}); err != nil {
-		return Project{}, err
-	}
-
-	snapshotID := newID()
-	manifest, err := captureSnapshot(project, snapshotID, "initial", s.store.snapshotTreePath(project.ID, snapshotID), s.cfg.Snapshot.Excludes, now)
-	if err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.SaveSnapshot(project.ID, manifest); err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.AppendProjectEvent(project.ID, Event{Timestamp: now, Type: "project.created", Fields: map[string]any{"snapshot_id": manifest.ID}}); err != nil {
+	if err := s.store.AppendProjectEvent(project.ID, Event{Timestamp: now, Type: "project.created"}); err != nil {
 		return Project{}, err
 	}
 
@@ -344,7 +331,7 @@ func (s *Service) ProjectShow(value string) (Project, error) {
 }
 
 func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project, error) {
-	if err := s.EnsureReady(true); err != nil {
+	if err := s.EnsureReady(false); err != nil {
 		return Project{}, err
 	}
 

@@ -1014,10 +1014,14 @@ func TestTUIProjectEnvironmentActionsAddRemoveAndClear(t *testing.T) {
 		t.Fatalf("performAction(project environment remove) error = %v", err)
 	}
 	chooseTUIMenuEntry(t, app, "Remove Command")
-	if app.dialog == nil || app.dialog.Title != "Remove Environment Command" {
-		t.Fatalf("expected remove environment command dialog, got %#v", app.dialog)
+	if app.selector == nil || app.selector.Title != "Remove Environment Commands" {
+		t.Fatalf("expected remove environment command selector, got %#v", app.selector)
 	}
-	submitTUIDialog(t, app, map[string]string{"index": "1"})
+	chooseTUISelector(t, app, "1. ./script/setup")
+	if app.dialog == nil || app.dialog.Title != "Remove Environment Commands" {
+		t.Fatalf("expected remove environment command confirmation, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{})
 
 	updated, err = service.ProjectShow(project.ID)
 	if err != nil {
@@ -1073,10 +1077,18 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	if app.dialog == nil || app.dialog.Title != "Create Environment Config" {
 		t.Fatalf("expected create environment config dialog, got %#v", app.dialog)
 	}
-	submitTUIDialog(t, app, map[string]string{
-		"slug":            "shared-dev",
-		"initial_command": "./script/setup",
-	})
+	if len(app.dialog.Fields) != 1 || app.dialog.Fields[0].Key != "slug" {
+		t.Fatalf("expected create environment config dialog to only prompt for slug, got %#v", app.dialog.Fields)
+	}
+	submitTUIDialog(t, app, map[string]string{"slug": "shared-dev"})
+	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
+		t.Fatalf("expected command menu after create, got %#v", app.menu)
+	}
+	chooseTUIMenuEntry(t, app, "Add Command")
+	if app.dialog == nil || app.dialog.Title != "Add Environment Config Command" {
+		t.Fatalf("expected add command dialog after create, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{"command": "./script/setup"})
 
 	config, err := service.EnvironmentConfigShow("shared-dev")
 	if err != nil {
@@ -1238,6 +1250,79 @@ func TestTUIManageEnvironmentConfigUsesSelector(t *testing.T) {
 	chooseTUISelector(t, app, "shared-dev")
 	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
 		t.Fatalf("expected environment config command menu, got %#v", app.menu)
+	}
+}
+
+func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	if _, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	}); err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+	if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+		Slug:     "shared-dev",
+		Commands: []string{"./script/setup", "direnv allow", "mise install"},
+	}); err != nil {
+		t.Fatalf("EnvironmentConfigCreate(shared-dev) error = %v", err)
+	}
+
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+	if err := app.openManageEnvironmentConfigDialog("shared-dev"); err != nil {
+		t.Fatalf("openManageEnvironmentConfigDialog(shared-dev) error = %v", err)
+	}
+	chooseTUISelector(t, app, "shared-dev")
+	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
+		t.Fatalf("expected environment config command menu, got %#v", app.menu)
+	}
+
+	chooseTUIMenuEntry(t, app, "Add Command")
+	if app.dialog == nil || app.dialog.Title != "Add Environment Config Command" {
+		t.Fatalf("expected add command dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{"command": "brew bundle"})
+	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
+		t.Fatalf("expected command menu to reopen after add, got %#v", app.menu)
+	}
+
+	chooseTUIMenuEntry(t, app, "Move Command")
+	if app.selector == nil || app.selector.Title != "Move Environment Config Command" {
+		t.Fatalf("expected move command selector, got %#v", app.selector)
+	}
+	chooseTUISelector(t, app, "4. brew bundle")
+	if app.menu == nil || app.menu.Title != "Move Environment Config Command: brew bundle" {
+		t.Fatalf("expected move direction menu, got %#v", app.menu)
+	}
+	chooseTUIMenuEntry(t, app, "Move Up")
+	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
+		t.Fatalf("expected command menu to reopen after reorder, got %#v", app.menu)
+	}
+
+	chooseTUIMenuEntry(t, app, "Remove Command")
+	if app.selector == nil || app.selector.Title != "Remove Environment Config Commands" {
+		t.Fatalf("expected remove command selector, got %#v", app.selector)
+	}
+	chooseTUISelector(t, app, "2. direnv allow", "3. brew bundle")
+	if app.dialog == nil || app.dialog.Title != "Remove Environment Config Commands" {
+		t.Fatalf("expected remove command confirmation dialog, got %#v", app.dialog)
+	}
+	submitTUIDialog(t, app, map[string]string{})
+	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
+		t.Fatalf("expected command menu to reopen after remove, got %#v", app.menu)
+	}
+
+	config, err := service.EnvironmentConfigShow("shared-dev")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigShow(shared-dev) error = %v", err)
+	}
+	if got := strings.Join(config.Commands, "|"); got != "./script/setup|mise install" {
+		t.Fatalf("expected reordered and removed commands, got %q", got)
 	}
 }
 
@@ -1774,6 +1859,7 @@ func chooseTUIMenuEntry(t *testing.T, app *vaxisTUIApp, label string) {
 	if app.menu == nil {
 		t.Fatalf("expected menu to be open")
 	}
+	current := app.menu
 
 	for _, entry := range app.menu.Entries {
 		if entry.Label != label {
@@ -1782,7 +1868,9 @@ func chooseTUIMenuEntry(t *testing.T, app *vaxisTUIApp, label string) {
 		if err := entry.Action(); err != nil {
 			t.Fatalf("menu action %q error = %v", label, err)
 		}
-		app.menu = nil
+		if app.menu == current {
+			app.menu = nil
+		}
 		return
 	}
 

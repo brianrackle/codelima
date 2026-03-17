@@ -328,11 +328,11 @@ Run the TUI:
 Inside the TUI verify:
 
 - the left pane renders the available projects and nodes, and the right pane renders either node details or one visible terminal
-- press `g`, create reusable environment config `qa-shared` with initial command `./script/setup`
-- press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm it appears as a second top-level project
+- press `g`, create reusable environment config `qa-shared`, confirm the command menu opens immediately, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
+- press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm it appears as a second top-level project without a long frozen pause
 - select project `qa-tui-extra`, confirm the right pane lists `qa-shared` under environment configs
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
-- with `qa-tui-extra` still selected, press `e`, add environment command `./script/setup`, and confirm the right pane lists one environment command for the project
+- with `qa-tui-extra` still selected, press `e`, add environment command `./script/setup`, remove it through the selector plus confirmation flow, add it again, and confirm the project environment menu stays open after each edit
 - with `qa-tui-extra` still selected, press `e` again, clear the environment commands, and confirm the right pane shows none configured
 - select project `qa-tui`, press `n`, create node `qa-tui-b`, and confirm the new node appears under the project without opening a shell session
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place

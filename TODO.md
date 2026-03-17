@@ -104,3 +104,29 @@ Disadvantages:
 - Adds credential and secret management to the release workflow.
 - Notarization will increase release latency and platform-specific maintenance.
 - Signed builds are more expensive to debug when packaging changes break late in the pipeline.
+
+### 5. Audit the remaining metadata-only service mutations for unnecessary runtime validation
+
+Problem:
+
+- Project create and update plus environment config create, update, and delete now avoid Lima runtime validation because they only mutate local metadata.
+- Other mutating service paths may still call the broader runtime validation helper even when they do not need `limactl` or live Lima state.
+- That keeps some metadata-only commands slower and harder to use from environments that only need the local store.
+
+Suggested solution:
+
+- Audit all mutating `Service` methods and classify them as metadata-only or runtime-backed.
+- Keep the current dependency validation only on runtime-backed operations such as node lifecycle, shell, clone, and patch apply.
+- Add focused regression tests that fail if metadata-only mutations start querying Lima again.
+
+Advantages:
+
+- Keeps metadata operations predictably fast.
+- Makes CLI and TUI behavior more consistent when Lima is unavailable or slow.
+- Reduces surprising coupling between local metadata edits and host virtualization state.
+
+Disadvantages:
+
+- Requires a careful audit so runtime-backed safety checks are not removed accidentally.
+- May expose stale-metadata edge cases that were previously masked by a broad readiness check.
+- Adds more distinction between service paths, which slightly increases maintenance overhead.
