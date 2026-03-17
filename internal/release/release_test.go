@@ -85,9 +85,11 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 	}
 
 	for _, snippet := range []string{
+		`require "zlib"`,
 		`class Codelima < Formula`,
 		`depends_on "git"`,
 		`depends_on "lima"`,
+		`version "1.2.3"`,
 		`on_macos do`,
 		`on_arm do`,
 		`https://github.com/brianrackle/codelima/releases/download/v1.2.3/codelima_1.2.3_darwin_arm64.tar.gz`,
@@ -95,7 +97,13 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 		`on_intel do`,
 		`https://github.com/brianrackle/codelima/releases/download/v1.2.3/codelima_1.2.3_linux_amd64.tar.gz`,
 		`ghostty_lib = OS.mac? ? "libghostty-vt.dylib" : "libghostty-vt.so"`,
-		`export CODELIMA_GHOSTTY_VT_LIB="#{libexec}/lib/#{ghostty_lib}"`,
+		`root = Dir["codelima_*/bin/codelima-real"].empty? ? "." : Dir["codelima_*"].fetch(0)`,
+		`odie "missing packaged release root" unless File.exist?(File.join(root, "bin", "codelima-real"))`,
+		`Zlib::GzipWriter.open(pkgshare/"#{ghostty_lib}.gz") do |gz|`,
+		`pkgshare.mkpath`,
+		`CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/codelima/#{version}"`,
+		`gzip -dc "#{pkgshare}/#{ghostty_lib}.gz" > "$RUNTIME_LIB.tmp"`,
+		`export CODELIMA_GHOSTTY_VT_LIB="$RUNTIME_LIB"`,
 	} {
 		if !strings.Contains(formula, snippet) {
 			t.Fatalf("formula missing %q:\n%s", snippet, formula)
