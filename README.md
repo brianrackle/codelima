@@ -1,15 +1,5 @@
 # CodeLima
 
-`CodeLima` is a Go CLI for managing lineage-aware projects, Lima-backed nodes, patch flows, and a shell-first TUI.
-
-The CLI manages:
-
-- projects and immutable workspace snapshots under `CODELIMA_HOME`
-- Lima-backed nodes delegated through `limactl`
-- bidirectional patch proposals along direct project lineage edges
-- a canonical shell surface that passes through to `limactl shell`
-- a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
-
 ## Install
 
 Install the latest packaged release from Homebrew:
@@ -20,6 +10,16 @@ brew install codelima
 ```
 
 The Homebrew formula installs the packaged `codelima` binary plus the bundled `libghostty-vt` runtime library, and declares `git` and `lima` as runtime dependencies.
+
+`CodeLima` is a Go CLI for managing lineage-aware projects, Lima-backed nodes, patch flows, and a shell-first TUI.
+
+The CLI manages:
+
+- projects and immutable workspace snapshots under `CODELIMA_HOME`
+- Lima-backed nodes delegated through `limactl`
+- bidirectional patch proposals along direct project lineage edges
+- a canonical shell surface that passes through to `limactl shell`
+- a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
 
 ## Supported Systems
 
