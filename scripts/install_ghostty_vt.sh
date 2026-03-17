@@ -16,6 +16,7 @@ PATCH_FILE="$CACHE_DIR/ghostty-wasm-api-${PATCH_COMMIT}.patch"
 LOCAL_PATCH_FILE="$SCRIPT_DIR/patches/ghostty-vt-codelima.patch"
 SOURCE_URL="https://github.com/ghostty-org/ghostty.git"
 PATCH_URL="https://raw.githubusercontent.com/coder/ghostty-web/$PATCH_COMMIT/patches/ghostty-wasm-api.patch"
+ZIG_GLOBAL_CACHE_DIR="$CACHE_DIR/zig-global"
 
 LIB_EXT="so"
 case "$(uname -s)" in
@@ -43,7 +44,7 @@ if [ -f "$INSTALL_DIR/lib/libghostty-vt.$LIB_EXT" ] && [ -f "$INSTALL_STAMP_FILE
   exit 0
 fi
 
-mkdir -p "$CACHE_DIR" "$INSTALL_BASE" "$WORK_ROOT"
+mkdir -p "$CACHE_DIR" "$INSTALL_BASE" "$WORK_ROOT" "$ZIG_GLOBAL_CACHE_DIR"
 
 if [ ! -f "$PATCH_FILE" ]; then
   curl -fsSL "$PATCH_URL" -o "$PATCH_FILE"
@@ -55,6 +56,7 @@ EXPECTED_STAMP="$GHOSTTY_COMMIT|$PATCH_COMMIT|$PATCH_STAMP|$LOCAL_PATCH_STAMP"
 TMP_DIR="$WORK_ROOT/install-ghostty-vt.$$"
 SRC_DIR="$TMP_DIR/ghostty"
 STAGE_DIR="$TMP_DIR/install"
+ZIG_LOCAL_CACHE_DIR="$SRC_DIR/.zig-cache"
 rm -rf "$TMP_DIR"
 mkdir -p "$TMP_DIR"
 trap 'rm -rf "$TMP_DIR"' EXIT INT TERM
@@ -66,7 +68,20 @@ git -C "$SRC_DIR" checkout --detach FETCH_HEAD >/dev/null
 
 (cd "$SRC_DIR" && git apply --check "$PATCH_FILE" && git apply "$PATCH_FILE")
 (cd "$SRC_DIR" && git apply --check "$LOCAL_PATCH_FILE" && git apply "$LOCAL_PATCH_FILE")
-(cd "$SRC_DIR" && "$ZIG" build lib-vt -Doptimize=ReleaseSmall --prefix "$STAGE_DIR")
+
+attempt=1
+while :; do
+  if (cd "$SRC_DIR" && ZIG_GLOBAL_CACHE_DIR="$ZIG_GLOBAL_CACHE_DIR" ZIG_LOCAL_CACHE_DIR="$ZIG_LOCAL_CACHE_DIR" "$ZIG" build lib-vt -Doptimize=ReleaseSmall --prefix "$STAGE_DIR"); then
+    break
+  fi
+  if [ "$attempt" -ge 3 ]; then
+    echo "ghostty lib-vt build failed after $attempt attempts" >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  rm -rf "$STAGE_DIR"
+  sleep 2
+done
 
 rm -rf "$INSTALL_DIR"
 mv "$STAGE_DIR" "$INSTALL_DIR"
