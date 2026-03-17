@@ -256,6 +256,7 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -306,17 +307,17 @@ func withGhosttyStderrSuppressed[T any](fn func() T) T {
 	}
 
 	stderrFD := int(os.Stderr.Fd())
-	savedFD, err := syscall.Dup(stderrFD)
+	savedFD, err := unix.Dup(stderrFD)
 	if err != nil {
 		return fn()
 	}
-	if err := syscall.Dup2(int(ghosttyStderr.file.Fd()), stderrFD); err != nil {
-		_ = syscall.Close(savedFD)
+	if err := unix.Dup2(int(ghosttyStderr.file.Fd()), stderrFD); err != nil {
+		_ = unix.Close(savedFD)
 		return fn()
 	}
 	defer func() {
-		_ = syscall.Dup2(savedFD, stderrFD)
-		_ = syscall.Close(savedFD)
+		_ = unix.Dup2(savedFD, stderrFD)
+		_ = unix.Close(savedFD)
 	}()
 
 	return fn()

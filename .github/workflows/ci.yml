@@ -1,5 +1,8 @@
 name: ci
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   pull_request:
   push:
@@ -16,6 +19,6 @@ jobs:
           - macos-14
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Verify
         run: make verify

@@ -1,5 +1,8 @@
 name: release
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     tags:
@@ -57,14 +60,14 @@ jobs:
             target: darwin-arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build release archive
         run: |
           mkdir -p "$RUNNER_TEMP/dist"
           make package \
             PACKAGE_VERSION="${{ needs.metadata.outputs.version }}" \
             DIST_DIR="$RUNNER_TEMP/dist"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: ${{ runner.temp }}/dist/*
@@ -76,7 +79,7 @@ jobs:
       - build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/dist
           pattern: release-*
@@ -99,8 +102,8 @@ jobs:
     if: ${{ vars.HOMEBREW_TAP_REPO != '' }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/dist
           pattern: release-*
