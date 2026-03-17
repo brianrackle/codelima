@@ -1,0 +1,142 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          case "$TAG" in
+            v*)
+              VERSION="${TAG#v}"
+              ;;
+            *)
+              echo "release tags must start with v" >&2
+              exit 1
+              ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-15-intel
+            target: darwin-amd64
+          - runner: macos-14
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist"
+          make package \
+            PACKAGE_VERSION="${{ needs.metadata.outputs.version }}" \
+            DIST_DIR="$RUNNER_TEMP/dist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: ${{ runner.temp }}/dist/*
+          if-no-files-found: error
+
+  publish-release:
+    needs:
+      - metadata
+      - build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/dist
+          pattern: release-*
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ needs.metadata.outputs.tag }}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes ""
+          find "$RUNNER_TEMP/dist" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.json' \) -print0 \
+            | xargs -0 gh release upload "$TAG" --clobber
+
+  update-homebrew-tap:
+    needs:
+      - metadata
+      - build
+      - publish-release
+    if: ${{ vars.HOMEBREW_TAP_REPO != '' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/dist
+          pattern: release-*
+          merge-multiple: true
+      - name: Render Homebrew formula
+        run: |
+          mkdir -p "$RUNNER_TEMP/generated/Formula"
+          make package-formula \
+            PACKAGE_VERSION="${{ needs.metadata.outputs.version }}" \
+            RELEASE_TAG="${{ needs.metadata.outputs.tag }}" \
+            RELEASE_REPO="${{ github.repository }}" \
+            DIST_DIR="$RUNNER_TEMP/dist" \
+            FORMULA_OUTPUT="$RUNNER_TEMP/generated/Formula/codelima.rb"
+      - name: Update tap repository
+        env:
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          HOMEBREW_TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "HOMEBREW_TAP_TOKEN is not configured; skipping tap update"
+            exit 0
+          fi
+          TAP_BRANCH="${HOMEBREW_TAP_BRANCH:-main}"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          git checkout "$TAP_BRANCH"
+          mkdir -p Formula
+          cp "$RUNNER_TEMP/generated/Formula/codelima.rb" Formula/codelima.rb
+          if git diff --quiet -- Formula/codelima.rb; then
+            echo "Homebrew formula already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/codelima.rb
+          git commit -m "Update codelima to ${{ needs.metadata.outputs.tag }}"
+          git push origin "HEAD:${TAP_BRANCH}"

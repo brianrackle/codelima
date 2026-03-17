@@ -38,7 +38,8 @@ INSTALL_STAMP_FILE="$INSTALL_DIR/.build-stamp"
 
 if [ -f "$INSTALL_DIR/lib/libghostty-vt.$LIB_EXT" ] && [ -f "$INSTALL_STAMP_FILE" ] && [ "$(cat "$INSTALL_STAMP_FILE")" = "$EXPECTED_STAMP" ]; then
   mkdir -p "$INSTALL_BASE"
-  ln -sfn "$INSTALL_DIR" "$CURRENT_LINK"
+  rm -f "$CURRENT_LINK"
+  ln -s "$INSTALL_DIR" "$CURRENT_LINK"
   exit 0
 fi
 
@@ -70,4 +71,5 @@ git -C "$SRC_DIR" checkout --detach FETCH_HEAD >/dev/null
 rm -rf "$INSTALL_DIR"
 mv "$STAGE_DIR" "$INSTALL_DIR"
 printf '%s\n' "$EXPECTED_STAMP" > "$INSTALL_STAMP_FILE"
-ln -sfn "$INSTALL_DIR" "$CURRENT_LINK"
+rm -f "$CURRENT_LINK"
+ln -s "$INSTALL_DIR" "$CURRENT_LINK"

@@ -15,7 +15,13 @@ export GOMODCACHE := $(TOOLS_DIR)/gopath/pkg/mod
 export GOCACHE := $(TOOLS_DIR)/gocache
 export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 
-.PHONY: init ghostty-vt fmt lint test build run tui smoke verify clean
+.PHONY: init ghostty-vt fmt lint test build run tui smoke package package-formula verify clean
+
+PACKAGE_VERSION ?= 0.0.0-dev
+RELEASE_TAG ?= v$(PACKAGE_VERSION)
+RELEASE_REPO ?= brianrackle/codelima
+DIST_DIR ?= $(CURDIR)/dist
+FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
 
 init:
 	./scripts/install_go.sh $(GO_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
@@ -50,7 +56,13 @@ tui: build
 smoke: build
 	./scripts/smoke_3_layers.sh
 
+package: init
+	./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR)
+
+package-formula: init
+	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)
+
 verify: fmt lint test build
 
 clean:
-	rm -rf bin
+	rm -rf bin dist

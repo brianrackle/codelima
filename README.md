@@ -28,6 +28,14 @@ make build
 
 The binary is written to `./bin/codelima`.
 
+To build a distributable archive for the current platform:
+
+```sh
+make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
+```
+
+That writes a Homebrew-ready tarball plus a JSON manifest under `./tmp/dist`.
+
 ## User Guide
 
 The examples in this guide assume `codelima` is installed and available on `PATH`.
@@ -241,6 +249,8 @@ make run ARGS="node create --project root --slug root-node"
 make run ARGS="node start root-node"
 make run ARGS="shell root-node -- uname -a"
 make tui ARGS="--home /tmp/codelima-dev/.codelima"
+make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
+make package-formula PACKAGE_VERSION=1.2.3 RELEASE_TAG=v1.2.3 RELEASE_REPO=brianrackle/codelima DIST_DIR=./tmp/dist FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
 ```
 
 ## Tooling
@@ -250,8 +260,51 @@ make fmt
 make lint
 make test
 make build
+make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
+make package-formula PACKAGE_VERSION=1.2.3 RELEASE_TAG=v1.2.3 RELEASE_REPO=brianrackle/codelima DIST_DIR=./tmp/dist FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
 make verify
 ```
+
+## Releases
+
+Local release packaging uses the same make targets as CI:
+
+```sh
+make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
+make package-formula \
+  PACKAGE_VERSION=1.2.3 \
+  RELEASE_TAG=v1.2.3 \
+  RELEASE_REPO=brianrackle/codelima \
+  DIST_DIR=./tmp/dist \
+  FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
+```
+
+`make package` builds a platform-native archive that contains:
+
+- `bin/codelima` as a small launcher that points `CODELIMA_GHOSTTY_VT_LIB` at the packaged Ghostty library
+- `bin/codelima-real` as the compiled Go binary
+- `lib/libghostty-vt.{dylib,so}` as the runtime terminal backend
+- `<asset>.json` as the manifest used to generate the Homebrew formula
+
+The repository ships two GitHub Actions workflows:
+
+- `.github/workflows/ci.yml` runs `make verify` on Ubuntu and macOS for pushes to `main` and pull requests
+- `.github/workflows/release.yml` builds release archives for `darwin-amd64`, `darwin-arm64`, `linux-amd64`, and `linux-arm64`, creates or updates the GitHub release for the tag, uploads the archives and manifests, and then updates a Homebrew tap when the required repository settings are present
+
+To enable automatic tap updates, configure:
+
+- repository variable `HOMEBREW_TAP_REPO`, for example `brianrackle/homebrew-codelima`
+- optional repository variable `HOMEBREW_TAP_BRANCH`, which defaults to `main`
+- repository secret `HOMEBREW_TAP_TOKEN` with permission to push to the tap repository
+
+Once those are in place, releasing a new Homebrew version is:
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The release workflow publishes the assets and updates `Formula/codelima.rb` in the tap. End users then upgrade with `brew update && brew upgrade codelima`.
 
 ## Documentation
 

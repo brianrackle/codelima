@@ -19,6 +19,7 @@ coverage.out
 
 # Local runtime and scratch data.
 /tmp/
+/dist/
 *.db
 *.db-*
 *.log

@@ -78,3 +78,29 @@ Disadvantages:
 - Adds more shell-startup logic and output in a path that should stay lightweight.
 - Requires care to avoid noisy warnings once a node is already healthy.
 - A doctor check would add another piece of guest-state probing to maintain.
+
+### 4. Sign and notarize release artifacts
+
+Problem:
+
+- The new packaging and release workflow publishes binary archives and updates the Homebrew tap automatically.
+- Those artifacts are not yet signed, and macOS releases are not notarized.
+- That leaves users without a machine-verifiable trust signal beyond GitHub release provenance and repository control.
+
+Suggested solution:
+
+- Add signing to the release workflow for the generated archives and manifests.
+- Add macOS code signing and notarization for the packaged `codelima-real` binary and the bundled Ghostty library before the archive is created.
+- Publish signatures or checksums in the GitHub release and teach the Homebrew tap flow to reference the signed assets where appropriate.
+
+Advantages:
+
+- Improves end-user trust in downloaded binaries.
+- Reduces friction from macOS Gatekeeper on distributed artifacts.
+- Makes the release pipeline stronger before wider external distribution.
+
+Disadvantages:
+
+- Adds credential and secret management to the release workflow.
+- Notarization will increase release latency and platform-specific maintenance.
+- Signed builds are more expensive to debug when packaging changes break late in the pipeline.

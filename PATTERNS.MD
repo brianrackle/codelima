@@ -41,6 +41,11 @@ Project and node hotkeys open small overlay dialogs or menus that call the exist
 Lima-backed TUI actions run asynchronously and stream `limactl` plus non-interactive guest-command output into a transient overlay.
 That keeps the event loop responsive while long-running start, stop, create, clone, or delete operations are in flight, and reuses the same `ExecLimaClient` streaming path that the CLI writes to stdout or stderr.
 
+## Bundled Runtime Wrapper
+
+Release archives package the compiled `codelima` binary as `bin/codelima-real`, a small launcher script as `bin/codelima`, and the matching `libghostty-vt` shared library under `lib/`.
+The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball installs, and the generated Homebrew formula all reuse the same runtime layout instead of each inventing a different library-discovery scheme.
+
 ## Guest Workspace Seed
 
 New nodes do not mount the host project workspace into the guest.

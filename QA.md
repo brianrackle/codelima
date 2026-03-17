@@ -514,3 +514,68 @@ Cleanup:
 ```sh
 rm -rf "$WORK_ROOT"
 ```
+
+## Packaging Verification
+
+This flow verifies that the repository can build a release archive for the current platform, emit the matching manifest, and render a Homebrew formula from those manifests without hand-editing release metadata.
+
+Prerequisites:
+
+- run `make init`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-package"
+DIST_DIR="$WORK_ROOT/dist"
+rm -rf "$WORK_ROOT"
+mkdir -p "$DIST_DIR"
+```
+
+Build the package and inspect the generated files:
+
+```sh
+make package PACKAGE_VERSION=0.0.0-qa DIST_DIR="$DIST_DIR"
+find "$DIST_DIR" -maxdepth 1 -type f | sort
+ARCHIVE="$(find "$DIST_DIR" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
+MANIFEST="$(find "$DIST_DIR" -maxdepth 1 -type f -name '*.json' | head -n 1)"
+tar -tzf "$ARCHIVE"
+cat "$MANIFEST"
+```
+
+Expected result:
+
+- `make package` succeeds
+- `DIST_DIR` contains one `.tar.gz` archive and one `.json` manifest
+- the archive contains `codelima_0.0.0-qa_<goos>_<goarch>/bin/codelima`
+- the archive contains `codelima_0.0.0-qa_<goos>_<goarch>/bin/codelima-real`
+- the archive contains `codelima_0.0.0-qa_<goos>_<goarch>/lib/libghostty-vt.dylib` on macOS or `libghostty-vt.so` on Linux
+- the manifest reports the same `version`, `goos`, `goarch`, and `asset_name`
+
+Render the Homebrew formula from the generated manifest:
+
+```sh
+make package-formula \
+  PACKAGE_VERSION=0.0.0-qa \
+  RELEASE_TAG=v0.0.0-qa \
+  RELEASE_REPO=brianrackle/codelima \
+  DIST_DIR="$DIST_DIR" \
+  FORMULA_OUTPUT="$DIST_DIR/Formula/codelima.rb"
+cat "$DIST_DIR/Formula/codelima.rb"
+```
+
+Expected result:
+
+- `make package-formula` succeeds
+- the formula contains `depends_on "git"`
+- the formula contains `depends_on "lima"`
+- the formula URLs point at `https://github.com/brianrackle/codelima/releases/download/v0.0.0-qa/`
+- the formula references the generated asset name and sha256 from the manifest
+
+Cleanup:
+
+```sh
+rm -rf "$WORK_ROOT"
+```
