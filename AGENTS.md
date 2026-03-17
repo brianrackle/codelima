@@ -36,6 +36,8 @@ The README.md must also stay current with an outline of the user-facing capabili
 
 When the `readme` skill is available in the current session, it should be used to maintain the README.md.
 
+The BUILD.md must be kept up to date with the maintainer-facing build, packaging, and release process.
+
 All tooling should be captured as make recipes
 
 The makefile will include an `init` command that will create the sandboxed development environment that agents can use.
