@@ -1,6 +1,6 @@
-# CodeLima M1
+# CodeLima
 
-`CodeLima M1` is a Go CLI that implements the Milestone 1 control plane from [SPEC_M1.md](/Users/brianrackle/Projects/test_lima/SPEC_M1.md).
+`CodeLima` is a Go CLI for managing lineage-aware projects, Lima-backed nodes, patch flows, and a shell-first TUI.
 
 The CLI manages:
 
@@ -9,6 +9,28 @@ The CLI manages:
 - bidirectional patch proposals along direct project lineage edges
 - a canonical shell surface that passes through to `limactl shell`
 - a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
+
+## Install
+
+Install the latest packaged release from Homebrew:
+
+```sh
+brew tap brianrackle/codelima
+brew install codelima
+```
+
+The Homebrew formula installs the packaged `codelima` binary plus the bundled `libghostty-vt` runtime library, and declares `git` and `lima` as runtime dependencies.
+
+## Supported Systems
+
+Current packaged releases are built for:
+
+- macOS `arm64`
+- macOS `amd64`
+- Linux `arm64`
+- Linux `amd64`
+
+Repository-local development and CI are exercised on macOS and Linux.
 
 ## Prerequisites
 
