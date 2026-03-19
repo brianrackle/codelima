@@ -654,7 +654,7 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
-	if len(configs) != 1 || configs[0].Slug != "shared-dev" {
+	if !containsEnvironmentConfigSlug(configs, "shared-dev") {
 		t.Fatalf("expected shared-dev to be listed, got %#v", configs)
 	}
 
@@ -738,8 +738,67 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
 	}
-	if len(configs) != 0 {
+	if containsEnvironmentConfigSlug(configs, "shared-dev") {
 		t.Fatalf("expected deleted environment config to be filtered from list, got %#v", configs)
+	}
+}
+
+func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+
+	configs, err := service.EnvironmentConfigList(false)
+	if err != nil {
+		t.Fatalf("EnvironmentConfigList() error = %v", err)
+	}
+
+	assertEnvironmentConfigCommands(t, configs, "codex",
+		"sudo snap install node --classic",
+		"sudo npm install -g @openai/codex",
+	)
+	assertEnvironmentConfigCommands(t, configs, "claude-code",
+		"curl -fsSL https://claude.ai/install.sh | bash",
+	)
+
+	if _, err := service.EnvironmentConfigUpdate("codex", EnvironmentConfigUpdateInput{
+		Commands: []string{"echo customized"},
+	}); err != nil {
+		t.Fatalf("EnvironmentConfigUpdate(codex) error = %v", err)
+	}
+
+	if err := service.EnsureReady(false); err != nil {
+		t.Fatalf("EnsureReady(false) error = %v", err)
+	}
+
+	config, err := service.EnvironmentConfigShow("codex")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
+	}
+	if got := strings.Join(config.Commands, "|"); got != "echo customized" {
+		t.Fatalf("expected customized codex commands to persist, got %q", got)
+	}
+}
+
+func TestDeletedBuiltInEnvironmentConfigIsNotRecreated(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+
+	if _, err := service.EnvironmentConfigDelete("codex"); err != nil {
+		t.Fatalf("EnvironmentConfigDelete(codex) error = %v", err)
+	}
+
+	if err := service.EnsureReady(false); err != nil {
+		t.Fatalf("EnsureReady(false) error = %v", err)
+	}
+
+	configs, err := service.EnvironmentConfigList(false)
+	if err != nil {
+		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
+	}
+	if containsEnvironmentConfigSlug(configs, "codex") {
+		t.Fatalf("expected deleted built-in environment config to stay deleted, got %#v", configs)
 	}
 }
 
@@ -824,7 +883,7 @@ func TestDispatchEnvironmentConfigCommandsAndProjectEnvConfigFlags(t *testing.T)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
 	}
-	if len(configs) != 0 {
+	if containsEnvironmentConfigSlug(configs, "shared-dev") {
 		t.Fatalf("expected deleted environment config to disappear from list, got %#v", configs)
 	}
 }
@@ -1326,6 +1385,32 @@ func containsCall(values []string, expected string) bool {
 		}
 	}
 	return false
+}
+
+func containsEnvironmentConfigSlug(configs []EnvironmentConfig, slug string) bool {
+	for _, config := range configs {
+		if config.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func assertEnvironmentConfigCommands(t *testing.T, configs []EnvironmentConfig, slug string, commands ...string) {
+	t.Helper()
+
+	for _, config := range configs {
+		if config.Slug != slug {
+			continue
+		}
+
+		if got := strings.Join(config.Commands, "|"); got != strings.Join(commands, "|") {
+			t.Fatalf("expected environment config %s commands %q, got %q", slug, strings.Join(commands, "|"), got)
+		}
+		return
+	}
+
+	t.Fatalf("expected environment config %s to exist, got %#v", slug, configs)
 }
 
 func quoted(value string) string {

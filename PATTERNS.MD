@@ -21,6 +21,11 @@ Node creation resolves an `AgentProfile` once and stores the concrete bootstrap 
 That resolution now includes both the project's direct environment commands and any referenced reusable environment configs.
 Later config changes do not retroactively mutate existing nodes.
 
+## Built-In Metadata Seeding
+
+`EnsureLayout` seeds durable built-in metadata such as agent profiles and reusable environment configs.
+Those defaults are written into the normal store on first use, so the CLI and TUI see the same `codex` and `claude-code` environment configs without special UI logic. Existing user edits or deletions win over later startup, which keeps the seeded defaults behaving like ordinary user-managed records instead of immortal system entries.
+
 ## Workspace-Aware Shell Delegation
 
 Shell entry always normalizes the documented `--` separator before delegating to Lima.
@@ -29,7 +34,7 @@ Interactive shells and one-off commands pass the node workspace through `limactl
 ## TUI Session Reuse
 
 The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal backend per opened node.
-The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits.
+The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits. When the terminal gains focus, the tree is hidden and the shell expands to full width; returning to tree focus restores the split layout around the same preserved node session.
 
 ## Contextual TUI Actions
 

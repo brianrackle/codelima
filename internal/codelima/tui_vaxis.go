@@ -107,6 +107,13 @@ type tuiRect struct {
 	height int
 }
 
+type tuiBodyLayout struct {
+	treeVisible bool
+	treeWidth   int
+	termCol     int
+	termWidth   int
+}
+
 func (r tuiRect) contains(col, row int) bool {
 	if r.width <= 0 || r.height <= 0 {
 		return false
@@ -119,6 +126,35 @@ func (r tuiRect) translateMouse(mouse vaxis.Mouse) vaxis.Mouse {
 	mouse.Col -= r.col
 	mouse.Row -= r.row
 	return mouse
+}
+
+func layoutTUIBody(width int, focus tuiFocus) tuiBodyLayout {
+	if focus == tuiFocusTerminal {
+		return tuiBodyLayout{
+			treeVisible: false,
+			treeWidth:   0,
+			termCol:     0,
+			termWidth:   width,
+		}
+	}
+
+	treeWidth := width / 3
+	if treeWidth < 28 {
+		treeWidth = 28
+	}
+	if treeWidth > 40 {
+		treeWidth = 40
+	}
+	if treeWidth > width-24 {
+		treeWidth = width - 24
+	}
+
+	return tuiBodyLayout{
+		treeVisible: true,
+		treeWidth:   treeWidth,
+		termCol:     treeWidth + 1,
+		termWidth:   width - treeWidth - 1,
+	}
 }
 
 type vaxisTUIApp struct {
@@ -1895,52 +1931,44 @@ func (a *vaxisTUIApp) draw() {
 
 	bodyTop := 2
 	bodyHeight := height - bodyTop - 1
-	treeWidth := width / 3
-	if treeWidth < 28 {
-		treeWidth = 28
-	}
-	if treeWidth > 40 {
-		treeWidth = 40
-	}
-	if treeWidth > width-24 {
-		treeWidth = width - 24
-	}
-	termWidth := width - treeWidth - 1
-
-	treeOuter := window.New(0, bodyTop, treeWidth, bodyHeight)
-	treeInner := border.All(treeOuter, mutedStyle)
-	termOuter := window.New(treeWidth+1, bodyTop, termWidth, bodyHeight)
+	layout := layoutTUIBody(width, a.state.focus)
+	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
 	termInner := border.All(termOuter, mutedStyle)
 
-	treeInner.Println(0, vaxis.Segment{Text: "Projects / Nodes", Style: headerStyle})
-	helpLines := []string{
-		"Mouse click: select project or node",
-		"Up/Down move, Left/Right collapse/expand",
-		"Action hotkeys are shown in the right pane",
-	}
+	if layout.treeVisible {
+		treeOuter := window.New(0, bodyTop, layout.treeWidth, bodyHeight)
+		treeInner := border.All(treeOuter, mutedStyle)
 
-	treeInnerWidth, treeInnerHeight := treeInner.Size()
-	treeContentHeight := treeInnerHeight - 1 - len(helpLines)
-	if treeContentHeight < 0 {
-		treeContentHeight = 0
-	}
-	treeContent := treeInner.New(0, 1, treeInnerWidth, treeContentHeight)
-	treeOriginCol, treeOriginRow := treeContent.Origin()
-	a.treeContentRect = tuiRect{col: treeOriginCol, row: treeOriginRow, width: treeInnerWidth, height: treeContentHeight}
-
-	for row, entry := range a.state.visibleEntries(treeContentHeight) {
-		index := a.state.viewportStart(treeContentHeight) + row
-		style := mutedStyle
-		if index == a.state.selection {
-			style = selectedStyle
+		treeInner.Println(0, vaxis.Segment{Text: "Projects / Nodes", Style: headerStyle})
+		helpLines := []string{
+			"Mouse click: select project or node",
+			"Up/Down move, Left/Right collapse/expand",
+			"Action hotkeys are shown in the right pane",
 		}
 
-		label := tuiEntryLabel(entry)
-		treeContent.Println(row, vaxis.Segment{Text: label, Style: style})
-	}
+		treeInnerWidth, treeInnerHeight := treeInner.Size()
+		treeContentHeight := treeInnerHeight - 1 - len(helpLines)
+		if treeContentHeight < 0 {
+			treeContentHeight = 0
+		}
+		treeContent := treeInner.New(0, 1, treeInnerWidth, treeContentHeight)
+		treeOriginCol, treeOriginRow := treeContent.Origin()
+		a.treeContentRect = tuiRect{col: treeOriginCol, row: treeOriginRow, width: treeInnerWidth, height: treeContentHeight}
 
-	for index, line := range helpLines {
-		treeInner.Println(treeInnerHeight-len(helpLines)+index, vaxis.Segment{Text: line, Style: mutedStyle})
+		for row, entry := range a.state.visibleEntries(treeContentHeight) {
+			index := a.state.viewportStart(treeContentHeight) + row
+			style := mutedStyle
+			if index == a.state.selection {
+				style = selectedStyle
+			}
+
+			label := tuiEntryLabel(entry)
+			treeContent.Println(row, vaxis.Segment{Text: label, Style: style})
+		}
+
+		for index, line := range helpLines {
+			treeInner.Println(treeInnerHeight-len(helpLines)+index, vaxis.Segment{Text: line, Style: mutedStyle})
+		}
 	}
 
 	entry := a.state.selectedEntry()
@@ -1951,7 +1979,11 @@ func (a *vaxisTUIApp) draw() {
 	} else {
 		a.printLinkifiedLine(termInner, 1, terminalSubtitle, mutedStyle)
 	}
-	termInner.Println(2, vaxis.Segment{Text: renderActionHints(availableTUIActions(entry)), Style: mutedStyle})
+	if a.state.focus == tuiFocusTerminal {
+		termInner.Println(2, vaxis.Segment{Text: "Terminal focused: shell has full width until Cmd-` returns to the tree (Alt-` fallback)", Style: mutedStyle})
+	} else {
+		termInner.Println(2, vaxis.Segment{Text: renderActionHints(availableTUIActions(entry)), Style: mutedStyle})
+	}
 
 	termInnerWidth, termInnerHeight := termInner.Size()
 	termBody := termInner.New(0, 3, termInnerWidth, termInnerHeight-3)
@@ -1972,9 +2004,6 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	footer := renderFooter(a.state.focus, entry)
-	if a.state.focus == tuiFocusTerminal {
-		footer = "Terminal focused: all input passes through to the shell until Alt-` returns to the tree"
-	}
 	window.Println(height-1, vaxis.Segment{Text: footer, Style: mutedStyle})
 
 	if a.menu != nil {
@@ -2127,7 +2156,7 @@ func renderActionHints(actions []tuiActionSpec) string {
 
 func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		return "Terminal focused: drag copies when the guest is not capturing the mouse, Shift-drag forces local copy, Alt-` returns to the tree"
+		return "Terminal focused: shell has full width, drag copies when possible, Shift-drag forces local copy, Cmd-` returns to the tree (Alt-` fallback)"
 	}
 	if entry.kind == "" {
 		return "Press [a] to add a project   q quit"
@@ -2179,7 +2208,9 @@ func tuiEntryLabel(entry tuiTreeEntry) string {
 }
 
 func isTreeEscapeKey(key vaxis.Key) bool {
-	return key.Modifiers&vaxis.ModAlt != 0 && (key.Text == "`" || key.Keycode == '`')
+	return key.Matches('`', vaxis.ModSuper) ||
+		key.Matches('`', vaxis.ModMeta) ||
+		key.Matches('`', vaxis.ModAlt)
 }
 
 func isQuitKey(key vaxis.Key) bool {

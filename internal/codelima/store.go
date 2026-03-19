@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Store struct {
@@ -59,6 +60,39 @@ func (s *Store) EnsureLayout() error {
 		}
 
 		if err := writeYAMLFile(profilePath, profile); err != nil {
+			return err
+		}
+	}
+
+	if err := s.ensureBuiltInEnvironmentConfigs(time.Now().UTC()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) ensureBuiltInEnvironmentConfigs(createdAt time.Time) error {
+	for _, spec := range builtInEnvironmentConfigs() {
+		config, err := s.EnvironmentConfigByIDOrSlug(spec.Slug)
+		if err == nil {
+			if config.DeletedAt != nil {
+				continue
+			}
+			continue
+		}
+
+		var appErr *AppError
+		if !As(err, &appErr) || appErr.Category != "NotFound" {
+			return err
+		}
+
+		if err := s.SaveEnvironmentConfig(EnvironmentConfig{
+			ID:        newID(),
+			Slug:      spec.Slug,
+			Commands:  append([]string(nil), spec.Commands...),
+			CreatedAt: createdAt,
+			UpdatedAt: createdAt,
+		}); err != nil {
 			return err
 		}
 	}

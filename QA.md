@@ -229,9 +229,12 @@ cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/project-a"
 cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/project-b"
 ```
 
-Create one shared environment config and two projects that reference it:
+Verify the built-in defaults, then create one shared environment config and two projects that reference it:
 
 ```sh
+./bin/codelima --home "$CODELIMA_HOME" environment list
+./bin/codelima --home "$CODELIMA_HOME" environment show codex
+./bin/codelima --home "$CODELIMA_HOME" environment show claude-code
 ./bin/codelima --home "$CODELIMA_HOME" environment create --slug qa-shared --env-command "./script/setup" --env-command "test -f README.md"
 ./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-env-a --workspace "$WORK_ROOT/project-a" --env-config qa-shared
 ./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-env-b --workspace "$WORK_ROOT/project-b" --env-config qa-shared
@@ -242,6 +245,9 @@ Create one shared environment config and two projects that reference it:
 
 Expected result:
 
+- the first `environment list` includes `codex` and `claude-code`
+- `environment show codex` includes `sudo snap install node --classic` and `sudo npm install -g @openai/codex`
+- `environment show claude-code` includes `curl -fsSL https://claude.ai/install.sh | bash`
 - `environment list` includes `qa-shared`
 - `environment show qa-shared` includes `environment_commands` with both configured commands
 - `project show qa-env-a` includes `environment_configs` with `qa-shared`
@@ -328,7 +334,7 @@ Run the TUI:
 Inside the TUI verify:
 
 - the left pane renders the available projects and nodes, and the right pane renders either node details or one visible terminal
-- press `g`, create reusable environment config `qa-shared`, confirm the command menu opens immediately, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
+- press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
 - press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm it appears as a second top-level project without a long frozen pause
 - select project `qa-tui-extra`, confirm the right pane lists `qa-shared` under environment configs
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
@@ -338,7 +344,8 @@ Inside the TUI verify:
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
 - selecting `qa-tui-a` opens its shell session automatically
-- `Tab` or `Enter` focuses the terminal, and `Alt-\`` returns focus to the tree
+- `Tab` or `Enter` focuses the terminal, hides the tree, and expands the terminal to full width
+- `Cmd-\`` returns focus to the tree and restores the split layout; `Alt-\`` still works as a fallback
 - in the `qa-tui-a` terminal, type `echo pending-a` without pressing `Enter`
 - return to the tree, select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`

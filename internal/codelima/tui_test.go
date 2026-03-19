@@ -173,6 +173,56 @@ func TestNewGhosttyTUITerminalLoadsWhenLibraryInstalled(t *testing.T) {
 	}
 }
 
+func TestLayoutTUIBodySplitsTreeAndTerminalWhenTreeFocused(t *testing.T) {
+	t.Parallel()
+
+	layout := layoutTUIBody(120, tuiFocusTree)
+	if !layout.treeVisible {
+		t.Fatalf("expected tree to stay visible when tree focused")
+	}
+	if layout.treeWidth != 40 {
+		t.Fatalf("expected clamped tree width 40, got %d", layout.treeWidth)
+	}
+	if layout.termCol != 41 {
+		t.Fatalf("expected terminal column 41, got %d", layout.termCol)
+	}
+	if layout.termWidth != 79 {
+		t.Fatalf("expected terminal width 79, got %d", layout.termWidth)
+	}
+}
+
+func TestLayoutTUIBodyExpandsTerminalWhenTerminalFocused(t *testing.T) {
+	t.Parallel()
+
+	layout := layoutTUIBody(120, tuiFocusTerminal)
+	if layout.treeVisible {
+		t.Fatalf("expected tree to be hidden when terminal focused")
+	}
+	if layout.treeWidth != 0 {
+		t.Fatalf("expected hidden tree width 0, got %d", layout.treeWidth)
+	}
+	if layout.termCol != 0 {
+		t.Fatalf("expected terminal to start at column 0, got %d", layout.termCol)
+	}
+	if layout.termWidth != 120 {
+		t.Fatalf("expected terminal to expand to full width, got %d", layout.termWidth)
+	}
+}
+
+func TestTreeEscapeKeyMatchesCommandAndAltBacktick(t *testing.T) {
+	t.Parallel()
+
+	if !isTreeEscapeKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
+		t.Fatalf("expected Super+` to match the tree escape key")
+	}
+	if !isTreeEscapeKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Alt+` to match the tree escape key")
+	}
+	if isTreeEscapeKey(vaxis.Key{Text: "`", Keycode: '`'}) {
+		t.Fatalf("expected bare ` not to match the tree escape key")
+	}
+}
+
 func TestTUIStateAutoSwitchesAndReusesPerNodeSessions(t *testing.T) {
 	t.Parallel()
 
@@ -318,6 +368,43 @@ func TestTUIStateSelectsCreatedNodeWithoutOpeningShellSession(t *testing.T) {
 
 	if err := state.focusTerminal(); err == nil {
 		t.Fatalf("expected focusTerminal() to fail for a node without a running shell session")
+	}
+}
+
+func TestTUIHandleKeyCommandBacktickReturnsFocusToTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper})
+	if err != nil {
+		t.Fatalf("handleKey(Super+`) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Super+` to return to the tree, not quit")
+	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected Super+` to return focus to the tree, got %q", app.state.focus)
 	}
 }
 

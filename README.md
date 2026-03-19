@@ -68,7 +68,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - register host workspaces as lineage-aware projects
 - capture immutable snapshots on demand for fork and patch workflows
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
-- create reusable environment configs and assign them to multiple projects as shared bootstrap defaults
+- create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - browse the project tree, manage selected projects and nodes, and jump between preserved per-node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
 - propose, approve, apply, reject, and inspect patches across direct project lineage edges
@@ -106,7 +106,24 @@ codelima doctor
 codelima config show
 ```
 
-2. Create a reusable environment config, then register a workspace as a project.
+2. Inspect the built-in reusable environment configs, then register a workspace as a project.
+
+```sh
+codelima environment list
+codelima environment show codex
+
+codelima project create \
+  --slug root \
+  --workspace ./test-project-dir \
+  --env-config codex
+```
+
+Fresh homes seed two reusable environment configs:
+
+- `codex`: installs Node via `snap`, then installs `@openai/codex` globally with `npm`
+- `claude-code`: runs `curl -fsSL https://claude.ai/install.sh | bash`
+
+Projects can combine those shared defaults with project-specific environment commands, or you can create your own reusable config when you need a team- or repo-specific bootstrap:
 
 ```sh
 codelima environment create \
@@ -114,20 +131,12 @@ codelima environment create \
   --env-command ./script/setup \
   --env-command "direnv allow"
 
-codelima project create \
-  --slug root \
-  --workspace ./test-project-dir \
-  --env-config shared-dev
-```
-
-Projects can combine shared environment configs with project-specific environment commands that run the first time new VMs for that project are bootstrapped:
-
-```sh
 codelima environment update shared-dev --env-command "mise install"
 codelima environment list
+codelima environment show codex
 codelima environment show shared-dev
 codelima project update root --env-command ./script/setup --env-command "direnv allow"
-codelima project update root --env-config shared-dev
+codelima project update root --env-config codex --env-config shared-dev
 codelima project update root --clear-env-configs
 codelima project update root --clear-env-commands
 ```
@@ -153,9 +162,9 @@ Or open the shell-first TUI and switch between preserved per-node sessions from 
 codelima
 ```
 
-Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, and `Alt-\`` returns focus to the tree without destroying the shell session.
+Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, hides the tree, and expands the shell to full width. `Cmd-\`` returns focus to the tree and restores the split layout without destroying the shell session; `Alt-\`` remains available as a fallback for terminals that do not forward the command key.
 Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into another node in the same project, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
-Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty. The project create and update dialogs use an environment-config selector instead of asking you to type config slugs, and `[g]` manage config opens a selector before the config command menu. Creating a reusable config now drops directly into the same command editor used for later edits, so you can add, remove, confirm, and reorder commands without retyping numbered positions.
+Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty. Fresh homes already include `codex` and `claude-code` in those selectors. The project create and update dialogs use an environment-config selector instead of asking you to type config slugs, and `[g]` manage config opens a selector before the config command menu. Creating a reusable config now drops directly into the same command editor used for later edits, so you can add, remove, confirm, and reorder commands without retyping numbered positions.
 Project create and update save only project metadata, while long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, a plain left-button drag copies the currently visible terminal text to the host clipboard when the guest is not actively capturing the mouse, and `Shift`-drag forces that local copy behavior even when an application such as Vim has enabled mouse handling. The mouse wheel scrolls local terminal scrollback when the guest is not actively capturing the mouse, and falls through to the guest when mouse tracking or alternate-screen scroll handling is enabled.
 
 The tree is keyboard and mouse driven. The right pane always shows the active action hotkeys for the selected item, so the common flow is to select a project or node in the tree and then press the matching letter key:
