@@ -15,6 +15,7 @@ type fakeLima struct {
 	calls        []string
 	shellCalls   []fakeShellCall
 	copyCalls    []fakeCopyCall
+	createErr    error
 	failCommand  string
 	cloneStatus  string
 	listCalls    int
@@ -65,6 +66,9 @@ func (f *fakeLima) List(_ context.Context) ([]RuntimeObservation, error) {
 
 func (f *fakeLima) Create(_ context.Context, instanceName, _ string) error {
 	f.calls = append(f.calls, "create:"+instanceName)
+	if f.createErr != nil {
+		return f.createErr
+	}
 	f.observations[instanceName] = RuntimeObservation{Name: instanceName, Exists: true, Status: "stopped", Dir: "/fake/" + instanceName}
 	return nil
 }
@@ -312,6 +316,93 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 
 	if node.Status != NodeStatusTerminated {
 		t.Fatalf("expected terminated status, got %q", node.Status)
+	}
+}
+
+func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	service.lima.(*fakeLima).createErr = errors.New("forced create failure")
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	if _, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "broken-node",
+	}); err == nil {
+		t.Fatalf("expected NodeCreate() to fail when Lima create fails")
+	}
+
+	entries, err := os.ReadDir(filepath.Join(service.cfg.MetadataRoot, "nodes"))
+	if err != nil {
+		t.Fatalf("ReadDir(nodes) error = %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected failed node create to remove partial metadata, found %d entries", len(entries))
+	}
+}
+
+func TestPartialNodeDirectoriesDoNotBlockHealthyNodeOperations(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	if err := os.MkdirAll(filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(partial node) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node", "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(partial template) error = %v", err)
+	}
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "healthy-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	nodes, err := service.NodeList(false)
+	if err != nil {
+		t.Fatalf("NodeList() error = %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != node.ID {
+		t.Fatalf("expected only the healthy node to be listed, got %#v", nodes)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+	if node.Status != NodeStatusRunning {
+		t.Fatalf("expected healthy node to reach running state, got %q", node.Status)
+	}
+
+	tree, err := service.ProjectTree("", false)
+	if err != nil {
+		t.Fatalf("ProjectTree() error = %v", err)
+	}
+	if len(tree) != 1 || len(tree[0].Nodes) != 1 || tree[0].Nodes[0].ID != node.ID {
+		t.Fatalf("expected project tree to include only the healthy node, got %#v", tree)
 	}
 }
 

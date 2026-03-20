@@ -640,7 +640,7 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 	return child, nil
 }
 
-func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, error) {
+func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
 	if err := s.EnsureReady(true); err != nil {
 		return Node{}, err
 	}
@@ -729,6 +729,20 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, 
 		UpdatedAt:             s.now(),
 	}
 
+	cleanupNodeDir := true
+	cleanupInstance := false
+	defer func() {
+		if err == nil {
+			return
+		}
+		if cleanupInstance {
+			_ = s.lima.Delete(ctx, instanceName)
+		}
+		if cleanupNodeDir {
+			_ = os.RemoveAll(s.store.nodeDir(nodeID))
+		}
+	}()
+
 	if err := atomicWriteFile(s.store.nodeTemplatePath(nodeID), template, 0o644); err != nil {
 		return Node{}, err
 	}
@@ -736,10 +750,13 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (Node, 
 	if err := s.lima.Create(ctx, instanceName, s.store.nodeTemplatePath(nodeID)); err != nil {
 		return Node{}, err
 	}
+	cleanupInstance = true
 
 	if err := s.store.SaveNode(node, bootstrap, template); err != nil {
 		return Node{}, err
 	}
+	cleanupNodeDir = false
+	cleanupInstance = false
 
 	if err := s.store.AppendNodeEvent(node.ID, Event{Timestamp: s.now(), Type: "node.created"}); err != nil {
 		return Node{}, err

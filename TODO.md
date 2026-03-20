@@ -130,3 +130,29 @@ Disadvantages:
 - Requires a careful audit so runtime-backed safety checks are not removed accidentally.
 - May expose stale-metadata edge cases that were previously masked by a broad readiness check.
 - Adds more distinction between service paths, which slightly increases maintenance overhead.
+
+### 6. Surface incomplete node metadata directories in doctor and cleanup tooling
+
+Problem:
+
+- Failed `node create` attempts used to leave behind `CODELIMA_HOME/nodes/<id>/` directories that contained a generated Lima template but no `node.yaml`.
+- The runtime now ignores those incomplete directories so existing homes recover automatically, but operators do not get any explicit signal that cleanup was needed.
+- That leaves silent metadata drift on disk and makes it harder to explain why a machine recovered after upgrade.
+
+Suggested solution:
+
+- Teach `doctor` to scan `CODELIMA_HOME/nodes/` for directories missing `node.yaml`.
+- Report those directories as warnings and optionally add a dedicated cleanup command that removes incomplete node metadata directories after confirmation.
+- Consider logging a one-time TUI/CLI warning when such directories are skipped during startup.
+
+Advantages:
+
+- Makes metadata repair visible and diagnosable.
+- Gives operators a supported cleanup path for stale directories left by older builds.
+- Helps distinguish silently skipped partial nodes from intentionally deleted nodes.
+
+Disadvantages:
+
+- Adds more store-health logic and another case to maintain in `doctor`.
+- A cleanup command needs careful confirmation semantics to avoid deleting the wrong data.
+- Startup warnings could become noisy if not rate-limited or deduplicated.

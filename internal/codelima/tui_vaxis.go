@@ -2139,7 +2139,9 @@ func (a *vaxisTUIApp) drawOverlay(win vaxis.Window, width int, height int, draw 
 
 	col := (winWidth - width) / 2
 	row := (winHeight - height) / 2
-	draw(win.New(col, row, width, height))
+	overlay := win.New(col, row, width, height)
+	overlay.Fill(vaxis.Cell{Character: vaxis.Character{Grapheme: " ", Width: 1}})
+	draw(overlay)
 }
 
 func renderActionHints(actions []tuiActionSpec) string {

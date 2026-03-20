@@ -144,6 +144,10 @@ func (s *Store) nodePath(nodeID string) string {
 	return filepath.Join(s.nodeDir(nodeID), "node.yaml")
 }
 
+func (s *Store) nodeMetadataExists(nodeID string) bool {
+	return exists(s.nodePath(nodeID))
+}
+
 func (s *Store) nodeEventsPath(nodeID string) string {
 	return filepath.Join(s.nodeDir(nodeID), "events.jsonl")
 }
@@ -598,6 +602,9 @@ func (s *Store) ListNodes(includeDeleted bool) ([]Node, error) {
 	nodes := []Node{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			continue
+		}
+		if !s.nodeMetadataExists(entry.Name()) {
 			continue
 		}
 

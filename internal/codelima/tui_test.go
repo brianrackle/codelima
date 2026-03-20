@@ -1,23 +1,119 @@
 package codelima
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"git.sr.ht/~rockorager/vaxis"
+	"github.com/containerd/console"
 )
 
 type fakeTUIRunner struct {
 	calls int
 }
 
+type fakeVaxisConsole struct {
+	input bytes.Buffer
+	size  console.WinSize
+}
+
 func (f *fakeTUIRunner) Run(_ context.Context, _ *Service) error {
 	f.calls++
 	return nil
+}
+
+func newFakeVaxisConsole(input string, width, height uint16) *fakeVaxisConsole {
+	console := &fakeVaxisConsole{
+		size: console.WinSize{
+			Width:  width,
+			Height: height,
+		},
+	}
+	console.input.WriteString(input)
+	return console
+}
+
+func (f *fakeVaxisConsole) Read(p []byte) (int, error) {
+	if f.input.Len() == 0 {
+		return 0, io.EOF
+	}
+	return f.input.Read(p)
+}
+
+func (f *fakeVaxisConsole) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (f *fakeVaxisConsole) Close() error {
+	return nil
+}
+
+func (f *fakeVaxisConsole) Fd() uintptr {
+	return 0
+}
+
+func (f *fakeVaxisConsole) Name() string {
+	return "fake-vaxis-console"
+}
+
+func (f *fakeVaxisConsole) Resize(size console.WinSize) error {
+	f.size = size
+	return nil
+}
+
+func (f *fakeVaxisConsole) ResizeFrom(other console.Console) error {
+	size, err := other.Size()
+	if err != nil {
+		return err
+	}
+	f.size = size
+	return nil
+}
+
+func (f *fakeVaxisConsole) SetRaw() error {
+	return nil
+}
+
+func (f *fakeVaxisConsole) DisableEcho() error {
+	return nil
+}
+
+func (f *fakeVaxisConsole) Reset() error {
+	return nil
+}
+
+func (f *fakeVaxisConsole) Size() (console.WinSize, error) {
+	return f.size, nil
+}
+
+func newRenderTestVaxis(t *testing.T, width, height int) *vaxis.Vaxis {
+	t.Helper()
+
+	console := newFakeVaxisConsole("\x1b[?1;2c", uint16(width), uint16(height))
+	vx, err := vaxis.New(vaxis.Options{
+		WithConsole:  console,
+		DisableMouse: true,
+		NoSignals:    true,
+	})
+	if err != nil {
+		t.Fatalf("vaxis.New() error = %v", err)
+	}
+	return vx
+}
+
+func renderedCellGrapheme(t *testing.T, vx *vaxis.Vaxis, col, row int) string {
+	t.Helper()
+
+	buf := reflect.ValueOf(vx).Elem().FieldByName("screenNext").Elem().FieldByName("buf")
+	cell := buf.Index(row).Index(col)
+	return cell.FieldByName("Character").FieldByName("Grapheme").String()
 }
 
 type fakeTUISessionManager struct {
@@ -170,6 +266,31 @@ func TestNewGhosttyTUITerminalLoadsWhenLibraryInstalled(t *testing.T) {
 
 	if terminal.TermEnv() != tuiEmbeddedTermEnv {
 		t.Fatalf("expected ghostty terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TermEnv())
+	}
+}
+
+func TestTUIDrawOverlayClearsCoveredCells(t *testing.T) {
+	t.Parallel()
+
+	vx := newRenderTestVaxis(t, 20, 10)
+	defer vx.Close()
+
+	window := vx.Window()
+	window.Fill(vaxis.Cell{Character: vaxis.Character{Grapheme: "x", Width: 1}})
+
+	app := &vaxisTUIApp{}
+	app.drawOverlay(window, 10, 5, func(overlay vaxis.Window) {
+		overlay.Println(0, vaxis.Segment{Text: "A"})
+	})
+
+	if got := renderedCellGrapheme(t, vx, 6, 3); got != " " {
+		t.Fatalf("expected overlay interior to be cleared to space, got %q", got)
+	}
+	if got := renderedCellGrapheme(t, vx, 5, 2); got != "A" {
+		t.Fatalf("expected overlay draw callback to render text, got %q", got)
+	}
+	if got := renderedCellGrapheme(t, vx, 0, 0); got != "x" {
+		t.Fatalf("expected cells outside overlay to remain unchanged, got %q", got)
 	}
 }
 
