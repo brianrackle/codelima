@@ -401,11 +401,10 @@ Inside the TUI verify:
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
 - selecting `qa-tui-a` opens its shell session automatically
-- `Alt-Enter` toggles focus between the tree and terminal without changing the layout
-- `Alt-\`` toggles the split or expanded layout without changing focus
-- use `Alt-Enter` to focus the `qa-tui-a` terminal, type `echo pending-a` without pressing `Enter`
-- if the terminal is expanded, press `Alt-\`` to restore the split layout
-- press `Alt-Enter` to toggle focus back to the tree, select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
+- `Alt-\`` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
+- use `Alt-\`` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
+- press `Alt-\`` again to return to the tree and confirm the split layout is restored
+- select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
 - drag over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
 - with the `qa-tui-b` terminal focused and the guest at a normal shell prompt, spin the mouse wheel up and down and confirm local scrollback moves without freezing the app

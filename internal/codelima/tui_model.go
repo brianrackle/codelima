@@ -83,17 +83,16 @@ func (e tuiTreeEntry) key() string {
 }
 
 type tuiState struct {
-	tree             []ProjectTreeNode
-	entries          []tuiTreeEntry
-	expanded         map[string]bool
-	projectsByID     map[string]Project
-	nodesByID        map[string]Node
-	selection        int
-	scroll           int
-	focus            tuiFocus
-	terminalExpanded bool
-	activeNodeID     string
-	sessions         tuiSessionManager
+	tree         []ProjectTreeNode
+	entries      []tuiTreeEntry
+	expanded     map[string]bool
+	projectsByID map[string]Project
+	nodesByID    map[string]Node
+	selection    int
+	scroll       int
+	focus        tuiFocus
+	activeNodeID string
+	sessions     tuiSessionManager
 }
 
 func newTUIState(tree []ProjectTreeNode, sessions tuiSessionManager) (*tuiState, error) {
@@ -340,10 +339,6 @@ func (s *tuiState) toggleFocus() error {
 	}
 
 	return s.focusTerminal()
-}
-
-func (s *tuiState) toggleTerminalExpanded() {
-	s.terminalExpanded = !s.terminalExpanded
 }
 
 func (s *tuiState) visibleEntries(height int) []tuiTreeEntry {

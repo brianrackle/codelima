@@ -393,7 +393,7 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 
 	app.draw()
 
-	layout := layoutTUIBody(100, false)
+	layout := layoutTUIBody(100, tuiFocusTree)
 	if got := renderedCellGrapheme(t, vx, layout.termCol, 2); got != "s" {
 		t.Fatalf("expected terminal content to start at the left edge of the pane, got %q", got)
 	}
@@ -405,7 +405,7 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 func TestLayoutTUIBodySplitsTreeAndTerminalWhenCollapsed(t *testing.T) {
 	t.Parallel()
 
-	layout := layoutTUIBody(120, false)
+	layout := layoutTUIBody(120, tuiFocusTree)
 	if !layout.treeVisible {
 		t.Fatalf("expected tree to stay visible when terminal is not expanded")
 	}
@@ -420,12 +420,12 @@ func TestLayoutTUIBodySplitsTreeAndTerminalWhenCollapsed(t *testing.T) {
 	}
 }
 
-func TestLayoutTUIBodyExpandsTerminalWhenRequested(t *testing.T) {
+func TestLayoutTUIBodyHidesTreeWhenTerminalFocused(t *testing.T) {
 	t.Parallel()
 
-	layout := layoutTUIBody(120, true)
+	layout := layoutTUIBody(120, tuiFocusTerminal)
 	if layout.treeVisible {
-		t.Fatalf("expected tree to be hidden when terminal is expanded")
+		t.Fatalf("expected tree to be hidden when terminal is focused")
 	}
 	if layout.treeWidth != 0 {
 		t.Fatalf("expected hidden tree width 0, got %d", layout.treeWidth)
@@ -438,34 +438,17 @@ func TestLayoutTUIBodyExpandsTerminalWhenRequested(t *testing.T) {
 	}
 }
 
-func TestTerminalExpandToggleKeyMatchesAltBacktickOnly(t *testing.T) {
+func TestTerminalViewToggleKeyMatchesAltBacktickOnly(t *testing.T) {
 	t.Parallel()
 
-	if !isTerminalExpandToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
-		t.Fatalf("expected Alt+` to match the expand toggle key")
+	if !isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Alt+` to match the terminal view toggle key")
 	}
-	if isTerminalExpandToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
-		t.Fatalf("expected Super+` not to match the expand toggle key")
+	if isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
+		t.Fatalf("expected Super+` not to match the terminal view toggle key")
 	}
-	if isTerminalExpandToggleKey(vaxis.Key{Text: "`", Keycode: '`'}) {
-		t.Fatalf("expected bare ` not to match the expand toggle key")
-	}
-}
-
-func TestTerminalFocusToggleKeyMatchesAltEnter(t *testing.T) {
-	t.Parallel()
-
-	if !isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt}) {
-		t.Fatalf("expected Alt+Enter to match the focus toggle key")
-	}
-	if isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModSuper}) {
-		t.Fatalf("expected Super+Enter not to match the focus toggle key")
-	}
-	if isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyEnter}) {
-		t.Fatalf("expected bare Enter not to match the focus toggle key")
-	}
-	if isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyTab, Modifiers: vaxis.ModAlt}) {
-		t.Fatalf("expected Alt+Tab not to match the focus toggle key")
+	if isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`'}) {
+		t.Fatalf("expected bare ` not to match the terminal view toggle key")
 	}
 }
 
@@ -617,7 +600,7 @@ func TestTUIStateSelectsCreatedNodeWithoutOpeningShellSession(t *testing.T) {
 	}
 }
 
-func TestTUIHandleKeyAltBacktickTogglesExpansionWithoutChangingFocus(t *testing.T) {
+func TestTUIHandleKeyAltBacktickTogglesFocusToTerminalAndHidesTree(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -627,10 +610,6 @@ func TestTUIHandleKeyAltBacktickTogglesExpansionWithoutChangingFocus(t *testing.
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
-	if err := state.focusTerminal(); err != nil {
-		t.Fatalf("focusTerminal() error = %v", err)
-	}
-	state.terminalExpanded = false
 
 	app := &vaxisTUIApp{
 		ctx:      ctx,
@@ -648,27 +627,53 @@ func TestTUIHandleKeyAltBacktickTogglesExpansionWithoutChangingFocus(t *testing.
 		t.Fatalf("handleKey(Alt+`) error = %v", err)
 	}
 	if quit {
-		t.Fatalf("expected Alt+` to toggle expansion, not quit")
+		t.Fatalf("expected Alt+` to toggle terminal view, not quit")
 	}
 	if app.state.focus != tuiFocusTerminal {
-		t.Fatalf("expected Alt+` to preserve terminal focus, got %q", app.state.focus)
+		t.Fatalf("expected Alt+` to focus the terminal, got %q", app.state.focus)
 	}
-	if !app.state.terminalExpanded {
-		t.Fatalf("expected Alt+` to expand the terminal")
+	if layout := layoutTUIBody(120, app.state.focus); layout.treeVisible {
+		t.Fatalf("expected terminal focus to hide the tree")
+	}
+}
+
+func TestTUIHandleKeyAltBacktickTogglesFocusBackToTreeAndShowsTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() error = %v", err)
 	}
 
-	quit, err = app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
 	if err != nil {
 		t.Fatalf("handleKey(Alt+`) error = %v", err)
 	}
 	if quit {
-		t.Fatalf("expected Alt+` to toggle expansion, not quit")
+		t.Fatalf("expected Alt+` to toggle terminal view, not quit")
 	}
-	if app.state.focus != tuiFocusTerminal {
-		t.Fatalf("expected Alt+` to preserve terminal focus, got %q", app.state.focus)
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected Alt+` to return focus to the tree, got %q", app.state.focus)
 	}
-	if app.state.terminalExpanded {
-		t.Fatalf("expected Alt+` to collapse the terminal")
+	if layout := layoutTUIBody(120, app.state.focus); !layout.treeVisible {
+		t.Fatalf("expected tree focus to show the tree")
 	}
 }
 
@@ -704,12 +709,9 @@ func TestTUIHandleKeyEnterNoLongerFocusesTerminal(t *testing.T) {
 	if app.state.focus != tuiFocusTree {
 		t.Fatalf("expected Enter to leave focus on the tree, got %q", app.state.focus)
 	}
-	if app.state.terminalExpanded {
-		t.Fatalf("expected Enter to keep the split layout")
-	}
 }
 
-func TestTUIHandleKeyAltEnterTogglesFocusToTerminalWithoutExpanding(t *testing.T) {
+func TestTUIHandleKeyAltEnterNoLongerTogglesTerminalFocus(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -736,50 +738,10 @@ func TestTUIHandleKeyAltEnterTogglesFocusToTerminalWithoutExpanding(t *testing.T
 		t.Fatalf("handleKey(Alt+Enter) error = %v", err)
 	}
 	if quit {
-		t.Fatalf("expected Alt+Enter to focus the terminal, not quit")
-	}
-	if app.state.focus != tuiFocusTerminal {
-		t.Fatalf("expected Alt+Enter to focus the terminal, got %q", app.state.focus)
-	}
-	if app.state.terminalExpanded {
-		t.Fatalf("expected Alt+Enter to keep the split layout")
-	}
-}
-
-func TestTUIHandleKeyAltEnterTogglesFocusBackToTree(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
-	if err != nil {
-		t.Fatalf("newTUIState() error = %v", err)
-	}
-	if err := state.focusTerminal(); err != nil {
-		t.Fatalf("focusTerminal() error = %v", err)
-	}
-
-	app := &vaxisTUIApp{
-		ctx:      ctx,
-		service:  service,
-		state:    state,
-		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
-	}
-	app.sessions.sessions["node-root"] = &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	}
-
-	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt})
-	if err != nil {
-		t.Fatalf("handleKey(Alt+Enter) error = %v", err)
-	}
-	if quit {
-		t.Fatalf("expected Alt+Enter to toggle focus back to the tree, not quit")
+		t.Fatalf("expected Alt+Enter to be ignored, not quit")
 	}
 	if app.state.focus != tuiFocusTree {
-		t.Fatalf("expected Alt+Enter to toggle focus back to the tree, got %q", app.state.focus)
+		t.Fatalf("expected Alt+Enter to leave focus on the tree, got %q", app.state.focus)
 	}
 }
 
@@ -810,9 +772,6 @@ func TestTUIHandleKeyTabNoLongerFocusesTerminal(t *testing.T) {
 	}
 	if app.state.focus != tuiFocusTree {
 		t.Fatalf("expected Tab to leave focus on the tree, got %q", app.state.focus)
-	}
-	if app.state.terminalExpanded {
-		t.Fatalf("expected Tab to leave the split layout unchanged")
 	}
 }
 

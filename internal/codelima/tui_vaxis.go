@@ -128,8 +128,8 @@ func (r tuiRect) translateMouse(mouse vaxis.Mouse) vaxis.Mouse {
 	return mouse
 }
 
-func layoutTUIBody(width int, terminalExpanded bool) tuiBodyLayout {
-	if terminalExpanded {
+func layoutTUIBody(width int, focus tuiFocus) tuiBodyLayout {
+	if focus == tuiFocusTerminal {
 		return tuiBodyLayout{
 			treeVisible: false,
 			treeWidth:   0,
@@ -346,19 +346,13 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 }
 
 func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
-	if isTerminalFocusToggleKey(key) {
+	if isTerminalViewToggleKey(key) {
 		if err := a.state.toggleFocus(); err != nil {
 			a.status = err.Error()
 			return false, nil
 		}
 		a.status = ""
 		a.syncSessionFocus()
-		return false, nil
-	}
-
-	if isTerminalExpandToggleKey(key) {
-		a.state.toggleTerminalExpanded()
-		a.status = ""
 		return false, nil
 	}
 
@@ -1930,12 +1924,11 @@ func (a *vaxisTUIApp) draw() {
 	window.Println(0,
 		vaxis.Segment{Text: "Project: " + projectSlug, Style: headerStyle},
 		vaxis.Segment{Text: "  Node: " + selectedNode},
-		vaxis.Segment{Text: "  Focus: " + string(a.state.focus)},
 	)
 
 	bodyTop := 1
 	bodyHeight := height - bodyTop - 1
-	layout := layoutTUIBody(width, a.state.terminalExpanded)
+	layout := layoutTUIBody(width, a.state.focus)
 	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
 	termBody := drawTerminalPane(termOuter, mutedStyle)
 
@@ -1987,13 +1980,13 @@ func (a *vaxisTUIApp) draw() {
 				a.drawTerminalSelection(termBody, session.terminal.String(), selectionStyle)
 			}
 		} else {
-			termBody.Println(0, vaxis.Segment{Text: "Shell session is not running. Select the node again or press Alt-Enter to reopen.", Style: mutedStyle})
+			termBody.Println(0, vaxis.Segment{Text: "Shell session is not running. Select the node again or press Alt-` to reopen.", Style: mutedStyle})
 		}
 	} else {
 		a.drawDetails(termBody, entry, headerStyle, mutedStyle)
 	}
 
-	footer := renderFooter(a.state.focus, a.state.terminalExpanded, entry)
+	footer := renderFooter(a.state.focus, entry)
 	footerStyle := mutedStyle
 	if a.status != "" {
 		footer = a.status
@@ -2083,7 +2076,7 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		}
 		row++
 		if nodeAutoStartsSession(entry.node) {
-			win.Println(row, vaxis.Segment{Text: "Node is running. Press Alt-Enter to toggle shell focus or Alt-` to resize.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: "Node is running. Press Alt-` to focus its terminal session.", Style: mutedStyle})
 			row += 2
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session.", Style: mutedStyle})
@@ -2140,21 +2133,15 @@ func drawTerminalPane(win vaxis.Window, style vaxis.Style) vaxis.Window {
 	return win.New(0, 1, width, height-2)
 }
 
-func renderFooter(focus tuiFocus, terminalExpanded bool, entry tuiTreeEntry) string {
+func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		if terminalExpanded {
-			return "Alt-Enter focus toggle   Alt-` split toggle   drag copy   Shift-drag force local copy   q quit"
-		}
-		return "Alt-Enter focus toggle   Alt-` width toggle   drag copy   Shift-drag force local copy   q quit"
-	}
-	if terminalExpanded {
-		return "Up/Down move hidden tree   Alt-Enter focus toggle   Alt-` restore split   q quit"
+		return "Alt-` tree focus   drag copy   Shift-drag force local copy   q quit"
 	}
 	if entry.kind == "" {
 		return "Press [a] to add a project   q quit"
 	}
 	if entry.kind == tuiTreeEntryNode {
-		return "Up/Down move   Left/Right collapse   Alt-Enter shell focus   wheel scroll   drag copy   q quit"
+		return "Up/Down move   Left/Right collapse   Alt-` shell focus   wheel scroll   drag copy   q quit"
 	}
 	return "Up/Down move   Left/Right collapse   Use action hotkeys in the right pane   q quit"
 }
@@ -2199,16 +2186,8 @@ func tuiEntryLabel(entry tuiTreeEntry) string {
 	}
 }
 
-func isTerminalExpandToggleKey(key vaxis.Key) bool {
+func isTerminalViewToggleKey(key vaxis.Key) bool {
 	return key.Matches('`', vaxis.ModAlt)
-}
-
-func isTerminalFocusToggleKey(key vaxis.Key) bool {
-	if key.Keycode != vaxis.KeyEnter {
-		return false
-	}
-
-	return key.Modifiers&vaxis.ModAlt != 0
 }
 
 func isQuitKey(key vaxis.Key) bool {

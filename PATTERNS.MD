@@ -39,7 +39,7 @@ Interactive shells and one-off commands pass the node workspace through `limactl
 ## TUI Session Reuse
 
 The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal backend per opened node.
-The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits. Terminal focus and layout are separate state: `Alt-Enter` toggles focus between the tree and terminal, and `Alt-\`` toggles the split or expanded layout without destroying the preserved node session.
+The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits. Tree visibility is driven directly by focus: `Alt-\`` toggles between tree focus with the split layout visible and terminal focus with the tree hidden, without destroying the preserved node session.
 
 ## Contextual TUI Actions
 

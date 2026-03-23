@@ -156,3 +156,29 @@ Disadvantages:
 - Requires care to avoid breaking the existing interactive shell startup path.
 - May involve subtle changes in PTY versus non-PTY execution behavior.
 - Could expose additional assumptions in current shell tests and verification scripts.
+
+### 7. Stop runtime validation from leaking raw `limactl list --json` output
+
+Problem:
+
+- During manual QA, some runtime-backed commands such as `node start` printed raw `limactl list --json` output before their normal command result.
+- The commands still succeeded, but the leaked JSON makes CLI output noisy and undermines the documented table- and record-oriented command contracts.
+- This looks separate from the existing duplicate-output issue in non-interactive shell mode because it occurred on lifecycle commands rather than `shell -- <cmd>`.
+
+Suggested solution:
+
+- Trace the runtime validation and Lima client paths that call `limactl list --json` before node lifecycle operations.
+- Ensure that probing output is captured for internal parsing instead of being written to command stdout.
+- Add a focused regression test that asserts `node start` and similar lifecycle commands do not emit unrelated Lima JSON records.
+
+Advantages:
+
+- Restores predictable CLI output for both human and scripted use.
+- Keeps lifecycle command output aligned with the documented user-facing contract.
+- Makes manual QA less brittle because command success is not mixed with unrelated probe output.
+
+Disadvantages:
+
+- Requires care around shared Lima client plumbing so progress streaming for real long-running operations still works.
+- May reveal other places where stdout/stderr routing is broader than intended.
+- Could require test doubles or refactoring around Lima readiness checks to isolate probe output cleanly.
