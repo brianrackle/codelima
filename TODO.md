@@ -131,28 +131,28 @@ Disadvantages:
 - May expose stale-metadata edge cases that were previously masked by a broad readiness check.
 - Adds more distinction between service paths, which slightly increases maintenance overhead.
 
-### 6. Surface incomplete node metadata directories in doctor and cleanup tooling
+### 6. Investigate duplicate output from `codelima shell <node> -- <cmd>`
 
 Problem:
 
-- Failed `node create` attempts used to leave behind `CODELIMA_HOME/nodes/<id>/` directories that contained a generated Lima template but no `node.yaml`.
-- The runtime now ignores those incomplete directories so existing homes recover automatically, but operators do not get any explicit signal that cleanup was needed.
-- That leaves silent metadata drift on disk and makes it harder to explain why a machine recovered after upgrade.
+- During QA reruns, `codelima shell qa-shell-node -- pwd` printed the expected workspace path twice.
+- The command still exits successfully, but the duplicated output breaks strict verification checks and makes shell scripting against the command less predictable.
+- The TUI chrome change did not touch this path, so this appears to be an existing shell execution quirk rather than a regression from the current task.
 
 Suggested solution:
 
-- Teach `doctor` to scan `CODELIMA_HOME/nodes/` for directories missing `node.yaml`.
-- Report those directories as warnings and optionally add a dedicated cleanup command that removes incomplete node metadata directories after confirmation.
-- Consider logging a one-time TUI/CLI warning when such directories are skipped during startup.
+- Trace the non-interactive shell execution path to determine whether the guest command is being invoked twice or whether stdout is being relayed twice on the host side.
+- Add a focused regression test for `codelima shell <node> -- pwd` that asserts a single line of output.
+- Normalize the command wrapper so non-interactive shell invocations have stable, single-pass stdout behavior.
 
 Advantages:
 
-- Makes metadata repair visible and diagnosable.
-- Gives operators a supported cleanup path for stale directories left by older builds.
-- Helps distinguish silently skipped partial nodes from intentionally deleted nodes.
+- Makes CLI scripting and QA verification more reliable.
+- Reduces confusion for users piping `codelima shell` output into other commands.
+- Produces a clearer contract between interactive and non-interactive shell modes.
 
 Disadvantages:
 
-- Adds more store-health logic and another case to maintain in `doctor`.
-- A cleanup command needs careful confirmation semantics to avoid deleting the wrong data.
-- Startup warnings could become noisy if not rate-limited or deduplicated.
+- Requires care to avoid breaking the existing interactive shell startup path.
+- May involve subtle changes in PTY versus non-PTY execution behavior.
+- Could expose additional assumptions in current shell tests and verification scripts.

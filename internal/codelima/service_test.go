@@ -406,6 +406,121 @@ func TestPartialNodeDirectoriesDoNotBlockHealthyNodeOperations(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsIncompleteNodeMetadataDirectories(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node")
+	if err := os.MkdirAll(partialDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(partial node) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(partialDir, "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(template) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(partialDir, "lima-instance.ref"), []byte("project-node-12345678\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(instance ref) error = %v", err)
+	}
+
+	report, err := service.Doctor(ctx)
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+
+	warningText := strings.Join(report.Warnings, "\n")
+	if !strings.Contains(warningText, "incomplete node metadata directory") {
+		t.Fatalf("expected doctor warning for incomplete node metadata, got %q", warningText)
+	}
+	if !strings.Contains(warningText, "project-node-12345678") {
+		t.Fatalf("expected doctor warning to include instance name, got %q", warningText)
+	}
+	if !strings.Contains(warningText, "node cleanup-incomplete --apply") {
+		t.Fatalf("expected doctor warning to include cleanup command, got %q", warningText)
+	}
+}
+
+func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	healthyNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "healthy-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node")
+	if err := os.MkdirAll(partialDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(partial node) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(partialDir, "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(template) error = %v", err)
+	}
+	instanceName := "partial-project-partial-node-12345678"
+	if err := os.WriteFile(filepath.Join(partialDir, "lima-instance.ref"), []byte(instanceName+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(instance ref) error = %v", err)
+	}
+	if err := os.WriteFile(service.store.nodeInstanceIndexPath(instanceName), []byte("partial-node\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(instance index) error = %v", err)
+	}
+
+	dryRun, err := service.NodeCleanupIncomplete(false)
+	if err != nil {
+		t.Fatalf("NodeCleanupIncomplete(false) error = %v", err)
+	}
+	if !dryRun.DryRun {
+		t.Fatalf("expected dry-run result")
+	}
+	if len(dryRun.Items) != 1 || dryRun.Items[0].NodeID != "partial-node" {
+		t.Fatalf("expected one partial node in dry-run, got %#v", dryRun.Items)
+	}
+	if !exists(partialDir) {
+		t.Fatalf("expected dry-run to leave partial node directory in place")
+	}
+	if !exists(service.store.nodeInstanceIndexPath(instanceName)) {
+		t.Fatalf("expected dry-run to leave instance index in place")
+	}
+
+	applied, err := service.NodeCleanupIncomplete(true)
+	if err != nil {
+		t.Fatalf("NodeCleanupIncomplete(true) error = %v", err)
+	}
+	if applied.DryRun {
+		t.Fatalf("expected apply result to report DryRun=false")
+	}
+	if len(applied.Items) != 1 || applied.Items[0].NodeID != "partial-node" {
+		t.Fatalf("expected one partial node in apply result, got %#v", applied.Items)
+	}
+	if exists(partialDir) {
+		t.Fatalf("expected apply to remove partial node directory")
+	}
+	if exists(service.store.nodeInstanceIndexPath(instanceName)) {
+		t.Fatalf("expected apply to remove orphaned instance index")
+	}
+
+	nodes, err := service.NodeList(false)
+	if err != nil {
+		t.Fatalf("NodeList() error = %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != healthyNode.ID {
+		t.Fatalf("expected cleanup to leave healthy node untouched, got %#v", nodes)
+	}
+}
+
 func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 	t.Parallel()
 

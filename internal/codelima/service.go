@@ -198,6 +198,12 @@ func (s *Service) Doctor(ctx context.Context) (DoctorReport, error) {
 		report.Warnings = append(report.Warnings, missing...)
 	}
 
+	if incomplete, err := s.store.IncompleteNodeWarnings(); err != nil {
+		return DoctorReport{}, err
+	} else {
+		report.Warnings = append(report.Warnings, incomplete...)
+	}
+
 	if orphans, err := s.store.OrphanedPatchStatusIndexes(); err != nil {
 		return DoctorReport{}, err
 	} else {
@@ -771,6 +777,36 @@ func (s *Service) NodeList(includeDeleted bool) ([]Node, error) {
 	}
 
 	return s.store.ListNodes(includeDeleted)
+}
+
+func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult, error) {
+	if err := s.EnsureReady(false); err != nil {
+		return IncompleteNodeCleanupResult{}, err
+	}
+
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
+	if err != nil {
+		return IncompleteNodeCleanupResult{}, err
+	}
+	defer func() {
+		_ = lockSet.Close()
+	}()
+
+	items, err := s.store.IncompleteNodeMetadata()
+	if err != nil {
+		return IncompleteNodeCleanupResult{}, err
+	}
+
+	if apply && len(items) > 0 {
+		if err := s.store.RemoveIncompleteNodeMetadata(items); err != nil {
+			return IncompleteNodeCleanupResult{}, err
+		}
+	}
+
+	return IncompleteNodeCleanupResult{
+		DryRun: !apply,
+		Items:  items,
+	}, nil
 }
 
 func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {

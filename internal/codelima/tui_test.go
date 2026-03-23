@@ -116,6 +116,20 @@ func renderedCellGrapheme(t *testing.T, vx *vaxis.Vaxis, col, row int) string {
 	return cell.FieldByName("Character").FieldByName("Grapheme").String()
 }
 
+func renderedScreenText(t *testing.T, vx *vaxis.Vaxis, width, height int) string {
+	t.Helper()
+
+	var lines []string
+	for row := range height {
+		var line strings.Builder
+		for col := range width {
+			line.WriteString(renderedCellGrapheme(t, vx, col, row))
+		}
+		lines = append(lines, strings.TrimRight(line.String(), " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
 type fakeTUISessionManager struct {
 	ensured map[string]int
 }
@@ -294,12 +308,62 @@ func TestTUIDrawOverlayClearsCoveredCells(t *testing.T) {
 	}
 }
 
-func TestLayoutTUIBodySplitsTreeAndTerminalWhenTreeFocused(t *testing.T) {
+func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 	t.Parallel()
 
-	layout := layoutTUIBody(120, tuiFocusTree)
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	vx := newRenderTestVaxis(t, 100, 24)
+	defer vx.Close()
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		vx:       vx,
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: &fakeTUITerminal{
+			snapshot: "shell prompt",
+			termEnv:  tuiEmbeddedTermEnv,
+		},
+	}
+
+	app.draw()
+
+	rendered := renderedScreenText(t, vx, 100, 24)
+	for _, unexpected := range []string{
+		"CodeLima TUI",
+		"Layout:",
+		"Shell-first layout",
+		"Mouse: enabled",
+		"Auto-switch on node selection",
+		"Terminal:",
+		"Terminal focused:",
+		"Tree focused:",
+		"status: ",
+		"workspace: ",
+	} {
+		if strings.Contains(rendered, unexpected) {
+			t.Fatalf("expected rendered TUI not to contain %q, got:\n%s", unexpected, rendered)
+		}
+	}
+}
+
+func TestLayoutTUIBodySplitsTreeAndTerminalWhenCollapsed(t *testing.T) {
+	t.Parallel()
+
+	layout := layoutTUIBody(120, false)
 	if !layout.treeVisible {
-		t.Fatalf("expected tree to stay visible when tree focused")
+		t.Fatalf("expected tree to stay visible when terminal is not expanded")
 	}
 	if layout.treeWidth != 40 {
 		t.Fatalf("expected clamped tree width 40, got %d", layout.treeWidth)
@@ -312,12 +376,12 @@ func TestLayoutTUIBodySplitsTreeAndTerminalWhenTreeFocused(t *testing.T) {
 	}
 }
 
-func TestLayoutTUIBodyExpandsTerminalWhenTerminalFocused(t *testing.T) {
+func TestLayoutTUIBodyExpandsTerminalWhenRequested(t *testing.T) {
 	t.Parallel()
 
-	layout := layoutTUIBody(120, tuiFocusTerminal)
+	layout := layoutTUIBody(120, true)
 	if layout.treeVisible {
-		t.Fatalf("expected tree to be hidden when terminal focused")
+		t.Fatalf("expected tree to be hidden when terminal is expanded")
 	}
 	if layout.treeWidth != 0 {
 		t.Fatalf("expected hidden tree width 0, got %d", layout.treeWidth)
@@ -330,17 +394,34 @@ func TestLayoutTUIBodyExpandsTerminalWhenTerminalFocused(t *testing.T) {
 	}
 }
 
-func TestTreeEscapeKeyMatchesCommandAndAltBacktick(t *testing.T) {
+func TestTerminalExpandToggleKeyMatchesAltBacktickOnly(t *testing.T) {
 	t.Parallel()
 
-	if !isTreeEscapeKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
-		t.Fatalf("expected Super+` to match the tree escape key")
+	if !isTerminalExpandToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Alt+` to match the expand toggle key")
 	}
-	if !isTreeEscapeKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
-		t.Fatalf("expected Alt+` to match the tree escape key")
+	if isTerminalExpandToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
+		t.Fatalf("expected Super+` not to match the expand toggle key")
 	}
-	if isTreeEscapeKey(vaxis.Key{Text: "`", Keycode: '`'}) {
-		t.Fatalf("expected bare ` not to match the tree escape key")
+	if isTerminalExpandToggleKey(vaxis.Key{Text: "`", Keycode: '`'}) {
+		t.Fatalf("expected bare ` not to match the expand toggle key")
+	}
+}
+
+func TestTerminalFocusToggleKeyMatchesAltEnter(t *testing.T) {
+	t.Parallel()
+
+	if !isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Alt+Enter to match the focus toggle key")
+	}
+	if isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModSuper}) {
+		t.Fatalf("expected Super+Enter not to match the focus toggle key")
+	}
+	if isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyEnter}) {
+		t.Fatalf("expected bare Enter not to match the focus toggle key")
+	}
+	if isTerminalFocusToggleKey(vaxis.Key{Keycode: vaxis.KeyTab, Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Alt+Tab not to match the focus toggle key")
 	}
 }
 
@@ -492,7 +573,136 @@ func TestTUIStateSelectsCreatedNodeWithoutOpeningShellSession(t *testing.T) {
 	}
 }
 
-func TestTUIHandleKeyCommandBacktickReturnsFocusToTree(t *testing.T) {
+func TestTUIHandleKeyAltBacktickTogglesExpansionWithoutChangingFocus(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() error = %v", err)
+	}
+	state.terminalExpanded = false
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
+	if err != nil {
+		t.Fatalf("handleKey(Alt+`) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Alt+` to toggle expansion, not quit")
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected Alt+` to preserve terminal focus, got %q", app.state.focus)
+	}
+	if !app.state.terminalExpanded {
+		t.Fatalf("expected Alt+` to expand the terminal")
+	}
+
+	quit, err = app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
+	if err != nil {
+		t.Fatalf("handleKey(Alt+`) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Alt+` to toggle expansion, not quit")
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected Alt+` to preserve terminal focus, got %q", app.state.focus)
+	}
+	if app.state.terminalExpanded {
+		t.Fatalf("expected Alt+` to collapse the terminal")
+	}
+}
+
+func TestTUIHandleKeyEnterNoLongerFocusesTerminal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter})
+	if err != nil {
+		t.Fatalf("handleKey(Enter) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Enter not to quit")
+	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected Enter to leave focus on the tree, got %q", app.state.focus)
+	}
+	if app.state.terminalExpanded {
+		t.Fatalf("expected Enter to keep the split layout")
+	}
+}
+
+func TestTUIHandleKeyAltEnterTogglesFocusToTerminalWithoutExpanding(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt})
+	if err != nil {
+		t.Fatalf("handleKey(Alt+Enter) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Alt+Enter to focus the terminal, not quit")
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected Alt+Enter to focus the terminal, got %q", app.state.focus)
+	}
+	if app.state.terminalExpanded {
+		t.Fatalf("expected Alt+Enter to keep the split layout")
+	}
+}
+
+func TestTUIHandleKeyAltEnterTogglesFocusBackToTree(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -517,15 +727,48 @@ func TestTUIHandleKeyCommandBacktickReturnsFocusToTree(t *testing.T) {
 		terminal: newFakeTUITerminal(),
 	}
 
-	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper})
+	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt})
 	if err != nil {
-		t.Fatalf("handleKey(Super+`) error = %v", err)
+		t.Fatalf("handleKey(Alt+Enter) error = %v", err)
 	}
 	if quit {
-		t.Fatalf("expected Super+` to return to the tree, not quit")
+		t.Fatalf("expected Alt+Enter to toggle focus back to the tree, not quit")
 	}
 	if app.state.focus != tuiFocusTree {
-		t.Fatalf("expected Super+` to return focus to the tree, got %q", app.state.focus)
+		t.Fatalf("expected Alt+Enter to toggle focus back to the tree, got %q", app.state.focus)
+	}
+}
+
+func TestTUIHandleKeyTabNoLongerFocusesTerminal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyTab})
+	if err != nil {
+		t.Fatalf("handleKey(Tab) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Tab to be ignored, not quit")
+	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected Tab to leave focus on the tree, got %q", app.state.focus)
+	}
+	if app.state.terminalExpanded {
+		t.Fatalf("expected Tab to leave the split layout unchanged")
 	}
 }
 

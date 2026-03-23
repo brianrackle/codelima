@@ -168,6 +168,30 @@ func (s *Store) nodeInstanceRefPath(nodeID string) string {
 	return filepath.Join(s.nodeDir(nodeID), "lima-instance.ref")
 }
 
+func (s *Store) incompleteNodeMetadata(nodeID string) (IncompleteNodeMetadata, error) {
+	item := IncompleteNodeMetadata{
+		NodeID:        nodeID,
+		DirectoryPath: s.nodeDir(nodeID),
+	}
+
+	templatePath := s.nodeTemplatePath(nodeID)
+	if exists(templatePath) {
+		item.TemplatePath = templatePath
+	}
+
+	instanceRefPath := s.nodeInstanceRefPath(nodeID)
+	if exists(instanceRefPath) {
+		item.InstanceRefPath = instanceRefPath
+		data, err := os.ReadFile(instanceRefPath)
+		if err != nil {
+			return IncompleteNodeMetadata{}, metadataCorruption("failed to read node instance ref", err, map[string]any{"path": instanceRefPath})
+		}
+		item.InstanceName = strings.TrimSpace(string(data))
+	}
+
+	return item, nil
+}
+
 func (s *Store) patchDir(patchID string) string {
 	return filepath.Join(s.cfg.MetadataRoot, "patches", patchID)
 }
@@ -627,6 +651,48 @@ func (s *Store) ListNodes(includeDeleted bool) ([]Node, error) {
 	return nodes, nil
 }
 
+func (s *Store) IncompleteNodeMetadata() ([]IncompleteNodeMetadata, error) {
+	root := filepath.Join(s.cfg.MetadataRoot, "nodes")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+
+	items := []IncompleteNodeMetadata{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if s.nodeMetadataExists(entry.Name()) {
+			continue
+		}
+
+		item, err := s.incompleteNodeMetadata(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].NodeID < items[j].NodeID
+	})
+
+	return items, nil
+}
+
+func (s *Store) RemoveIncompleteNodeMetadata(items []IncompleteNodeMetadata) error {
+	for _, item := range items {
+		if strings.TrimSpace(item.InstanceName) != "" {
+			_ = os.Remove(s.nodeInstanceIndexPath(item.InstanceName))
+		}
+		if err := os.RemoveAll(item.DirectoryPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) ProjectNodes(projectID string, includeDeleted bool) ([]Node, error) {
 	nodes, err := s.ListNodes(includeDeleted)
 	if err != nil {
@@ -809,6 +875,25 @@ func (s *Store) MissingNodeIndexes() ([]string, error) {
 	}
 
 	return missing, nil
+}
+
+func (s *Store) IncompleteNodeWarnings() ([]string, error) {
+	items, err := s.IncompleteNodeMetadata()
+	if err != nil {
+		return nil, err
+	}
+
+	warnings := make([]string, 0, len(items))
+	for _, item := range items {
+		message := fmt.Sprintf("incomplete node metadata directory: %s", item.DirectoryPath)
+		if item.InstanceName != "" {
+			message += fmt.Sprintf(" (instance %s)", item.InstanceName)
+		}
+		message += "; remove it with `codelima node cleanup-incomplete --apply`"
+		warnings = append(warnings, message)
+	}
+
+	return warnings, nil
 }
 
 func (s *Store) OrphanedPatchStatusIndexes() ([]string, error) {

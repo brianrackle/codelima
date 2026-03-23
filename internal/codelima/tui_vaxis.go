@@ -128,8 +128,8 @@ func (r tuiRect) translateMouse(mouse vaxis.Mouse) vaxis.Mouse {
 	return mouse
 }
 
-func layoutTUIBody(width int, focus tuiFocus) tuiBodyLayout {
-	if focus == tuiFocusTerminal {
+func layoutTUIBody(width int, terminalExpanded bool) tuiBodyLayout {
+	if terminalExpanded {
 		return tuiBodyLayout{
 			treeVisible: false,
 			treeWidth:   0,
@@ -346,12 +346,23 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 }
 
 func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
-	if a.state.focus == tuiFocusTerminal {
-		if isTreeEscapeKey(key) {
-			a.state.focusTree()
-			a.syncSessionFocus()
+	if isTerminalFocusToggleKey(key) {
+		if err := a.state.toggleFocus(); err != nil {
+			a.status = err.Error()
 			return false, nil
 		}
+		a.status = ""
+		a.syncSessionFocus()
+		return false, nil
+	}
+
+	if isTerminalExpandToggleKey(key) {
+		a.state.toggleTerminalExpanded()
+		a.status = ""
+		return false, nil
+	}
+
+	if a.state.focus == tuiFocusTerminal {
 		a.forwardTerminalEvent(key)
 		return false, nil
 	}
@@ -376,8 +387,6 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
 		a.state.collapseSelection()
 	case key.MatchString("Right"):
 		a.state.expandSelection()
-	case key.MatchString("Enter"), key.MatchString("Tab"):
-		err = a.state.focusTerminal()
 	default:
 		return false, nil
 	}
@@ -1919,19 +1928,14 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	window.Println(0,
-		vaxis.Segment{Text: "CodeLima TUI", Style: headerStyle},
-		vaxis.Segment{Text: "  Project: " + projectSlug},
-		vaxis.Segment{Text: "  Selected Node: " + selectedNode},
+		vaxis.Segment{Text: "Project: " + projectSlug, Style: headerStyle},
+		vaxis.Segment{Text: "  Node: " + selectedNode},
 		vaxis.Segment{Text: "  Focus: " + string(a.state.focus)},
 	)
 
-	window.Println(1,
-		vaxis.Segment{Text: "Shell-first layout  Mouse: enabled  Auto-switch on node selection", Style: mutedStyle},
-	)
-
-	bodyTop := 2
+	bodyTop := 1
 	bodyHeight := height - bodyTop - 1
-	layout := layoutTUIBody(width, a.state.focus)
+	layout := layoutTUIBody(width, a.state.terminalExpanded)
 	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
 	termInner := border.All(termOuter, mutedStyle)
 
@@ -1972,23 +1976,10 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	entry := a.state.selectedEntry()
-	terminalTitle, terminalSubtitle := a.panelHeader(entry)
-	termInner.Println(0, vaxis.Segment{Text: terminalTitle, Style: headerStyle})
-	if a.status != "" {
-		a.printLinkifiedLine(termInner, 1, a.status, errorStyle)
-	} else {
-		a.printLinkifiedLine(termInner, 1, terminalSubtitle, mutedStyle)
-	}
-	if a.state.focus == tuiFocusTerminal {
-		termInner.Println(2, vaxis.Segment{Text: "Terminal focused: shell has full width until Cmd-` returns to the tree (Alt-` fallback)", Style: mutedStyle})
-	} else {
-		termInner.Println(2, vaxis.Segment{Text: renderActionHints(availableTUIActions(entry)), Style: mutedStyle})
-	}
-
 	termInnerWidth, termInnerHeight := termInner.Size()
-	termBody := termInner.New(0, 3, termInnerWidth, termInnerHeight-3)
+	termBody := termInner.New(0, 0, termInnerWidth, termInnerHeight)
 	termOriginCol, termOriginRow := termBody.Origin()
-	a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight - 3}
+	a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight}
 
 	if entry.kind == tuiTreeEntryNode && a.sessions.HasSession(entry.node.ID) {
 		if session, ok := a.sessions.Session(entry.node.ID); ok {
@@ -1997,14 +1988,19 @@ func (a *vaxisTUIApp) draw() {
 				a.drawTerminalSelection(termBody, session.terminal.String(), selectionStyle)
 			}
 		} else {
-			termBody.Println(0, vaxis.Segment{Text: "Shell session is not running. Select the node again or press Enter to reopen.", Style: mutedStyle})
+			termBody.Println(0, vaxis.Segment{Text: "Shell session is not running. Select the node again or press Alt-Enter to reopen.", Style: mutedStyle})
 		}
 	} else {
 		a.drawDetails(termBody, entry, headerStyle, mutedStyle)
 	}
 
-	footer := renderFooter(a.state.focus, entry)
-	window.Println(height-1, vaxis.Segment{Text: footer, Style: mutedStyle})
+	footer := renderFooter(a.state.focus, a.state.terminalExpanded, entry)
+	footerStyle := mutedStyle
+	if a.status != "" {
+		footer = a.status
+		footerStyle = errorStyle
+	}
+	window.Println(height-1, vaxis.Segment{Text: footer, Style: footerStyle})
 
 	if a.menu != nil {
 		a.drawOverlay(window, 56, 11, func(overlay vaxis.Window) {
@@ -2029,28 +2025,6 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	a.vx.Render()
-}
-
-func (a *vaxisTUIApp) panelHeader(entry tuiTreeEntry) (title string, subtitle string) {
-	switch entry.kind {
-	case tuiTreeEntryProject:
-		subtitle = entry.project.WorkspacePath
-		if subtitle == "" {
-			subtitle = "workspace path unavailable"
-		}
-		return "Project: " + entry.project.Slug, subtitle
-	case tuiTreeEntryNode:
-		subtitle = "status: " + nodeVMStatus(entry.node)
-		if workspace := nodeWorkspacePath(entry.node); workspace != "" {
-			subtitle += "  workspace: " + workspace
-		}
-		if a.sessions.HasSession(entry.node.ID) {
-			return "Terminal: " + entry.node.Slug, subtitle
-		}
-		return "Node: " + entry.node.Slug, subtitle
-	default:
-		return "Terminal", "Select a project or node in the tree."
-	}
 }
 
 func tuiMutedStyle() vaxis.Style {
@@ -2110,7 +2084,7 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		}
 		row++
 		if nodeAutoStartsSession(entry.node) {
-			win.Println(row, vaxis.Segment{Text: "Node is running. Press Tab or Enter to focus its shell session.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: "Node is running. Press Alt-Enter to toggle shell focus or Alt-` to resize.", Style: mutedStyle})
 			row += 2
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session.", Style: mutedStyle})
@@ -2144,27 +2118,21 @@ func (a *vaxisTUIApp) drawOverlay(win vaxis.Window, width int, height int, draw 
 	draw(overlay)
 }
 
-func renderActionHints(actions []tuiActionSpec) string {
-	if len(actions) == 0 {
-		return "Tree: no actions available"
-	}
-
-	parts := make([]string, 0, len(actions))
-	for _, action := range actions {
-		parts = append(parts, "["+string(action.Hotkey)+"] "+action.Label)
-	}
-	return "Tree: " + strings.Join(parts, "  ")
-}
-
-func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
+func renderFooter(focus tuiFocus, terminalExpanded bool, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		return "Terminal focused: shell has full width, drag copies when possible, Shift-drag forces local copy, Cmd-` returns to the tree (Alt-` fallback)"
+		if terminalExpanded {
+			return "Alt-Enter focus toggle   Alt-` split toggle   drag copy   Shift-drag force local copy   q quit"
+		}
+		return "Alt-Enter focus toggle   Alt-` width toggle   drag copy   Shift-drag force local copy   q quit"
+	}
+	if terminalExpanded {
+		return "Up/Down move hidden tree   Alt-Enter focus toggle   Alt-` restore split   q quit"
 	}
 	if entry.kind == "" {
 		return "Press [a] to add a project   q quit"
 	}
 	if entry.kind == tuiTreeEntryNode {
-		return "Up/Down move   Left/Right collapse   Tab/Enter shell   wheel scroll   drag copy   q quit"
+		return "Up/Down move   Left/Right collapse   Alt-Enter shell focus   wheel scroll   drag copy   q quit"
 	}
 	return "Up/Down move   Left/Right collapse   Use action hotkeys in the right pane   q quit"
 }
@@ -2209,10 +2177,16 @@ func tuiEntryLabel(entry tuiTreeEntry) string {
 	}
 }
 
-func isTreeEscapeKey(key vaxis.Key) bool {
-	return key.Matches('`', vaxis.ModSuper) ||
-		key.Matches('`', vaxis.ModMeta) ||
-		key.Matches('`', vaxis.ModAlt)
+func isTerminalExpandToggleKey(key vaxis.Key) bool {
+	return key.Matches('`', vaxis.ModAlt)
+}
+
+func isTerminalFocusToggleKey(key vaxis.Key) bool {
+	if key.Keycode != vaxis.KeyEnter {
+		return false
+	}
+
+	return key.Modifiers&vaxis.ModAlt != 0
 }
 
 func isQuitKey(key vaxis.Key) bool {

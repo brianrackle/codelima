@@ -219,6 +219,19 @@ type DoctorCheck struct {
 	Message string `json:"message"`
 }
 
+type IncompleteNodeMetadata struct {
+	NodeID          string `json:"node_id" yaml:"node_id"`
+	DirectoryPath   string `json:"directory_path" yaml:"directory_path"`
+	TemplatePath    string `json:"template_path,omitempty" yaml:"template_path,omitempty"`
+	InstanceName    string `json:"instance_name,omitempty" yaml:"instance_name,omitempty"`
+	InstanceRefPath string `json:"instance_ref_path,omitempty" yaml:"instance_ref_path,omitempty"`
+}
+
+type IncompleteNodeCleanupResult struct {
+	DryRun bool                     `json:"dry_run" yaml:"dry_run"`
+	Items  []IncompleteNodeMetadata `json:"items" yaml:"items"`
+}
+
 type ProjectTreeNode struct {
 	Project  Project           `json:"project"`
 	Nodes    []Node            `json:"nodes,omitempty"`

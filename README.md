@@ -68,6 +68,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - register host workspaces as lineage-aware projects
 - capture immutable snapshots on demand for fork and patch workflows
 - create, start, stop, clone, inspect, and delete Lima-backed nodes
+- detect and clean up incomplete node metadata directories left by failed node creation attempts
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - browse the project tree, manage selected projects and nodes, and jump between preserved per-node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
@@ -95,7 +96,7 @@ Useful global flags:
 - `--json` returns structured output for automation
 - `--log-level LEVEL` reserves a verbosity setting for future CLI logging
 
-`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `vm_status` so the live VM state is visible without switching to `node show`. Use `--json` when you need the full structured payload for scripts.
+`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `vm_status` so the live VM state is visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
 
 ### Typical Workflow
 
@@ -105,6 +106,15 @@ Useful global flags:
 codelima doctor
 codelima config show
 ```
+
+If `doctor` reports an incomplete node metadata directory from an older failed `node create`, inspect the candidates first and then remove them explicitly:
+
+```sh
+codelima node cleanup-incomplete
+codelima node cleanup-incomplete --apply
+```
+
+`node cleanup-incomplete` is a dry run by default. Add `--apply` only after you confirm the listed `node_dir` values are stale partial metadata directories rather than healthy nodes.
 
 2. Inspect the built-in reusable environment configs, then register a workspace as a project.
 
@@ -162,7 +172,7 @@ Or open the shell-first TUI and switch between preserved per-node sessions from 
 codelima
 ```
 
-Inside the TUI, selecting a node auto-switches the visible terminal. `Enter` or `Tab` focuses the terminal pane, hides the tree, and expands the shell to full width. `Cmd-\`` returns focus to the tree and restores the split layout without destroying the shell session; `Alt-\`` remains available as a fallback for terminals that do not forward the command key.
+Inside the TUI, selecting a node auto-switches the visible terminal. `Alt-Enter` toggles focus between the tree and terminal without resizing either pane. `Alt-\`` toggles the split or expanded layout without changing focus. When the split layout is visible, clicking the tree also moves focus back to the tree without destroying the shell session.
 Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into another node in the same project, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
 Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty. Fresh homes already include `codex` and `claude-code` in those selectors. The project create and update dialogs use an environment-config selector instead of asking you to type config slugs, and `[g]` manage config opens a selector before the config command menu. Creating a reusable config now drops directly into the same command editor used for later edits, so you can add, remove, confirm, and reorder commands without retyping numbered positions.
 Project create and update save only project metadata, while long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, a plain left-button drag copies the currently visible terminal text to the host clipboard when the guest is not actively capturing the mouse, and `Shift`-drag forces that local copy behavior even when an application such as Vim has enabled mouse handling. The mouse wheel scrolls local terminal scrollback when the guest is not actively capturing the mouse, and falls through to the guest when mouse tracking or alternate-screen scroll handling is enabled.

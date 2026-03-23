@@ -71,6 +71,63 @@ Cleanup:
 rm -rf "$WORK_ROOT"
 ```
 
+## Doctor And Incomplete Node Cleanup Verification
+
+This flow verifies that `doctor` reports incomplete node metadata directories left by failed node creation attempts, and that `node cleanup-incomplete` supports both dry-run inspection and explicit removal.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-doctor-cleanup"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+mkdir -p "$CODELIMA_HOME/nodes/partial-node"
+printf 'arch: aarch64\n' > "$CODELIMA_HOME/nodes/partial-node/instance.lima.yaml"
+printf 'qa-root-qa-node-12345678\n' > "$CODELIMA_HOME/nodes/partial-node/lima-instance.ref"
+```
+
+Verify `doctor` warns about the incomplete node metadata:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" doctor
+```
+
+Expected result:
+
+- `doctor` succeeds
+- the output includes `warning: incomplete node metadata directory:`
+- the warning includes `qa-root-qa-node-12345678`
+- the warning includes `node cleanup-incomplete --apply`
+
+Verify dry-run and apply cleanup:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node cleanup-incomplete
+test -d "$CODELIMA_HOME/nodes/partial-node"
+./bin/codelima --home "$CODELIMA_HOME" node cleanup-incomplete --apply
+test ! -d "$CODELIMA_HOME/nodes/partial-node"
+```
+
+Expected result:
+
+- the dry-run output includes `partial-node` and `would_remove`
+- the dry-run leaves the directory on disk
+- the apply output includes `partial-node` and `removed`
+- the apply removes the incomplete node directory
+
+Cleanup:
+
+```sh
+rm -rf "$WORK_ROOT"
+```
+
 ## Tree Verification
 
 This flow verifies that `project tree` includes both lineage projects and the nodes attached to each project.
@@ -258,7 +315,7 @@ Update the shared config, create a new node from one of the projects, and verify
 ./bin/codelima --home "$CODELIMA_HOME" environment update qa-shared --env-command "pwd >/dev/null"
 ./bin/codelima --home "$CODELIMA_HOME" environment show qa-shared
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-env-b --slug qa-env-b-node
-grep -R '"pwd >/dev/null"' "$CODELIMA_HOME/nodes"
+find "$CODELIMA_HOME/nodes" -name bootstrap.json -exec cat {} \; | grep 'pwd'
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-env-b-node
 ```
 
@@ -344,10 +401,11 @@ Inside the TUI verify:
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
 - selecting `qa-tui-a` opens its shell session automatically
-- `Tab` or `Enter` focuses the terminal, hides the tree, and expands the terminal to full width
-- `Cmd-\`` returns focus to the tree and restores the split layout; `Alt-\`` still works as a fallback
-- in the `qa-tui-a` terminal, type `echo pending-a` without pressing `Enter`
-- return to the tree, select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
+- `Alt-Enter` toggles focus between the tree and terminal without changing the layout
+- `Alt-\`` toggles the split or expanded layout without changing focus
+- use `Alt-Enter` to focus the `qa-tui-a` terminal, type `echo pending-a` without pressing `Enter`
+- if the terminal is expanded, press `Alt-\`` to restore the split layout
+- press `Alt-Enter` to toggle focus back to the tree, select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
 - drag over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
 - with the `qa-tui-b` terminal focused and the guest at a normal shell prompt, spin the mouse wheel up and down and confirm local scrollback moves without freezing the app

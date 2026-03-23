@@ -5,6 +5,11 @@
 The CLI treats `CODELIMA_HOME` as the authoritative store for projects, nodes, snapshots, patches, and indexes.
 Every write goes through temp-file-plus-rename semantics so metadata stays recoverable after partial failures.
 
+## Incomplete Metadata Recovery
+
+When store enumeration finds a node directory without `node.yaml`, it treats that directory as incomplete metadata instead of a real node.
+Normal node and tree reads skip those directories so older failed writes do not brick the CLI or TUI, while `doctor` and `node cleanup-incomplete` surface the problem explicitly for operators.
+
 ## External Command Boundary
 
 Lima interactions are isolated behind `LimaClient`.
@@ -34,7 +39,7 @@ Interactive shells and one-off commands pass the node workspace through `limactl
 ## TUI Session Reuse
 
 The TUI launches shells by spawning `codelima shell <node>` inside one PTY-backed terminal backend per opened node.
-The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits. When the terminal gains focus, the tree is hidden and the shell expands to full width; returning to tree focus restores the split layout around the same preserved node session.
+The preferred backend is Ghostty VT, with the older Vaxis terminal widget retained as a fallback when the native Ghostty library is unavailable. Changing the selected node only swaps which emulator is visible, so scrollback, alternate screens, cursor state, hyperlinks, and unsubmitted input stay attached to that node until the TUI exits. Terminal focus and layout are separate state: `Alt-Enter` toggles focus between the tree and terminal, and `Alt-\`` toggles the split or expanded layout without destroying the preserved node session.
 
 ## Contextual TUI Actions
 

@@ -395,6 +395,14 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 			return nil, invalidArgument(err.Error(), nil)
 		}
 		return service.NodeList(*includeDeleted)
+	case "cleanup-incomplete":
+		flags := flag.NewFlagSet("node cleanup-incomplete", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		apply := flags.Bool("apply", false, "")
+		if err := flags.Parse(args[1:]); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		return service.NodeCleanupIncomplete(*apply)
 	case "show":
 		if len(args) < 2 {
 			return nil, invalidArgument("node show requires <node>", nil)
@@ -585,6 +593,8 @@ func writeSuccess(stdout io.Writer, asJSON bool, value any) {
 		_, _ = fmt.Fprint(stdout, renderEnvironmentConfigList(data))
 	case []Node:
 		_, _ = fmt.Fprint(stdout, renderNodeList(data))
+	case IncompleteNodeCleanupResult:
+		_, _ = fmt.Fprint(stdout, renderIncompleteNodeCleanupResult(data))
 	case []ProjectTreeNode:
 		_, _ = fmt.Fprint(stdout, renderProjectTree(data, ""))
 	case DoctorReport:
@@ -664,6 +674,31 @@ func renderEnvironmentConfigList(configs []EnvironmentConfig) string {
 	}
 
 	return renderTable([]string{"slug", "uuid", "command_count"}, rows)
+}
+
+func renderIncompleteNodeCleanupResult(result IncompleteNodeCleanupResult) string {
+	rows := make([][]string, 0, len(result.Items))
+	action := "would_remove"
+	if !result.DryRun {
+		action = "removed"
+	}
+
+	for _, item := range result.Items {
+		rows = append(rows, []string{
+			item.NodeID,
+			coalesce(item.InstanceName, "-"),
+			action,
+		})
+	}
+
+	if len(rows) == 0 {
+		if result.DryRun {
+			return "no incomplete node metadata directories found\n"
+		}
+		return "removed 0 incomplete node metadata directories\n"
+	}
+
+	return renderTable([]string{"node_dir", "instance_name", "action"}, rows)
 }
 
 func nodeWorkspacePath(node Node) string {
@@ -755,7 +790,7 @@ Groups:
   config show
   environment create|list|show|update|delete
   project create|list|show|update|delete|tree|fork
-  node create|list|show|start|stop|clone|delete|status|logs|shell
+  node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
   patch propose|list|show|approve|apply|reject
   shell <node> [-- command...]
 
