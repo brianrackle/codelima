@@ -1937,7 +1937,7 @@ func (a *vaxisTUIApp) draw() {
 	bodyHeight := height - bodyTop - 1
 	layout := layoutTUIBody(width, a.state.terminalExpanded)
 	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
-	termInner := border.All(termOuter, mutedStyle)
+	termBody := drawTerminalPane(termOuter, mutedStyle)
 
 	if layout.treeVisible {
 		treeOuter := window.New(0, bodyTop, layout.treeWidth, bodyHeight)
@@ -1976,8 +1976,7 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	entry := a.state.selectedEntry()
-	termInnerWidth, termInnerHeight := termInner.Size()
-	termBody := termInner.New(0, 0, termInnerWidth, termInnerHeight)
+	termInnerWidth, termInnerHeight := termBody.Size()
 	termOriginCol, termOriginRow := termBody.Origin()
 	a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight}
 
@@ -2116,6 +2115,29 @@ func (a *vaxisTUIApp) drawOverlay(win vaxis.Window, width int, height int, draw 
 	overlay := win.New(col, row, width, height)
 	overlay.Fill(vaxis.Cell{Character: vaxis.Character{Grapheme: " ", Width: 1}})
 	draw(overlay)
+}
+
+func drawTerminalPane(win vaxis.Window, style vaxis.Style) vaxis.Window {
+	width, height := win.Size()
+	if width <= 0 || height <= 0 {
+		return win
+	}
+
+	borderCell := vaxis.Cell{
+		Character: vaxis.Character{Grapheme: "─", Width: 1},
+		Style:     style,
+	}
+	for col := range width {
+		win.SetCell(col, 0, borderCell)
+		if height > 1 {
+			win.SetCell(col, height-1, borderCell)
+		}
+	}
+
+	if height <= 2 {
+		return win.New(0, 0, width, height)
+	}
+	return win.New(0, 1, width, height-2)
 }
 
 func renderFooter(focus tuiFocus, terminalExpanded bool, entry tuiTreeEntry) string {

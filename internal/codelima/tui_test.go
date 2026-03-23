@@ -169,7 +169,11 @@ func (f *fakeTUITerminal) Update(event vaxis.Event) {
 	f.events = append(f.events, event)
 }
 
-func (f *fakeTUITerminal) Draw(vaxis.Window) {}
+func (f *fakeTUITerminal) Draw(win vaxis.Window) {
+	for row, line := range strings.Split(f.snapshot, "\n") {
+		win.Println(row, vaxis.Segment{Text: line})
+	}
+}
 
 func (f *fakeTUITerminal) Close() {}
 
@@ -355,6 +359,46 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 		if strings.Contains(rendered, unexpected) {
 			t.Fatalf("expected rendered TUI not to contain %q, got:\n%s", unexpected, rendered)
 		}
+	}
+}
+
+func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	vx := newRenderTestVaxis(t, 100, 24)
+	defer vx.Close()
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		vx:       vx,
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: &fakeTUITerminal{
+			snapshot: "shell prompt",
+			termEnv:  tuiEmbeddedTermEnv,
+		},
+	}
+
+	app.draw()
+
+	layout := layoutTUIBody(100, false)
+	if got := renderedCellGrapheme(t, vx, layout.termCol, 2); got != "s" {
+		t.Fatalf("expected terminal content to start at the left edge of the pane, got %q", got)
+	}
+	if got := renderedCellGrapheme(t, vx, layout.termCol, 1); got != "─" {
+		t.Fatalf("expected top terminal border at the pane edge, got %q", got)
 	}
 }
 
