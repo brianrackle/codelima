@@ -166,7 +166,6 @@ type vaxisTUIApp struct {
 	screenHyperlinkAt func(int, int) (string, bool)
 	state             *tuiState
 	sessions          *tuiSessionStore
-	patches           []PatchProposal
 	progress          *tuiProgressWriter
 	operation         *tuiOperationState
 	linkRegions       []tuiLinkRegion
@@ -218,9 +217,6 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
 			execLima.Stdout = stdout
 			execLima.Stderr = stderr
 		}()
-	}
-	if err := app.reloadPatches(); err != nil {
-		return err
 	}
 	app.syncSessionFocus()
 	app.draw()
@@ -453,8 +449,6 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 		a.openDeleteNodeDialog(entry.node)
 	case tuiActionNodeClone:
 		a.openCloneNodeDialog(entry.node, entry.project)
-	case tuiActionNodePatch:
-		a.openPatchMenu(entry.node, entry.project)
 	}
 
 	return nil
@@ -776,15 +770,6 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 	return a.renderedHyperlinkAt(mouse.Col, mouse.Row)
 }
 
-func (a *vaxisTUIApp) reloadPatches() error {
-	patches, err := a.service.PatchList("")
-	if err != nil {
-		return err
-	}
-	a.patches = patches
-	return nil
-}
-
 func (a *vaxisTUIApp) reloadData(preferredKey string) error {
 	tree, err := a.service.ProjectTree("", false)
 	if err != nil {
@@ -793,10 +778,6 @@ func (a *vaxisTUIApp) reloadData(preferredKey string) error {
 	if err := a.state.replaceTree(tree, preferredKey); err != nil {
 		return err
 	}
-	if err := a.reloadPatches(); err != nil {
-		return err
-	}
-
 	var orphans []string
 	for nodeID := range a.sessions.sessions {
 		if _, ok := a.state.nodesByID[nodeID]; !ok {
@@ -844,10 +825,6 @@ func (a *vaxisTUIApp) applyOperationResult(result tuiOperationResult) error {
 	}
 	if result.ReloadData {
 		if err := a.reloadData(result.PreferredKey); err != nil {
-			return err
-		}
-	} else if result.ReloadPatches {
-		if err := a.reloadPatches(); err != nil {
 			return err
 		}
 	}
@@ -937,21 +914,22 @@ func (a *vaxisTUIApp) openCreateProjectDialog() {
 }
 
 func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
-	a.dialog = newTUIDialog(
+	dialog := newTUIDialog(
 		"Create Node",
 		"Create",
 		[]string{
 			"Selected project: " + project.Slug,
-			"Uses the project's existing runtime, agent, and environment command defaults.",
 		},
 		[]tuiDialogField{
 			newTUIInputField("slug", "Node Slug", project.Slug+"-node", true),
+			newTUIValueSelectorField("workspace_mode", "Workspace Mode", WorkspaceModeCopy, true, workspaceModeDisplay, nil),
 		},
 		func(values map[string]string) error {
 			return a.startOperation("Creating node "+values["slug"], func(ctx context.Context) (tuiOperationResult, error) {
 				node, err := a.service.NodeCreate(ctx, NodeCreateInput{
-					Project: project.ID,
-					Slug:    values["slug"],
+					Project:       project.ID,
+					Slug:          values["slug"],
+					WorkspaceMode: values["workspace_mode"],
 				})
 				if err != nil {
 					return tuiOperationResult{}, err
@@ -964,6 +942,46 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 			})
 		},
 	)
+	dialog.Fields[1].Activate = func() error {
+		return a.openWorkspaceModeSelector(
+			dialog.Fields[1].rawValue(),
+			func(value string) error {
+				dialog.SetFieldValue("workspace_mode", value)
+				return nil
+			},
+		)
+	}
+	a.dialog = dialog
+}
+
+func (a *vaxisTUIApp) openWorkspaceModeSelector(current string, onSubmit func(value string) error) error {
+	options := []tuiSelectorOption{
+		{Label: workspaceModeDisplay(WorkspaceModeCopy), Value: WorkspaceModeCopy},
+		{Label: workspaceModeDisplay(WorkspaceModeMounted), Value: WorkspaceModeMounted},
+	}
+	a.selector = newTUISelector(
+		"Workspace Mode",
+		nil,
+		options,
+		[]string{coalesce(current, WorkspaceModeCopy)},
+		false,
+		func(values []string) error {
+			if len(values) == 0 {
+				return fmt.Errorf("select a workspace mode")
+			}
+			return onSubmit(values[0])
+		},
+	)
+	return nil
+}
+
+func workspaceModeDisplay(mode string) string {
+	switch normalizeWorkspaceMode(mode) {
+	case WorkspaceModeMounted:
+		return "mounted: writable host workspace mount"
+	default:
+		return "copy: isolated guest workspace copy"
+	}
 }
 
 func (a *vaxisTUIApp) openProjectEnvironmentMenu(project Project) {
@@ -989,19 +1007,6 @@ func (a *vaxisTUIApp) openProjectEnvironmentMenu(project Project) {
 		Description: description,
 		Entries: []tuiMenuEntry{
 			{Key: 'g', Label: "Set Configs", Action: func() error { return a.openSetProjectEnvironmentConfigsDialog(project) }},
-			{Key: 'l', Label: "Clear Configs", Action: func() error {
-				return a.startOperation("Clearing configs for "+project.Slug, func(context.Context) (tuiOperationResult, error) {
-					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{ClearEnvironmentConfigs: true})
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:       "cleared environment configs for " + updated.Slug,
-						PreferredKey: "project:" + updated.ID,
-						ReloadData:   true,
-					}, nil
-				})
-			}},
 			{Key: 'a', Label: "Add Command", Action: func() error { a.openAddProjectEnvironmentCommandDialog(project); return nil }},
 			{Key: 'r', Label: "Remove Command", Action: func() error { return a.openRemoveProjectEnvironmentCommandDialog(project) }},
 			{Key: 'm', Label: "Move Command", Action: func() error { return a.openMoveProjectEnvironmentCommandDialog(project) }},
@@ -1230,15 +1235,16 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 	}
 
 	description := []string{
-		"Reusable environment command sets can be assigned to multiple projects.",
+		"No environment configs configured.",
 	}
-	if len(configs) == 0 {
-		description = append(description, "No environment configs configured.")
-	} else {
+	if len(configs) > 0 {
+		description = description[:0]
 		description = append(description, "Configured defaults:")
 		for _, config := range configs {
 			description = append(description, fmt.Sprintf("- %s (%d commands)", config.Slug, len(config.Commands)))
 		}
+	} else {
+		description = append(description[:0], "No environment configs configured.")
 	}
 
 	entries := []tuiMenuEntry{
@@ -1308,15 +1314,16 @@ func (a *vaxisTUIApp) openManageEnvironmentConfigDialog(defaultSlug string) erro
 
 func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig) {
 	description := []string{
-		"Commands in this config apply to new nodes for every project that references " + config.Slug + ".",
+		"No environment commands configured.",
 	}
-	if len(config.Commands) == 0 {
-		description = append(description, "No environment commands configured.")
-	} else {
+	if len(config.Commands) > 0 {
+		description = description[:0]
 		description = append(description, "Configured commands:")
 		for index, command := range config.Commands {
 			description = append(description, fmt.Sprintf("%d. %s", index+1, command))
 		}
+	} else {
+		description = append(description[:0], "No environment commands configured.")
 	}
 
 	a.menu = &tuiMenu{
@@ -1569,111 +1576,6 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
 	)
 }
 
-func (a *vaxisTUIApp) openPatchMenu(node Node, project Project) {
-	a.menu = &tuiMenu{
-		Title: "Patch Operations",
-		Description: []string{
-			"Selected node: " + node.Slug,
-			"Selected project: " + project.Slug,
-		},
-		Entries: []tuiMenuEntry{
-			{Key: 'p', Label: "Propose Patch", Action: func() error { a.openPatchProposeDialog(node, project); return nil }},
-			{Key: 'a', Label: "Approve Patch", Action: func() error { a.openPatchApproveDialog(project); return nil }},
-			{Key: 'y', Label: "Apply Patch", Action: func() error { a.openPatchApplyDialog(project); return nil }},
-			{Key: 'r', Label: "Reject Patch", Action: func() error { a.openPatchRejectDialog(project); return nil }},
-		},
-	}
-}
-
-func (a *vaxisTUIApp) openPatchProposeDialog(node Node, project Project) {
-	a.dialog = newTUIDialog(
-		"Propose Patch",
-		"Propose",
-		[]string{
-			"Source project is " + project.Slug + " and source node is " + node.Slug + ".",
-			"Enter the direct lineage neighbor project to target.",
-		},
-		[]tuiDialogField{
-			newTUIInputField("target_project", "Target Project Slug", "", true),
-			newTUIInputField("target_node", "Target Node Slug", "", false),
-		},
-		func(values map[string]string) error {
-			proposal, err := a.service.PatchPropose(a.ctx, PatchProposeInput{
-				SourceProject: project.ID,
-				SourceNode:    node.ID,
-				TargetProject: values["target_project"],
-				TargetNode:    values["target_node"],
-			})
-			if err != nil {
-				return err
-			}
-			a.status = "proposed patch " + proposal.ID
-			return a.reloadData("node:" + node.ID)
-		},
-	)
-}
-
-func (a *vaxisTUIApp) openPatchApproveDialog(project Project) {
-	a.dialog = newTUIDialog(
-		"Approve Patch",
-		"Approve",
-		[]string{"Approve a submitted patch related to project " + project.Slug + "."},
-		[]tuiDialogField{
-			newTUIInputField("patch_id", "Patch ID", "", true),
-			newTUIInputField("actor", "Actor", "tui", true),
-			newTUIInputField("note", "Note", "", false),
-		},
-		func(values map[string]string) error {
-			proposal, err := a.service.PatchApprove(values["patch_id"], values["actor"], values["note"])
-			if err != nil {
-				return err
-			}
-			a.status = "approved patch " + proposal.ID
-			return a.reloadPatches()
-		},
-	)
-}
-
-func (a *vaxisTUIApp) openPatchApplyDialog(project Project) {
-	a.dialog = newTUIDialog(
-		"Apply Patch",
-		"Apply",
-		[]string{"Apply an approved patch related to project " + project.Slug + "."},
-		[]tuiDialogField{
-			newTUIInputField("patch_id", "Patch ID", "", true),
-		},
-		func(values map[string]string) error {
-			proposal, err := a.service.PatchApply(a.ctx, values["patch_id"])
-			if err != nil {
-				return err
-			}
-			a.status = "applied patch " + proposal.ID
-			return a.reloadPatches()
-		},
-	)
-}
-
-func (a *vaxisTUIApp) openPatchRejectDialog(project Project) {
-	a.dialog = newTUIDialog(
-		"Reject Patch",
-		"Reject",
-		[]string{"Reject a submitted or approved patch related to project " + project.Slug + "."},
-		[]tuiDialogField{
-			newTUIInputField("patch_id", "Patch ID", "", true),
-			newTUIInputField("actor", "Actor", "tui", true),
-			newTUIInputField("note", "Note", "", false),
-		},
-		func(values map[string]string) error {
-			proposal, err := a.service.PatchReject(values["patch_id"], values["actor"], values["note"])
-			if err != nil {
-				return err
-			}
-			a.status = "rejected patch " + proposal.ID
-			return a.reloadPatches()
-		},
-	)
-}
-
 func (a *vaxisTUIApp) forwardTerminalEvent(event vaxis.Event) {
 	if a.state.focus != tuiFocusTerminal {
 		return
@@ -1916,15 +1818,16 @@ func (a *vaxisTUIApp) draw() {
 		projectSlug = project.Slug
 	}
 
-	selectedNode := "none"
-	if node, ok := a.state.activeNode(); ok {
-		selectedNode = node.Slug
+	headerSegments := []vaxis.Segment{
+		{Text: "Project: " + projectSlug, Style: headerStyle},
 	}
-
-	window.Println(0,
-		vaxis.Segment{Text: "Project: " + projectSlug, Style: headerStyle},
-		vaxis.Segment{Text: "  Node: " + selectedNode},
-	)
+	if entry := a.state.selectedEntry(); entry.kind == tuiTreeEntryNode {
+		headerSegments = append(headerSegments,
+			vaxis.Segment{Text: "  Node: " + entry.node.Slug},
+			vaxis.Segment{Text: "  Mode: " + nodeWorkspaceMode(entry.node)},
+		)
+	}
+	window.Println(0, headerSegments...)
 
 	bodyTop := 1
 	bodyHeight := height - bodyTop - 1
@@ -2048,17 +1951,14 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		}
 		row++
 		win.Println(row, vaxis.Segment{Text: "Create nodes, assign reusable environment configs, manage direct environment commands, update the project binding, or delete the project from the tree view.", Style: mutedStyle})
-		row += 2
-		for _, patch := range a.relatedPatches(entry.project.ID) {
-			win.Println(row, vaxis.Segment{Text: patchSummary(patch), Style: mutedStyle})
-			row++
-		}
 	case tuiTreeEntryNode:
 		win.Println(row, vaxis.Segment{Text: "Node controls", Style: headerStyle})
 		row++
 		win.Println(row, vaxis.Segment{Text: "Slug: " + entry.node.Slug})
 		row++
 		win.Println(row, vaxis.Segment{Text: "Status: " + nodeVMStatus(entry.node)})
+		row++
+		win.Println(row, vaxis.Segment{Text: "Workspace mode: " + nodeWorkspaceMode(entry.node)})
 		row++
 		if workspace := nodeWorkspacePath(entry.node); workspace != "" {
 			a.printLinkifiedLine(win, row, "Workspace: "+workspace, vaxis.Style{})
@@ -2067,14 +1967,8 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		row++
 		if nodeAutoStartsSession(entry.node) {
 			win.Println(row, vaxis.Segment{Text: "Node is running. Press Alt-` to focus its terminal session.", Style: mutedStyle})
-			row += 2
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session.", Style: mutedStyle})
-			row += 2
-		}
-		for _, patch := range a.relatedPatches(entry.project.ID) {
-			win.Println(row, vaxis.Segment{Text: patchSummary(patch), Style: mutedStyle})
-			row++
 		}
 	default:
 		win.Println(0, vaxis.Segment{Text: "Press [a] to create a project or select a project or node in the tree.", Style: mutedStyle})
@@ -2141,26 +2035,6 @@ func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
 	}
 	parts = append(parts, "q quit")
 	return strings.Join(parts, "   ")
-}
-
-func (a *vaxisTUIApp) relatedPatches(projectID string) []PatchProposal {
-	if projectID == "" {
-		return nil
-	}
-
-	related := make([]PatchProposal, 0, 4)
-	for index := len(a.patches) - 1; index >= 0 && len(related) < 4; index-- {
-		patch := a.patches[index]
-		if patch.SourceProjectID != projectID && patch.TargetProjectID != projectID {
-			continue
-		}
-		related = append(related, patch)
-	}
-	return related
-}
-
-func patchSummary(patch PatchProposal) string {
-	return patch.ID + "  " + patch.Status + "  " + patch.Direction
 }
 
 func tuiEntryLabel(entry tuiTreeEntry) string {

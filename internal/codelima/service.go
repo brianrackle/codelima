@@ -55,12 +55,13 @@ type ProjectForkInput struct {
 }
 
 type NodeCreateInput struct {
-	Project      string
-	Slug         string
-	Runtime      string
-	Provider     string
-	AgentProfile string
-	Resources    Resources
+	Project       string
+	Slug          string
+	Runtime       string
+	Provider      string
+	AgentProfile  string
+	WorkspaceMode string
+	Resources     Resources
 }
 
 type NodeCloneInput struct {
@@ -684,6 +685,11 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
+	workspaceMode := normalizeWorkspaceMode(input.WorkspaceMode)
+	if workspaceMode == "" {
+		return Node{}, invalidArgument("workspace mode must be copy or mounted", map[string]any{"workspace_mode": input.WorkspaceMode})
+	}
+
 	projectCommands, err := s.resolveProjectEnvironmentCommands(project)
 	if err != nil {
 		return Node{}, err
@@ -711,9 +717,17 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		Completed:         false,
 	}
 
-	template, err := s.renderTemplate(ctx, project, resources, bootstrap)
+	template, err := s.renderTemplate(ctx, project, resources, bootstrap, workspaceMode)
 	if err != nil {
 		return Node{}, err
+	}
+
+	guestWorkspacePath := project.WorkspacePath
+	workspaceMountPath := ""
+	workspaceSeeded := false
+	if workspaceMode == WorkspaceModeMounted {
+		guestWorkspacePath = ""
+		workspaceMountPath = project.WorkspacePath
 	}
 
 	node := Node{
@@ -728,8 +742,10 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		AgentProfileName:      profileName,
 		BootstrapCommands:     bootstrap.CombinedCommands(),
 		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		GuestWorkspacePath:    project.WorkspacePath,
-		WorkspaceSeeded:       false,
+		WorkspaceMode:         workspaceMode,
+		GuestWorkspacePath:    guestWorkspacePath,
+		WorkspaceMountPath:    workspaceMountPath,
+		WorkspaceSeeded:       workspaceSeeded,
 		BootstrapCompleted:    false,
 		CreatedAt:             s.now(),
 		UpdatedAt:             s.now(),
@@ -1062,7 +1078,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	bootstrap.SetupCommands = append([]string(nil), sourceBootstrap.SetupCommands...)
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
-	template, err := s.renderTemplate(ctx, sourceProject, resources, bootstrap)
+	template, err := s.renderTemplate(ctx, sourceProject, resources, bootstrap, nodeWorkspaceMode(sourceNode))
 	if err != nil {
 		return Node{}, err
 	}
@@ -1080,7 +1096,9 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		AgentProfileName:      sourceNode.AgentProfileName,
 		BootstrapCommands:     append([]string(nil), sourceNode.BootstrapCommands...),
 		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		GuestWorkspacePath:    s.nodeGuestWorkspacePath(sourceNode),
+		WorkspaceMode:         nodeWorkspaceMode(sourceNode),
+		GuestWorkspacePath:    sourceNode.GuestWorkspacePath,
+		WorkspaceMountPath:    sourceNode.WorkspaceMountPath,
 		WorkspaceSeeded:       sourceNode.WorkspaceSeeded,
 		BootstrapCompleted:    bootstrap.Completed,
 		BootstrapCompletedAt:  bootstrap.CompletedAt,
@@ -1619,7 +1637,7 @@ func (s *Service) generateInstanceName(projectSlug, nodeSlug, nodeID string) (st
 	return instanceName, nil
 }
 
-func (s *Service) renderTemplate(ctx context.Context, project Project, resources Resources, bootstrap BootstrapState) ([]byte, error) {
+func (s *Service) renderTemplate(ctx context.Context, project Project, resources Resources, bootstrap BootstrapState, workspaceMode string) ([]byte, error) {
 	rawTemplate, err := s.lima.BaseTemplate(ctx, project.DefaultLimaTemplate)
 	if err != nil {
 		return nil, err
@@ -1633,7 +1651,7 @@ func (s *Service) renderTemplate(ctx context.Context, project Project, resources
 	document["cpus"] = resources.CPUs
 	document["memory"] = fmt.Sprintf("%dGiB", resources.MemoryGiB)
 	document["disk"] = fmt.Sprintf("%dGiB", resources.DiskGiB)
-	document["mounts"] = []map[string]any{}
+	document["mounts"] = renderWorkspaceMounts(project.WorkspacePath, workspaceMode)
 
 	templateBytes, err := yaml.Marshal(document)
 	if err != nil {
@@ -1659,6 +1677,10 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, node Node) error {
 	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
 		return err
+	}
+
+	if nodeWorkspaceMode(node) == WorkspaceModeMounted {
+		return nil
 	}
 
 	return s.seedGuestWorkspace(ctx, project, node)
@@ -1715,6 +1737,41 @@ func (s *Service) nodeGuestWorkspacePath(node Node) string {
 	}
 
 	return project.WorkspacePath
+}
+
+func normalizeWorkspaceMode(mode string) string {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case "", WorkspaceModeCopy:
+		return WorkspaceModeCopy
+	case WorkspaceModeMounted:
+		return WorkspaceModeMounted
+	default:
+		return ""
+	}
+}
+
+func nodeWorkspaceMode(node Node) string {
+	if mode := normalizeWorkspaceMode(node.WorkspaceMode); mode != "" {
+		return mode
+	}
+	if node.WorkspaceMountPath != "" {
+		return WorkspaceModeMounted
+	}
+	return WorkspaceModeCopy
+}
+
+func renderWorkspaceMounts(workspacePath, workspaceMode string) []map[string]any {
+	if normalizeWorkspaceMode(workspaceMode) != WorkspaceModeMounted || strings.TrimSpace(workspacePath) == "" {
+		return []map[string]any{}
+	}
+
+	return []map[string]any{
+		{
+			"location":   workspacePath,
+			"mountPoint": workspacePath,
+			"writable":   true,
+		},
+	}
 }
 
 func (s *Service) resolveProjectWorkspacePath(input string, currentProjectID string) (string, error) {

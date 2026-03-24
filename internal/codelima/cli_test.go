@@ -71,12 +71,14 @@ func TestWriteSuccessRendersNodeListAsTableUsingGuestWorkspacePath(t *testing.T)
 	for _, expected := range []string{
 		"slug",
 		"uuid",
+		"workspace_mode",
 		"workspace_path",
 		"runtime",
 		"vm_status",
 		"agent",
 		"design",
 		"node-uuid",
+		WorkspaceModeCopy,
 		"/guest/workspace",
 		RuntimeVM,
 		"running",
@@ -101,6 +103,7 @@ func TestWriteSuccessRendersNodeListAsTableUsingMountWorkspaceFallback(t *testin
 		{
 			ID:                 "node-uuid",
 			Slug:               "design",
+			WorkspaceMode:      WorkspaceModeMounted,
 			WorkspaceMountPath: "/host/workspace",
 			Runtime:            RuntimeVM,
 			Status:             NodeStatusCreated,
@@ -111,6 +114,9 @@ func TestWriteSuccessRendersNodeListAsTableUsingMountWorkspaceFallback(t *testin
 	output := stdout.String()
 	if !strings.Contains(output, "/host/workspace") {
 		t.Fatalf("expected output to fall back to workspace mount path, got %q", output)
+	}
+	if !strings.Contains(output, WorkspaceModeMounted) {
+		t.Fatalf("expected output to include mounted workspace mode, got %q", output)
 	}
 
 	if !strings.Contains(output, NodeStatusCreated) {
@@ -138,6 +144,9 @@ func TestRunHelpPrintsUsageAndExitsSuccess(t *testing.T) {
 	}
 	if !strings.Contains(output, "node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell") {
 		t.Fatalf("expected help output to include the incomplete-node cleanup command, got %q", output)
+	}
+	if strings.Contains(output, "patch propose|list|show|approve|apply|reject") {
+		t.Fatalf("expected help output to omit patch commands, got %q", output)
 	}
 	if !strings.Contains(output, "Running with no command opens the TUI.") {
 		t.Fatalf("expected help output to describe the default TUI launch, got %q", output)
@@ -219,5 +228,50 @@ func TestDispatchNodeCleanupIncompleteParsesApplyFlag(t *testing.T) {
 	}
 	if exists(partialDir) {
 		t.Fatalf("expected apply dispatch to remove partial directory")
+	}
+}
+
+func TestDispatchNodeCreateParsesWorkspaceMode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	value, err := dispatchNode(ctx, service, []string{
+		"create",
+		"--project", project.ID,
+		"--slug", "mounted-node",
+		"--workspace-mode", "mounted",
+	})
+	if err != nil {
+		t.Fatalf("dispatchNode(create) error = %v", err)
+	}
+
+	node, ok := value.(Node)
+	if !ok {
+		t.Fatalf("expected Node result, got %T", value)
+	}
+	if got := nodeWorkspaceMode(node); got != WorkspaceModeMounted {
+		t.Fatalf("expected mounted workspace mode, got %q", got)
+	}
+}
+
+func TestDispatchPatchCommandGroupIsRejected(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	if _, err := dispatch(ctx, service, []string{"patch", "list"}); err == nil {
+		t.Fatalf("expected dispatch(patch list) to fail")
 	}
 }

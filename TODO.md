@@ -182,3 +182,55 @@ Disadvantages:
 - Requires care around shared Lima client plumbing so progress streaming for real long-running operations still works.
 - May reveal other places where stdout/stderr routing is broader than intended.
 - Could require test doubles or refactoring around Lima readiness checks to isolate probe output cleanly.
+
+### 8. Fix the environment-config QA flow where updated config commands do not reach later node bootstrap verification
+
+Problem:
+
+- During the full `QA.md` rerun, the matrix repeatedly stopped in `Environment Config Verification` after `environment update qa-shared --env-command 'pwd >/dev/null'` and a later `node create --project qa-env-b --slug qa-env-b-node`.
+- The failure appears before the TUI-specific checks for the current task and is unrelated to the header/menu copy changes.
+- The likely fault is that the updated reusable environment config is not being reflected in the created node's resolved `bootstrap.json` as the QA flow expects.
+
+Suggested solution:
+
+- Trace the environment-config update and node bootstrap resolution path to confirm whether updated config commands replace the previous command list for future nodes.
+- Add a focused regression that updates a reusable environment config, creates a fresh node from a referencing project, and asserts the new command appears in that node's bootstrap state.
+- Fix either the environment-config persistence path or the project command resolution path so new nodes always receive the latest referenced config commands.
+
+Advantages:
+
+- Restores the documented `QA.md` environment-config verification flow.
+- Improves confidence that reusable configs behave predictably after updates.
+- Prevents stale bootstrap command sets from being baked into newly created nodes.
+
+Disadvantages:
+
+- May require refactoring around config update semantics versus append/replace semantics.
+- Could surface compatibility assumptions in current tests or user workflows.
+- Needs real Lima-backed verification because the issue appears in the full end-to-end flow rather than only unit tests.
+
+### 9. Design and implement a replacement for the removed patch-based file return flow
+
+Problem:
+
+- The user-facing patch proposal and apply workflow has been removed from the CLI and TUI.
+- There is no replacement yet for moving file changes from VM-local copied workspaces back to the host when `workspace_mode=copy`.
+- Users still need a deliberate path for synchronizing guest-side edits back to the host without switching every node to `mounted`.
+
+Suggested solution:
+
+- Design a new explicit export or sync flow for copied-workspace nodes that does not depend on lineage patch proposals.
+- Decide whether that replacement should be node-scoped, project-scoped, or workspace-scoped, and whether it should sync whole trees or a selected diff.
+- Once the product direction is settled, remove or rework the remaining internal patch implementation to match the new transfer model.
+
+Advantages:
+
+- Replaces the removed feature with a clearer workflow that better matches the copy-versus-mounted workspace model.
+- Avoids preserving an outdated patch UX while the new file-return model is being designed.
+- Creates a cleaner boundary between project lineage management and workspace synchronization.
+
+Disadvantages:
+
+- Users in copy mode temporarily lose any built-in way to push guest-side changes back to the host.
+- The final solution may require larger storage and workflow changes than the removed patch surface.
+- Deferring the replacement leaves unused internal patch code in the codebase for now.

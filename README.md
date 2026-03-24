@@ -11,13 +11,12 @@ brew install codelima
 
 The Homebrew formula installs the packaged `codelima` binary plus the bundled `libghostty-vt` runtime library, and declares `git` and `lima` as runtime dependencies.
 
-`CodeLima` is a Go CLI for managing lineage-aware projects, Lima-backed nodes, patch flows, and a shell-first TUI.
+`CodeLima` is a Go CLI for managing lineage-aware projects, Lima-backed nodes, and a shell-first TUI.
 
 The CLI manages:
 
 - projects and immutable workspace snapshots under `CODELIMA_HOME`
 - Lima-backed nodes delegated through `limactl`
-- bidirectional patch proposals along direct project lineage edges
 - a canonical shell surface that passes through to `limactl shell`
 - a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
 
@@ -66,13 +65,12 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 ### Capabilities
 
 - register host workspaces as lineage-aware projects
-- capture immutable snapshots on demand for fork and patch workflows
-- create, start, stop, clone, inspect, and delete Lima-backed nodes
+- capture immutable snapshots on demand for lineage-aware project workflows
+- create, start, stop, clone, inspect, and delete Lima-backed nodes, choosing either an isolated copied workspace or a writable mounted workspace per node
 - detect and clean up incomplete node metadata directories left by failed node creation attempts
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - browse the project tree, manage selected projects and nodes, and jump between preserved per-node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
-- propose, approve, apply, reject, and inspect patches across direct project lineage edges
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
 
@@ -96,7 +94,7 @@ Useful global flags:
 - `--json` returns structured output for automation
 - `--log-level LEVEL` reserves a verbosity setting for future CLI logging
 
-`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `vm_status` so the live VM state is visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
+`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `workspace_mode` and `vm_status` so both the workspace binding strategy and live VM state are visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
 
 ### Typical Workflow
 
@@ -155,9 +153,15 @@ codelima project update root --clear-env-commands
 
 ```sh
 codelima node create --project root --slug root-node
+codelima node create --project root --slug root-mounted --workspace-mode mounted
 codelima node start root-node
 codelima node status root-node
 ```
+
+`node create` supports two workspace modes:
+
+- `copy` is the default. On first start, CodeLima copies the host workspace into the VM at the same absolute path and keeps later guest edits isolated inside the VM.
+- `mounted` mounts the host workspace writable into the VM at the same absolute path, so guest edits are reflected in the host workspace immediately.
 
 4. Open a shell or run a one-off command inside the node.
 
@@ -173,7 +177,7 @@ codelima
 ```
 
 Inside the TUI, selecting a node auto-switches the visible terminal. `Alt-\`` toggles between the tree view and a terminal-focused full-width shell for the selected running node. Clicking the tree moves focus back to the tree and restores the split view without destroying the shell session.
-Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. Selecting a node exposes node actions: start or stop it, delete it, clone it into another node in the same project, or open patch operations. Non-running nodes stay selectable so you can manage them before opening a shell session.
+Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. The create-node dialog now lets you choose between a copied workspace and a writable mounted workspace for the new node. Selecting a node exposes node actions: start or stop it, delete it, or clone it into another node in the same project. Non-running nodes stay selectable so you can manage them before opening a shell session.
 Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty. Fresh homes already include `codex` and `claude-code` in those selectors. The project create and update dialogs use an environment-config selector instead of asking you to type config slugs, and `[g]` manage config opens a selector before the config command menu. Creating a reusable config now drops directly into the same command editor used for later edits, so you can add, remove, confirm, and reorder commands without retyping numbered positions.
 Project create and update save only project metadata, while long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, a plain left-button drag copies the currently visible terminal text to the host clipboard when the guest is not actively capturing the mouse, and `Shift`-drag forces that local copy behavior even when an application such as Vim has enabled mouse handling. The mouse wheel scrolls local terminal scrollback when the guest is not actively capturing the mouse, and falls through to the guest when mouse tracking or alternate-screen scroll handling is enabled.
 
@@ -181,11 +185,11 @@ The tree is keyboard and mouse driven. In tree focus, the footer mirrors the cur
 
 - global tree actions: `[a]` add project, `[g]` manage reusable environment configs
 - project actions: `[n]` create node, `[e]` manage environment commands and config refs, `[u]` update project, `[x]` delete project
-- node actions: `[s]` start or stop node, `[d]` delete node, `[c]` clone node, `[p]` patch operations
+- node actions: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
 
-On first start, CodeLima copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
+In the default `copy` mode, the first successful start copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
 
-`node create` and the first `node start` still require the registered host workspace to exist so the guest copy can be seeded. After that seed is in place, `shell` and later restarts use the guest-local copy without re-mounting the host workspace. Rebind the project before creating a replacement node from a moved host workspace:
+In `mounted` mode, CodeLima mounts the host workspace writable into the VM instead of copying it, so guest-side edits are immediately reflected on the host. `node create` and the first `node start` still require the registered host workspace to exist. Rebind the project before creating a replacement node from a moved host workspace:
 
 ```sh
 codelima node delete root-node
@@ -207,15 +211,7 @@ codelima node create --project child --slug child-node
 codelima node clone root-node --node-slug root-node-clone
 ```
 
-`node clone` copies the source VM at the Lima layer. If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project and keeps the same guest workspace path and bootstrap state as the source VM.
-
-7. Move changes back across the lineage with a patch proposal.
-
-```sh
-codelima patch propose --source child --target root
-codelima patch approve <patch-id> --actor you
-codelima patch apply <patch-id>
-```
+`node clone` copies the source VM at the Lima layer. If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project and keeps the same workspace mode, workspace path binding, and bootstrap state as the source VM.
 
 ### Useful Examples
 
@@ -254,14 +250,6 @@ codelima node start child-node
 codelima node clone child-node --node-slug grandchild-node
 codelima project tree
 codelima node list
-```
-
-Review a patch without applying it:
-
-```sh
-codelima patch list
-codelima patch show <patch-id>
-codelima patch reject <patch-id> --actor you --note "needs more work"
 ```
 
 Rebind a project after moving its workspace on the host:
@@ -379,7 +367,6 @@ By default the CLI stores metadata in `~/.codelima`:
   _index/
   projects/
   nodes/
-  patches/
 ```
 
 Override the location with `--home` or `CODELIMA_HOME`.

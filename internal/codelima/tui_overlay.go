@@ -67,6 +67,17 @@ func newTUISelectorField(key, label, value string, required bool, activate func(
 	}
 }
 
+func newTUIValueSelectorField(key, label, value string, required bool, display func(string) string, activate func() error) tuiDialogField {
+	return tuiDialogField{
+		Key:      key,
+		Label:    label,
+		Required: required,
+		Value:    value,
+		Display:  display,
+		Activate: activate,
+	}
+}
+
 func (f *tuiDialogField) rawValue() string {
 	if f.Input != nil {
 		return strings.TrimSpace(f.Input.String())

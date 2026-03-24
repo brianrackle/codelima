@@ -319,6 +319,71 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 	}
 }
 
+func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+		SetupCommands: []string{"./script/setup"},
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project:       project.ID,
+		Slug:          "mounted-node",
+		WorkspaceMode: WorkspaceModeMounted,
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if got := nodeWorkspaceMode(node); got != WorkspaceModeMounted {
+		t.Fatalf("expected mounted workspace mode, got %q", got)
+	}
+	if node.WorkspaceMountPath != workspace {
+		t.Fatalf("expected workspace mount path %q, got %q", workspace, node.WorkspaceMountPath)
+	}
+	if node.GuestWorkspacePath != "" {
+		t.Fatalf("expected mounted node guest workspace path to be empty, got %q", node.GuestWorkspacePath)
+	}
+
+	templateBytes, err := os.ReadFile(node.GeneratedTemplatePath)
+	if err != nil {
+		t.Fatalf("ReadFile(template) error = %v", err)
+	}
+
+	templateText := string(templateBytes)
+	if !strings.Contains(templateText, "location: "+workspace) {
+		t.Fatalf("expected generated template to mount host workspace, got %s", templateText)
+	}
+	if !strings.Contains(templateText, "mountPoint: "+workspace) {
+		t.Fatalf("expected generated template to mount at the host path, got %s", templateText)
+	}
+	if !strings.Contains(templateText, "writable: true") {
+		t.Fatalf("expected generated template to use a writable mount, got %s", templateText)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	if !node.WorkspaceSeeded {
+		t.Fatalf("expected mounted node start to mark workspace prepared")
+	}
+	if containsSubstring(service.lima.(*fakeLima).calls, "copy:"+node.LimaInstanceName+":") {
+		t.Fatalf("expected mounted node to skip workspace copy, calls = %v", service.lima.(*fakeLima).calls)
+	}
+}
+
 func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
 	t.Parallel()
 
@@ -575,6 +640,49 @@ func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 	}
 	if len(projects) != 1 {
 		t.Fatalf("expected clone to keep a single project, got %d", len(projects))
+	}
+}
+
+func TestNodeClonePreservesMountedWorkspaceMode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project:       project.ID,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeMounted,
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: node.ID,
+		NodeSlug:   "child-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeClone() error = %v", err)
+	}
+
+	if got := nodeWorkspaceMode(childNode); got != WorkspaceModeMounted {
+		t.Fatalf("expected cloned node workspace mode mounted, got %q", got)
+	}
+	if childNode.WorkspaceMountPath != workspace {
+		t.Fatalf("expected child node mount path %q, got %q", workspace, childNode.WorkspaceMountPath)
+	}
+	if childNode.GuestWorkspacePath != "" {
+		t.Fatalf("expected cloned mounted node to keep empty guest workspace path, got %q", childNode.GuestWorkspacePath)
 	}
 }
 

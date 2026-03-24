@@ -14,6 +14,9 @@ const (
 	ProviderLima   = "lima"
 	ProviderColima = "colima"
 
+	WorkspaceModeCopy    = "copy"
+	WorkspaceModeMounted = "mounted"
+
 	NodeStatusCreated      = "created"
 	NodeStatusProvisioning = "provisioning"
 	NodeStatusRegistering  = "registering"
@@ -104,6 +107,7 @@ type Node struct {
 	AgentProfileName       string              `json:"agent_profile_name" yaml:"agent_profile_name"`
 	BootstrapCommands      []string            `json:"bootstrap_commands" yaml:"bootstrap_commands"`
 	GeneratedTemplatePath  string              `json:"generated_template_path" yaml:"generated_template_path"`
+	WorkspaceMode          string              `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
 	GuestWorkspacePath     string              `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
 	WorkspaceMountPath     string              `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
 	WorkspaceSeeded        bool                `json:"workspace_seeded" yaml:"workspace_seeded"`

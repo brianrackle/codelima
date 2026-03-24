@@ -110,8 +110,6 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 		return dispatchProject(ctx, service, args[1:])
 	case "node":
 		return dispatchNode(ctx, service, args[1:])
-	case "patch":
-		return dispatchPatch(ctx, service, args[1:])
 	case "shell":
 		return dispatchShell(ctx, service, args[1:])
 	default:
@@ -367,6 +365,7 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		flags.SetOutput(io.Discard)
 		project := flags.String("project", "", "")
 		slug := flags.String("slug", "", "")
+		workspaceMode := flags.String("workspace-mode", WorkspaceModeCopy, "")
 		runtime := flags.String("runtime", RuntimeVM, "")
 		provider := flags.String("provider", ProviderLima, "")
 		agentProfile := flags.String("agent-profile", "", "")
@@ -380,12 +379,13 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 			return nil, invalidArgument("--project is required", nil)
 		}
 		return service.NodeCreate(ctx, NodeCreateInput{
-			Project:      *project,
-			Slug:         *slug,
-			Runtime:      *runtime,
-			Provider:     *provider,
-			AgentProfile: *agentProfile,
-			Resources:    Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
+			Project:       *project,
+			Slug:          *slug,
+			Runtime:       *runtime,
+			Provider:      *provider,
+			AgentProfile:  *agentProfile,
+			WorkspaceMode: *workspaceMode,
+			Resources:     Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
 		})
 	case "list":
 		flags := flag.NewFlagSet("node list", flag.ContinueOnError)
@@ -477,100 +477,6 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 	}
 }
 
-func dispatchPatch(ctx context.Context, service *Service, args []string) (any, error) {
-	if len(args) == 0 {
-		return nil, invalidArgument("missing patch command", nil)
-	}
-
-	switch args[0] {
-	case "propose":
-		flags := flag.NewFlagSet("patch propose", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		sourceProject := flags.String("source", "", "")
-		sourceNode := flags.String("source-node", "", "")
-		targetProject := flags.String("target", "", "")
-		targetNode := flags.String("target-node", "", "")
-		if err := flags.Parse(args[1:]); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		if *sourceProject == "" || *targetProject == "" {
-			return nil, invalidArgument("--source and --target are required", nil)
-		}
-		return service.PatchPropose(ctx, PatchProposeInput{
-			SourceProject: *sourceProject,
-			SourceNode:    *sourceNode,
-			TargetProject: *targetProject,
-			TargetNode:    *targetNode,
-		})
-	case "list":
-		flags := flag.NewFlagSet("patch list", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		status := flags.String("status", "", "")
-		if err := flags.Parse(args[1:]); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		return service.PatchList(*status)
-	case "show":
-		if len(args) < 2 {
-			return nil, invalidArgument("patch show requires <patch>", nil)
-		}
-		proposal, events, err := service.PatchShow(args[1])
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"proposal": proposal, "events": events}, nil
-	case "approve":
-		flags := flag.NewFlagSet("patch approve", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		actor := flags.String("actor", "operator", "")
-		note := flags.String("note", "", "")
-		remaining := args[1:]
-		patchID := ""
-		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-			patchID = remaining[0]
-			remaining = remaining[1:]
-		}
-		if err := flags.Parse(remaining); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		if patchID == "" && flags.NArg() > 0 {
-			patchID = flags.Arg(0)
-		}
-		if patchID == "" {
-			return nil, invalidArgument("patch approve requires <patch>", nil)
-		}
-		return service.PatchApprove(patchID, *actor, *note)
-	case "apply":
-		if len(args) < 2 {
-			return nil, invalidArgument("patch apply requires <patch>", nil)
-		}
-		return service.PatchApply(ctx, args[1])
-	case "reject":
-		flags := flag.NewFlagSet("patch reject", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		actor := flags.String("actor", "operator", "")
-		note := flags.String("note", "", "")
-		remaining := args[1:]
-		patchID := ""
-		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-			patchID = remaining[0]
-			remaining = remaining[1:]
-		}
-		if err := flags.Parse(remaining); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		if patchID == "" && flags.NArg() > 0 {
-			patchID = flags.Arg(0)
-		}
-		if patchID == "" {
-			return nil, invalidArgument("patch reject requires <patch>", nil)
-		}
-		return service.PatchReject(patchID, *actor, *note)
-	default:
-		return nil, invalidArgument("unknown patch command", map[string]any{"command": args[0]})
-	}
-}
-
 func dispatchShell(ctx context.Context, service *Service, args []string) (any, error) {
 	if len(args) < 1 {
 		return nil, invalidArgument("shell requires <node>", nil)
@@ -653,6 +559,7 @@ func renderNodeList(nodes []Node) string {
 		rows = append(rows, []string{
 			node.Slug,
 			node.ID,
+			nodeWorkspaceMode(node),
 			nodeWorkspacePath(node),
 			node.Runtime,
 			nodeVMStatus(node),
@@ -660,7 +567,7 @@ func renderNodeList(nodes []Node) string {
 		})
 	}
 
-	return renderTable([]string{"slug", "uuid", "workspace_path", "runtime", "vm_status", "agent"}, rows)
+	return renderTable([]string{"slug", "uuid", "workspace_mode", "workspace_path", "runtime", "vm_status", "agent"}, rows)
 }
 
 func renderEnvironmentConfigList(configs []EnvironmentConfig) string {
@@ -791,7 +698,6 @@ Groups:
   environment create|list|show|update|delete
   project create|list|show|update|delete|tree|fork
   node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
-  patch propose|list|show|approve|apply|reject
   shell <node> [-- command...]
 
 Running with no command opens the TUI.

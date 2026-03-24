@@ -42,7 +42,6 @@ const (
 	tuiActionNodeStop                tuiActionID = "node.stop"
 	tuiActionNodeDelete              tuiActionID = "node.delete"
 	tuiActionNodeClone               tuiActionID = "node.clone"
-	tuiActionNodePatch               tuiActionID = "node.patch"
 )
 
 type tuiActionSpec struct {
@@ -478,7 +477,6 @@ func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
 		actions = append(actions,
 			tuiActionSpec{ID: tuiActionNodeDelete, Label: "Delete Node", Hotkey: 'd'},
 			tuiActionSpec{ID: tuiActionNodeClone, Label: "Clone Node", Hotkey: 'c'},
-			tuiActionSpec{ID: tuiActionNodePatch, Label: "Patch Ops", Hotkey: 'p'},
 		)
 		return actions
 	default:

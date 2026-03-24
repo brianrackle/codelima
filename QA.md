@@ -37,8 +37,8 @@ Expected result:
 
 - `project list` prints a table with the columns `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`
 - the `project list` row includes `qa-list`, `$ROOT_DIR/test-project-dir`, `vm`, and `codex-cli`
-- `node list` prints a table with the columns `slug`, `uuid`, `workspace_path`, `runtime`, `vm_status`, and `agent`
-- the `node list` row includes `qa-list-node`, `$ROOT_DIR/test-project-dir`, `vm`, `created`, and `codex-cli`
+- `node list` prints a table with the columns `slug`, `uuid`, `workspace_mode`, `workspace_path`, `runtime`, `vm_status`, and `agent`
+- the `node list` row includes `qa-list-node`, `copy`, `$ROOT_DIR/test-project-dir`, `vm`, `created`, and `codex-cli`
 
 Start the node and verify the VM status updates:
 
@@ -265,6 +265,79 @@ Cleanup:
 rm -rf "$WORK_ROOT"
 ```
 
+## Workspace Mode Verification
+
+This flow verifies that node creation supports both isolated copied workspaces and writable mounted workspaces, and that each mode behaves as documented.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-workspace-mode"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+```
+
+Create one default copy-mode node and one mounted node:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-workspace --workspace "$ROOT_DIR/test-project-dir" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-workspace --slug qa-copy-node
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-workspace --slug qa-mounted-node --workspace-mode mounted
+./bin/codelima --home "$CODELIMA_HOME" node list
+./bin/codelima --home "$CODELIMA_HOME" node show qa-copy-node
+./bin/codelima --home "$CODELIMA_HOME" node show qa-mounted-node
+```
+
+Expected result:
+
+- `node list` shows `qa-copy-node` with `workspace_mode` `copy`
+- `node list` shows `qa-mounted-node` with `workspace_mode` `mounted`
+- `node show qa-copy-node` includes `workspace_mode: copy` and `guest_workspace_path: $ROOT_DIR/test-project-dir`
+- `node show qa-mounted-node` includes `workspace_mode: mounted` and `workspace_mount_path: $ROOT_DIR/test-project-dir`
+
+Start the mounted node and verify guest edits immediately affect the host workspace:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node start qa-mounted-node
+./bin/codelima --home "$CODELIMA_HOME" shell qa-mounted-node -- sh -lc 'printf mounted > README.md'
+cat "$ROOT_DIR/test-project-dir/README.md"
+```
+
+Expected result:
+
+- `node start qa-mounted-node` succeeds
+- the final `cat` prints `mounted`
+
+Restore the host workspace, then start the copy-mode node and verify guest edits stay isolated:
+
+```sh
+printf 'hello\n' > "$ROOT_DIR/test-project-dir/README.md"
+./bin/codelima --home "$CODELIMA_HOME" node start qa-copy-node
+./bin/codelima --home "$CODELIMA_HOME" shell qa-copy-node -- sh -lc 'printf copied > README.md'
+cat "$ROOT_DIR/test-project-dir/README.md"
+```
+
+Expected result:
+
+- `node start qa-copy-node` succeeds
+- the final `cat` still prints `hello`
+
+Cleanup:
+
+```sh
+printf 'hello\n' > "$ROOT_DIR/test-project-dir/README.md"
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-copy-node
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-mounted-node
+rm -rf "$WORK_ROOT"
+```
+
 ## Environment Config Verification
 
 This flow verifies that reusable environment configs can be created once, assigned to multiple projects, resolved into new node bootstrap state, and removed only after projects stop referencing them.
@@ -372,7 +445,7 @@ CODELIMA_HOME="$WORK_ROOT/.codelima"
 cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
 ```
 
-Create one root project, a running node, and a forked child project for later patch verification:
+Create one root project, a running node, and a forked child project:
 
 ```sh
 ./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui --workspace "$WORK_ROOT/root" --env-command "./script/setup"
@@ -398,11 +471,12 @@ Inside the TUI verify:
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
 - with `qa-tui-extra` still selected, press `e`, add environment command `./script/setup`, remove it through the selector plus confirmation flow, add it again, and confirm the project environment menu stays open after each edit
 - with `qa-tui-extra` still selected, press `e` again, clear the environment commands, and confirm the right pane shows none configured
-- select project `qa-tui`, press `n`, create node `qa-tui-b`, and confirm the new node appears under the project without opening a shell session
+- select project `qa-tui`, press `n`, create node `qa-tui-b` with workspace mode `mounted`, and confirm the new node appears under the project without opening a shell session
+- with `qa-tui-b` selected, confirm the right pane shows `Workspace mode: mounted`
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
 - selecting `qa-tui-a` opens its shell session automatically
-- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, `[c] clone node`, and `[p] patch ops`, alongside `Alt-\`` shell focus
+- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` shell focus
 - `Alt-\`` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
 - use `Alt-\`` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
 - press `Alt-\`` again to return to the tree and confirm the split layout is restored
@@ -418,20 +492,6 @@ Inside the TUI verify:
 - refocus the `qa-tui-a` or `qa-tui-b` terminal, print an OSC 8 hyperlink such as `printf '\033]8;;https://example.com\033\\example\033]8;;\033\\\n'`, click the visible link text, and confirm the host opens it
 - in a focused node terminal, run `sudo apt-get install -y sl` and confirm the embedded terminal remains responsive past the `Reading database ...` progress output and returns to a prompt
 
-In a second host shell, create a host-side change in the forked child project:
-
-```sh
-printf 'qa patch\n' > "$WORK_ROOT/child/README.md"
-```
-
-Back in the TUI verify patch operations from the forked child node:
-
-- select `qa-tui-child-a`, press `p`, choose propose, target project `qa-tui-root`, and record the new patch ID shown in the status line or related patch list
-- press `p` again, choose approve, enter that patch ID, and confirm the patch status becomes `approved`
-- press `p` again, choose apply, enter that patch ID, and confirm the patch status becomes `applied`
-- in the second host shell, confirm `cat "$WORK_ROOT/root/README.md"` now prints `qa patch`
-- change the child project again in the second host shell with `printf 'qa reject\n' > "$WORK_ROOT/child/README.md"`
-- propose a second patch from `qa-tui-child-a` to `qa-tui-root`, then use `p` and reject on that second patch ID, and confirm the patch status becomes `rejected`
 - select `qa-tui-b-clone`, press `d`, delete the cloned node, and confirm it disappears from project `qa-tui-root`
 - select `qa-tui-child-a`, press `d`, delete the child node, then select project `qa-tui-child`, press `x`, and confirm the child project disappears from the tree
 - select `qa-tui-b`, press `d`, delete it, and confirm it disappears from the tree

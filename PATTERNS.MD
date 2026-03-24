@@ -2,7 +2,7 @@
 
 ## Filesystem Metadata Store
 
-The CLI treats `CODELIMA_HOME` as the authoritative store for projects, nodes, snapshots, patches, and indexes.
+The CLI treats `CODELIMA_HOME` as the authoritative store for projects, nodes, snapshots, and indexes.
 Every write goes through temp-file-plus-rename semantics so metadata stays recoverable after partial failures.
 
 ## Incomplete Metadata Recovery
@@ -17,8 +17,7 @@ Tests use a fake implementation to assert delegation behavior without creating r
 
 ## Snapshot Then Promote
 
-Fork and patch flows never mutate a target workspace before an immutable snapshot exists.
-Patch apply stages changes in a temporary tree, validates with `git apply --check`, then syncs managed files back into the live workspace.
+Fork flows never mutate a target workspace before an immutable snapshot exists.
 
 ## Bootstrap State Freeze
 
@@ -44,7 +43,7 @@ The preferred backend is Ghostty VT, with the older Vaxis terminal widget retain
 ## Contextual TUI Actions
 
 The TUI treats the tree selection as the context boundary for mutations.
-Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree and patch lists while preserving expansion state and the most relevant selection. In tree focus, the footer should mirror those currently available action hotkeys instead of showing generic placeholder copy, so the visible hints always match the keys the operator can press at that moment. Project-scoped environment commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry. Command removal uses selectors plus explicit confirmation instead of typed indexes, and command reordering is expressed as single-step move actions so order-sensitive bootstrap lists stay editable without freeform text parsing. When a dialog needs a reusable config reference, it opens a selector overlay instead of asking the operator to type slugs manually.
+Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree while preserving expansion state and the most relevant selection. In tree focus, the footer should mirror those currently available action hotkeys instead of showing generic placeholder copy, so the visible hints always match the keys the operator can press at that moment. Project-scoped environment commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry. Command removal uses selectors plus explicit confirmation instead of typed indexes, and command reordering is expressed as single-step move actions so order-sensitive bootstrap lists stay editable without freeform text parsing. When a dialog needs a reusable config reference, it opens a selector overlay instead of asking the operator to type slugs manually.
 
 ## Async Lima Progress In TUI
 
@@ -58,13 +57,18 @@ The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball i
 
 ## Guest Workspace Seed
 
-New nodes do not mount the host project workspace into the guest.
-Instead, the first successful start copies the host workspace into the guest at the same absolute path, which keeps guest edits isolated while preserving the expected path layout for project environment commands and shell entry.
+New nodes default to `copy` workspace mode.
+In that mode, the first successful start copies the host workspace into the guest at the same absolute path, which keeps guest edits isolated while preserving the expected path layout for project environment commands and shell entry.
+
+## Workspace Mode Per Node
+
+Node creation chooses the workspace binding strategy per node instead of per project.
+`copy` keeps the existing isolated guest copy behavior, while `mounted` renders a writable Lima mount at the same absolute path on host and guest and skips the guest copy step. Node metadata and clone behavior preserve that mode explicitly so later shell entry, details rendering, and cloned nodes do not need to infer it from current runtime state.
 
 ## Clone Is VM Copy
 
 Node clone uses `limactl clone` as a full-VM copy.
-If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project, keeps the same guest workspace path, and keeps the source VM's bootstrap state.
+If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project, keeps the same workspace mode and workspace path binding, and keeps the source VM's bootstrap state.
 
 ## Workspace Rebind Guard
 

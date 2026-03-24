@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -344,6 +343,9 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 	app.draw()
 
 	rendered := renderedScreenText(t, vx, 100, 24)
+	if !strings.Contains(rendered, "Project: root  Node: root-node  Mode: copy") {
+		t.Fatalf("expected rendered TUI header to include the node workspace mode, got:\n%s", rendered)
+	}
 	for _, unexpected := range []string{
 		"CodeLima TUI",
 		"Layout:",
@@ -362,6 +364,49 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 		if strings.Contains(rendered, unexpected) {
 			t.Fatalf("expected rendered TUI not to contain %q, got:\n%s", unexpected, rendered)
 		}
+	}
+}
+
+func TestTUIDrawProjectHeaderOmitsNodeAndModeWhenProjectSelected(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	selectTUIEntry(t, &vaxisTUIApp{state: state}, "project:project-root")
+
+	vx := newRenderTestVaxis(t, 100, 24)
+	defer vx.Close()
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		vx:       vx,
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: &fakeTUITerminal{
+			snapshot: "shell prompt",
+			termEnv:  tuiEmbeddedTermEnv,
+		},
+	}
+
+	app.draw()
+
+	rendered := renderedScreenText(t, vx, 100, 24)
+	if !strings.Contains(rendered, "Project: root") {
+		t.Fatalf("expected rendered TUI header to include the project, got:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Node:") || strings.Contains(rendered, "Mode:") {
+		t.Fatalf("expected rendered TUI header to omit node and mode when a project is selected, got:\n%s", rendered)
 	}
 }
 
@@ -430,7 +475,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "root-node", Status: NodeStatusRunning},
 	}
 	got = renderFooter(tuiFocusTree, runningNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   Alt-` shell focus   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   [p] patch ops   q quit" {
+	if got != "Up/Down move   Left/Right collapse   Alt-` shell focus   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected running-node footer with shell focus and node actions, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -442,7 +487,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "stopped-node", Status: NodeStatusStopped},
 	}
 	got = renderFooter(tuiFocusTree, stoppedNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   [p] patch ops   q quit" {
+	if got != "Up/Down move   Left/Right collapse   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected stopped-node footer without shell focus, got %q", got)
 	}
 
@@ -1354,7 +1399,7 @@ func TestTUIAvailableActionsDependOnSelectedEntry(t *testing.T) {
 		node: Node{Slug: "root-node", Status: NodeStatusRunning},
 	})
 
-	if got := actionIDs(runningNodeActions); got != "project.create,environment_config.manage,node.stop,node.delete,node.clone,node.patch" {
+	if got := actionIDs(runningNodeActions); got != "project.create,environment_config.manage,node.stop,node.delete,node.clone" {
 		t.Fatalf("unexpected running node action set: %s", got)
 	}
 
@@ -1363,7 +1408,7 @@ func TestTUIAvailableActionsDependOnSelectedEntry(t *testing.T) {
 		node: Node{Slug: "created-node", Status: NodeStatusCreated},
 	})
 
-	if got := actionIDs(createdNodeActions); got != "project.create,environment_config.manage,node.start,node.delete,node.clone,node.patch" {
+	if got := actionIDs(createdNodeActions); got != "project.create,environment_config.manage,node.start,node.delete,node.clone" {
 		t.Fatalf("unexpected created node action set: %s", got)
 	}
 }
@@ -1416,11 +1461,39 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	if app.dialog == nil || app.dialog.Title != "Create Node" {
 		t.Fatalf("expected create node dialog, got %#v", app.dialog)
 	}
-	submitTUIDialog(t, app, map[string]string{"slug": "root-node"})
+	if len(app.dialog.Description) != 1 || app.dialog.Description[0] != "Selected project: "+rootProject.Slug {
+		t.Fatalf("expected create node dialog to keep only the selected project context, got %#v", app.dialog.Description)
+	}
+	if len(app.dialog.Fields) != 2 {
+		t.Fatalf("expected create node dialog to prompt for slug and workspace mode, got %#v", app.dialog.Fields)
+	}
+	if err := app.dialog.Fields[1].Activate(); err != nil {
+		t.Fatalf("workspace mode selector activate error = %v", err)
+	}
+	if app.selector == nil || app.selector.Title != "Workspace Mode" {
+		t.Fatalf("expected workspace mode selector, got %#v", app.selector)
+	}
+	if len(app.selector.Description) != 0 {
+		t.Fatalf("expected workspace mode selector to rely on option labels without extra description, got %#v", app.selector.Description)
+	}
+	if len(app.selector.Options) != 2 {
+		t.Fatalf("expected two workspace mode options, got %#v", app.selector.Options)
+	}
+	app.selector = nil
+	submitTUIDialog(t, app, map[string]string{
+		"slug":           "root-node",
+		"workspace_mode": WorkspaceModeMounted,
+	})
 
 	rootNode, err := service.NodeShow(ctx, "root-node")
 	if err != nil {
 		t.Fatalf("NodeShow(root-node) error = %v", err)
+	}
+	if got := nodeWorkspaceMode(rootNode); got != WorkspaceModeMounted {
+		t.Fatalf("expected created node workspace mode mounted, got %q", got)
+	}
+	if rootNode.WorkspaceMountPath != workspace {
+		t.Fatalf("expected mounted workspace path %q, got %q", workspace, rootNode.WorkspaceMountPath)
 	}
 	if nodeAutoStartsSession(rootNode) {
 		t.Fatalf("expected newly created node to remain non-running, got status %q", rootNode.Status)
@@ -1580,6 +1653,11 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	if app.menu == nil || app.menu.Title != "Environment Configs" {
 		t.Fatalf("expected environment config menu, got %#v", app.menu)
 	}
+	for _, line := range app.menu.Description {
+		if strings.Contains(line, "Reusable environment command sets can be assigned to multiple projects.") {
+			t.Fatalf("expected environment config menu description to omit redundant copy, got %#v", app.menu.Description)
+		}
+	}
 	chooseTUIMenuEntry(t, app, "Create Config")
 	if app.dialog == nil || app.dialog.Title != "Create Environment Config" {
 		t.Fatalf("expected create environment config dialog, got %#v", app.dialog)
@@ -1590,6 +1668,11 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	submitTUIDialog(t, app, map[string]string{"slug": "shared-dev"})
 	if app.menu == nil || app.menu.Title != "Environment Config: shared-dev" {
 		t.Fatalf("expected command menu after create, got %#v", app.menu)
+	}
+	for _, line := range app.menu.Description {
+		if strings.Contains(line, "Commands in this config apply to new nodes for every project") {
+			t.Fatalf("expected environment config command menu to omit redundant copy, got %#v", app.menu.Description)
+		}
 	}
 	chooseTUIMenuEntry(t, app, "Add Command")
 	if app.dialog == nil || app.dialog.Title != "Add Environment Config Command" {
@@ -1649,6 +1732,11 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	}
 	if app.menu == nil || app.menu.Title != "Project Environment" {
 		t.Fatalf("expected project environment menu, got %#v", app.menu)
+	}
+	for _, entry := range app.menu.Entries {
+		if entry.Label == "Clear Configs" {
+			t.Fatalf("expected project environment menu to omit Clear Configs, got %#v", app.menu.Entries)
+		}
 	}
 	chooseTUIMenuEntry(t, app, "Set Configs")
 	if app.selector == nil || app.selector.Title != "Set Environment Configs" {
@@ -2058,166 +2146,6 @@ func TestTUINodeCloneLeavesProviderStartedCloneStoppedUntilExplicitStart(t *test
 	}
 }
 
-func TestTUINodePatchActionsProposeApproveApplyAndReject(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "file.txt"), "root\n")
-
-	rootProject, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate(root) error = %v", err)
-	}
-
-	childWorkspace := filepath.Join(t.TempDir(), "child")
-	childProject, err := service.ProjectFork(ctx, ProjectForkInput{
-		SourceProject: rootProject.ID,
-		Slug:          "child",
-		WorkspacePath: childWorkspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectFork(child) error = %v", err)
-	}
-
-	rootNode, err := service.NodeCreate(ctx, NodeCreateInput{Project: rootProject.ID, Slug: "root-node"})
-	if err != nil {
-		t.Fatalf("NodeCreate(root-node) error = %v", err)
-	}
-	childNode, err := service.NodeCreate(ctx, NodeCreateInput{Project: childProject.ID, Slug: "child-node"})
-	if err != nil {
-		t.Fatalf("NodeCreate(child-node) error = %v", err)
-	}
-
-	writeFile(t, filepath.Join(childWorkspace, "file.txt"), "child change\n")
-
-	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
-	selectTUIEntry(t, app, "node:"+childNode.ID)
-
-	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
-		t.Fatalf("performAction(patch menu) error = %v", err)
-	}
-	if app.menu == nil || app.menu.Title != "Patch Operations" {
-		t.Fatalf("expected patch operations menu, got %#v", app.menu)
-	}
-	chooseTUIMenuEntry(t, app, "Propose Patch")
-	if app.dialog == nil || app.dialog.Title != "Propose Patch" {
-		t.Fatalf("expected propose patch dialog, got %#v", app.dialog)
-	}
-	submitTUIDialog(t, app, map[string]string{
-		"target_project": rootProject.Slug,
-		"target_node":    rootNode.Slug,
-	})
-
-	patches, err := service.PatchList("")
-	if err != nil {
-		t.Fatalf("PatchList() after propose error = %v", err)
-	}
-	if len(patches) != 1 {
-		t.Fatalf("expected one patch after proposal, got %d", len(patches))
-	}
-	firstPatch := patches[0]
-	if firstPatch.Status != PatchStatusSubmitted {
-		t.Fatalf("expected submitted patch status, got %q", firstPatch.Status)
-	}
-	if firstPatch.SourceNodeID != childNode.ID || firstPatch.TargetNodeID != rootNode.ID {
-		t.Fatalf("expected patch to track child->root nodes, got source=%q target=%q", firstPatch.SourceNodeID, firstPatch.TargetNodeID)
-	}
-
-	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
-		t.Fatalf("performAction(patch menu approve) error = %v", err)
-	}
-	chooseTUIMenuEntry(t, app, "Approve Patch")
-	submitTUIDialog(t, app, map[string]string{
-		"patch_id": firstPatch.ID,
-		"actor":    "tui-test",
-		"note":     "ready",
-	})
-
-	approvedPatch, _, err := service.PatchShow(firstPatch.ID)
-	if err != nil {
-		t.Fatalf("PatchShow(approved) error = %v", err)
-	}
-	if approvedPatch.Status != PatchStatusApproved {
-		t.Fatalf("expected approved patch status, got %q", approvedPatch.Status)
-	}
-
-	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
-		t.Fatalf("performAction(patch menu apply) error = %v", err)
-	}
-	chooseTUIMenuEntry(t, app, "Apply Patch")
-	submitTUIDialog(t, app, map[string]string{
-		"patch_id": firstPatch.ID,
-	})
-
-	appliedPatch, _, err := service.PatchShow(firstPatch.ID)
-	if err != nil {
-		t.Fatalf("PatchShow(applied) error = %v", err)
-	}
-	if appliedPatch.Status != PatchStatusApplied {
-		t.Fatalf("expected applied patch status, got %q", appliedPatch.Status)
-	}
-
-	rootContents, err := os.ReadFile(filepath.Join(workspace, "file.txt"))
-	if err != nil {
-		t.Fatalf("ReadFile(root file) error = %v", err)
-	}
-	if string(rootContents) != "child change\n" {
-		t.Fatalf("expected root workspace to receive applied patch, got %q", string(rootContents))
-	}
-
-	writeFile(t, filepath.Join(childWorkspace, "file.txt"), "rejected change\n")
-
-	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
-		t.Fatalf("performAction(patch menu repropose) error = %v", err)
-	}
-	chooseTUIMenuEntry(t, app, "Propose Patch")
-	submitTUIDialog(t, app, map[string]string{
-		"target_project": rootProject.Slug,
-		"target_node":    rootNode.Slug,
-	})
-
-	patches, err = service.PatchList("")
-	if err != nil {
-		t.Fatalf("PatchList() after repropose error = %v", err)
-	}
-	if len(patches) != 2 {
-		t.Fatalf("expected two patches after reproposal, got %d", len(patches))
-	}
-
-	var secondPatch PatchProposal
-	for _, patch := range patches {
-		if patch.ID != firstPatch.ID {
-			secondPatch = patch
-			break
-		}
-	}
-	if secondPatch.ID == "" {
-		t.Fatalf("expected to find a second patch proposal")
-	}
-
-	if err := app.performAction(tuiActionSpec{ID: tuiActionNodePatch}); err != nil {
-		t.Fatalf("performAction(patch menu reject) error = %v", err)
-	}
-	chooseTUIMenuEntry(t, app, "Reject Patch")
-	submitTUIDialog(t, app, map[string]string{
-		"patch_id": secondPatch.ID,
-		"actor":    "tui-test",
-		"note":     "not yet",
-	})
-
-	rejectedPatch, _, err := service.PatchShow(secondPatch.ID)
-	if err != nil {
-		t.Fatalf("PatchShow(rejected) error = %v", err)
-	}
-	if rejectedPatch.Status != PatchStatusRejected {
-		t.Fatalf("expected rejected patch status, got %q", rejectedPatch.Status)
-	}
-}
-
 func testTUITree(t *testing.T) []ProjectTreeNode {
 	t.Helper()
 
@@ -2328,9 +2256,6 @@ func newTestTUIApp(t *testing.T, ctx context.Context, service *Service, sessions
 		service:  service,
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
-	}
-	if err := app.reloadPatches(); err != nil {
-		t.Fatalf("reloadPatches() error = %v", err)
 	}
 
 	return app
