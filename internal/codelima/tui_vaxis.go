@@ -2125,15 +2125,22 @@ func drawTerminalPane(win vaxis.Window, style vaxis.Style) vaxis.Window {
 
 func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		return "Alt-` tree focus   drag copy   Shift-drag force local copy   q quit"
+		return "Alt-` tree focus   q quit"
 	}
-	if entry.kind == "" {
-		return "Press [a] to add a project   q quit"
+
+	parts := make([]string, 0, 10)
+	if entry.kind != "" {
+		parts = append(parts, "Up/Down move", "Left/Right collapse")
+		if entry.kind == tuiTreeEntryNode && nodeAutoStartsSession(entry.node) {
+			parts = append(parts, "Alt-` shell focus")
+		}
 	}
-	if entry.kind == tuiTreeEntryNode {
-		return "Up/Down move   Left/Right collapse   Alt-` shell focus   wheel scroll   drag copy   q quit"
+
+	for _, action := range availableTUIActions(entry) {
+		parts = append(parts, fmt.Sprintf("[%c] %s", action.Hotkey, strings.ToLower(action.Label)))
 	}
-	return "Up/Down move   Left/Right collapse   Use action hotkeys in the right pane   q quit"
+	parts = append(parts, "q quit")
+	return strings.Join(parts, "   ")
 }
 
 func (a *vaxisTUIApp) relatedPatches(projectID string) []PatchProposal {

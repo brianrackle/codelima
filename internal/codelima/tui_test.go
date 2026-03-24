@@ -405,6 +405,56 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 	}
 }
 
+func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
+	t.Parallel()
+
+	got := renderFooter(tuiFocusTree, tuiTreeEntry{})
+	if got != "[a] add project   [g] env configs   q quit" {
+		t.Fatalf("expected empty-tree footer with global actions, got %q", got)
+	}
+
+	projectEntry := tuiTreeEntry{
+		kind:    tuiTreeEntryProject,
+		project: Project{Slug: "root"},
+	}
+	got = renderFooter(tuiFocusTree, projectEntry)
+	if got != "Up/Down move   Left/Right collapse   [a] add project   [g] env configs   [n] create node   [e] environment   [u] update project   [x] delete project   q quit" {
+		t.Fatalf("expected project footer with project actions, got %q", got)
+	}
+	if strings.Contains(got, "Use action hotkeys in the right pane") {
+		t.Fatalf("expected project footer to omit generic action text, got %q", got)
+	}
+
+	runningNodeEntry := tuiTreeEntry{
+		kind: tuiTreeEntryNode,
+		node: Node{Slug: "root-node", Status: NodeStatusRunning},
+	}
+	got = renderFooter(tuiFocusTree, runningNodeEntry)
+	if got != "Up/Down move   Left/Right collapse   Alt-` shell focus   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   [p] patch ops   q quit" {
+		t.Fatalf("expected running-node footer with shell focus and node actions, got %q", got)
+	}
+	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
+		t.Fatalf("expected running-node footer to omit mouse hints, got %q", got)
+	}
+
+	stoppedNodeEntry := tuiTreeEntry{
+		kind: tuiTreeEntryNode,
+		node: Node{Slug: "stopped-node", Status: NodeStatusStopped},
+	}
+	got = renderFooter(tuiFocusTree, stoppedNodeEntry)
+	if got != "Up/Down move   Left/Right collapse   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   [p] patch ops   q quit" {
+		t.Fatalf("expected stopped-node footer without shell focus, got %q", got)
+	}
+
+	got = renderFooter(tuiFocusTerminal, runningNodeEntry)
+	if got != "Alt-` tree focus   q quit" {
+		t.Fatalf("expected terminal footer without mouse hints, got %q", got)
+	}
+	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
+		t.Fatalf("expected terminal footer to omit mouse hints, got %q", got)
+	}
+}
+
 func TestLayoutTUIBodySplitsTreeAndTerminalWhenCollapsed(t *testing.T) {
 	t.Parallel()
 
