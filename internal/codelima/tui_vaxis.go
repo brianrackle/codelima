@@ -1937,14 +1937,8 @@ func (a *vaxisTUIApp) draw() {
 		treeInner := border.All(treeOuter, mutedStyle)
 
 		treeInner.Println(0, vaxis.Segment{Text: "Projects / Nodes", Style: headerStyle})
-		helpLines := []string{
-			"Mouse click: select project or node",
-			"Up/Down move, Left/Right collapse/expand",
-			"Action hotkeys are shown in the right pane",
-		}
-
 		treeInnerWidth, treeInnerHeight := treeInner.Size()
-		treeContentHeight := treeInnerHeight - 1 - len(helpLines)
+		treeContentHeight := treeInnerHeight - 1
 		if treeContentHeight < 0 {
 			treeContentHeight = 0
 		}
@@ -1961,10 +1955,6 @@ func (a *vaxisTUIApp) draw() {
 
 			label := tuiEntryLabel(entry)
 			treeContent.Println(row, vaxis.Segment{Text: label, Style: style})
-		}
-
-		for index, line := range helpLines {
-			treeInner.Println(treeInnerHeight-len(helpLines)+index, vaxis.Segment{Text: line, Style: mutedStyle})
 		}
 	}
 
