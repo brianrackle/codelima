@@ -1,5 +1,62 @@
 # CodeLima
 
+> Sandbox agentic coding in real Lima VMs instead of on your host machine.
+
+CodeLima is a Go CLI and shell-first TUI for managing lineage-aware projects, Lima-backed nodes, and reusable environment configs from one control plane. It helps you run coding agents, dev environments, and repo-specific toolchains inside real Linux VMs while keeping your macOS or Linux workstation cleaner, safer, and easier to reason about.
+
+## The Problem
+
+Modern coding workflows are powerful, but the default setup is messy:
+
+- running agents with broad permissions directly on the host
+- accumulating `apt`, `npm`, language runtimes, and shell-state drift across repos
+- conflicting toolchains between projects
+- accidental writes outside the repo you meant to touch
+- slow context switching when you juggle many repos, many environments, and many terminal sessions
+
+## How CodeLima Solves It
+
+CodeLima is a thin workflow layer on top of Lima, not a replacement for it. You register host workspaces as projects, create Lima-backed nodes for those projects, choose whether each node gets an isolated guest copy or a live writable mount of the repo, and bootstrap nodes with reusable environment configs.
+
+That gives you:
+
+- **real VM isolation** for risky agent sessions
+- **two workspace modes**: `copy` for safer experimentation and `mounted` for immediate host sync
+- **shared environment configs** for Codex, Claude Code, and custom Linux toolchains
+- **one control plane** for many repos and many nodes
+- **a shell-first TUI** that keeps one live terminal session per opened node while the TUI is running
+- **direct Lima escape hatches** whenever you want to use `limactl` yourself
+
+## What That Feels Like In Practice
+
+- Give `codex` or `claude` full in-guest permissions without giving the same reach to your host.
+- Keep package installs, shell state, and experiments off your workstation.
+- Move between projects and nodes quickly from the CLI or the TUI.
+
+## See The Value In 60 Seconds
+
+Once `codelima` is on your `PATH`, you can register a repo, create a sandboxed node, and drop into the VM:
+
+```sh
+codelima project create \
+  --slug payments \
+  --workspace /Users/you/src/payments \
+  --env-config codex \
+  --agent-profile codex-cli
+
+codelima node create --project payments --slug payments-sandbox --workspace-mode copy
+codelima node start payments-sandbox
+codelima shell payments-sandbox
+```
+
+Then, inside the VM shell:
+
+```sh
+codex
+```
+
+Use `copy` when you want the strongest sandbox boundary around agent actions. Use `mounted` when you intentionally want the VM to act directly on your host workspace with immediate sync.
+
 ## Install
 
 Install the latest packaged release from Homebrew:
@@ -10,15 +67,6 @@ brew install codelima
 ```
 
 The Homebrew formula installs the packaged `codelima` binary plus the bundled `libghostty-vt` runtime library, and declares `git` and `lima` as runtime dependencies.
-
-`CodeLima` is a Go CLI for managing lineage-aware projects, Lima-backed nodes, and a shell-first TUI.
-
-The CLI manages:
-
-- projects and immutable workspace snapshots under `CODELIMA_HOME`
-- Lima-backed nodes delegated through `limactl`
-- a canonical shell surface that passes through to `limactl shell`
-- a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
 
 ## Supported Systems
 
@@ -40,7 +88,7 @@ Repository-local development and CI are exercised on macOS and Linux.
 
 `make init` installs the Go toolchain, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling/<os>-<arch>`; system Go or Zig installs are not required. The per-platform layout avoids host and guest toolchain collisions when the same repository is used from both macOS and a Linux VM.
 
-## Setup
+## Build From Source
 
 ```sh
 make init
@@ -57,10 +105,47 @@ make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
 
 That writes a Homebrew-ready tarball plus a JSON manifest under `./tmp/dist`.
 
-## User Guide
+## Quick Start
 
-The examples in this guide assume `codelima` is installed and available on `PATH`.
+The examples below assume `codelima` is installed and available on `PATH`.
 For repository-local development, use `make run ARGS="..."` or `./bin/codelima ...`.
+
+Create a project from a host repo:
+
+```sh
+codelima project create --slug api --workspace /Users/you/src/api
+```
+
+Create a Lima-backed node for that project:
+
+```sh
+codelima node create --project api --slug api-copy --workspace-mode copy
+```
+
+Start the node and open a shell inside it:
+
+```sh
+codelima node start api-copy
+codelima shell api-copy
+```
+
+Open the TUI instead of running a subcommand:
+
+```sh
+codelima
+```
+
+Use `copy` when you want an isolated guest workspace. Use `mounted` when you want guest edits to appear on the host immediately.
+
+## Core Concepts
+
+CodeLima manages:
+
+- projects and immutable workspace snapshots under `CODELIMA_HOME`
+- Lima-backed nodes delegated through `limactl`
+- reusable environment configs that bootstrap new nodes
+- a canonical shell surface that passes through to `limactl shell`
+- a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
 
 ### Capabilities
 
@@ -74,7 +159,7 @@ For repository-local development, use `make run ARGS="..."` or `./bin/codelima .
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
 
-### Command Structure
+## Command Structure
 
 Most commands follow this shape:
 
@@ -96,31 +181,7 @@ Useful global flags:
 
 `project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `workspace_mode` and `vm_status` so both the workspace binding strategy and live VM state are visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
 
-### Why Sandbox Agentic Coding In CodeLima
-
-CodeLima is built on top of Lima, so each node is a real VM instead of a shell wrapper around your host filesystem. That means you can give a coding agent broad permissions inside the VM without taking the same risk on your host machine.
-
-That isolation is useful when you want to avoid:
-
-- package bloat from repeated `apt`, `snap`, `npm`, or language-runtime installs on the host
-- version conflicts between repos that want different toolchains
-- filesystem misuse such as writing outside the intended project directory
-- host breakage from destructive shell mistakes, failed package upgrades, or broken login-shell state
-- accumulating experimental dependencies on your macOS or Linux workstation
-
-If you need lower-level control, you can always drop down to Lima directly. CodeLima does not hide the fact that nodes are Lima VMs:
-
-```sh
-limactl list
-limactl shell <instance-name>
-limactl copy <instance-name>:/path/in/vm ./local-path
-limactl copy ./local-file <instance-name>:/path/in/vm
-limactl stop <instance-name>
-```
-
-Use `codelima node show <node>` or `limactl list` to find the backing instance name.
-
-### TUI Quick Start
+## TUI Quick Start
 
 The TUI opens when you run `codelima` with no command:
 
@@ -174,7 +235,7 @@ Create Node dialog:
 +--------------------------------------------------------------------+
 ```
 
-### Workflow 1: Manage Many Codebases From One Control Plane
+## Workflow 1: Manage Many Codebases From One Control Plane
 
 Use one `CODELIMA_HOME` to track many host workspaces while giving each codebase its own projects and nodes.
 
@@ -209,7 +270,7 @@ Why this helps for agentic coding:
 - per-project default environments, resources, and agent profile metadata
 - per-node terminals that stay attached while you move around the tree
 
-### Workflow 2: Choose How VM Changes Sync Back To The Host
+## Workflow 2: Choose How VM Changes Sync Back To The Host
 
 Node creation gives you two workspace modes:
 
@@ -242,7 +303,7 @@ Practical rule:
 - use `copy` when you want the strongest sandbox boundary around a coding agent
 - use `mounted` when you intentionally want the VM to act directly on your host workspace
 
-### Workflow 3: Run Codex Or Claude In A Sandboxed VM With Full In-Guest Permissions
+## Workflow 3: Run Codex Or Claude In A Sandboxed VM With Full In-Guest Permissions
 
 Fresh homes include:
 
@@ -310,7 +371,7 @@ Why this is safer:
 - if the agent breaks the VM, you can stop, delete, and recreate the node
 - `copy` mode keeps accidental file damage out of the host workspace
 
-### Workflow 4: Build Custom Environments For Any Agent Or Linux Package Set
+## Workflow 4: Build Custom Environments For Any Agent Or Linux Package Set
 
 Reusable environment configs are just ordered command lists that run when a new node is first bootstrapped. Use them to install editors, CLIs, package managers, or custom agent wrappers.
 
@@ -352,7 +413,22 @@ Good uses for custom environments:
 - installing helper tools such as `gh`, `just`, `direnv`, `uv`, `pnpm`, or `docker` clients
 - encoding repeatable setup once instead of repeating it in every VM by hand
 
-### CLI Commands At A Glance
+## Lima Fallback Examples
+
+Because CodeLima uses Lima instead of inventing a separate VM backend, you can always fall back to `limactl` if you need something CodeLima does not expose yet:
+
+```sh
+limactl list
+limactl shell <instance-name>
+limactl copy <instance-name>:/var/log/cloud-init-output.log ./cloud-init-output.log
+limactl copy ./local-config <instance-name>:/tmp/local-config
+limactl stop <instance-name>
+limactl delete -f <instance-name>
+```
+
+That makes CodeLima a higher-level workflow layer on top of Lima rather than a dead-end abstraction.
+
+## CLI Commands At A Glance
 
 Health and config:
 
@@ -405,21 +481,6 @@ Shell entry:
 codelima shell NODE
 codelima shell NODE -- uname -a
 ```
-
-### Lima Fallback Examples
-
-Because CodeLima uses Lima instead of inventing a separate VM backend, you can always fall back to `limactl` if you need something CodeLima does not expose yet:
-
-```sh
-limactl list
-limactl shell <instance-name>
-limactl copy <instance-name>:/var/log/cloud-init-output.log ./cloud-init-output.log
-limactl copy ./local-config <instance-name>:/tmp/local-config
-limactl stop <instance-name>
-limactl delete -f <instance-name>
-```
-
-That makes CodeLima a higher-level workflow layer on top of Lima rather than a dead-end abstraction.
 
 ## Make Shortcuts
 
