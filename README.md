@@ -96,176 +96,330 @@ Useful global flags:
 
 `project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `workspace_mode` and `vm_status` so both the workspace binding strategy and live VM state are visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
 
-### Typical Workflow
+### Why Sandbox Agentic Coding In CodeLima
 
-1. Check host readiness and inspect the active config.
+CodeLima is built on top of Lima, so each node is a real VM instead of a shell wrapper around your host filesystem. That means you can give a coding agent broad permissions inside the VM without taking the same risk on your host machine.
+
+That isolation is useful when you want to avoid:
+
+- package bloat from repeated `apt`, `snap`, `npm`, or language-runtime installs on the host
+- version conflicts between repos that want different toolchains
+- filesystem misuse such as writing outside the intended project directory
+- host breakage from destructive shell mistakes, failed package upgrades, or broken login-shell state
+- accumulating experimental dependencies on your macOS or Linux workstation
+
+If you need lower-level control, you can always drop down to Lima directly. CodeLima does not hide the fact that nodes are Lima VMs:
+
+```sh
+limactl list
+limactl shell <instance-name>
+limactl copy <instance-name>:/path/in/vm ./local-path
+limactl copy ./local-file <instance-name>:/path/in/vm
+limactl stop <instance-name>
+```
+
+Use `codelima node show <node>` or `limactl list` to find the backing instance name.
+
+### TUI Quick Start
+
+The TUI opens when you run `codelima` with no command:
+
+```sh
+codelima
+```
+
+Basic layout:
+
+```text
++---------------------------+---------------------------------------------+
+| Projects / Nodes          | Details or terminal                         |
+|                           |                                             |
+| ▼ api                     | Project: api                                |
+|   • api-copy    STOPPED   | Node: api-copy  Mode: copy                  |
+|   • api-mount   RUNNING   |                                             |
+| ▼ billing                 | Alt-` toggles tree focus <-> terminal focus |
+|   • billing-a   RUNNING   |                                             |
++---------------------------+---------------------------------------------+
+```
+
+Fast key reference:
+
+- `Alt-\``: toggle between tree focus and terminal focus
+- `q`: quit the TUI
+- `Up` / `Down`: move selection in the tree
+- `Left` / `Right`: collapse or expand projects in the tree
+- `[a]`: add project
+- `[g]`: manage reusable environment configs
+- on a selected project: `[n]` create node, `[e]` manage project environment, `[u]` update project, `[x]` delete project
+- on a selected node: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
+- mouse: click tree entries to select, click links to open them, drag terminal text to copy, `Shift`-drag to force local copy, wheel-scroll local terminal scrollback when the guest is not capturing the mouse
+
+Create Project dialog:
+
+```text
++--------------------------- Create Project ----------------------------+
+| Project Slug: api                                                 |
+| Workspace Path: /Users/you/src/api                                |
+| Environment Configs: codex                                        |
++--------------------------------------------------------------------+
+```
+
+Create Node dialog:
+
+```text
++---------------------------- Create Node -----------------------------+
+| Selected project: api                                             |
+| Node Slug: api-copy                                               |
+| Workspace Mode: copy: isolated guest workspace copy               |
++--------------------------------------------------------------------+
+```
+
+### Workflow 1: Manage Many Codebases From One Control Plane
+
+Use one `CODELIMA_HOME` to track many host workspaces while giving each codebase its own projects and nodes.
+
+CLI:
+
+```sh
+codelima project create --slug api --workspace /Users/you/src/api
+codelima project create --slug billing --workspace /Users/you/src/billing
+codelima project create --slug docs --workspace /Users/you/src/docs
+
+codelima project list
+codelima project tree
+```
+
+TUI view after registering several repos:
+
+```text
++---------------------------+---------------------------------------------+
+| Projects / Nodes          | Project: billing                            |
+|                           |                                             |
+| ▼ api                     | Workspace: /Users/you/src/billing           |
+|   • api-copy    STOPPED   | [n] create node                             |
+| ▼ billing                 | [e] environment                             |
+|   • billing-a   RUNNING   | [u] update project                          |
+| ▼ docs                    | [x] delete project                          |
++---------------------------+---------------------------------------------+
+```
+
+Why this helps for agentic coding:
+
+- one place to switch between many repos quickly
+- per-project default environments, resources, and agent profile metadata
+- per-node terminals that stay attached while you move around the tree
+
+### Workflow 2: Choose How VM Changes Sync Back To The Host
+
+Node creation gives you two workspace modes:
+
+- `copy`: safest for experimentation; the host repo is copied into the VM on first start and guest edits stay in the VM
+- `mounted`: fastest feedback loop; the host repo is mounted writable and guest edits appear on the host immediately
+
+CLI:
+
+```sh
+codelima node create --project api --slug api-copy --workspace-mode copy
+codelima node create --project api --slug api-mounted --workspace-mode mounted
+
+codelima node start api-copy
+codelima node start api-mounted
+codelima node list
+```
+
+ASCII comparison:
+
+```text
+copy mode                         mounted mode
+---------                         ------------
+host repo ----copy once----> VM   host repo <----live writable----> VM
+safe isolation                    immediate sync to host
+best for risky agents             best for tight edit/test loops
+```
+
+Practical rule:
+
+- use `copy` when you want the strongest sandbox boundary around a coding agent
+- use `mounted` when you intentionally want the VM to act directly on your host workspace
+
+### Workflow 3: Run Codex Or Claude In A Sandboxed VM With Full In-Guest Permissions
+
+Fresh homes include:
+
+- environment config `codex`
+- environment config `claude-code`
+- agent profiles `codex-cli` and `claude-code`
+
+The environment config installs the tool in the VM. The agent profile records which command that project or node expects to run. CodeLima itself does not add extra in-guest restrictions, so if you want a full-permission, no-restriction Codex or Claude session, start it inside the VM shell rather than on your host.
+
+Codex example:
+
+```sh
+codelima project create \
+  --slug payments \
+  --workspace /Users/you/src/payments \
+  --env-config codex \
+  --agent-profile codex-cli
+
+codelima node create --project payments --slug payments-codex --workspace-mode copy
+codelima node start payments-codex
+codelima shell payments-codex
+```
+
+Then, inside the VM shell:
+
+```sh
+codex
+```
+
+Claude example:
+
+```sh
+codelima project create \
+  --slug frontend \
+  --workspace /Users/you/src/frontend \
+  --env-config claude-code \
+  --agent-profile claude-code
+
+codelima node create --project frontend --slug frontend-claude --workspace-mode copy
+codelima node start frontend-claude
+codelima shell frontend-claude
+```
+
+Then, inside the VM shell:
+
+```sh
+claude
+```
+
+TUI view after creating the project and node:
+
+```text
++---------------------------+---------------------------------------------+
+| Projects / Nodes          | Project: payments                           |
+| ▼ payments                | Node: payments-codex  Mode: copy            |
+|   • payments-codex RUNNING| Environment configs: codex                  |
+|                           | Open terminal, then run `codex` in the VM   |
++---------------------------+---------------------------------------------+
+```
+
+Why this is safer:
+
+- unrestricted agent actions happen inside the VM
+- package installs and shell state stay off the host
+- if the agent breaks the VM, you can stop, delete, and recreate the node
+- `copy` mode keeps accidental file damage out of the host workspace
+
+### Workflow 4: Build Custom Environments For Any Agent Or Linux Package Set
+
+Reusable environment configs are just ordered command lists that run when a new node is first bootstrapped. Use them to install editors, CLIs, package managers, or custom agent wrappers.
+
+CLI:
+
+```sh
+codelima environment create \
+  --slug devbox \
+  --env-command "sudo apt-get update" \
+  --env-command "sudo apt-get install -y ripgrep fd-find jq gh" \
+  --env-command "curl -fsSL https://mise.run | sh"
+
+codelima environment update devbox --env-command "sudo npm install -g @anthropic-ai/claude-code"
+codelima environment show devbox
+
+codelima project create \
+  --slug tooling \
+  --workspace /Users/you/src/tooling \
+  --env-config devbox
+```
+
+TUI flow:
+
+```text
+[g] Env Configs
+  -> Create Config
+  -> Add Command
+  -> Move Command
+  -> Remove Command
+
+[a] Add Project
+  -> choose Environment Configs: devbox
+```
+
+Good uses for custom environments:
+
+- installing Linux packages for a repo-specific toolchain
+- installing your preferred coding agent if it is not one of the built-ins
+- installing helper tools such as `gh`, `just`, `direnv`, `uv`, `pnpm`, or `docker` clients
+- encoding repeatable setup once instead of repeating it in every VM by hand
+
+### CLI Commands At A Glance
+
+Health and config:
 
 ```sh
 codelima doctor
 codelima config show
 ```
 
-If `doctor` reports an incomplete node metadata directory from an older failed `node create`, inspect the candidates first and then remove them explicitly:
+Reusable environments:
 
 ```sh
+codelima environment create --slug NAME --env-command '...'
+codelima environment list
+codelima environment show NAME
+codelima environment update NAME --env-command '...'
+codelima environment delete NAME
+```
+
+Projects:
+
+```sh
+codelima project create --slug NAME --workspace /path/to/repo
+codelima project list
+codelima project show NAME
+codelima project update NAME --workspace /new/path
+codelima project delete NAME
+codelima project tree
+codelima project fork SOURCE --slug CHILD --workspace /path/to/child
+```
+
+Nodes:
+
+```sh
+codelima node create --project PROJECT --slug NODE [--workspace-mode copy|mounted]
+codelima node list
+codelima node show NODE
+codelima node start NODE
+codelima node stop NODE
+codelima node clone NODE --node-slug NEW-NODE
+codelima node delete NODE
+codelima node status NODE
+codelima node logs NODE
 codelima node cleanup-incomplete
 codelima node cleanup-incomplete --apply
 ```
 
-`node cleanup-incomplete` is a dry run by default. Add `--apply` only after you confirm the listed `node_dir` values are stale partial metadata directories rather than healthy nodes.
-
-2. Inspect the built-in reusable environment configs, then register a workspace as a project.
+Shell entry:
 
 ```sh
-codelima environment list
-codelima environment show codex
-
-codelima project create \
-  --slug root \
-  --workspace ./test-project-dir \
-  --env-config codex
+codelima shell NODE
+codelima shell NODE -- uname -a
 ```
 
-Fresh homes seed two reusable environment configs:
+### Lima Fallback Examples
 
-- `codex`: installs Node via `snap`, then installs `@openai/codex` globally with `npm`
-- `claude-code`: runs `curl -fsSL https://claude.ai/install.sh | bash`
-
-Projects can combine those shared defaults with project-specific environment commands, or you can create your own reusable config when you need a team- or repo-specific bootstrap:
+Because CodeLima uses Lima instead of inventing a separate VM backend, you can always fall back to `limactl` if you need something CodeLima does not expose yet:
 
 ```sh
-codelima environment create \
-  --slug shared-dev \
-  --env-command ./script/setup \
-  --env-command "direnv allow"
-
-codelima environment update shared-dev --env-command "mise install"
-codelima environment list
-codelima environment show codex
-codelima environment show shared-dev
-codelima project update root --env-command ./script/setup --env-command "direnv allow"
-codelima project update root --env-config codex --env-config shared-dev
-codelima project update root --clear-env-configs
-codelima project update root --clear-env-commands
+limactl list
+limactl shell <instance-name>
+limactl copy <instance-name>:/var/log/cloud-init-output.log ./cloud-init-output.log
+limactl copy ./local-config <instance-name>:/tmp/local-config
+limactl stop <instance-name>
+limactl delete -f <instance-name>
 ```
 
-3. Create and start a Lima-backed node for that project.
-
-```sh
-codelima node create --project root --slug root-node
-codelima node create --project root --slug root-mounted --workspace-mode mounted
-codelima node start root-node
-codelima node status root-node
-```
-
-`node create` supports two workspace modes:
-
-- `copy` is the default. On first start, CodeLima copies the host workspace into the VM at the same absolute path and keeps later guest edits isolated inside the VM.
-- `mounted` mounts the host workspace writable into the VM at the same absolute path, so guest edits are reflected in the host workspace immediately.
-
-4. Open a shell or run a one-off command inside the node.
-
-```sh
-codelima shell root-node
-codelima shell root-node -- uname -a
-```
-
-Or open the shell-first TUI and switch between preserved per-node sessions from the project tree:
-
-```sh
-codelima
-```
-
-Inside the TUI, selecting a node auto-switches the visible terminal. `Alt-\`` toggles between the tree view and a terminal-focused full-width shell for the selected running node. Clicking the tree moves focus back to the tree and restores the split view without destroying the shell session.
-Selecting a project exposes project actions in the right pane: create a node, manage the project's environment commands and shared config refs, update the project binding, or delete the project. The create-node dialog now lets you choose between a copied workspace and a writable mounted workspace for the new node. Selecting a node exposes node actions: start or stop it, delete it, or clone it into another node in the same project. Non-running nodes stay selectable so you can manage them before opening a shell session.
-Project creation and environment config management are global tree actions, so you can add a new top-level project or reusable config even when the tree is empty. Fresh homes already include `codex` and `claude-code` in those selectors. The project create and update dialogs use an environment-config selector instead of asking you to type config slugs, and `[g]` manage config opens a selector before the config command menu. Creating a reusable config now drops directly into the same command editor used for later edits, so you can add, remove, confirm, and reorder commands without retyping numbered positions.
-Project create and update save only project metadata, while long-running Lima-backed node actions stream live `limactl` and guest bootstrap output in a TUI overlay instead of freezing the screen. Workspace paths and URLs shown in the right pane are clickable, and OSC 8 hyperlinks emitted inside the terminal pane are clickable too. Inside the terminal pane, a plain left-button drag copies the currently visible terminal text to the host clipboard when the guest is not actively capturing the mouse, and `Shift`-drag forces that local copy behavior even when an application such as Vim has enabled mouse handling. The mouse wheel scrolls local terminal scrollback when the guest is not actively capturing the mouse, and falls through to the guest when mouse tracking or alternate-screen scroll handling is enabled.
-
-The tree is keyboard and mouse driven. In tree focus, the footer mirrors the currently available action hotkeys for the selected item, while the right pane keeps the fuller action context. The common flow is to select a project or node in the tree and then press the matching letter key:
-
-- global tree actions: `[a]` add project, `[g]` manage reusable environment configs
-- project actions: `[n]` create node, `[e]` manage environment commands and config refs, `[u]` update project, `[x]` delete project
-- node actions: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
-
-In the default `copy` mode, the first successful start copies the host project workspace into the VM at the same absolute path it has on the host. The host workspace is not mounted into the VM, so guest-side edits stay isolated inside the guest unless you explicitly bring them back out.
-
-In `mounted` mode, CodeLima mounts the host workspace writable into the VM instead of copying it, so guest-side edits are immediately reflected on the host. `node create` and the first `node start` still require the registered host workspace to exist. Rebind the project before creating a replacement node from a moved host workspace:
-
-```sh
-codelima node delete root-node
-codelima project update root --workspace /new/host/path
-codelima node create --project root --slug root-node
-codelima node start root-node
-```
-
-5. Fork the project when you need a child workspace and direct project lineage.
-
-```sh
-codelima project fork root --slug child --workspace /tmp/codelima-child
-codelima node create --project child --slug child-node
-```
-
-6. Clone a node when you want another VM in the same project.
-
-```sh
-codelima node clone root-node --node-slug root-node-clone
-```
-
-`node clone` copies the source VM at the Lima layer. If the source node is running, CodeLima stops it, clones it, and starts it again. The cloned node stays in the same project and keeps the same workspace mode, workspace path binding, and bootstrap state as the source VM.
-
-### Useful Examples
-
-Create an isolated metadata root for a temporary session:
-
-```sh
-codelima --home /tmp/codelima-dev doctor
-```
-
-List projects and print the lineage tree with attached nodes:
-
-```sh
-codelima project list
-codelima node list
-codelima project tree
-codelima
-```
-
-Inspect node history and runtime state:
-
-```sh
-codelima node show root-node
-codelima node logs root-node
-codelima node status root-node
-```
-
-Create three cloned VMs in one project from `test-project-dir`:
-
-```sh
-codelima environment create --slug shared-dev --env-command ./script/setup
-codelima project create --slug root --workspace ./test-project-dir --env-config shared-dev
-codelima node create --project root --slug root-node
-codelima node start root-node
-codelima node clone root-node --node-slug child-node
-codelima node start child-node
-codelima node clone child-node --node-slug grandchild-node
-codelima project tree
-codelima node list
-```
-
-Rebind a project after moving its workspace on the host:
-
-```sh
-codelima node delete root-node
-codelima project update root --workspace /Users/you/Projects/codelima/test-project-dir
-codelima project show root
-```
-
-Clean up a node while keeping historical metadata:
-
-```sh
-codelima node stop root-node
-codelima node delete root-node
-```
+That makes CodeLima a higher-level workflow layer on top of Lima rather than a dead-end abstraction.
 
 ## Make Shortcuts
 
@@ -374,4 +528,4 @@ Override the location with `--home` or `CODELIMA_HOME`.
 ## Notes
 
 - `config show` displays the active defaults and resolved paths.
-- Built-in `codex-cli` and `claude-code` profiles are smoke-friendly defaults. Replace the profile YAML files under `CODELIMA_HOME/_config/agent-profiles/` when you want real install commands.
+- Built-in `codex-cli` and `claude-code` agent profiles define the default launch command names. Pair them with the matching `codex` or `claude-code` environment config so the executable is actually installed in the VM.
