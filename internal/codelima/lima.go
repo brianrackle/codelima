@@ -53,6 +53,7 @@ const (
 	limaCommandStop                 limaCommandKind = "stop"
 	limaCommandDelete               limaCommandKind = "delete"
 	limaCommandClone                limaCommandKind = "clone"
+	limaCommandBootstrap            limaCommandKind = "bootstrap"
 	limaCommandWorkspaceSeedPrepare limaCommandKind = "workspace_seed_prepare"
 	limaCommandCopy                 limaCommandKind = "copy"
 	limaCommandShell                limaCommandKind = "shell"
@@ -60,7 +61,29 @@ const (
 
 var unresolvedLimaPlaceholderPattern = regexp.MustCompile(`\{\{[^{}]+\}\}`)
 
-func resolveConfiguredLimaCommand(binary string, global LimaCommandTemplates, project Project, nodeCommands LimaCommandTemplates, kind limaCommandKind, values map[string]string) (string, error) {
+func supportedLimaCommandKind(kind limaCommandKind) bool {
+	switch kind {
+	case limaCommandTemplateCopy,
+		limaCommandCreate,
+		limaCommandStart,
+		limaCommandStop,
+		limaCommandDelete,
+		limaCommandClone,
+		limaCommandBootstrap,
+		limaCommandWorkspaceSeedPrepare,
+		limaCommandCopy,
+		limaCommandShell:
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveConfiguredLimaCommands(binary string, global LimaCommandTemplates, project Project, nodeCommands LimaCommandTemplates, kind limaCommandKind, values map[string]string) ([]string, error) {
+	if !supportedLimaCommandKind(kind) {
+		return nil, invalidArgument("unsupported lima command kind", map[string]any{"kind": string(kind)})
+	}
+
 	if values == nil {
 		values = map[string]string{}
 	}
@@ -68,36 +91,39 @@ func resolveConfiguredLimaCommand(binary string, global LimaCommandTemplates, pr
 	values = cloneMap(values)
 	values["binary"] = shellQuote(binary)
 
-	template := defaultProjectLimaCommandTemplate(kind)
-	globalTemplate := global.template(kind)
-	projectTemplate := project.LimaCommands.template(kind)
-	nodeTemplate := nodeCommands.template(kind)
-	if template == "" && globalTemplate == "" && projectTemplate == "" && nodeTemplate == "" {
-		return "", invalidArgument("unsupported lima command kind", map[string]any{"kind": string(kind)})
-	}
-	template = coalesce(globalTemplate, template)
-	template = coalesce(projectTemplate, template)
-	template = coalesce(nodeTemplate, template)
+	templates := defaultProjectLimaCommandTemplates(kind)
+	globalTemplates := global.templates(kind)
+	projectTemplates := project.LimaCommands.templates(kind)
+	nodeTemplates := nodeCommands.templates(kind)
 
-	command := template
-	for key, value := range values {
-		command = strings.ReplaceAll(command, "{{"+key+"}}", value)
+	templates = applyDefaultCommandList(globalTemplates, templates)
+	templates = applyDefaultCommandList(projectTemplates, templates)
+	templates = applyDefaultCommandList(nodeTemplates, templates)
+
+	resolved := make([]string, 0, len(templates))
+	for _, template := range templates {
+		command := template
+		for key, value := range values {
+			command = strings.ReplaceAll(command, "{{"+key+"}}", value)
+		}
+
+		if unresolved := unresolvedLimaPlaceholderPattern.FindString(command); unresolved != "" {
+			return nil, invalidArgument("lima command template contains an unknown placeholder", map[string]any{"placeholder": unresolved, "command": template})
+		}
+
+		command = strings.TrimSpace(command)
+		if command == "" {
+			return nil, invalidArgument("lima command template must not resolve to an empty command", map[string]any{"kind": string(kind)})
+		}
+
+		resolved = append(resolved, command)
 	}
 
-	if unresolved := unresolvedLimaPlaceholderPattern.FindString(command); unresolved != "" {
-		return "", invalidArgument("lima command template contains an unknown placeholder", map[string]any{"placeholder": unresolved, "command": template})
-	}
-
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return "", invalidArgument("lima command template must not resolve to an empty command", map[string]any{"kind": string(kind)})
-	}
-
-	return command, nil
+	return resolved, nil
 }
 
-func defaultProjectLimaCommandTemplate(kind limaCommandKind) string {
-	return defaultLimaCommandTemplates().template(kind)
+func defaultProjectLimaCommandTemplates(kind limaCommandKind) []string {
+	return defaultLimaCommandTemplates().templates(kind)
 }
 
 func shellQuote(value string) string {
@@ -154,20 +180,24 @@ func shellCommandArgsFragment(args []string) string {
 }
 
 func (c *ExecLimaClient) BaseTemplate(ctx context.Context, project Project, nodeCommands LimaCommandTemplates, locator string) ([]byte, error) {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, nodeCommands, limaCommandTemplateCopy, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, nodeCommands, limaCommandTemplateCopy, map[string]string{
 		"locator": shellQuote(locator),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	stdout, stderr, err := c.runCommandString(ctx, 15*time.Second, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return nil, externalCommandFailed(
-			"limactl template copy failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"locator": locator},
-		)
+	var stdout []byte
+	for _, command := range commands {
+		commandStdout, stderr, runErr := c.runCommandString(ctx, 15*time.Second, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return nil, externalCommandFailed(
+				"limactl template copy failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"locator": locator, "command": command},
+			)
+		}
+		stdout = commandStdout
 	}
 
 	return stdout, nil
@@ -222,7 +252,7 @@ func (c *ExecLimaClient) List(ctx context.Context) ([]RuntimeObservation, error)
 }
 
 func (c *ExecLimaClient) Create(ctx context.Context, project Project, node Node, templatePath string) error {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandCreate, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandCreate, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 		"template_path": shellQuote(templatePath),
 	})
@@ -230,80 +260,88 @@ func (c *ExecLimaClient) Create(ctx context.Context, project Project, node Node,
 		return err
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 15*time.Minute, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return externalCommandFailed(
-			"limactl create failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"instance_name": node.LimaInstanceName, "template_path": templatePath},
-		)
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 15*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl create failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "template_path": templatePath, "command": command},
+			)
+		}
 	}
 
 	return nil
 }
 
 func (c *ExecLimaClient) Start(ctx context.Context, project Project, node Node) error {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandStart, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandStart, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 15*time.Minute, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return externalCommandFailed(
-			"limactl start failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"instance_name": node.LimaInstanceName},
-		)
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 15*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl start failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "command": command},
+			)
+		}
 	}
 
 	return nil
 }
 
 func (c *ExecLimaClient) Stop(ctx context.Context, project Project, node Node) error {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandStop, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandStop, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 10*time.Minute, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return externalCommandFailed(
-			"limactl stop failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"instance_name": node.LimaInstanceName},
-		)
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl stop failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "command": command},
+			)
+		}
 	}
 
 	return nil
 }
 
 func (c *ExecLimaClient) Delete(ctx context.Context, project Project, node Node) error {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandDelete, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandDelete, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 10*time.Minute, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return externalCommandFailed(
-			"limactl delete failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"instance_name": node.LimaInstanceName},
-		)
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl delete failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "command": command},
+			)
+		}
 	}
 
 	return nil
 }
 
 func (c *ExecLimaClient) Clone(ctx context.Context, project Project, sourceNode, targetNode Node) error {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, targetNode.LimaCommands, limaCommandClone, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, targetNode.LimaCommands, limaCommandClone, map[string]string{
 		"source_instance": shellQuote(sourceNode.LimaInstanceName),
 		"target_instance": shellQuote(targetNode.LimaInstanceName),
 	})
@@ -311,20 +349,22 @@ func (c *ExecLimaClient) Clone(ctx context.Context, project Project, sourceNode,
 		return err
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 20*time.Minute, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return externalCommandFailed(
-			"limactl clone failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"source_instance": sourceNode.LimaInstanceName, "target_instance": targetNode.LimaInstanceName},
-		)
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 20*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl clone failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"source_instance": sourceNode.LimaInstanceName, "target_instance": targetNode.LimaInstanceName, "command": command},
+			)
+		}
 	}
 
 	return nil
 }
 
 func (c *ExecLimaClient) CopyToGuest(ctx context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
-	command, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandCopy, map[string]string{
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandCopy, map[string]string{
 		"source_path":    shellQuote(sourcePath),
 		"target_path":    shellQuote(targetPath),
 		"instance_name":  shellQuote(node.LimaInstanceName),
@@ -335,13 +375,15 @@ func (c *ExecLimaClient) CopyToGuest(ctx context.Context, project Project, node 
 		return err
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 20*time.Minute, command, c.Stdout, c.Stderr)
-	if err != nil {
-		return externalCommandFailed(
-			"limactl copy failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"instance_name": node.LimaInstanceName, "source_path": sourcePath, "target_path": targetPath},
-		)
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 20*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl copy failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "source_path": sourcePath, "target_path": targetPath, "command": command},
+			)
+		}
 	}
 
 	return nil
@@ -353,7 +395,7 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 		workdirFlag = prefixedShellFragment("--workdir", shellQuote(workdir))
 	}
 
-	resolvedCommand, err := resolveConfiguredLimaCommand(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandShell, map[string]string{
+	resolvedCommands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandShell, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 		"workdir":       shellQuote(workdir),
 		"workdir_flag":  workdirFlag,
@@ -364,7 +406,18 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 	}
 
 	if interactive {
-		cmd := exec.CommandContext(ctx, "sh", "-lc", resolvedCommand)
+		for _, preCommand := range resolvedCommands[:len(resolvedCommands)-1] {
+			_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, preCommand, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
+			if runErr != nil {
+				return externalCommandFailed(
+					"limactl shell failed",
+					fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+					map[string]any{"instance_name": node.LimaInstanceName, "command": command, "resolved_command": preCommand},
+				)
+			}
+		}
+
+		cmd := exec.CommandContext(ctx, "sh", "-lc", resolvedCommands[len(resolvedCommands)-1])
 		cmd.Stdin = streams.Stdin
 		cmd.Stdout = streams.Stdout
 		cmd.Stderr = streams.Stderr
@@ -372,20 +425,21 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 			return externalCommandFailed(
 				"limactl shell failed",
 				err,
-				map[string]any{"instance_name": node.LimaInstanceName, "command": command},
+				map[string]any{"instance_name": node.LimaInstanceName, "command": command, "resolved_command": resolvedCommands[len(resolvedCommands)-1]},
 			)
 		}
-
 		return nil
 	}
 
-	_, stderr, err := c.runCommandString(ctx, 10*time.Minute, resolvedCommand, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
-	if err != nil {
-		return externalCommandFailed(
-			"limactl shell failed",
-			fmt.Errorf("%w: %s", err, strings.TrimSpace(string(stderr))),
-			map[string]any{"instance_name": node.LimaInstanceName, "command": command},
-		)
+	for _, resolvedCommand := range resolvedCommands {
+		_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, resolvedCommand, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl shell failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "command": command, "resolved_command": resolvedCommand},
+			)
+		}
 	}
 
 	return nil

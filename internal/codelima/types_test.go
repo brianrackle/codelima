@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestProjectMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t *testing.T) {
+func TestProjectMarshalsBootstrapCommandsAndReadsLegacySetupCommands(t *testing.T) {
 	t.Parallel()
 
 	project := Project{
@@ -16,10 +16,10 @@ func TestProjectMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t *testin
 		Slug:               "root",
 		WorkspacePath:      "/workspace/root",
 		EnvironmentConfigs: []string{"shared-dev", "lang-go"},
-		SetupCommands:      []string{"./script/setup", "direnv allow"},
 		LimaCommands: LimaCommandTemplates{
-			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
-			Shell: "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}",
+			Bootstrap: []string{"./script/setup", "direnv allow"},
+			Start:     []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
+			Shell:     []string{"{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"},
 		},
 	}
 
@@ -29,11 +29,11 @@ func TestProjectMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t *testin
 	}
 
 	if strings.Contains(string(yamlPayload), "setup_commands:") {
-		t.Fatalf("expected yaml output to use environment_commands, got %s", string(yamlPayload))
+		t.Fatalf("expected yaml output to avoid setup_commands, got %s", string(yamlPayload))
 	}
 
-	if !strings.Contains(string(yamlPayload), "environment_commands:") {
-		t.Fatalf("expected yaml output to include environment_commands, got %s", string(yamlPayload))
+	if strings.Contains(string(yamlPayload), "environment_commands:") {
+		t.Fatalf("expected yaml output to avoid environment_commands, got %s", string(yamlPayload))
 	}
 
 	if !strings.Contains(string(yamlPayload), "environment_configs:") {
@@ -44,7 +44,11 @@ func TestProjectMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t *testin
 		t.Fatalf("expected yaml output to include lima_commands, got %s", string(yamlPayload))
 	}
 
-	if !strings.Contains(string(yamlPayload), "start: '{{binary}} start {{instance_name}} --vm-type=vz'") {
+	if !strings.Contains(string(yamlPayload), "bootstrap:") || !strings.Contains(string(yamlPayload), "./script/setup") {
+		t.Fatalf("expected yaml output to include bootstrap commands, got %s", string(yamlPayload))
+	}
+
+	if !strings.Contains(string(yamlPayload), "start:") || !strings.Contains(string(yamlPayload), "{{binary}} start {{instance_name}} --vm-type=vz") {
 		t.Fatalf("expected yaml output to include custom start command, got %s", string(yamlPayload))
 	}
 
@@ -54,11 +58,15 @@ func TestProjectMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t *testin
 	}
 
 	if strings.Contains(string(jsonPayload), "setup_commands") {
-		t.Fatalf("expected json output to use environment_commands, got %s", string(jsonPayload))
+		t.Fatalf("expected json output to avoid setup_commands, got %s", string(jsonPayload))
 	}
 
-	if !strings.Contains(string(jsonPayload), "environment_commands") {
-		t.Fatalf("expected json output to include environment_commands, got %s", string(jsonPayload))
+	if strings.Contains(string(jsonPayload), "environment_commands") {
+		t.Fatalf("expected json output to avoid environment_commands, got %s", string(jsonPayload))
+	}
+
+	if !strings.Contains(string(jsonPayload), "bootstrap") {
+		t.Fatalf("expected json output to include bootstrap commands, got %s", string(jsonPayload))
 	}
 
 	if !strings.Contains(string(jsonPayload), "environment_configs") {
@@ -81,21 +89,23 @@ setup_commands:
   - ./script/setup
   - direnv allow
 lima_commands:
-  start: "{{binary}} start {{instance_name}} --vm-type=vz"
-  shell: "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"
+  start:
+    - "{{binary}} start {{instance_name}} --vm-type=vz"
+  shell:
+    - "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"
 `), &fromLegacyYAML); err != nil {
 		t.Fatalf("yaml.Unmarshal(legacy) error = %v", err)
 	}
 
-	if got := strings.Join(fromLegacyYAML.SetupCommands, "|"); got != "./script/setup|direnv allow" {
-		t.Fatalf("expected legacy yaml setup commands to load, got %q", got)
+	if got := strings.Join(fromLegacyYAML.LimaCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
+		t.Fatalf("expected legacy yaml setup commands to load into bootstrap, got %q", got)
 	}
 
 	if got := strings.Join(fromLegacyYAML.EnvironmentConfigs, "|"); got != "shared-dev|lang-go" {
 		t.Fatalf("expected environment config refs to load from yaml, got %q", got)
 	}
 
-	if got := fromLegacyYAML.LimaCommands.Start; got != "{{binary}} start {{instance_name}} --vm-type=vz" {
+	if got := strings.Join(fromLegacyYAML.LimaCommands.Start, "|"); got != "{{binary}} start {{instance_name}} --vm-type=vz" {
 		t.Fatalf("expected lima start command to load from yaml, got %q", got)
 	}
 
@@ -107,22 +117,22 @@ lima_commands:
   "environment_configs": ["shared-dev", "lang-go"],
   "setup_commands": ["./script/setup", "direnv allow"],
   "lima_commands": {
-    "start": "{{binary}} start {{instance_name}} --vm-type=vz",
-    "shell": "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"
+    "start": ["{{binary}} start {{instance_name}} --vm-type=vz"],
+    "shell": ["{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"]
   }
 }`), &fromLegacyJSON); err != nil {
 		t.Fatalf("json.Unmarshal(legacy) error = %v", err)
 	}
 
-	if got := strings.Join(fromLegacyJSON.SetupCommands, "|"); got != "./script/setup|direnv allow" {
-		t.Fatalf("expected legacy json setup commands to load, got %q", got)
+	if got := strings.Join(fromLegacyJSON.LimaCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
+		t.Fatalf("expected legacy json setup commands to load into bootstrap, got %q", got)
 	}
 
 	if got := strings.Join(fromLegacyJSON.EnvironmentConfigs, "|"); got != "shared-dev|lang-go" {
 		t.Fatalf("expected environment config refs to load from json, got %q", got)
 	}
 
-	if got := fromLegacyJSON.LimaCommands.Shell; got != "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}" {
+	if got := strings.Join(fromLegacyJSON.LimaCommands.Shell, "|"); got != "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}" {
 		t.Fatalf("expected lima shell command to load from json, got %q", got)
 	}
 }
@@ -140,8 +150,8 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 		Status:           NodeStatusCreated,
 		AgentProfileName: "codex-cli",
 		LimaCommands: LimaCommandTemplates{
-			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
-			Copy:  "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}",
+			Start: []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
+			Copy:  []string{"{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"},
 		},
 	}
 
@@ -154,10 +164,10 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 	if !strings.Contains(output, "lima_commands:") {
 		t.Fatalf("expected yaml output to include lima_commands, got %s", output)
 	}
-	if !strings.Contains(output, "start: '{{binary}} start {{instance_name}} --vm-type=vz'") {
+	if !strings.Contains(output, "start:") || !strings.Contains(output, "{{binary}} start {{instance_name}} --vm-type=vz") {
 		t.Fatalf("expected yaml output to include start override, got %s", output)
 	}
-	if !strings.Contains(output, "copy: '{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}'") {
+	if !strings.Contains(output, "copy:") || !strings.Contains(output, "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}") {
 		t.Fatalf("expected yaml output to include copy override, got %s", output)
 	}
 
@@ -171,13 +181,13 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestBootstrapStateMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t *testing.T) {
+func TestBootstrapStateMarshalsBootstrapCommandsAndReadsLegacySetupCommands(t *testing.T) {
 	t.Parallel()
 
 	state := BootstrapState{
 		AgentProfileName:  "codex-cli",
 		InstallCommands:   []string{"mise install"},
-		SetupCommands:     []string{"./script/setup"},
+		BootstrapCommands: []string{"./script/setup"},
 		ValidationCommand: "command -v sh",
 		LaunchCommand:     "codex",
 		Environment:       map[string]string{"CODELIMA": "1"},
@@ -189,11 +199,15 @@ func TestBootstrapStateMarshalsEnvironmentCommandsAndReadsLegacySetupCommands(t 
 	}
 
 	if strings.Contains(string(yamlPayload), "setup_commands:") {
-		t.Fatalf("expected yaml bootstrap output to use environment_commands, got %s", string(yamlPayload))
+		t.Fatalf("expected yaml bootstrap output to avoid setup_commands, got %s", string(yamlPayload))
 	}
 
-	if !strings.Contains(string(yamlPayload), "environment_commands:") {
-		t.Fatalf("expected yaml bootstrap output to include environment_commands, got %s", string(yamlPayload))
+	if strings.Contains(string(yamlPayload), "environment_commands:") {
+		t.Fatalf("expected yaml bootstrap output to avoid environment_commands, got %s", string(yamlPayload))
+	}
+
+	if !strings.Contains(string(yamlPayload), "bootstrap_commands:") {
+		t.Fatalf("expected yaml bootstrap output to include bootstrap_commands, got %s", string(yamlPayload))
 	}
 
 	var legacy BootstrapState
@@ -211,24 +225,28 @@ environment:
 		t.Fatalf("yaml.Unmarshal(legacy bootstrap) error = %v", err)
 	}
 
-	if got := strings.Join(legacy.SetupCommands, "|"); got != "./script/setup" {
+	if got := strings.Join(legacy.BootstrapCommands, "|"); got != "./script/setup" {
 		t.Fatalf("expected legacy bootstrap setup commands to load, got %q", got)
 	}
 }
 
-func TestBootstrapCommentUsesEnvironmentCommandsLabel(t *testing.T) {
+func TestBootstrapCommentUsesBootstrapCommandsLabel(t *testing.T) {
 	t.Parallel()
 
 	comment := bootstrapComment(BootstrapState{
-		AgentProfileName: "codex-cli",
-		SetupCommands:    []string{"./script/setup"},
+		AgentProfileName:  "codex-cli",
+		BootstrapCommands: []string{"./script/setup"},
 	})
 
 	if strings.Contains(comment, "setup_commands") {
 		t.Fatalf("expected bootstrap comment to avoid setup_commands, got %s", comment)
 	}
 
-	if !strings.Contains(comment, "environment_commands") {
-		t.Fatalf("expected bootstrap comment to include environment_commands, got %s", comment)
+	if strings.Contains(comment, "environment_commands") {
+		t.Fatalf("expected bootstrap comment to avoid environment_commands, got %s", comment)
+	}
+
+	if !strings.Contains(comment, "bootstrap_commands") {
+		t.Fatalf("expected bootstrap comment to include bootstrap_commands, got %s", comment)
 	}
 }

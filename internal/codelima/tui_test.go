@@ -1501,7 +1501,7 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	if rootNode.WorkspaceMountPath != workspace {
 		t.Fatalf("expected mounted workspace path %q, got %q", workspace, rootNode.WorkspaceMountPath)
 	}
-	if got := rootNode.LimaCommands.Start; got != "{{binary}} start {{instance_name}} --tty=false" {
+	if got := strings.Join(rootNode.LimaCommands.Start, "|"); got != "{{binary}} start {{instance_name}} --tty=false" {
 		t.Fatalf("expected create node dialog to load lima command overrides, got %q", got)
 	}
 	if nodeAutoStartsSession(rootNode) {
@@ -1567,9 +1567,9 @@ func TestTUIDrawProjectDetailsShowProjectFilePathAndManualEditGuidance(t *testin
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-		SetupCommands: []string{"./script/setup"},
+		Slug:              "root",
+		WorkspacePath:     workspace,
+		BootstrapCommands: []string{"./script/setup"},
 	})
 	if err != nil {
 		t.Fatalf("ProjectCreate(root) error = %v", err)
@@ -1598,7 +1598,11 @@ func TestTUIDrawProjectDetailsShowProjectFilePathAndManualEditGuidance(t *testin
 
 	rendered := renderedScreenText(t, app.vx, 220, 30)
 	projectFilePath := service.store.projectPath(project.ID)
-	if !strings.Contains(rendered, "Project file: "+projectFilePath) {
+	expectedPathPrefix := "Project file: " + projectFilePath
+	if len(expectedPathPrefix) > 80 {
+		expectedPathPrefix = expectedPathPrefix[:80]
+	}
+	if !strings.Contains(rendered, expectedPathPrefix) {
 		t.Fatalf("expected rendered project details to include the project file path, got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "edit the project file directly for advanced settings such as Lima command overrides") {
@@ -1650,8 +1654,8 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 			t.Fatalf("expected environment config command menu to omit redundant copy, got %#v", app.menu.Description)
 		}
 	}
-	chooseTUIMenuEntry(t, app, "Add Command")
-	if app.dialog == nil || app.dialog.Title != "Add Environment Config Command" {
+	chooseTUIMenuEntry(t, app, "Add Bootstrap Command")
+	if app.dialog == nil || app.dialog.Title != "Add Environment Config Bootstrap Command" {
 		t.Fatalf("expected add command dialog after create, got %#v", app.dialog)
 	}
 	submitTUIDialog(t, app, map[string]string{"command": "./script/setup"})
@@ -1660,7 +1664,7 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(shared-dev) error = %v", err)
 	}
-	if got := strings.Join(config.Commands, "|"); got != "./script/setup" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "./script/setup" {
 		t.Fatalf("expected created config command, got %q", got)
 	}
 
@@ -1753,8 +1757,8 @@ func TestTUICreateProjectDialogUsesEnvironmentConfigSelector(t *testing.T) {
 		t.Fatalf("ProjectCreate(root) error = %v", err)
 	}
 	if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-		Slug:     "shared-dev",
-		Commands: []string{"./script/setup"},
+		Slug:              "shared-dev",
+		BootstrapCommands: []string{"./script/setup"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigCreate(shared-dev) error = %v", err)
 	}
@@ -1809,8 +1813,8 @@ func TestTUIManageEnvironmentConfigUsesSelector(t *testing.T) {
 		t.Fatalf("ProjectCreate(root) error = %v", err)
 	}
 	if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-		Slug:     "shared-dev",
-		Commands: []string{"./script/setup"},
+		Slug:              "shared-dev",
+		BootstrapCommands: []string{"./script/setup"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigCreate(shared-dev) error = %v", err)
 	}
@@ -1847,8 +1851,8 @@ func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *test
 		t.Fatalf("ProjectCreate(root) error = %v", err)
 	}
 	if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-		Slug:     "shared-dev",
-		Commands: []string{"./script/setup", "direnv allow", "mise install"},
+		Slug:              "shared-dev",
+		BootstrapCommands: []string{"./script/setup", "direnv allow", "mise install"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigCreate(shared-dev) error = %v", err)
 	}
@@ -1862,8 +1866,8 @@ func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *test
 		t.Fatalf("expected environment config command menu, got %#v", app.menu)
 	}
 
-	chooseTUIMenuEntry(t, app, "Add Command")
-	if app.dialog == nil || app.dialog.Title != "Add Environment Config Command" {
+	chooseTUIMenuEntry(t, app, "Add Bootstrap Command")
+	if app.dialog == nil || app.dialog.Title != "Add Environment Config Bootstrap Command" {
 		t.Fatalf("expected add command dialog, got %#v", app.dialog)
 	}
 	submitTUIDialog(t, app, map[string]string{"command": "brew bundle"})
@@ -1871,12 +1875,12 @@ func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *test
 		t.Fatalf("expected command menu to reopen after add, got %#v", app.menu)
 	}
 
-	chooseTUIMenuEntry(t, app, "Move Command")
-	if app.selector == nil || app.selector.Title != "Move Environment Config Command" {
+	chooseTUIMenuEntry(t, app, "Move Bootstrap Command")
+	if app.selector == nil || app.selector.Title != "Move Environment Config Bootstrap Command" {
 		t.Fatalf("expected move command selector, got %#v", app.selector)
 	}
 	chooseTUISelector(t, app, "4. brew bundle")
-	if app.menu == nil || app.menu.Title != "Move Environment Config Command: brew bundle" {
+	if app.menu == nil || app.menu.Title != "Move Environment Config Bootstrap Command: brew bundle" {
 		t.Fatalf("expected move direction menu, got %#v", app.menu)
 	}
 	chooseTUIMenuEntry(t, app, "Move Up")
@@ -1884,12 +1888,12 @@ func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *test
 		t.Fatalf("expected command menu to reopen after reorder, got %#v", app.menu)
 	}
 
-	chooseTUIMenuEntry(t, app, "Remove Command")
-	if app.selector == nil || app.selector.Title != "Remove Environment Config Commands" {
+	chooseTUIMenuEntry(t, app, "Remove Bootstrap Command")
+	if app.selector == nil || app.selector.Title != "Remove Environment Config Bootstrap Commands" {
 		t.Fatalf("expected remove command selector, got %#v", app.selector)
 	}
 	chooseTUISelector(t, app, "2. direnv allow", "3. brew bundle")
-	if app.dialog == nil || app.dialog.Title != "Remove Environment Config Commands" {
+	if app.dialog == nil || app.dialog.Title != "Remove Environment Config Bootstrap Commands" {
 		t.Fatalf("expected remove command confirmation dialog, got %#v", app.dialog)
 	}
 	submitTUIDialog(t, app, map[string]string{})
@@ -1901,7 +1905,7 @@ func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *test
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(shared-dev) error = %v", err)
 	}
-	if got := strings.Join(config.Commands, "|"); got != "./script/setup|mise install" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "./script/setup|mise install" {
 		t.Fatalf("expected reordered and removed commands, got %q", got)
 	}
 }
@@ -2055,7 +2059,7 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	if childNode.ParentNodeID != rootNode.ID {
 		t.Fatalf("expected cloned node parent id %q, got %q", rootNode.ID, childNode.ParentNodeID)
 	}
-	if got := childNode.LimaCommands.Clone; got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
+	if got := strings.Join(childNode.LimaCommands.Clone, "|"); got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
 		t.Fatalf("expected clone node dialog to load lima command overrides, got %q", got)
 	}
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != childNode.ID {

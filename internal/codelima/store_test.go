@@ -13,7 +13,7 @@ func TestSaveProjectWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *test
 
 	home := filepath.Join(t.TempDir(), ".codelima")
 	cfg := DefaultConfig(home)
-	cfg.LimaCommands.Start = "{{binary}} start {{instance_name}} --vm-type=vz"
+	cfg.LimaCommands.Start = []string{"{{binary}} start {{instance_name}} --vm-type=vz"}
 	store := NewStore(cfg)
 	if err := store.EnsureLayout(); err != nil {
 		t.Fatalf("EnsureLayout() error = %v", err)
@@ -25,7 +25,6 @@ func TestSaveProjectWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *test
 		WorkspacePath:       "/workspace/root",
 		AgentProfileName:    "codex-cli",
 		EnvironmentConfigs:  []string{},
-		SetupCommands:       []string{},
 		DefaultRuntime:      RuntimeVM,
 		DefaultProvider:     ProviderLima,
 		DefaultLimaTemplate: "template:default",
@@ -49,11 +48,14 @@ func TestSaveProjectWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *test
 	if !strings.Contains(output, "\n# lima_commands:\n") {
 		t.Fatalf("expected project metadata to include a commented lima_commands block, got %s", output)
 	}
-	if !strings.Contains(output, "#     workspace_seed_prepare: sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}") {
+	if !strings.Contains(output, "#     workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
 		t.Fatalf("expected project metadata to include the default workspace seed prepare command example, got %s", output)
 	}
-	if !strings.Contains(output, "#     start: '{{binary}} start {{instance_name}} --vm-type=vz'") {
+	if !strings.Contains(output, "#     start:") || !strings.Contains(output, "{{binary}} start {{instance_name}} --vm-type=vz") {
 		t.Fatalf("expected project metadata to include the global default start command example, got %s", output)
+	}
+	if !strings.Contains(output, "#     bootstrap: []") {
+		t.Fatalf("expected project metadata to include the bootstrap command example, got %s", output)
 	}
 }
 
@@ -130,7 +132,6 @@ func TestSaveNodeWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *testing
 		WorkspacePath:       "/workspace/root",
 		AgentProfileName:    "codex-cli",
 		EnvironmentConfigs:  []string{},
-		SetupCommands:       []string{},
 		DefaultRuntime:      RuntimeVM,
 		DefaultProvider:     ProviderLima,
 		DefaultLimaTemplate: "template:default",
@@ -172,10 +173,10 @@ func TestSaveNodeWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *testing
 	if !strings.Contains(output, "\n# lima_commands:\n") {
 		t.Fatalf("expected node metadata to include a commented lima_commands block, got %s", output)
 	}
-	if !strings.Contains(output, "#     create: '{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}'") {
+	if !strings.Contains(output, "#     create:") || !strings.Contains(output, "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}") {
 		t.Fatalf("expected node metadata to include the effective create command example, got %s", output)
 	}
-	if !strings.Contains(output, "#     workspace_seed_prepare: sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}") {
+	if !strings.Contains(output, "#     workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
 		t.Fatalf("expected node metadata to include the workspace seed prepare example, got %s", output)
 	}
 }

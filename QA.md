@@ -22,7 +22,7 @@ CODELIMA_HOME="$WORK_ROOT/.codelima"
 Create a project and node:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-list --workspace "$ROOT_DIR/test-project-dir" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-list --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-list --slug qa-list-node
 ```
 
@@ -151,7 +151,7 @@ cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
 Create a root project, a child project, and one node for each:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tree-root --workspace "$WORK_ROOT/root" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tree-root --workspace "$WORK_ROOT/root" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tree-root --slug qa-tree-root-node
 ./bin/codelima --home "$CODELIMA_HOME" project fork qa-tree-root --slug qa-tree-child --workspace "$WORK_ROOT/child"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tree-child --slug qa-tree-child-node
@@ -212,7 +212,7 @@ CODELIMA_HOME="$WORK_ROOT/.codelima"
 Create and start a QA node:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-shell --workspace "$ROOT_DIR/test-project-dir" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-shell --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-shell --slug qa-shell-node
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-shell-node
 ```
@@ -287,7 +287,7 @@ CODELIMA_HOME="$WORK_ROOT/.codelima"
 Create one default copy-mode node and one mounted node:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-workspace --workspace "$ROOT_DIR/test-project-dir" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-workspace --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-workspace --slug qa-copy-node
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-workspace --slug qa-mounted-node --workspace-mode mounted
 ./bin/codelima --home "$CODELIMA_HOME" node list
@@ -365,7 +365,7 @@ Verify the built-in defaults, then create one shared environment config and two 
 ./bin/codelima --home "$CODELIMA_HOME" environment list
 ./bin/codelima --home "$CODELIMA_HOME" environment show codex
 ./bin/codelima --home "$CODELIMA_HOME" environment show claude-code
-./bin/codelima --home "$CODELIMA_HOME" environment create --slug qa-shared --env-command "./script/setup" --env-command "test -f README.md"
+./bin/codelima --home "$CODELIMA_HOME" environment create --slug qa-shared --bootstrap-command "./script/setup" --bootstrap-command "test -f README.md"
 ./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-env-a --workspace "$WORK_ROOT/project-a" --env-config qa-shared
 ./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-env-b --workspace "$WORK_ROOT/project-b" --env-config qa-shared
 ./bin/codelima --home "$CODELIMA_HOME" environment list
@@ -379,13 +379,13 @@ Expected result:
 - `environment show codex` includes `sudo snap install node --classic` and `sudo npm install -g @openai/codex`
 - `environment show claude-code` includes `curl -fsSL https://claude.ai/install.sh | bash`
 - `environment list` includes `qa-shared`
-- `environment show qa-shared` includes `environment_commands` with both configured commands
+- `environment show qa-shared` includes `bootstrap_commands` with both configured commands
 - `project show qa-env-a` includes `environment_configs` with `qa-shared`
 
 Update the shared config, create a new node from one of the projects, and verify the resolved bootstrap state:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" environment update qa-shared --env-command "pwd >/dev/null"
+./bin/codelima --home "$CODELIMA_HOME" environment update qa-shared --bootstrap-command "pwd >/dev/null"
 ./bin/codelima --home "$CODELIMA_HOME" environment show qa-shared
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-env-b --slug qa-env-b-node
 find "$CODELIMA_HOME/nodes" -name bootstrap.json -exec cat {} \; | grep 'pwd'
@@ -448,7 +448,7 @@ cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
 Create one root project, a running node, and a forked child project:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui --workspace "$WORK_ROOT/root" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui --workspace "$WORK_ROOT/root" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui --slug qa-tui-a
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-a
 ./bin/codelima --home "$CODELIMA_HOME" project fork qa-tui --slug qa-tui-child --workspace "$WORK_ROOT/child"
@@ -539,7 +539,7 @@ cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
 Create and start the source node:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-clone-root --workspace "$WORK_ROOT/root" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-clone-root --workspace "$WORK_ROOT/root" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-clone-root --slug qa-clone-root-node
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-clone-root-node
 ```
@@ -607,7 +607,7 @@ cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/moved"
 Create a project and a node:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-rebind --workspace "$WORK_ROOT/original" --env-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-rebind --workspace "$WORK_ROOT/original" --bootstrap-command "./script/setup"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-rebind --slug qa-rebind-node
 ```
 

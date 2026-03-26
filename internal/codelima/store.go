@@ -199,11 +199,11 @@ func (s *Store) ensureBuiltInEnvironmentConfigs(createdAt time.Time) error {
 		}
 
 		if err := s.SaveEnvironmentConfig(EnvironmentConfig{
-			ID:        newID(),
-			Slug:      spec.Slug,
-			Commands:  append([]string(nil), spec.Commands...),
-			CreatedAt: createdAt,
-			UpdatedAt: createdAt,
+			ID:                newID(),
+			Slug:              spec.Slug,
+			BootstrapCommands: append([]string(nil), spec.BootstrapCommands...),
+			CreatedAt:         createdAt,
+			UpdatedAt:         createdAt,
 		}); err != nil {
 			return err
 		}

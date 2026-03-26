@@ -17,8 +17,8 @@ Tests use a fake implementation to assert delegation behavior without creating r
 
 ## Command-Template-First Lima Overrides
 
-The authoritative default Lima command templates live in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`, including `workspace_seed_prepare` for the guest-side directory preparation step used by copy-mode workspaces.
-Projects and nodes can each override any subset of those commands under the same `lima_commands` key, with precedence `config.yaml`, then `project.yaml`, then `node.yaml`. Project and node metadata files without explicit overrides include commented example blocks so operators can discover the shape in place. Runtime expansion happens with placeholders like `{{instance_name}}`, `{{template_path}}`, `{{command_args}}`, `{{target_path}}`, and `{{target_parent}}`, while advanced per-node create-time overrides are seeded through `node create --lima-commands-file`, `node clone --lima-commands-file`, or the matching TUI dialog field before `node.yaml` already exists on disk.
+The authoritative default Lima command templates live in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`, including `bootstrap` for first-start guest bootstrap work and `workspace_seed_prepare` for the copy-mode guest directory preparation step.
+Each `lima_commands` entry is an ordered command list, so one action can execute multiple commands in sequence. Projects and nodes can each override any subset of those command lists under the same key, with precedence `config.yaml`, then `project.yaml`, then `node.yaml`. Project and node metadata files without explicit overrides include commented example blocks so operators can discover the shape in place. Runtime expansion happens with placeholders like `{{instance_name}}`, `{{template_path}}`, `{{command_args}}`, `{{target_path}}`, and `{{target_parent}}`, while advanced per-node create-time overrides are seeded through `node create --lima-commands-file`, `node clone --lima-commands-file`, or the matching TUI dialog field before `node.yaml` already exists on disk.
 
 ## Snapshot Then Promote
 
@@ -27,7 +27,7 @@ Fork flows never mutate a target workspace before an immutable snapshot exists.
 ## Bootstrap State Freeze
 
 Node creation resolves an `AgentProfile` once and stores the concrete bootstrap inputs in `bootstrap.json`.
-That resolution now includes both the project's direct environment commands and any referenced reusable environment configs.
+That resolution includes the effective `lima_commands.bootstrap` list plus any referenced reusable environment config `bootstrap_commands`.
 Later config changes do not retroactively mutate existing nodes.
 
 ## Built-In Metadata Seeding
@@ -48,7 +48,7 @@ The preferred backend is Ghostty VT, with the older Vaxis terminal widget retain
 ## Contextual TUI Actions
 
 The TUI treats the tree selection as the context boundary for mutations.
-Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree while preserving expansion state and the most relevant selection. In tree focus, the footer should mirror those currently available action hotkeys instead of showing generic placeholder copy, so the visible hints always match the keys the operator can press at that moment. Project-scoped environment commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry. Command removal uses selectors plus explicit confirmation instead of typed indexes, and command reordering is expressed as single-step move actions so order-sensitive bootstrap lists stay editable without freeform text parsing. When a dialog needs a reusable config reference, it opens a selector overlay instead of asking the operator to type slugs manually.
+Project and node hotkeys open small overlay dialogs or menus that call the existing `Service` methods, then reload the tree while preserving expansion state and the most relevant selection. In tree focus, the footer should mirror those currently available action hotkeys instead of showing generic placeholder copy, so the visible hints always match the keys the operator can press at that moment. Project-scoped bootstrap commands and reusable environment configs use the same pattern via dedicated menus so list editing does not depend on multiline text entry. Command removal uses selectors plus explicit confirmation instead of typed indexes, and command reordering is expressed as single-step move actions so order-sensitive bootstrap lists stay editable without freeform text parsing. When a dialog needs a reusable config reference, it opens a selector overlay instead of asking the operator to type slugs manually.
 
 ## Async Lima Progress In TUI
 
@@ -63,7 +63,7 @@ The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball i
 ## Guest Workspace Seed
 
 New nodes default to `copy` workspace mode.
-In that mode, the first successful start resolves `lima_commands.workspace_seed_prepare` to clear and recreate the guest target path, then runs `lima_commands.copy` to copy the host workspace into the guest at the same absolute path. That keeps guest edits isolated while preserving the expected path layout for project environment commands and shell entry.
+In that mode, the first successful start resolves `lima_commands.workspace_seed_prepare` to clear and recreate the guest target path, then runs `lima_commands.copy` to copy the host workspace into the guest at the same absolute path. That keeps guest edits isolated while preserving the expected path layout for project bootstrap commands and shell entry.
 
 ## Workspace Mode Per Node
 

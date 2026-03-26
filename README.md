@@ -276,33 +276,50 @@ Project-specific overrides live in the project metadata file shown in the TUI ri
 Node-specific overrides live in `CODELIMA_HOME/nodes/<node-id>/node.yaml`, and the TUI node details pane links that file directly.
 When a project or node has no overrides yet, its metadata file includes a commented example `lima_commands` block you can uncomment and edit.
 
+Each `lima_commands` action is an ordered command list. CodeLima executes the list in order, and higher-precedence overrides replace the whole list for that action. `lima_commands.bootstrap` runs during the first successful node start and replaces the older project-level `environment_commands` field.
+
 Global default example:
 
 ```yaml
 lima_commands:
-  create: "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}"
-  start: "{{binary}} start -y {{instance_name}}"
-  workspace_seed_prepare: "sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}"
-  clone: "{{binary}} clone -y {{source_instance}} {{target_instance}}"
+  create:
+    - "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}"
+  start:
+    - "{{binary}} start -y {{instance_name}}"
+  bootstrap: []
+  workspace_seed_prepare:
+    - "sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}"
+  clone:
+    - "{{binary}} clone -y {{source_instance}} {{target_instance}}"
 ```
 
 Project override example:
 
 ```yaml
 lima_commands:
-  workspace_seed_prepare: "install -d {{target_parent}} && rm -rf {{target_path}}"
-  copy: "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"
-  create: "{{binary}} create -y --name {{instance_name}} --cpus=6 --memory=12 --disk=80 --vm-type=vz {{template_path}}"
-  start: "{{binary}} start {{instance_name}} --vm-type=vz"
-  clone: "{{binary}} clone -y {{source_instance}} {{target_instance}}"
+  bootstrap:
+    - "./script/setup"
+    - "direnv allow"
+  workspace_seed_prepare:
+    - "install -d {{target_parent}} && rm -rf {{target_path}}"
+  copy:
+    - "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"
+  create:
+    - "{{binary}} create -y --name {{instance_name}} --cpus=6 --memory=12 --disk=80 --vm-type=vz {{template_path}}"
+  start:
+    - "{{binary}} start {{instance_name}} --vm-type=vz"
+  clone:
+    - "{{binary}} clone -y {{source_instance}} {{target_instance}}"
 ```
 
 Node override example:
 
 ```yaml
 lima_commands:
-  start: "{{binary}} start {{instance_name}} --tty=false"
-  copy: "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"
+  start:
+    - "{{binary}} start {{instance_name}} --tty=false"
+  copy:
+    - "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"
 ```
 
 Global, project, and node overrides follow normal precedence in that order. For the very first `node create` or `node clone`, use `--lima-commands-file` or the TUI `Lima Commands File` field when you need node-specific `create`, `clone`, or `template_copy` overrides to apply before the node metadata file already exists on disk.
@@ -436,11 +453,11 @@ CLI:
 ```sh
 codelima environment create \
   --slug devbox \
-  --env-command "sudo apt-get update" \
-  --env-command "sudo apt-get install -y ripgrep fd-find jq gh" \
-  --env-command "curl -fsSL https://mise.run | sh"
+  --bootstrap-command "sudo apt-get update" \
+  --bootstrap-command "sudo apt-get install -y ripgrep fd-find jq gh" \
+  --bootstrap-command "curl -fsSL https://mise.run | sh"
 
-codelima environment update devbox --env-command "sudo npm install -g @anthropic-ai/claude-code"
+codelima environment update devbox --bootstrap-command "sudo npm install -g @anthropic-ai/claude-code"
 codelima environment show devbox
 
 codelima project create \
@@ -454,9 +471,9 @@ TUI flow:
 ```text
 [g] Env Configs
   -> Create Config
-  -> Add Command
-  -> Move Command
-  -> Remove Command
+  -> Add Bootstrap Command
+  -> Move Bootstrap Command
+  -> Remove Bootstrap Command
 
 [a] Add Project
   -> choose Environment Configs: devbox
@@ -496,10 +513,10 @@ codelima config show
 Reusable environments:
 
 ```sh
-codelima environment create --slug NAME --env-command '...'
+codelima environment create --slug NAME --bootstrap-command '...'
 codelima environment list
 codelima environment show NAME
-codelima environment update NAME --env-command '...'
+codelima environment update NAME --bootstrap-command '...'
 codelima environment delete NAME
 ```
 
@@ -548,7 +565,7 @@ codelima shell NODE -- uname -a
 ```sh
 make run ARGS="doctor"
 make run ARGS="config show"
-make run ARGS="environment create --slug shared-dev --env-command ./script/setup"
+make run ARGS="environment create --slug shared-dev --bootstrap-command ./script/setup"
 make run ARGS="project create --slug root --workspace ./test-project-dir --env-config shared-dev"
 make run ARGS="node create --project root --slug root-node"
 make run ARGS="node start root-node"

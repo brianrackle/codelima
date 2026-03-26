@@ -490,8 +490,8 @@ func (a *vaxisTUIApp) environmentConfigSelectorOptions() ([]tuiSelectorOption, e
 	options := make([]tuiSelectorOption, 0, len(configs))
 	for _, config := range configs {
 		label := config.Slug
-		if len(config.Commands) > 0 {
-			label = fmt.Sprintf("%s (%d commands)", config.Slug, len(config.Commands))
+		if len(config.BootstrapCommands) > 0 {
+			label = fmt.Sprintf("%s (%d bootstrap commands)", config.Slug, len(config.BootstrapCommands))
 		}
 		options = append(options, tuiSelectorOption{
 			Label: label,
@@ -1040,7 +1040,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 		description = description[:0]
 		description = append(description, "Configured defaults:")
 		for _, config := range configs {
-			description = append(description, fmt.Sprintf("- %s (%d commands)", config.Slug, len(config.Commands)))
+			description = append(description, fmt.Sprintf("- %s (%d bootstrap commands)", config.Slug, len(config.BootstrapCommands)))
 		}
 	} else {
 		description = append(description[:0], "No environment configs configured.")
@@ -1113,26 +1113,26 @@ func (a *vaxisTUIApp) openManageEnvironmentConfigDialog(defaultSlug string) erro
 
 func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig) {
 	description := []string{
-		"No environment commands configured.",
+		"No bootstrap commands configured.",
 	}
-	if len(config.Commands) > 0 {
+	if len(config.BootstrapCommands) > 0 {
 		description = description[:0]
-		description = append(description, "Configured commands:")
-		for index, command := range config.Commands {
+		description = append(description, "Configured bootstrap commands:")
+		for index, command := range config.BootstrapCommands {
 			description = append(description, fmt.Sprintf("%d. %s", index+1, command))
 		}
 	} else {
-		description = append(description[:0], "No environment commands configured.")
+		description = append(description[:0], "No bootstrap commands configured.")
 	}
 
 	a.menu = &tuiMenu{
 		Title:       "Environment Config: " + config.Slug,
 		Description: description,
 		Entries: []tuiMenuEntry{
-			{Key: 'a', Label: "Add Command", Action: func() error { a.openAddEnvironmentConfigCommandDialog(config); return nil }},
-			{Key: 'r', Label: "Remove Command", Action: func() error { return a.openRemoveEnvironmentConfigCommandDialog(config) }},
-			{Key: 'm', Label: "Move Command", Action: func() error { return a.openMoveEnvironmentConfigCommandDialog(config) }},
-			{Key: 'c', Label: "Clear Commands", Action: func() error { a.openClearEnvironmentConfigCommandsDialog(config); return nil }},
+			{Key: 'a', Label: "Add Bootstrap Command", Action: func() error { a.openAddEnvironmentConfigCommandDialog(config); return nil }},
+			{Key: 'r', Label: "Remove Bootstrap Command", Action: func() error { return a.openRemoveEnvironmentConfigCommandDialog(config) }},
+			{Key: 'm', Label: "Move Bootstrap Command", Action: func() error { return a.openMoveEnvironmentConfigCommandDialog(config) }},
+			{Key: 'c', Label: "Clear Bootstrap Commands", Action: func() error { a.openClearEnvironmentConfigCommandsDialog(config); return nil }},
 			{Key: 'd', Label: "Delete Config", Action: func() error { a.openDeleteEnvironmentConfigDialog(config); return nil }},
 		},
 	}
@@ -1140,15 +1140,15 @@ func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig)
 
 func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentConfig) {
 	a.dialog = newTUIDialog(
-		"Add Environment Config Command",
+		"Add Environment Config Bootstrap Command",
 		"Add",
-		[]string{"Add a command to the reusable environment config."},
+		[]string{"Add a bootstrap command to the reusable environment config."},
 		[]tuiDialogField{
 			newTUIInputField("command", "Command", "", true),
 		},
 		func(values map[string]string) error {
-			commands := append(append([]string(nil), config.Commands...), values["command"])
-			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{Commands: commands})
+			commands := append(append([]string(nil), config.BootstrapCommands...), values["command"])
+			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{BootstrapCommands: commands})
 			if err != nil {
 				return err
 			}
@@ -1159,18 +1159,18 @@ func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentCo
 }
 
 func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config EnvironmentConfig) error {
-	if len(config.Commands) == 0 {
+	if len(config.BootstrapCommands) == 0 {
 		return fmt.Errorf("environment config %s has no commands", config.Slug)
 	}
 
 	a.selector = newTUISelector(
-		"Remove Environment Config Commands",
-		[]string{"Choose one or more reusable environment config commands to remove."},
-		commandSelectorOptions(config.Commands),
+		"Remove Environment Config Bootstrap Commands",
+		[]string{"Choose one or more reusable environment config bootstrap commands to remove."},
+		commandSelectorOptions(config.BootstrapCommands),
 		nil,
 		true,
 		func(values []string) error {
-			indices, err := parseSelectorIndices(values, len(config.Commands))
+			indices, err := parseSelectorIndices(values, len(config.BootstrapCommands))
 			if err != nil {
 				return err
 			}
@@ -1180,17 +1180,17 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 
 			description := []string{"Remove the selected reusable environment config commands?"}
 			for _, index := range indices {
-				description = append(description, fmt.Sprintf("%d. %s", index+1, config.Commands[index]))
+				description = append(description, fmt.Sprintf("%d. %s", index+1, config.BootstrapCommands[index]))
 			}
 
 			a.dialog = newTUIDialog(
-				"Remove Environment Config Commands",
+				"Remove Environment Config Bootstrap Commands",
 				"Remove",
 				description,
 				nil,
 				func(map[string]string) error {
 					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
-						Commands: removeCommandsByIndex(config.Commands, indices),
+						BootstrapCommands: removeCommandsByIndex(config.BootstrapCommands, indices),
 					})
 					if err != nil {
 						return err
@@ -1207,18 +1207,18 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 }
 
 func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentConfig) error {
-	if len(config.Commands) < 2 {
+	if len(config.BootstrapCommands) < 2 {
 		return fmt.Errorf("environment config %s needs at least two commands to change order", config.Slug)
 	}
 
 	a.selector = newTUISelector(
-		"Move Environment Config Command",
-		[]string{"Choose a reusable environment config command to move up or down."},
-		commandSelectorOptions(config.Commands),
+		"Move Environment Config Bootstrap Command",
+		[]string{"Choose a reusable environment config bootstrap command to move up or down."},
+		commandSelectorOptions(config.BootstrapCommands),
 		nil,
 		false,
 		func(values []string) error {
-			indices, err := parseSelectorIndices(values, len(config.Commands))
+			indices, err := parseSelectorIndices(values, len(config.BootstrapCommands))
 			if err != nil {
 				return err
 			}
@@ -1226,13 +1226,13 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 				return fmt.Errorf("select a single command to move")
 			}
 			index := indices[0]
-			command := config.Commands[index]
+			command := config.BootstrapCommands[index]
 
 			entries := []tuiMenuEntry{}
 			if index > 0 {
 				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
 					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
-						Commands: moveCommand(config.Commands, index, -1),
+						BootstrapCommands: moveCommand(config.BootstrapCommands, index, -1),
 					})
 					if err != nil {
 						return err
@@ -1241,10 +1241,10 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				}})
 			}
-			if index < len(config.Commands)-1 {
+			if index < len(config.BootstrapCommands)-1 {
 				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
 					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
-						Commands: moveCommand(config.Commands, index, 1),
+						BootstrapCommands: moveCommand(config.BootstrapCommands, index, 1),
 					})
 					if err != nil {
 						return err
@@ -1255,8 +1255,8 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 			}
 
 			a.menu = &tuiMenu{
-				Title:       "Move Environment Config Command: " + command,
-				Description: []string{"Choose how to reposition the selected reusable environment config command."},
+				Title:       "Move Environment Config Bootstrap Command: " + command,
+				Description: []string{"Choose how to reposition the selected reusable environment config bootstrap command."},
 				Entries:     entries,
 			}
 			return nil
@@ -1267,12 +1267,12 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 
 func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config EnvironmentConfig) {
 	a.dialog = newTUIDialog(
-		"Clear Environment Config Commands",
+		"Clear Environment Config Bootstrap Commands",
 		"Clear",
-		[]string{"Remove all commands from environment config " + config.Slug + "."},
+		[]string{"Remove all bootstrap commands from environment config " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
-			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{ClearCommands: true})
+			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{ClearBootstrapCommands: true})
 			if err != nil {
 				return err
 			}
@@ -1747,15 +1747,15 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 			win.Println(row, vaxis.Segment{Text: "Environment configs: " + commaSeparatedValues(entry.project.EnvironmentConfigs), Style: mutedStyle})
 			row++
 		}
-		if len(entry.project.SetupCommands) == 0 {
-			win.Println(row, vaxis.Segment{Text: "Environment commands: none", Style: mutedStyle})
+		if len(entry.project.LimaCommands.Bootstrap) == 0 {
+			win.Println(row, vaxis.Segment{Text: "Bootstrap commands: none", Style: mutedStyle})
 			row++
 		} else {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Environment commands: %d", len(entry.project.SetupCommands)), Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Bootstrap commands: %d", len(entry.project.LimaCommands.Bootstrap)), Style: mutedStyle})
 			row++
-			for index, command := range entry.project.SetupCommands {
+			for index, command := range entry.project.LimaCommands.Bootstrap {
 				if index >= 3 {
-					win.Println(row, vaxis.Segment{Text: fmt.Sprintf("... %d more", len(entry.project.SetupCommands)-index), Style: mutedStyle})
+					win.Println(row, vaxis.Segment{Text: fmt.Sprintf("... %d more", len(entry.project.LimaCommands.Bootstrap)-index), Style: mutedStyle})
 					row++
 					break
 				}

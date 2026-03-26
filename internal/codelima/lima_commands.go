@@ -15,85 +15,109 @@ type limaCommandsExample struct {
 }
 
 type limaCommandTemplateField struct {
-	key   string
-	value string
+	key    string
+	values []string
 }
 
 func defaultLimaCommandTemplates() LimaCommandTemplates {
 	return LimaCommandTemplates{
-		TemplateCopy:         "{{binary}} template copy --fill {{locator}} -",
-		Create:               "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}",
-		Start:                "{{binary}} start -y {{instance_name}}",
-		Stop:                 "{{binary}} stop -y {{instance_name}}",
-		Delete:               "{{binary}} delete -f {{instance_name}}",
-		Clone:                "{{binary}} clone -y {{source_instance}} {{target_instance}}",
-		WorkspaceSeedPrepare: `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`,
-		Copy:                 "{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}}",
-		Shell:                "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}",
+		TemplateCopy: []string{
+			"{{binary}} template copy --fill {{locator}} -",
+		},
+		Create: []string{
+			"{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}",
+		},
+		Start: []string{
+			"{{binary}} start -y {{instance_name}}",
+		},
+		Stop: []string{
+			"{{binary}} stop -y {{instance_name}}",
+		},
+		Delete: []string{
+			"{{binary}} delete -f {{instance_name}}",
+		},
+		Clone: []string{
+			"{{binary}} clone -y {{source_instance}} {{target_instance}}",
+		},
+		Bootstrap: []string{},
+		WorkspaceSeedPrepare: []string{
+			`sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`,
+		},
+		Copy: []string{
+			"{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}}",
+		},
+		Shell: []string{
+			"{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}",
+		},
 	}
 }
 
 func (t LimaCommandTemplates) ApplyDefaults(defaults LimaCommandTemplates) LimaCommandTemplates {
-	t.TemplateCopy = coalesce(t.TemplateCopy, defaults.TemplateCopy)
-	t.Create = coalesce(t.Create, defaults.Create)
-	t.Start = coalesce(t.Start, defaults.Start)
-	t.Stop = coalesce(t.Stop, defaults.Stop)
-	t.Delete = coalesce(t.Delete, defaults.Delete)
-	t.Clone = coalesce(t.Clone, defaults.Clone)
-	t.WorkspaceSeedPrepare = coalesce(t.WorkspaceSeedPrepare, defaults.WorkspaceSeedPrepare)
-	t.Copy = coalesce(t.Copy, defaults.Copy)
-	t.Shell = coalesce(t.Shell, defaults.Shell)
+	t.TemplateCopy = applyDefaultCommandList(t.TemplateCopy, defaults.TemplateCopy)
+	t.Create = applyDefaultCommandList(t.Create, defaults.Create)
+	t.Start = applyDefaultCommandList(t.Start, defaults.Start)
+	t.Stop = applyDefaultCommandList(t.Stop, defaults.Stop)
+	t.Delete = applyDefaultCommandList(t.Delete, defaults.Delete)
+	t.Clone = applyDefaultCommandList(t.Clone, defaults.Clone)
+	t.Bootstrap = applyDefaultCommandList(t.Bootstrap, defaults.Bootstrap)
+	t.WorkspaceSeedPrepare = applyDefaultCommandList(t.WorkspaceSeedPrepare, defaults.WorkspaceSeedPrepare)
+	t.Copy = applyDefaultCommandList(t.Copy, defaults.Copy)
+	t.Shell = applyDefaultCommandList(t.Shell, defaults.Shell)
 	return t
 }
 
 func (t LimaCommandTemplates) IsZero() bool {
-	return strings.TrimSpace(t.TemplateCopy) == "" &&
-		strings.TrimSpace(t.Create) == "" &&
-		strings.TrimSpace(t.Start) == "" &&
-		strings.TrimSpace(t.Stop) == "" &&
-		strings.TrimSpace(t.Delete) == "" &&
-		strings.TrimSpace(t.Clone) == "" &&
-		strings.TrimSpace(t.WorkspaceSeedPrepare) == "" &&
-		strings.TrimSpace(t.Copy) == "" &&
-		strings.TrimSpace(t.Shell) == ""
+	return len(t.TemplateCopy) == 0 &&
+		len(t.Create) == 0 &&
+		len(t.Start) == 0 &&
+		len(t.Stop) == 0 &&
+		len(t.Delete) == 0 &&
+		len(t.Clone) == 0 &&
+		len(t.Bootstrap) == 0 &&
+		len(t.WorkspaceSeedPrepare) == 0 &&
+		len(t.Copy) == 0 &&
+		len(t.Shell) == 0
 }
 
-func (t LimaCommandTemplates) template(kind limaCommandKind) string {
+func (t LimaCommandTemplates) templates(kind limaCommandKind) []string {
 	switch kind {
 	case limaCommandTemplateCopy:
-		return t.TemplateCopy
+		return copyCommandList(t.TemplateCopy)
 	case limaCommandCreate:
-		return t.Create
+		return copyCommandList(t.Create)
 	case limaCommandStart:
-		return t.Start
+		return copyCommandList(t.Start)
 	case limaCommandStop:
-		return t.Stop
+		return copyCommandList(t.Stop)
 	case limaCommandDelete:
-		return t.Delete
+		return copyCommandList(t.Delete)
 	case limaCommandClone:
-		return t.Clone
+		return copyCommandList(t.Clone)
+	case limaCommandBootstrap:
+		return copyCommandList(t.Bootstrap)
 	case limaCommandWorkspaceSeedPrepare:
-		return t.WorkspaceSeedPrepare
+		return copyCommandList(t.WorkspaceSeedPrepare)
 	case limaCommandCopy:
-		return t.Copy
+		return copyCommandList(t.Copy)
 	case limaCommandShell:
-		return t.Shell
+		return copyCommandList(t.Shell)
 	default:
-		return ""
+		return nil
 	}
 }
 
 func (t LimaCommandTemplates) orderedFields() []limaCommandTemplateField {
 	return []limaCommandTemplateField{
-		{key: "template_copy", value: t.TemplateCopy},
-		{key: "create", value: t.Create},
-		{key: "start", value: t.Start},
-		{key: "stop", value: t.Stop},
-		{key: "delete", value: t.Delete},
-		{key: "clone", value: t.Clone},
-		{key: "workspace_seed_prepare", value: t.WorkspaceSeedPrepare},
-		{key: "copy", value: t.Copy},
-		{key: "shell", value: t.Shell},
+		{key: "template_copy", values: t.TemplateCopy},
+		{key: "create", values: t.Create},
+		{key: "start", values: t.Start},
+		{key: "stop", values: t.Stop},
+		{key: "delete", values: t.Delete},
+		{key: "clone", values: t.Clone},
+		{key: "bootstrap", values: t.Bootstrap},
+		{key: "workspace_seed_prepare", values: t.WorkspaceSeedPrepare},
+		{key: "copy", values: t.Copy},
+		{key: "shell", values: t.Shell},
 	}
 }
 

@@ -31,7 +31,7 @@ type ProjectCreateInput struct {
 	WorkspacePath      string
 	AgentProfile       string
 	EnvironmentConfigs []string
-	SetupCommands      []string
+	BootstrapCommands  []string
 	Template           string
 }
 
@@ -41,8 +41,8 @@ type ProjectUpdateInput struct {
 	AgentProfile            *string
 	EnvironmentConfigs      []string
 	ClearEnvironmentConfigs bool
-	SetupCommands           []string
-	ClearSetup              bool
+	BootstrapCommands       []string
+	ClearBootstrap          bool
 	Template                *string
 }
 
@@ -300,7 +300,7 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 		WorkspacePath:       workspacePath,
 		AgentProfileName:    coalesce(input.AgentProfile, s.cfg.DefaultAgentProfile),
 		EnvironmentConfigs:  environmentConfigs,
-		SetupCommands:       append([]string(nil), input.SetupCommands...),
+		LimaCommands:        LimaCommandTemplates{Bootstrap: append([]string(nil), input.BootstrapCommands...)},
 		DefaultRuntime:      RuntimeVM,
 		DefaultProvider:     ProviderLima,
 		DefaultLimaTemplate: coalesce(input.Template, s.cfg.DefaultTemplate),
@@ -387,10 +387,10 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 		}
 	}
 
-	if input.ClearSetup {
-		project.SetupCommands = []string{}
-	} else if input.SetupCommands != nil {
-		project.SetupCommands = append([]string(nil), input.SetupCommands...)
+	if input.ClearBootstrap {
+		project.LimaCommands.Bootstrap = []string{}
+	} else if input.BootstrapCommands != nil {
+		project.LimaCommands.Bootstrap = append([]string(nil), input.BootstrapCommands...)
 	}
 
 	if input.ClearEnvironmentConfigs {
@@ -612,7 +612,6 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 		ForkBaseSnapshotID:  baseSnapshot.ID,
 		AgentProfileName:    source.AgentProfileName,
 		EnvironmentConfigs:  append([]string(nil), source.EnvironmentConfigs...),
-		SetupCommands:       append([]string(nil), source.SetupCommands...),
 		DefaultRuntime:      source.DefaultRuntime,
 		DefaultProvider:     source.DefaultProvider,
 		DefaultLimaTemplate: source.DefaultLimaTemplate,
@@ -684,7 +683,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, invalidArgument("workspace mode must be copy or mounted", map[string]any{"workspace_mode": input.WorkspaceMode})
 	}
 
-	projectCommands, err := s.resolveProjectEnvironmentCommands(project)
+	projectCommands, err := s.resolveProjectBootstrapCommands(project, input.LimaCommands)
 	if err != nil {
 		return Node{}, err
 	}
@@ -703,7 +702,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	bootstrap := BootstrapState{
 		AgentProfileName:  profile.Name,
 		InstallCommands:   append([]string(nil), profile.InstallCommands...),
-		SetupCommands:     projectCommands,
+		BootstrapCommands: projectCommands,
 		ValidationCommand: profile.ValidationCommand,
 		LaunchCommand:     profile.LaunchCommand,
 		Environment:       cloneMap(profile.Environment),
@@ -1066,7 +1065,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 
 	bootstrap := sourceBootstrap
 	bootstrap.InstallCommands = append([]string(nil), sourceBootstrap.InstallCommands...)
-	bootstrap.SetupCommands = append([]string(nil), sourceBootstrap.SetupCommands...)
+	bootstrap.BootstrapCommands = append([]string(nil), sourceBootstrap.BootstrapCommands...)
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
 	childNode = Node{
@@ -1604,8 +1603,8 @@ func (s *Service) resolveEnvironmentConfigRefs(refs []string) ([]string, error) 
 	return resolved, nil
 }
 
-func (s *Service) resolveProjectEnvironmentCommands(project Project) ([]string, error) {
-	commands := make([]string, 0, len(project.SetupCommands))
+func (s *Service) resolveProjectBootstrapCommands(project Project, nodeCommands LimaCommandTemplates) ([]string, error) {
+	commands := []string{}
 	for _, slug := range project.EnvironmentConfigs {
 		config, err := s.store.EnvironmentConfigByIDOrSlug(slug)
 		if err != nil {
@@ -1614,10 +1613,15 @@ func (s *Service) resolveProjectEnvironmentCommands(project Project) ([]string, 
 		if config.DeletedAt != nil {
 			return nil, notFound("environment config not found", map[string]any{"query": slug})
 		}
-		commands = append(commands, config.Commands...)
+		commands = append(commands, config.BootstrapCommands...)
 	}
 
-	commands = append(commands, project.SetupCommands...)
+	resolved, err := resolveConfiguredLimaCommands("limactl", s.cfg.LimaCommands, project, nodeCommands, limaCommandBootstrap, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	commands = append(commands, resolved...)
 	return commands, nil
 }
 
@@ -1711,12 +1715,17 @@ func (s *Service) seedGuestWorkspace(ctx context.Context, project Project, node 
 }
 
 func (s *Service) resolveWorkspaceSeedPrepareCommand(project Project, node Node, sourcePath, targetPath string) (string, error) {
-	return resolveConfiguredLimaCommand("limactl", s.cfg.LimaCommands, project, node.LimaCommands, limaCommandWorkspaceSeedPrepare, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", s.cfg.LimaCommands, project, node.LimaCommands, limaCommandWorkspaceSeedPrepare, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 		"source_path":   shellQuote(sourcePath),
 		"target_path":   shellQuote(targetPath),
 		"target_parent": shellQuote(filepath.Dir(targetPath)),
 	})
+	if err != nil {
+		return "", err
+	}
+
+	return strings.Join(commands, " && "), nil
 }
 
 func normalizeShellCommand(command []string) []string {

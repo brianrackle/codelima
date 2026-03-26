@@ -136,6 +136,7 @@ func dispatchEnvironment(service *Service, args []string) (any, error) {
 		flags.SetOutput(io.Discard)
 		slug := flags.String("slug", "", "")
 		var commands stringSliceFlag
+		flags.Var(&commands, "bootstrap-command", "")
 		flags.Var(&commands, "setup-command", "")
 		flags.Var(&commands, "env-command", "")
 		if err := flags.Parse(args[1:]); err != nil {
@@ -145,8 +146,8 @@ func dispatchEnvironment(service *Service, args []string) (any, error) {
 			return nil, invalidArgument("--slug is required", nil)
 		}
 		return service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-			Slug:     *slug,
-			Commands: []string(commands),
+			Slug:              *slug,
+			BootstrapCommands: []string(commands),
 		})
 	case "list":
 		flags := flag.NewFlagSet("environment list", flag.ContinueOnError)
@@ -164,9 +165,11 @@ func dispatchEnvironment(service *Service, args []string) (any, error) {
 	case "update":
 		flags := flag.NewFlagSet("environment update", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
+		clearBootstrap := flags.Bool("clear-bootstrap-commands", false, "")
 		clearSetup := flags.Bool("clear-setup-commands", false, "")
 		clearEnvironment := flags.Bool("clear-env-commands", false, "")
 		var commands stringSliceFlag
+		flags.Var(&commands, "bootstrap-command", "")
 		flags.Var(&commands, "setup-command", "")
 		flags.Var(&commands, "env-command", "")
 		remaining := args[1:]
@@ -185,8 +188,8 @@ func dispatchEnvironment(service *Service, args []string) (any, error) {
 			return nil, invalidArgument("environment update requires <config>", nil)
 		}
 		return service.EnvironmentConfigUpdate(target, EnvironmentConfigUpdateInput{
-			Commands:      []string(commands),
-			ClearCommands: *clearSetup || *clearEnvironment,
+			BootstrapCommands:      []string(commands),
+			ClearBootstrapCommands: *clearBootstrap || *clearSetup || *clearEnvironment,
 		})
 	case "delete":
 		if len(args) < 2 {
@@ -212,10 +215,11 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		agentProfile := flags.String("agent-profile", "", "")
 		template := flags.String("template", "", "")
 		var environmentConfigs stringSliceFlag
-		var setupCommands stringSliceFlag
+		var bootstrapCommands stringSliceFlag
 		flags.Var(&environmentConfigs, "env-config", "")
-		flags.Var(&setupCommands, "setup-command", "")
-		flags.Var(&setupCommands, "env-command", "")
+		flags.Var(&bootstrapCommands, "bootstrap-command", "")
+		flags.Var(&bootstrapCommands, "setup-command", "")
+		flags.Var(&bootstrapCommands, "env-command", "")
 		if err := flags.Parse(args[1:]); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
@@ -227,7 +231,7 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 			WorkspacePath:      *workspace,
 			AgentProfile:       *agentProfile,
 			EnvironmentConfigs: []string(environmentConfigs),
-			SetupCommands:      []string(setupCommands),
+			BootstrapCommands:  []string(bootstrapCommands),
 			Template:           *template,
 		})
 	case "list":
@@ -250,14 +254,16 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		workspace := flags.String("workspace", "", "")
 		agentProfile := flags.String("agent-profile", "", "")
 		template := flags.String("template", "", "")
+		clearBootstrap := flags.Bool("clear-bootstrap-commands", false, "")
 		clearSetup := flags.Bool("clear-setup-commands", false, "")
 		clearEnvironment := flags.Bool("clear-env-commands", false, "")
 		clearEnvironmentConfigs := flags.Bool("clear-env-configs", false, "")
 		var environmentConfigs stringSliceFlag
-		var setupCommands stringSliceFlag
+		var bootstrapCommands stringSliceFlag
 		flags.Var(&environmentConfigs, "env-config", "")
-		flags.Var(&setupCommands, "setup-command", "")
-		flags.Var(&setupCommands, "env-command", "")
+		flags.Var(&bootstrapCommands, "bootstrap-command", "")
+		flags.Var(&bootstrapCommands, "setup-command", "")
+		flags.Var(&bootstrapCommands, "env-command", "")
 		remaining := args[1:]
 		target := ""
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
@@ -292,8 +298,8 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 			AgentProfile:            agentPtr,
 			EnvironmentConfigs:      []string(environmentConfigs),
 			ClearEnvironmentConfigs: *clearEnvironmentConfigs,
-			SetupCommands:           []string(setupCommands),
-			ClearSetup:              *clearSetup || *clearEnvironment,
+			BootstrapCommands:       []string(bootstrapCommands),
+			ClearBootstrap:          *clearBootstrap || *clearSetup || *clearEnvironment,
 			Template:                templatePtr,
 		})
 	case "delete":
@@ -568,7 +574,7 @@ func renderEnvironmentConfigList(configs []EnvironmentConfig) string {
 		rows = append(rows, []string{
 			config.Slug,
 			config.ID,
-			strconv.Itoa(len(config.Commands)),
+			strconv.Itoa(len(config.BootstrapCommands)),
 		})
 	}
 

@@ -1,13 +1,13 @@
 package codelima
 
 type EnvironmentConfigCreateInput struct {
-	Slug     string
-	Commands []string
+	Slug              string
+	BootstrapCommands []string
 }
 
 type EnvironmentConfigUpdateInput struct {
-	Commands      []string
-	ClearCommands bool
+	BootstrapCommands      []string
+	ClearBootstrapCommands bool
 }
 
 func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (EnvironmentConfig, error) {
@@ -33,11 +33,11 @@ func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (E
 
 	now := s.now()
 	config := EnvironmentConfig{
-		ID:        newID(),
-		Slug:      input.Slug,
-		Commands:  append([]string(nil), input.Commands...),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                newID(),
+		Slug:              input.Slug,
+		BootstrapCommands: append([]string(nil), input.BootstrapCommands...),
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	if err := s.store.SaveEnvironmentConfig(config); err != nil {
@@ -81,10 +81,10 @@ func (s *Service) EnvironmentConfigUpdate(value string, input EnvironmentConfigU
 		return EnvironmentConfig{}, err
 	}
 
-	if input.ClearCommands {
-		config.Commands = []string{}
-	} else if input.Commands != nil {
-		config.Commands = append([]string(nil), input.Commands...)
+	if input.ClearBootstrapCommands {
+		config.BootstrapCommands = []string{}
+	} else if input.BootstrapCommands != nil {
+		config.BootstrapCommands = append([]string(nil), input.BootstrapCommands...)
 	}
 
 	config.UpdatedAt = s.now()

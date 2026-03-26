@@ -149,22 +149,22 @@ func builtInProfiles() map[string]AgentProfile {
 }
 
 type builtInEnvironmentConfigSpec struct {
-	Slug     string
-	Commands []string
+	Slug              string
+	BootstrapCommands []string
 }
 
 func builtInEnvironmentConfigs() []builtInEnvironmentConfigSpec {
 	return []builtInEnvironmentConfigSpec{
 		{
 			Slug: "codex",
-			Commands: []string{
+			BootstrapCommands: []string{
 				"sudo snap install node --classic",
 				"sudo npm install -g @openai/codex",
 			},
 		},
 		{
 			Slug: "claude-code",
-			Commands: []string{
+			BootstrapCommands: []string{
 				"curl -fsSL https://claude.ai/install.sh | bash",
 			},
 		},
@@ -183,8 +183,8 @@ func bootstrapComment(state BootstrapState) string {
 		lines = append(lines, fmt.Sprintf("#     - %s", command))
 	}
 
-	lines = append(lines, "#   environment_commands:")
-	for _, command := range state.SetupCommands {
+	lines = append(lines, "#   bootstrap_commands:")
+	for _, command := range state.BootstrapCommands {
 		lines = append(lines, fmt.Sprintf("#     - %s", command))
 	}
 

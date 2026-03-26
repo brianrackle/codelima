@@ -51,13 +51,15 @@ func newFakeLima() *fakeLima {
 
 func (f *fakeLima) BaseTemplate(_ context.Context, project Project, nodeCommands LimaCommandTemplates, locator string) ([]byte, error) {
 	f.calls = append(f.calls, "template")
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, nodeCommands, limaCommandTemplateCopy, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, nodeCommands, limaCommandTemplateCopy, map[string]string{
 		"locator": shellQuote(locator),
 	})
 	if err != nil {
 		return nil, err
 	}
-	f.invocations = append(f.invocations, "template:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "template:"+command)
+	}
 	return append([]byte(nil), f.baseTemplate...), nil
 }
 
@@ -75,14 +77,16 @@ func (f *fakeLima) List(_ context.Context) ([]RuntimeObservation, error) {
 
 func (f *fakeLima) Create(_ context.Context, project Project, node Node, templatePath string) error {
 	f.calls = append(f.calls, "create:"+node.LimaInstanceName)
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCreate, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCreate, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 		"template_path": shellQuote(templatePath),
 	})
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "create:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "create:"+command)
+	}
 	if f.createErr != nil {
 		return f.createErr
 	}
@@ -92,13 +96,15 @@ func (f *fakeLima) Create(_ context.Context, project Project, node Node, templat
 
 func (f *fakeLima) Start(_ context.Context, project Project, node Node) error {
 	f.calls = append(f.calls, "start:"+node.LimaInstanceName)
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStart, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStart, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "start:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "start:"+command)
+	}
 	observation := f.observations[node.LimaInstanceName]
 	observation.Status = "running"
 	observation.Exists = true
@@ -109,13 +115,15 @@ func (f *fakeLima) Start(_ context.Context, project Project, node Node) error {
 
 func (f *fakeLima) Stop(_ context.Context, project Project, node Node) error {
 	f.calls = append(f.calls, "stop:"+node.LimaInstanceName)
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStop, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStop, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "stop:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "stop:"+command)
+	}
 	observation := f.observations[node.LimaInstanceName]
 	observation.Status = "stopped"
 	observation.Exists = true
@@ -126,27 +134,31 @@ func (f *fakeLima) Stop(_ context.Context, project Project, node Node) error {
 
 func (f *fakeLima) Delete(_ context.Context, project Project, node Node) error {
 	f.calls = append(f.calls, "delete:"+node.LimaInstanceName)
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandDelete, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandDelete, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "delete:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "delete:"+command)
+	}
 	delete(f.observations, node.LimaInstanceName)
 	return nil
 }
 
 func (f *fakeLima) Clone(_ context.Context, project Project, sourceNode, targetNode Node) error {
 	f.calls = append(f.calls, "clone:"+sourceNode.LimaInstanceName+"->"+targetNode.LimaInstanceName)
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, targetNode.LimaCommands, limaCommandClone, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, targetNode.LimaCommands, limaCommandClone, map[string]string{
 		"source_instance": shellQuote(sourceNode.LimaInstanceName),
 		"target_instance": shellQuote(targetNode.LimaInstanceName),
 	})
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "clone:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "clone:"+command)
+	}
 	status := f.cloneStatus
 	if strings.TrimSpace(status) == "" {
 		status = "stopped"
@@ -157,7 +169,7 @@ func (f *fakeLima) Clone(_ context.Context, project Project, sourceNode, targetN
 
 func (f *fakeLima) CopyToGuest(_ context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
 	f.calls = append(f.calls, "copy:"+node.LimaInstanceName+":"+sourcePath+"->"+targetPath)
-	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCopy, map[string]string{
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCopy, map[string]string{
 		"source_path":    shellQuote(sourcePath),
 		"target_path":    shellQuote(targetPath),
 		"instance_name":  shellQuote(node.LimaInstanceName),
@@ -167,7 +179,9 @@ func (f *fakeLima) CopyToGuest(_ context.Context, project Project, node Node, so
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "copy:"+command)
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "copy:"+command)
+	}
 	f.copyCalls = append(f.copyCalls, fakeCopyCall{
 		instanceName: node.LimaInstanceName,
 		sourcePath:   sourcePath,
@@ -183,7 +197,7 @@ func (f *fakeLima) Shell(_ context.Context, project Project, node Node, command 
 	if workdir != "" {
 		workdirFlag = prefixedShellFragment("--workdir", shellQuote(workdir))
 	}
-	resolved, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandShell, map[string]string{
+	resolved, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandShell, map[string]string{
 		"instance_name": shellQuote(node.LimaInstanceName),
 		"workdir":       shellQuote(workdir),
 		"workdir_flag":  workdirFlag,
@@ -192,7 +206,9 @@ func (f *fakeLima) Shell(_ context.Context, project Project, node Node, command 
 	if err != nil {
 		return err
 	}
-	f.invocations = append(f.invocations, "shell:"+resolved)
+	for _, resolvedCommand := range resolved {
+		f.invocations = append(f.invocations, "shell:"+resolvedCommand)
+	}
 	f.shellCalls = append(f.shellCalls, fakeShellCall{
 		instanceName: node.LimaInstanceName,
 		command:      append([]string(nil), command...),
@@ -290,15 +306,15 @@ func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireLima(t *testing
 	}
 
 	config, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-		Slug:     "shared-dev",
-		Commands: []string{"./script/setup"},
+		Slug:              "shared-dev",
+		BootstrapCommands: []string{"./script/setup"},
 	})
 	if err != nil {
 		t.Fatalf("EnvironmentConfigCreate() error = %v", err)
 	}
 
 	if _, err := service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
-		Commands: []string{"./script/setup", "direnv allow"},
+		BootstrapCommands: []string{"./script/setup", "direnv allow"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigUpdate() error = %v", err)
 	}
@@ -321,9 +337,9 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-		SetupCommands: []string{"./script/setup"},
+		Slug:              "root",
+		WorkspacePath:     workspace,
+		BootstrapCommands: []string{"./script/setup"},
 	})
 	if err != nil {
 		t.Fatalf("ProjectCreate() error = %v", err)
@@ -407,9 +423,9 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-		SetupCommands: []string{"./script/setup"},
+		Slug:              "root",
+		WorkspacePath:     workspace,
+		BootstrapCommands: []string{"./script/setup"},
 	})
 	if err != nil {
 		t.Fatalf("ProjectCreate() error = %v", err)
@@ -478,7 +494,7 @@ func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
 		t.Fatalf("ProjectCreate() error = %v", err)
 	}
 
-	project.LimaCommands.WorkspaceSeedPrepare = "echo preparing {{instance_name}} {{target_path}} {{target_parent}}"
+	project.LimaCommands.WorkspaceSeedPrepare = []string{"echo preparing {{instance_name}} {{target_path}} {{target_parent}}"}
 	if err := service.store.SaveProject(project); err != nil {
 		t.Fatalf("SaveProject(custom workspace seed prepare command) error = %v", err)
 	}
@@ -558,14 +574,14 @@ func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
 	}
 
 	project.LimaCommands = LimaCommandTemplates{
-		Create:       "{{binary}} create --name {{instance_name}} --cpus=8 --memory=16 --disk=100 {{template_path}} --vm-type=vz",
-		Start:        "{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'",
-		Stop:         "{{binary}} stop {{instance_name}} --preserve-state",
-		Delete:       "{{binary}} delete {{instance_name}} --archive",
-		Clone:        "{{binary}} clone {{source_instance}} {{target_instance}} --vm-type=vz",
-		Copy:         "{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}} --checksum",
-		Shell:        "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}} --debug",
-		TemplateCopy: "{{binary}} template copy --fill {{locator}} -",
+		Create:       []string{"{{binary}} create --name {{instance_name}} --cpus=8 --memory=16 --disk=100 {{template_path}} --vm-type=vz"},
+		Start:        []string{"{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'"},
+		Stop:         []string{"{{binary}} stop {{instance_name}} --preserve-state"},
+		Delete:       []string{"{{binary}} delete {{instance_name}} --archive"},
+		Clone:        []string{"{{binary}} clone {{source_instance}} {{target_instance}} --vm-type=vz"},
+		Copy:         []string{"{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"},
+		Shell:        []string{"{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}} --debug"},
+		TemplateCopy: []string{"{{binary}} template copy --fill {{locator}} -"},
 	}
 	if err := service.store.SaveProject(project); err != nil {
 		t.Fatalf("SaveProject(custom commands) error = %v", err)
@@ -1109,8 +1125,8 @@ func TestDispatchProjectCreateAndUpdateEnvironmentCommandFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectShow(root) error = %v", err)
 	}
-	if strings.Join(project.SetupCommands, "|") != "./script/setup|direnv allow" {
-		t.Fatalf("expected environment commands from create, got %v", project.SetupCommands)
+	if got := strings.Join(project.LimaCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
+		t.Fatalf("expected bootstrap commands from create, got %v", project.LimaCommands.Bootstrap)
 	}
 
 	if _, err := dispatch(ctx, service, []string{
@@ -1125,8 +1141,8 @@ func TestDispatchProjectCreateAndUpdateEnvironmentCommandFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectShow(updated root) error = %v", err)
 	}
-	if strings.Join(project.SetupCommands, "|") != "mise install|make init" {
-		t.Fatalf("expected environment commands from update, got %v", project.SetupCommands)
+	if got := strings.Join(project.LimaCommands.Bootstrap, "|"); got != "mise install|make init" {
+		t.Fatalf("expected bootstrap commands from update, got %v", project.LimaCommands.Bootstrap)
 	}
 
 	if _, err := dispatch(ctx, service, []string{
@@ -1140,8 +1156,8 @@ func TestDispatchProjectCreateAndUpdateEnvironmentCommandFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectShow(cleared root) error = %v", err)
 	}
-	if len(project.SetupCommands) != 0 {
-		t.Fatalf("expected cleared environment commands, got %v", project.SetupCommands)
+	if len(project.LimaCommands.Bootstrap) != 0 {
+		t.Fatalf("expected cleared bootstrap commands, got %v", project.LimaCommands.Bootstrap)
 	}
 }
 
@@ -1164,8 +1180,8 @@ func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
 		Project: project.ID,
 		Slug:    "root-node",
 		LimaCommands: LimaCommandTemplates{
-			Clone: "{{binary}} clone {{source_instance}} {{target_instance}} --set '.nestedvirtualization=true'",
-			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
+			Clone: []string{"{{binary}} clone {{source_instance}} {{target_instance}} --set '.nestedvirtualization=true'"},
+			Start: []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
 		},
 	})
 	if err != nil {
@@ -1180,10 +1196,10 @@ func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
 		t.Fatalf("NodeClone() error = %v", err)
 	}
 
-	if childNode.LimaCommands.Clone != node.LimaCommands.Clone {
+	if strings.Join(childNode.LimaCommands.Clone, "|") != strings.Join(node.LimaCommands.Clone, "|") {
 		t.Fatalf("expected cloned node to inherit clone command override %q, got %q", node.LimaCommands.Clone, childNode.LimaCommands.Clone)
 	}
-	if childNode.LimaCommands.Start != node.LimaCommands.Start {
+	if strings.Join(childNode.LimaCommands.Start, "|") != strings.Join(node.LimaCommands.Start, "|") {
 		t.Fatalf("expected cloned node to inherit start command override %q, got %q", node.LimaCommands.Start, childNode.LimaCommands.Start)
 	}
 	if !containsSubstring(service.lima.(*fakeLima).invocations, "--set '.nestedvirtualization=true'") {
@@ -1199,14 +1215,14 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
 	config, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
-		Slug:     "shared-dev",
-		Commands: []string{"./script/setup", "direnv allow"},
+		Slug:              "shared-dev",
+		BootstrapCommands: []string{"./script/setup", "direnv allow"},
 	})
 	if err != nil {
 		t.Fatalf("EnvironmentConfigCreate() error = %v", err)
 	}
 
-	if got := strings.Join(config.Commands, "|"); got != "./script/setup|direnv allow" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "./script/setup|direnv allow" {
 		t.Fatalf("expected created commands, got %q", got)
 	}
 
@@ -1222,7 +1238,7 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 		Slug:               "root",
 		WorkspacePath:      workspace,
 		EnvironmentConfigs: []string{"shared-dev"},
-		SetupCommands:      []string{"make init"},
+		BootstrapCommands:  []string{"make init"},
 	})
 	if err != nil {
 		t.Fatalf("ProjectCreate() error = %v", err)
@@ -1244,7 +1260,7 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBootstrapState(root-node) error = %v", err)
 	}
-	if got := strings.Join(bootstrap.SetupCommands, "|"); got != "./script/setup|direnv allow|make init" {
+	if got := strings.Join(bootstrap.BootstrapCommands, "|"); got != "./script/setup|direnv allow|make init" {
 		t.Fatalf("expected resolved bootstrap commands, got %q", got)
 	}
 
@@ -1253,12 +1269,12 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	}
 
 	config, err = service.EnvironmentConfigUpdate("shared-dev", EnvironmentConfigUpdateInput{
-		Commands: []string{"mise install"},
+		BootstrapCommands: []string{"mise install"},
 	})
 	if err != nil {
 		t.Fatalf("EnvironmentConfigUpdate() error = %v", err)
 	}
-	if got := strings.Join(config.Commands, "|"); got != "mise install" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "mise install" {
 		t.Fatalf("expected updated commands, got %q", got)
 	}
 
@@ -1274,7 +1290,7 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBootstrapState(root-node-2) error = %v", err)
 	}
-	if got := strings.Join(bootstrap.SetupCommands, "|"); got != "mise install|make init" {
+	if got := strings.Join(bootstrap.BootstrapCommands, "|"); got != "mise install|make init" {
 		t.Fatalf("expected updated config commands to apply to future nodes, got %q", got)
 	}
 
@@ -1322,7 +1338,7 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	)
 
 	if _, err := service.EnvironmentConfigUpdate("codex", EnvironmentConfigUpdateInput{
-		Commands: []string{"echo customized"},
+		BootstrapCommands: []string{"echo customized"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigUpdate(codex) error = %v", err)
 	}
@@ -1335,7 +1351,7 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}
-	if got := strings.Join(config.Commands, "|"); got != "echo customized" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "echo customized" {
 		t.Fatalf("expected customized codex commands to persist, got %q", got)
 	}
 }
@@ -1382,7 +1398,7 @@ func TestDispatchEnvironmentConfigCommandsAndProjectEnvConfigFlags(t *testing.T)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(shared-dev) error = %v", err)
 	}
-	if got := strings.Join(config.Commands, "|"); got != "./script/setup|direnv allow" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "./script/setup|direnv allow" {
 		t.Fatalf("expected created environment config commands, got %q", got)
 	}
 
@@ -1414,7 +1430,7 @@ func TestDispatchEnvironmentConfigCommandsAndProjectEnvConfigFlags(t *testing.T)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(updated shared-dev) error = %v", err)
 	}
-	if got := strings.Join(config.Commands, "|"); got != "mise install" {
+	if got := strings.Join(config.BootstrapCommands, "|"); got != "mise install" {
 		t.Fatalf("expected updated environment config commands, got %q", got)
 	}
 
@@ -1964,7 +1980,7 @@ func assertEnvironmentConfigCommands(t *testing.T, configs []EnvironmentConfig, 
 			continue
 		}
 
-		if got := strings.Join(config.Commands, "|"); got != strings.Join(commands, "|") {
+		if got := strings.Join(config.BootstrapCommands, "|"); got != strings.Join(commands, "|") {
 			t.Fatalf("expected environment config %s commands %q, got %q", slug, strings.Join(commands, "|"), got)
 		}
 		return

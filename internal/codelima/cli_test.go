@@ -299,7 +299,7 @@ func TestDispatchNodeCreateLoadsLimaCommandsFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Node result, got %T", value)
 	}
-	if got := node.LimaCommands.Start; got != "{{binary}} start {{instance_name}} --tty=false" {
+	if got := strings.Join(node.LimaCommands.Start, "|"); got != "{{binary}} start {{instance_name}} --tty=false" {
 		t.Fatalf("expected node create to load start override, got %q", got)
 	}
 }
@@ -346,7 +346,7 @@ func TestDispatchNodeCloneLoadsLimaCommandsFile(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Node result, got %T", value)
 	}
-	if got := node.LimaCommands.Clone; got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
+	if got := strings.Join(node.LimaCommands.Clone, "|"); got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
 		t.Fatalf("expected node clone to load clone override, got %q", got)
 	}
 }
