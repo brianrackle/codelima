@@ -28,14 +28,137 @@ func TestExecLimaClientCreateStreamsConfiguredOutput(t *testing.T) {
 		Stderr: &stderr,
 	}
 
-	if err := client.Create(context.Background(), "demo-node", "/tmp/template.yaml"); err != nil {
+	if err := client.Create(context.Background(), Project{}, Node{LimaInstanceName: "demo-node"}, "/tmp/template.yaml"); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	if !strings.Contains(stdout.String(), "stdout:create -y --name demo-node /tmp/template.yaml") {
+	if !strings.Contains(stdout.String(), "stdout:create -y --name demo-node --cpus=2 --memory=4 --disk=20 /tmp/template.yaml") {
 		t.Fatalf("expected stdout stream, got %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "stderr:create -y --name demo-node /tmp/template.yaml") {
+	if !strings.Contains(stderr.String(), "stderr:create -y --name demo-node --cpus=2 --memory=4 --disk=20 /tmp/template.yaml") {
 		t.Fatalf("expected stderr stream, got %q", stderr.String())
+	}
+}
+
+func TestExecLimaClientStartUsesProjectScopedCommandTemplate(t *testing.T) {
+	t.Parallel()
+
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "limactl")
+	script := "#!/usr/bin/env sh\n" +
+		"printf 'stdout:%s\\n' \"$*\"\n" +
+		"printf 'stderr:%s\\n' \"$*\" >&2\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake limactl) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	client := &ExecLimaClient{
+		Binary: scriptPath,
+		LimaCommands: LimaCommandTemplates{
+			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	project := Project{
+		LimaCommands: LimaCommandTemplates{
+			Start: "{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'",
+		},
+	}
+
+	if err := client.Start(context.Background(), project, Node{LimaInstanceName: "demo-node"}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "stdout:start demo-node --set .nestedvirtualization=true") {
+		t.Fatalf("expected stdout stream to include custom start command, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "stderr:start demo-node --set .nestedvirtualization=true") {
+		t.Fatalf("expected stderr stream to include custom start command, got %q", stderr.String())
+	}
+}
+
+func TestExecLimaClientStartUsesGlobalCommandTemplateWhenProjectOverrideMissing(t *testing.T) {
+	t.Parallel()
+
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "limactl")
+	script := "#!/usr/bin/env sh\n" +
+		"printf 'stdout:%s\\n' \"$*\"\n" +
+		"printf 'stderr:%s\\n' \"$*\" >&2\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake limactl) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	client := &ExecLimaClient{
+		Binary: scriptPath,
+		LimaCommands: LimaCommandTemplates{
+			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	if err := client.Start(context.Background(), Project{}, Node{LimaInstanceName: "demo-node"}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "stdout:start demo-node --vm-type=vz") {
+		t.Fatalf("expected stdout stream to include global start command, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "stderr:start demo-node --vm-type=vz") {
+		t.Fatalf("expected stderr stream to include global start command, got %q", stderr.String())
+	}
+}
+
+func TestExecLimaClientStartUsesNodeScopedCommandTemplate(t *testing.T) {
+	t.Parallel()
+
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "limactl")
+	script := "#!/usr/bin/env sh\n" +
+		"printf 'stdout:%s\\n' \"$*\"\n" +
+		"printf 'stderr:%s\\n' \"$*\" >&2\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake limactl) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	client := &ExecLimaClient{
+		Binary: scriptPath,
+		LimaCommands: LimaCommandTemplates{
+			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	project := Project{
+		LimaCommands: LimaCommandTemplates{
+			Start: "{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'",
+		},
+	}
+	node := Node{
+		LimaInstanceName: "demo-node",
+		LimaCommands: LimaCommandTemplates{
+			Start: "{{binary}} start {{instance_name}} --tty=false",
+		},
+	}
+
+	if err := client.Start(context.Background(), project, node); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "stdout:start demo-node --tty=false") {
+		t.Fatalf("expected stdout stream to include node-specific start command, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "stderr:start demo-node --tty=false") {
+		t.Fatalf("expected stderr stream to include node-specific start command, got %q", stderr.String())
 	}
 }

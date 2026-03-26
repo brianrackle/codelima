@@ -71,7 +71,7 @@ The result must be implementable as a Go CLI binary that works on macOS and Linu
 - Project lineage layer
   - Defines workspace lineage, immutable fork bases, and patch adjacency.
 - Node runtime layer
-  - Maps a project to a concrete Lima instance plus requested resources and bootstrap settings.
+  - Maps a project to a concrete Lima instance plus effective Lima command templates and bootstrap settings.
 - External runtime layer
   - Lima owns VM boot, shell transport, copy semantics, instance storage, and guest execution transport.
 
@@ -127,7 +127,7 @@ Required fields:
 - `default_runtime`: enum, must be `vm` in Milestone 1
 - `default_provider`: enum, must be `lima` in Milestone 1
 - `default_lima_template`: template locator or absolute file path
-- `default_resources`: requested CPU, memory, and disk defaults for new nodes
+- `lima_commands`: optional per-project Lima command override templates
 - `created_at`
 - `updated_at`
 - `deleted_at`: optional tombstone timestamp
@@ -207,7 +207,7 @@ Required fields:
 - `runtime`: enum `vm | container`
 - `provider`: enum `lima | colima`
 - `lima_instance_name`
-- `requested_resources`: CPU, memory, disk
+- `lima_commands`: optional per-node Lima command override templates
 - `status`
 - `agent_profile_name`
 - `bootstrap_commands`: concrete command list derived at create time
@@ -363,7 +363,7 @@ Mutable fields:
 - `agent_profile_name`
 - `setup_commands`
 - `default_lima_template`
-- `default_resources`
+- `lima_commands`
 
 Immutable fields:
 
@@ -426,11 +426,12 @@ Behavior:
 - renders a local Lima template file containing:
   - the selected base template
   - the mounted project workspace
-  - resource overrides
   - first-boot install and setup commands
 - invokes `limactl create`
 - persists node metadata with `status=created`
 - emits `node.created`
+
+CPU, memory, disk, and any other advanced Lima create flags are part of the effective `lima_commands.create` template rather than typed project or node resource fields.
 
 `node create` must not start the instance unless an explicit future flag is introduced. Milestone 1 create and start are separate commands.
 
@@ -465,7 +466,7 @@ Definition:
 Behavior:
 
 - stops and restarts the source node internally when the source VM is running
-- invokes `limactl clone <old> <new>` as the VM duplication primitive
+- invokes the effective `lima_commands.clone` template as the VM duplication primitive
 - keeps the cloned node in the source project
 - persists a cloned node with `parent_node_id` set, `project_id` unchanged, and `status=created`
 
@@ -603,7 +604,8 @@ Resolution rules:
 
 - missing `CODELIMA_HOME` defaults to `~/.codelima`
 - `CODELIMA_HOME` must resolve to a local writable path
-- project defaults may override global defaults for nodes created under that project
+- Lima command templates resolve with precedence built-in defaults, then `config.yaml`, then project metadata, then node metadata
+- node-scoped create-time overrides may be supplied before `node.yaml` exists through an explicit Lima command override file
 - node creation freezes effective bootstrap inputs into node metadata
 
 ### 6.2 Dynamic Reload and Change Semantics
@@ -642,15 +644,18 @@ default_runtime: vm
 default_provider: lima
 default_agent_profile: codex-cli
 default_lima_template: template:default
-default_resources:
-  cpus: 4
-  memory_gib: 8
-  disk_gib: 40
 snapshot:
   ignore:
     - .git/**
     - .codelima/**
 agent_profiles_dir: ~/.codelima/_config/agent-profiles
+lima_commands:
+  create: "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}"
+  start: "{{binary}} start -y {{instance_name}}"
+  clone: "{{binary}} clone -y {{source_instance}} {{target_instance}}"
+  workspace_seed_prepare: "sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}"
+  copy: "{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}}"
+  shell: "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"
 ```
 
 `config` command surface for Milestone 1:
@@ -830,19 +835,23 @@ Fork materialization rules:
 - preserve executable bits and symlinks
 - fail if the destination path exists and is non-empty
 
-### 9.4 Resource Management
+### 9.4 Lima Command Override Model
 
-Required resource fields:
+Required command-template fields:
 
-- `cpus`
-- `memory_gib`
-- `disk_gib`
+- `create`
+- `clone`
+- `start`
+- `stop`
+- `delete`
+- `copy`
+- `shell`
 
 Rules:
 
-- resources are requested at node creation time
-- public node resource mutation is out of scope in Milestone 1
-- cloned nodes may override resources during `node clone`
+- default CPU, memory, disk, and other advanced Lima behavior live in the effective command templates rather than typed resource fields
+- project and node metadata may override any subset of the global command templates
+- node-scoped create-time overrides may be supplied before persistence through an explicit override file
 
 ## 10. Integration Contract
 
@@ -894,11 +903,12 @@ For each node, CodeLima must materialize a generated Lima template containing:
 - effective base template
 - deterministic instance name
 - workspace mount
-- resource settings
 - bootstrap provision steps
 - agent profile environment
 
 The generated template is part of CodeLima metadata and must be stored at `nodes/<id>/instance.lima.yaml`.
+
+VM resource flags and other `limactl create` or `limactl clone` options are expected to live in the effective command templates instead of the generated template YAML.
 
 ### 10.4 Error Handling Contract
 

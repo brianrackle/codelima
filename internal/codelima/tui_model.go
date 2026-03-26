@@ -35,7 +35,6 @@ const (
 	tuiActionProjectCreate           tuiActionID = "project.create"
 	tuiActionEnvironmentConfigManage tuiActionID = "environment_config.manage"
 	tuiActionProjectCreateNode       tuiActionID = "project.create_node"
-	tuiActionProjectEnvironment      tuiActionID = "project.environment"
 	tuiActionProjectUpdate           tuiActionID = "project.update"
 	tuiActionProjectDelete           tuiActionID = "project.delete"
 	tuiActionNodeStart               tuiActionID = "node.start"
@@ -463,7 +462,6 @@ func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
 	case tuiTreeEntryProject:
 		actions = append(actions,
 			tuiActionSpec{ID: tuiActionProjectCreateNode, Label: "Create Node", Hotkey: 'n'},
-			tuiActionSpec{ID: tuiActionProjectEnvironment, Label: "Environment", Hotkey: 'e'},
 			tuiActionSpec{ID: tuiActionProjectUpdate, Label: "Update Project", Hotkey: 'u'},
 			tuiActionSpec{ID: tuiActionProjectDelete, Label: "Delete Project", Hotkey: 'x'},
 		)

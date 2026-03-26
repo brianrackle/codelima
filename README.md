@@ -23,6 +23,7 @@ That gives you:
 - **real VM isolation** for risky agent sessions
 - **two workspace modes**: `copy` for safer experimentation and `mounted` for immediate host sync
 - **shared environment configs** for Codex, Claude Code, and custom Linux toolchains
+- **global, project, and node Lima command overrides** when a repo or VM needs non-default `limactl` flags
 - **one control plane** for many repos and many nodes
 - **a shell-first TUI** that keeps one live terminal session per opened node while the TUI is running
 - **direct Lima escape hatches** whenever you want to use `limactl` yourself
@@ -211,7 +212,7 @@ Fast key reference:
 - `Left` / `Right`: collapse or expand projects in the tree
 - `[a]`: add project
 - `[g]`: manage reusable environment configs
-- on a selected project: `[n]` create node, `[e]` manage project environment, `[u]` update project, `[x]` delete project
+- on a selected project: `[n]` create node, `[u]` update project, `[x]` delete project
 - on a selected node: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
 - mouse: click tree entries to select, click links to open them, drag terminal text to copy, `Shift`-drag to force local copy, wheel-scroll local terminal scrollback when the guest is not capturing the mouse
 
@@ -257,8 +258,8 @@ TUI view after registering several repos:
 | Projects / Nodes          | Project: billing                            |
 |                           |                                             |
 | ▼ api                     | Workspace: /Users/you/src/billing           |
-|   • api-copy    STOPPED   | [n] create node                             |
-| ▼ billing                 | [e] environment                             |
+|   • api-copy    STOPPED   | Project file: ~/.codelima/projects/...      |
+| ▼ billing                 | [n] create node                             |
 |   • billing-a   RUNNING   | [u] update project                          |
 | ▼ docs                    | [x] delete project                          |
 +---------------------------+---------------------------------------------+
@@ -267,8 +268,60 @@ TUI view after registering several repos:
 Why this helps for agentic coding:
 
 - one place to switch between many repos quickly
-- per-project default environments, resources, and agent profile metadata
+- per-project default environments and agent profile metadata
 - per-node terminals that stay attached while you move around the tree
+
+Global Lima command defaults live in `CODELIMA_HOME/_config/config.yaml`.
+Project-specific overrides live in the project metadata file shown in the TUI right pane under `CODELIMA_HOME/projects/<project-id>/project.yaml`.
+Node-specific overrides live in `CODELIMA_HOME/nodes/<node-id>/node.yaml`, and the TUI node details pane links that file directly.
+When a project or node has no overrides yet, its metadata file includes a commented example `lima_commands` block you can uncomment and edit.
+
+Global default example:
+
+```yaml
+lima_commands:
+  create: "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}"
+  start: "{{binary}} start -y {{instance_name}}"
+  workspace_seed_prepare: "sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}"
+  clone: "{{binary}} clone -y {{source_instance}} {{target_instance}}"
+```
+
+Project override example:
+
+```yaml
+lima_commands:
+  workspace_seed_prepare: "install -d {{target_parent}} && rm -rf {{target_path}}"
+  copy: "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"
+  create: "{{binary}} create -y --name {{instance_name}} --cpus=6 --memory=12 --disk=80 --vm-type=vz {{template_path}}"
+  start: "{{binary}} start {{instance_name}} --vm-type=vz"
+  clone: "{{binary}} clone -y {{source_instance}} {{target_instance}}"
+```
+
+Node override example:
+
+```yaml
+lima_commands:
+  start: "{{binary}} start {{instance_name}} --tty=false"
+  copy: "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"
+```
+
+Global, project, and node overrides follow normal precedence in that order. For the very first `node create` or `node clone`, use `--lima-commands-file` or the TUI `Lima Commands File` field when you need node-specific `create`, `clone`, or `template_copy` overrides to apply before the node metadata file already exists on disk.
+
+Available placeholders depend on the command and include:
+
+- `{{binary}}`
+- `{{locator}}`
+- `{{instance_name}}`
+- `{{template_path}}`
+- `{{source_instance}}`
+- `{{target_instance}}`
+- `{{source_path}}`
+- `{{target_path}}`
+- `{{target_parent}}`
+- `{{copy_target}}`
+- `{{recursive_flag}}`
+- `{{workdir_flag}}`
+- `{{command_args}}`
 
 ## Workflow 2: Choose How VM Changes Sync Back To The Host
 
@@ -277,11 +330,14 @@ Node creation gives you two workspace modes:
 - `copy`: safest for experimentation; the host repo is copied into the VM on first start and guest edits stay in the VM
 - `mounted`: fastest feedback loop; the host repo is mounted writable and guest edits appear on the host immediately
 
+When a project needs non-default copy-mode seeding, override `lima_commands.workspace_seed_prepare` for the guest-side directory prep and `lima_commands.copy` for the host-to-guest transfer itself. The TUI create-node and clone-node dialogs also accept an optional `Lima Commands File` path for first-create per-node overrides.
+
 CLI:
 
 ```sh
 codelima node create --project api --slug api-copy --workspace-mode copy
 codelima node create --project api --slug api-mounted --workspace-mode mounted
+codelima node create --project api --slug api-tuned --lima-commands-file ./tmp/api-node-lima.yaml
 
 codelima node start api-copy
 codelima node start api-mounted
@@ -459,15 +515,20 @@ codelima project tree
 codelima project fork SOURCE --slug CHILD --workspace /path/to/child
 ```
 
+Global Lima command defaults are stored in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`.
+Project-specific overrides live in each project's `project.yaml` under the same key.
+Node-specific overrides live in each node's `node.yaml` under the same key.
+Use `config show` to inspect the effective global defaults, `project show` to inspect project-specific overrides, `node show` to inspect node-specific overrides, and the TUI details pane to find the on-disk metadata files quickly.
+
 Nodes:
 
 ```sh
-codelima node create --project PROJECT --slug NODE [--workspace-mode copy|mounted]
+codelima node create --project PROJECT --slug NODE [--workspace-mode copy|mounted] [--lima-commands-file PATH]
 codelima node list
 codelima node show NODE
 codelima node start NODE
 codelima node stop NODE
-codelima node clone NODE --node-slug NEW-NODE
+codelima node clone NODE --node-slug NEW-NODE [--lima-commands-file PATH]
 codelima node delete NODE
 codelima node status NODE
 codelima node logs NODE

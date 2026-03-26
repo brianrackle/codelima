@@ -234,3 +234,29 @@ Disadvantages:
 - Users in copy mode temporarily lose any built-in way to push guest-side changes back to the host.
 - The final solution may require larger storage and workflow changes than the removed patch surface.
 - Deferring the replacement leaves unused internal patch code in the codebase for now.
+
+### 10. Complete the full `QA.md` matrix on a host with working Lima boot and interactive terminal support
+
+Problem:
+
+- This change was covered by automated tests, `make verify`, and a shim-backed manual verification that confirmed `config show` exposes `lima_commands`, project and node metadata persist the expected override blocks, `node create` and `node clone` accept override files, and generated `instance.lima.yaml` files no longer keep typed `cpus`, `memory`, or `disk` keys.
+- The full manual `QA.md` matrix could not be completed in the current sandbox because real Lima image download, VM boot, and interactive TUI verification need a host with working virtualization support and a real terminal session.
+- That leaves the broader end-to-end Lima-backed verification incomplete even though the command-template override paths were exercised locally.
+
+Suggested solution:
+
+- Re-run the relevant Lima-backed `QA.md` flows on a host with working Lima networking, writable `LIMA_HOME`, and functional guest boot support.
+- Include at least `List Verification`, `Shell Verification`, `Workspace Mode Verification`, `Clone Verification`, and the interactive `TUI Verification` flow on a real terminal session.
+- Confirm cleanup completes afterward so no verification-only Lima instances, images, or metadata remain.
+
+Advantages:
+
+- Closes the remaining manual verification gap for the command-template-first Lima override change.
+- Exercises the actual Lima boot, shell, and TUI paths that unit tests and sandboxed create-only checks cannot fully cover.
+- Produces higher confidence that the documented QA matrix still holds on a real operator machine.
+
+Disadvantages:
+
+- Requires a host environment with Lima, virtualization support, network access, and an interactive terminal.
+- Takes materially longer than the automated test and lint verification already completed here.
+- May expose environment-specific Lima issues that are not reproducible in the current sandbox.

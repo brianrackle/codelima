@@ -414,8 +414,6 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 		return a.openEnvironmentConfigsMenu()
 	case tuiActionProjectCreateNode:
 		a.openCreateNodeDialog(entry.project)
-	case tuiActionProjectEnvironment:
-		a.openProjectEnvironmentMenu(entry.project)
 	case tuiActionProjectUpdate:
 		a.openUpdateProjectDialog(entry.project)
 	case tuiActionProjectDelete:
@@ -578,18 +576,6 @@ func moveCommand(commands []string, index int, delta int) []string {
 	moved := append([]string(nil), commands...)
 	moved[index], moved[target] = moved[target], moved[index]
 	return moved
-}
-
-func (a *vaxisTUIApp) reloadProjectAndOpenEnvironmentMenu(projectID string) error {
-	if err := a.reloadData("project:" + projectID); err != nil {
-		return err
-	}
-	project, err := a.service.ProjectShow(projectID)
-	if err != nil {
-		return err
-	}
-	a.openProjectEnvironmentMenu(project)
-	return nil
 }
 
 func (a *vaxisTUIApp) reopenEnvironmentConfigCommandMenu(configID string) error {
@@ -923,13 +909,19 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 		[]tuiDialogField{
 			newTUIInputField("slug", "Node Slug", project.Slug+"-node", true),
 			newTUIValueSelectorField("workspace_mode", "Workspace Mode", WorkspaceModeCopy, true, workspaceModeDisplay, nil),
+			newTUIInputField("lima_commands_file", "Lima Commands File", "", false),
 		},
 		func(values map[string]string) error {
+			limaCommands, err := loadOptionalLimaCommandsFile(values["lima_commands_file"])
+			if err != nil {
+				return err
+			}
 			return a.startOperation("Creating node "+values["slug"], func(ctx context.Context) (tuiOperationResult, error) {
 				node, err := a.service.NodeCreate(ctx, NodeCreateInput{
 					Project:       project.ID,
 					Slug:          values["slug"],
 					WorkspaceMode: values["workspace_mode"],
+					LimaCommands:  limaCommands,
 				})
 				if err != nil {
 					return tuiOperationResult{}, err
@@ -984,206 +976,13 @@ func workspaceModeDisplay(mode string) string {
 	}
 }
 
-func (a *vaxisTUIApp) openProjectEnvironmentMenu(project Project) {
-	description := []string{
-		"Commands run the first time a node for project " + project.Slug + " is bootstrapped.",
-	}
-	if len(project.EnvironmentConfigs) == 0 {
-		description = append(description, "Assigned configs: none.")
-	} else {
-		description = append(description, "Assigned configs: "+commaSeparatedValues(project.EnvironmentConfigs))
-	}
-	if len(project.SetupCommands) == 0 {
-		description = append(description, "No environment commands configured.")
-	} else {
-		description = append(description, "Configured commands:")
-		for index, command := range project.SetupCommands {
-			description = append(description, fmt.Sprintf("%d. %s", index+1, command))
-		}
-	}
-
-	a.menu = &tuiMenu{
-		Title:       "Project Environment",
-		Description: description,
-		Entries: []tuiMenuEntry{
-			{Key: 'g', Label: "Set Configs", Action: func() error { return a.openSetProjectEnvironmentConfigsDialog(project) }},
-			{Key: 'a', Label: "Add Command", Action: func() error { a.openAddProjectEnvironmentCommandDialog(project); return nil }},
-			{Key: 'r', Label: "Remove Command", Action: func() error { return a.openRemoveProjectEnvironmentCommandDialog(project) }},
-			{Key: 'm', Label: "Move Command", Action: func() error { return a.openMoveProjectEnvironmentCommandDialog(project) }},
-			{Key: 'c', Label: "Clear Commands", Action: func() error { a.openClearProjectEnvironmentCommandsDialog(project); return nil }},
-		},
-	}
-}
-
-func (a *vaxisTUIApp) openSetProjectEnvironmentConfigsDialog(project Project) error {
-	return a.openEnvironmentConfigSelector(
-		"Set Environment Configs",
-		[]string{"Choose reusable environment configs to assign shared defaults to this project."},
-		project.EnvironmentConfigs,
-		true,
-		func(values []string) error {
-			return a.startOperation("Updating configs for "+project.Slug, func(context.Context) (tuiOperationResult, error) {
-				updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{
-					EnvironmentConfigs: values,
-				})
-				if err != nil {
-					return tuiOperationResult{}, err
-				}
-				return tuiOperationResult{
-					Status:       "updated environment configs for " + updated.Slug,
-					PreferredKey: "project:" + updated.ID,
-					ReloadData:   true,
-				}, nil
-			})
-		},
-	)
-}
-
-func (a *vaxisTUIApp) openAddProjectEnvironmentCommandDialog(project Project) {
-	a.dialog = newTUIDialog(
-		"Add Environment Command",
-		"Add",
-		[]string{"Add a command to the project's environment bootstrap list."},
-		[]tuiDialogField{
-			newTUIInputField("command", "Command", "", true),
-		},
-		func(values map[string]string) error {
-			commands := append(append([]string(nil), project.SetupCommands...), values["command"])
-			updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: commands})
-			if err != nil {
-				return err
-			}
-			a.status = "updated environment for " + updated.Slug
-			return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
-		},
-	)
-}
-
-func (a *vaxisTUIApp) openRemoveProjectEnvironmentCommandDialog(project Project) error {
-	if len(project.SetupCommands) == 0 {
-		return fmt.Errorf("project %s has no environment commands", project.Slug)
-	}
-
-	a.selector = newTUISelector(
-		"Remove Environment Commands",
-		[]string{"Choose one or more project environment commands to remove."},
-		commandSelectorOptions(project.SetupCommands),
-		nil,
-		true,
-		func(values []string) error {
-			indices, err := parseSelectorIndices(values, len(project.SetupCommands))
-			if err != nil {
-				return err
-			}
-			if len(indices) == 0 {
-				return fmt.Errorf("select at least one command to remove")
-			}
-
-			description := []string{"Remove the selected project environment commands?"}
-			for _, index := range indices {
-				description = append(description, fmt.Sprintf("%d. %s", index+1, project.SetupCommands[index]))
-			}
-
-			a.dialog = newTUIDialog(
-				"Remove Environment Commands",
-				"Remove",
-				description,
-				nil,
-				func(map[string]string) error {
-					commands := removeCommandsByIndex(project.SetupCommands, indices)
-					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: commands})
-					if err != nil {
-						return err
-					}
-					a.status = "updated environment for " + updated.Slug
-					return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
-				},
-			)
-			return nil
-		},
-	)
-	return nil
-}
-
-func (a *vaxisTUIApp) openMoveProjectEnvironmentCommandDialog(project Project) error {
-	if len(project.SetupCommands) < 2 {
-		return fmt.Errorf("project %s needs at least two environment commands to change order", project.Slug)
-	}
-
-	a.selector = newTUISelector(
-		"Move Environment Command",
-		[]string{"Choose a project environment command to move up or down."},
-		commandSelectorOptions(project.SetupCommands),
-		nil,
-		false,
-		func(values []string) error {
-			indices, err := parseSelectorIndices(values, len(project.SetupCommands))
-			if err != nil {
-				return err
-			}
-			if len(indices) != 1 {
-				return fmt.Errorf("select a single command to move")
-			}
-			index := indices[0]
-			command := project.SetupCommands[index]
-
-			entries := []tuiMenuEntry{}
-			if index > 0 {
-				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
-					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: moveCommand(project.SetupCommands, index, -1)})
-					if err != nil {
-						return err
-					}
-					a.status = "updated environment for " + updated.Slug
-					return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
-				}})
-			}
-			if index < len(project.SetupCommands)-1 {
-				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
-					updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{SetupCommands: moveCommand(project.SetupCommands, index, 1)})
-					if err != nil {
-						return err
-					}
-					a.status = "updated environment for " + updated.Slug
-					return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
-				}})
-			}
-
-			a.menu = &tuiMenu{
-				Title:       "Move Environment Command: " + command,
-				Description: []string{"Choose how to reposition the selected project environment command."},
-				Entries:     entries,
-			}
-			return nil
-		},
-	)
-	return nil
-}
-
-func (a *vaxisTUIApp) openClearProjectEnvironmentCommandsDialog(project Project) {
-	a.dialog = newTUIDialog(
-		"Clear Environment Commands",
-		"Clear",
-		[]string{"Remove all environment commands from project " + project.Slug + "."},
-		nil,
-		func(_ map[string]string) error {
-			updated, err := a.service.ProjectUpdate(project.ID, ProjectUpdateInput{ClearSetup: true})
-			if err != nil {
-				return err
-			}
-			a.status = "cleared environment for " + updated.Slug
-			return a.reloadProjectAndOpenEnvironmentMenu(updated.ID)
-		},
-	)
-}
-
 func (a *vaxisTUIApp) openUpdateProjectDialog(project Project) {
 	dialog := newTUIDialog(
 		"Update Project",
 		"Update",
 		[]string{
 			"Update the selected project slug, workspace path, and assigned environment configs.",
-			"Use [e] to manage direct project-specific environment commands.",
+			"Edit the project file shown in the right pane when you need advanced per-project settings such as Lima command overrides.",
 		},
 		[]tuiDialogField{
 			newTUIInputField("slug", "Project Slug", project.Slug, true),
@@ -1556,12 +1355,18 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
 		},
 		[]tuiDialogField{
 			newTUIInputField("node_slug", "Cloned Node Slug", node.Slug+"-clone", true),
+			newTUIInputField("lima_commands_file", "Lima Commands File", "", false),
 		},
 		func(values map[string]string) error {
+			limaCommands, err := loadOptionalLimaCommandsFile(values["lima_commands_file"])
+			if err != nil {
+				return err
+			}
 			return a.startOperation("Cloning node "+node.Slug, func(ctx context.Context) (tuiOperationResult, error) {
 				childNode, err := a.service.NodeClone(ctx, NodeCloneInput{
-					SourceNode: node.ID,
-					NodeSlug:   values["node_slug"],
+					SourceNode:   node.ID,
+					NodeSlug:     values["node_slug"],
+					LimaCommands: limaCommands,
 				})
 				if err != nil {
 					return tuiOperationResult{}, err
@@ -1925,7 +1730,16 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		win.Println(row, vaxis.Segment{Text: "Slug: " + entry.project.Slug})
 		row++
 		a.printLinkifiedLine(win, row, "Workspace: "+entry.project.WorkspacePath, vaxis.Style{})
-		row += 2
+		row++
+		projectPath := ""
+		if a.service != nil && a.service.store != nil {
+			projectPath = a.service.store.projectPath(entry.project.ID)
+		}
+		if projectPath != "" {
+			a.printLinkifiedLine(win, row, "Project file: "+projectPath, vaxis.Style{})
+			row++
+		}
+		row++
 		if len(entry.project.EnvironmentConfigs) == 0 {
 			win.Println(row, vaxis.Segment{Text: "Environment configs: none", Style: mutedStyle})
 			row++
@@ -1950,7 +1764,7 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 			}
 		}
 		row++
-		win.Println(row, vaxis.Segment{Text: "Create nodes, assign reusable environment configs, manage direct environment commands, update the project binding, or delete the project from the tree view.", Style: mutedStyle})
+		win.Println(row, vaxis.Segment{Text: "Create nodes, update the project binding, or edit the project file directly for advanced settings such as Lima command overrides.", Style: mutedStyle})
 	case tuiTreeEntryNode:
 		win.Println(row, vaxis.Segment{Text: "Node controls", Style: headerStyle})
 		row++
@@ -1958,6 +1772,14 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		row++
 		win.Println(row, vaxis.Segment{Text: "Status: " + nodeVMStatus(entry.node)})
 		row++
+		nodePath := ""
+		if a.service != nil && a.service.store != nil {
+			nodePath = a.service.store.nodePath(entry.node.ID)
+		}
+		if nodePath != "" {
+			a.printLinkifiedLine(win, row, "Node file: "+nodePath, vaxis.Style{})
+			row++
+		}
 		win.Println(row, vaxis.Segment{Text: "Workspace mode: " + nodeWorkspaceMode(entry.node)})
 		row++
 		if workspace := nodeWorkspacePath(entry.node); workspace != "" {
@@ -1968,7 +1790,7 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		if nodeAutoStartsSession(entry.node) {
 			win.Println(row, vaxis.Segment{Text: "Node is running. Press Alt-` to focus its terminal session.", Style: mutedStyle})
 		} else {
-			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session, or edit the node file directly for advanced per-node Lima command overrides.", Style: mutedStyle})
 		}
 	default:
 		win.Println(0, vaxis.Segment{Text: "Press [a] to create a project or select a project or node in the tree.", Style: mutedStyle})

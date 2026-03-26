@@ -42,15 +42,8 @@ func (s *Store) EnsureLayout() error {
 		}
 	}
 
-	if !exists(s.configPath()) {
-		data, err := defaultConfigYAML(s.cfg)
-		if err != nil {
-			return err
-		}
-
-		if err := atomicWriteFile(s.configPath(), data, 0o644); err != nil {
-			return err
-		}
+	if err := s.ensureConfigFile(); err != nil {
+		return err
 	}
 
 	for name, profile := range builtInProfiles() {
@@ -66,6 +59,125 @@ func (s *Store) EnsureLayout() error {
 
 	if err := s.ensureBuiltInEnvironmentConfigs(time.Now().UTC()); err != nil {
 		return err
+	}
+
+	if err := s.ensureProjectMetadataFiles(); err != nil {
+		return err
+	}
+
+	if err := s.ensureNodeMetadataFiles(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) ensureConfigFile() error {
+	path := s.configPath()
+	if !exists(path) {
+		return writeConfigFile(path, s.cfg)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return metadataCorruption("failed to read config.yaml", err, map[string]any{"path": path})
+	}
+
+	if !configFileNeedsRefresh(data) {
+		return nil
+	}
+
+	return writeConfigFile(path, s.cfg)
+}
+
+func (s *Store) ensureProjectMetadataFiles() error {
+	projectRoot := filepath.Join(s.cfg.MetadataRoot, "projects")
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	defaults := s.cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates())
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(projectRoot, entry.Name(), "project.yaml")
+		if !exists(path) {
+			continue
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return metadataCorruption("failed to read project metadata", err, map[string]any{"path": path})
+		}
+
+		var project Project
+		if err := readYAMLFile(path, &project); err != nil {
+			return metadataCorruption("failed to load project", err, map[string]any{"path": path})
+		}
+
+		if !projectFileNeedsRefresh(data, project, defaults) {
+			continue
+		}
+
+		if err := writeProjectFile(path, project, defaults); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *Store) ensureNodeMetadataFiles() error {
+	nodeRoot := filepath.Join(s.cfg.MetadataRoot, "nodes")
+	entries, err := os.ReadDir(nodeRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		path := filepath.Join(nodeRoot, entry.Name(), "node.yaml")
+		if !exists(path) {
+			continue
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return metadataCorruption("failed to read node metadata", err, map[string]any{"path": path})
+		}
+
+		var node Node
+		if err := readYAMLFile(path, &node); err != nil {
+			return metadataCorruption("failed to load node", err, map[string]any{"path": path})
+		}
+
+		project, err := s.ProjectByID(node.ProjectID)
+		if err != nil {
+			return err
+		}
+		defaults := project.LimaCommands.ApplyDefaults(s.cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates()))
+
+		if !nodeFileNeedsRefresh(data, node, defaults) {
+			continue
+		}
+
+		if err := writeNodeFile(path, node, defaults); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -256,7 +368,7 @@ func (s *Store) SaveProject(project Project) error {
 		previous = &loaded
 	}
 
-	if err := writeYAMLFile(s.projectPath(project.ID), project); err != nil {
+	if err := writeProjectFile(s.projectPath(project.ID), project, s.cfg.LimaCommands); err != nil {
 		return err
 	}
 
@@ -488,7 +600,13 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState, template []byte) e
 		previous = &loaded
 	}
 
-	if err := writeYAMLFile(s.nodePath(node.ID), node); err != nil {
+	project, err := s.ProjectByID(node.ProjectID)
+	if err != nil {
+		return err
+	}
+	defaults := project.LimaCommands.ApplyDefaults(s.cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates()))
+
+	if err := writeNodeFile(s.nodePath(node.ID), node, defaults); err != nil {
 		return err
 	}
 

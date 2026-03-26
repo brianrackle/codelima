@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
+	"golang.org/x/sys/unix"
 )
 
 var ghosttyStderrCaptureMu sync.Mutex
@@ -162,17 +162,17 @@ func captureGhosttyProcessStderr(t *testing.T, fn func()) string {
 	}
 
 	stderrFD := int(os.Stderr.Fd())
-	savedFD, err := syscall.Dup(stderrFD)
+	savedFD, err := unix.Dup(stderrFD)
 	if err != nil {
 		_ = reader.Close()
 		_ = writer.Close()
 		t.Fatalf("dup stderr error = %v", err)
 	}
 
-	if err := syscall.Dup2(int(writer.Fd()), stderrFD); err != nil {
+	if err := unix.Dup2(int(writer.Fd()), stderrFD); err != nil {
 		_ = reader.Close()
 		_ = writer.Close()
-		_ = syscall.Close(savedFD)
+		_ = unix.Close(savedFD)
 		t.Fatalf("redirect stderr error = %v", err)
 	}
 	_ = writer.Close()
@@ -187,11 +187,11 @@ func captureGhosttyProcessStderr(t *testing.T, fn func()) string {
 
 	fn()
 
-	if err := syscall.Dup2(savedFD, stderrFD); err != nil {
-		_ = syscall.Close(savedFD)
+	if err := unix.Dup2(savedFD, stderrFD); err != nil {
+		_ = unix.Close(savedFD)
 		t.Fatalf("restore stderr error = %v", err)
 	}
-	_ = syscall.Close(savedFD)
+	_ = unix.Close(savedFD)
 
 	return <-outputCh
 }

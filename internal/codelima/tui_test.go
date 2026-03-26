@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -463,7 +464,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		project: Project{Slug: "root"},
 	}
 	got = renderFooter(tuiFocusTree, projectEntry)
-	if got != "Up/Down move   Left/Right collapse   [a] add project   [g] env configs   [n] create node   [e] environment   [u] update project   [x] delete project   q quit" {
+	if got != "Up/Down move   Left/Right collapse   [a] add project   [g] env configs   [n] create node   [u] update project   [x] delete project   q quit" {
 		t.Fatalf("expected project footer with project actions, got %q", got)
 	}
 	if strings.Contains(got, "Use action hotkeys in the right pane") {
@@ -1390,7 +1391,7 @@ func TestTUIAvailableActionsDependOnSelectedEntry(t *testing.T) {
 		project: Project{Slug: "root"},
 	})
 
-	if got := actionIDs(projectActions); got != "project.create,environment_config.manage,project.create_node,project.environment,project.update,project.delete" {
+	if got := actionIDs(projectActions); got != "project.create,environment_config.manage,project.create_node,project.update,project.delete" {
 		t.Fatalf("unexpected project action set: %s", got)
 	}
 
@@ -1464,8 +1465,8 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	if len(app.dialog.Description) != 1 || app.dialog.Description[0] != "Selected project: "+rootProject.Slug {
 		t.Fatalf("expected create node dialog to keep only the selected project context, got %#v", app.dialog.Description)
 	}
-	if len(app.dialog.Fields) != 2 {
-		t.Fatalf("expected create node dialog to prompt for slug and workspace mode, got %#v", app.dialog.Fields)
+	if len(app.dialog.Fields) != 3 {
+		t.Fatalf("expected create node dialog to prompt for slug, workspace mode, and an optional lima commands file, got %#v", app.dialog.Fields)
 	}
 	if err := app.dialog.Fields[1].Activate(); err != nil {
 		t.Fatalf("workspace mode selector activate error = %v", err)
@@ -1480,9 +1481,14 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 		t.Fatalf("expected two workspace mode options, got %#v", app.selector.Options)
 	}
 	app.selector = nil
+	limaCommandsPath := filepath.Join(t.TempDir(), "tui-node-create-lima.yaml")
+	if err := os.WriteFile(limaCommandsPath, []byte("start: \"{{binary}} start {{instance_name}} --tty=false\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lima commands) error = %v", err)
+	}
 	submitTUIDialog(t, app, map[string]string{
-		"slug":           "root-node",
-		"workspace_mode": WorkspaceModeMounted,
+		"slug":               "root-node",
+		"workspace_mode":     WorkspaceModeMounted,
+		"lima_commands_file": limaCommandsPath,
 	})
 
 	rootNode, err := service.NodeShow(ctx, "root-node")
@@ -1494,6 +1500,9 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	}
 	if rootNode.WorkspaceMountPath != workspace {
 		t.Fatalf("expected mounted workspace path %q, got %q", workspace, rootNode.WorkspaceMountPath)
+	}
+	if got := rootNode.LimaCommands.Start; got != "{{binary}} start {{instance_name}} --tty=false" {
+		t.Fatalf("expected create node dialog to load lima command overrides, got %q", got)
 	}
 	if nodeAutoStartsSession(rootNode) {
 		t.Fatalf("expected newly created node to remain non-running, got status %q", rootNode.Status)
@@ -1550,7 +1559,7 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	}
 }
 
-func TestTUIProjectEnvironmentActionsAddRemoveAndClear(t *testing.T) {
+func TestTUIDrawProjectDetailsShowProjectFilePathAndManualEditGuidance(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1566,67 +1575,34 @@ func TestTUIProjectEnvironmentActionsAddRemoveAndClear(t *testing.T) {
 		t.Fatalf("ProjectCreate(root) error = %v", err)
 	}
 
-	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
-	selectTUIEntry(t, app, "project:"+project.ID)
-
-	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectEnvironment}); err != nil {
-		t.Fatalf("performAction(project environment) error = %v", err)
-	}
-	if app.menu == nil || app.menu.Title != "Project Environment" {
-		t.Fatalf("expected project environment menu, got %#v", app.menu)
-	}
-	chooseTUIMenuEntry(t, app, "Add Command")
-	if app.dialog == nil || app.dialog.Title != "Add Environment Command" {
-		t.Fatalf("expected add environment command dialog, got %#v", app.dialog)
-	}
-	submitTUIDialog(t, app, map[string]string{"command": "direnv allow"})
-
-	updated, err := service.ProjectShow(project.ID)
+	tree, err := service.ProjectTree("", false)
 	if err != nil {
-		t.Fatalf("ProjectShow(updated root) error = %v", err)
+		t.Fatalf("ProjectTree() error = %v", err)
 	}
-	if strings.Join(updated.SetupCommands, "|") != "./script/setup|direnv allow" {
-		t.Fatalf("expected appended environment commands, got %v", updated.SetupCommands)
+
+	state, err := newTUIState(tree, newFakeTUISessionManager())
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
 	}
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		vx:       newRenderTestVaxis(t, 220, 30),
+	}
+	defer app.vx.Close()
 
 	selectTUIEntry(t, app, "project:"+project.ID)
-	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectEnvironment}); err != nil {
-		t.Fatalf("performAction(project environment remove) error = %v", err)
-	}
-	chooseTUIMenuEntry(t, app, "Remove Command")
-	if app.selector == nil || app.selector.Title != "Remove Environment Commands" {
-		t.Fatalf("expected remove environment command selector, got %#v", app.selector)
-	}
-	chooseTUISelector(t, app, "1. ./script/setup")
-	if app.dialog == nil || app.dialog.Title != "Remove Environment Commands" {
-		t.Fatalf("expected remove environment command confirmation, got %#v", app.dialog)
-	}
-	submitTUIDialog(t, app, map[string]string{})
+	app.draw()
 
-	updated, err = service.ProjectShow(project.ID)
-	if err != nil {
-		t.Fatalf("ProjectShow(after remove) error = %v", err)
+	rendered := renderedScreenText(t, app.vx, 220, 30)
+	projectFilePath := service.store.projectPath(project.ID)
+	if !strings.Contains(rendered, "Project file: "+projectFilePath) {
+		t.Fatalf("expected rendered project details to include the project file path, got:\n%s", rendered)
 	}
-	if strings.Join(updated.SetupCommands, "|") != "direnv allow" {
-		t.Fatalf("expected first environment command to be removed, got %v", updated.SetupCommands)
-	}
-
-	selectTUIEntry(t, app, "project:"+project.ID)
-	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectEnvironment}); err != nil {
-		t.Fatalf("performAction(project environment clear) error = %v", err)
-	}
-	chooseTUIMenuEntry(t, app, "Clear Commands")
-	if app.dialog == nil || app.dialog.Title != "Clear Environment Commands" {
-		t.Fatalf("expected clear environment commands dialog, got %#v", app.dialog)
-	}
-	submitTUIDialog(t, app, map[string]string{})
-
-	updated, err = service.ProjectShow(project.ID)
-	if err != nil {
-		t.Fatalf("ProjectShow(after clear) error = %v", err)
-	}
-	if len(updated.SetupCommands) != 0 {
-		t.Fatalf("expected cleared environment commands, got %v", updated.SetupCommands)
+	if !strings.Contains(rendered, "edit the project file directly for advanced settings such as Lima command overrides") {
+		t.Fatalf("expected rendered project details to include manual edit guidance, got:\n%s", rendered)
 	}
 }
 
@@ -1727,22 +1703,31 @@ func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	}
 
 	selectTUIEntry(t, app, "project:"+project.ID)
-	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectEnvironment}); err != nil {
-		t.Fatalf("performAction(project environment clear configs) error = %v", err)
+	if err := app.performAction(tuiActionSpec{ID: tuiActionProjectUpdate}); err != nil {
+		t.Fatalf("performAction(update project clear configs) error = %v", err)
 	}
-	if app.menu == nil || app.menu.Title != "Project Environment" {
-		t.Fatalf("expected project environment menu, got %#v", app.menu)
+	if app.dialog == nil || app.dialog.Title != "Update Project" {
+		t.Fatalf("expected update project dialog, got %#v", app.dialog)
 	}
-	for _, entry := range app.menu.Entries {
-		if entry.Label == "Clear Configs" {
-			t.Fatalf("expected project environment menu to omit Clear Configs, got %#v", app.menu.Entries)
-		}
+	app.dialog.FieldIndex = 2
+	quit, err = app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEnter})
+	if err != nil {
+		t.Fatalf("handleEvent(open selector for clear) error = %v", err)
 	}
-	chooseTUIMenuEntry(t, app, "Set Configs")
-	if app.selector == nil || app.selector.Title != "Set Environment Configs" {
-		t.Fatalf("expected set configs selector, got %#v", app.selector)
+	if quit {
+		t.Fatalf("expected selector open to keep app running")
+	}
+	if app.selector == nil || app.selector.Title != "Select Environment Configs" {
+		t.Fatalf("expected environment config selector, got %#v", app.selector)
 	}
 	chooseTUISelector(t, app)
+	quit, err = app.handleEvent(vaxis.Key{Keycode: 's', Modifiers: vaxis.ModCtrl})
+	if err != nil {
+		t.Fatalf("handleEvent(Ctrl+s clear configs) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Ctrl+s clear submit to keep app running")
+	}
 
 	updated, err = service.ProjectShow(project.ID)
 	if err != nil {
@@ -2054,8 +2039,13 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	if app.dialog == nil || app.dialog.Title != "Clone Node" {
 		t.Fatalf("expected clone node dialog, got %#v", app.dialog)
 	}
+	limaCommandsPath := filepath.Join(t.TempDir(), "tui-node-clone-lima.yaml")
+	if err := os.WriteFile(limaCommandsPath, []byte("clone: \"{{binary}} clone {{source_instance}} {{target_instance}} --tty=false\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lima commands) error = %v", err)
+	}
 	submitTUIDialog(t, app, map[string]string{
-		"node_slug": "child-node",
+		"node_slug":          "child-node",
+		"lima_commands_file": limaCommandsPath,
 	})
 
 	childNode, err := service.NodeShow(ctx, "child-node")
@@ -2064,6 +2054,9 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	}
 	if childNode.ParentNodeID != rootNode.ID {
 		t.Fatalf("expected cloned node parent id %q, got %q", rootNode.ID, childNode.ParentNodeID)
+	}
+	if got := childNode.LimaCommands.Clone; got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
+		t.Fatalf("expected clone node dialog to load lima command overrides, got %q", got)
 	}
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != childNode.ID {
 		t.Fatalf("expected cloned child node to become selected, got %#v", got)
@@ -2128,7 +2121,8 @@ func TestTUINodeCloneLeavesProviderStartedCloneStoppedUntilExplicitStart(t *test
 		t.Fatalf("expected clone node dialog, got %#v", app.dialog)
 	}
 	submitTUIDialog(t, app, map[string]string{
-		"node_slug": "child-node",
+		"node_slug":          "child-node",
+		"lima_commands_file": "",
 	})
 
 	childNode, err := service.NodeShow(ctx, "child-node")

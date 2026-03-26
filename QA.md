@@ -467,12 +467,12 @@ Inside the TUI verify:
 - press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
 - press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm it appears as a second top-level project without a long frozen pause
 - select project `qa-tui-extra`, confirm the right pane lists `qa-shared` under environment configs
-- with `qa-tui-extra` selected and the tree focused, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[e] environment`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text
+- with `qa-tui-extra` selected and the tree focused, confirm the right pane shows a `Project file:` path under the workspace path so the metadata file can be edited manually when needed
+- with `qa-tui-extra` selected and the tree focused, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
-- with `qa-tui-extra` still selected, press `e`, add environment command `./script/setup`, remove it through the selector plus confirmation flow, add it again, and confirm the project environment menu stays open after each edit
-- with `qa-tui-extra` still selected, press `e` again, clear the environment commands, and confirm the right pane shows none configured
 - select project `qa-tui`, press `n`, create node `qa-tui-b` with workspace mode `mounted`, and confirm the new node appears under the project without opening a shell session
 - with `qa-tui-b` selected, confirm the right pane shows `Workspace mode: mounted`
+- with `qa-tui-b` selected, confirm the right pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
 - selecting `qa-tui-a` opens its shell session automatically

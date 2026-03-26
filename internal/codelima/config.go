@@ -8,11 +8,11 @@ import (
 )
 
 type Config struct {
-	MetadataRoot        string    `json:"metadata_root" yaml:"metadata_root"`
-	LimaHome            string    `json:"lima_home" yaml:"lima_home"`
-	DefaultAgentProfile string    `json:"default_agent_profile" yaml:"default_agent_profile"`
-	DefaultTemplate     string    `json:"default_template" yaml:"default_template"`
-	DefaultResources    Resources `json:"default_resources" yaml:"default_resources"`
+	MetadataRoot        string               `json:"metadata_root" yaml:"metadata_root"`
+	LimaHome            string               `json:"lima_home" yaml:"lima_home"`
+	DefaultAgentProfile string               `json:"default_agent_profile" yaml:"default_agent_profile"`
+	DefaultTemplate     string               `json:"default_template" yaml:"default_template"`
+	LimaCommands        LimaCommandTemplates `json:"lima_commands" yaml:"lima_commands"`
 	Snapshot            struct {
 		Excludes []string `json:"excludes" yaml:"excludes"`
 	} `json:"snapshot" yaml:"snapshot"`
@@ -25,11 +25,7 @@ func DefaultConfig(home string) Config {
 		LimaHome:            expandHome("~/.lima"),
 		DefaultAgentProfile: "codex-cli",
 		DefaultTemplate:     "template:default",
-		DefaultResources: Resources{
-			CPUs:      2,
-			MemoryGiB: 4,
-			DiskGiB:   20,
-		},
+		LimaCommands:        defaultLimaCommandTemplates(),
 	}
 	cfg.Snapshot.Excludes = []string{".codelima", ".git"}
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
@@ -71,6 +67,7 @@ func LoadConfig(homeOverride string) (Config, error) {
 	}
 
 	cfg.LimaHome = expandHome(cfg.LimaHome)
+	cfg.LimaCommands = cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates())
 
 	return cfg, nil
 }
@@ -81,7 +78,7 @@ func (c Config) Summary() map[string]any {
 		"lima_home":             c.LimaHome,
 		"default_agent_profile": c.DefaultAgentProfile,
 		"default_template":      c.DefaultTemplate,
-		"default_resources":     c.DefaultResources,
+		"lima_commands":         c.LimaCommands,
 		"snapshot_excludes":     c.Snapshot.Excludes,
 		"agent_profiles_dir":    c.AgentProfilesDir,
 	}
@@ -125,15 +122,11 @@ func validateConfig(cfg Config) error {
 		return invalidArgument("default template is required", nil)
 	}
 
-	if cfg.DefaultResources.CPUs <= 0 || cfg.DefaultResources.MemoryGiB <= 0 || cfg.DefaultResources.DiskGiB <= 0 {
-		return invalidArgument("default resources must be positive", map[string]any{"resources": cfg.DefaultResources})
-	}
-
 	return nil
 }
 
 func defaultConfigYAML(cfg Config) ([]byte, error) {
-	return yamlBytes(cfg)
+	return configYAMLBytes(cfg)
 }
 
 func builtInProfiles() map[string]AgentProfile {

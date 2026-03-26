@@ -265,6 +265,92 @@ func TestDispatchNodeCreateParsesWorkspaceMode(t *testing.T) {
 	}
 }
 
+func TestDispatchNodeCreateLoadsLimaCommandsFile(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	commandsPath := filepath.Join(t.TempDir(), "node-create-lima.yaml")
+	if err := os.WriteFile(commandsPath, []byte("start: \"{{binary}} start {{instance_name}} --tty=false\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lima commands) error = %v", err)
+	}
+
+	value, err := dispatchNode(ctx, service, []string{
+		"create",
+		"--project", project.ID,
+		"--slug", "configured-node",
+		"--lima-commands-file", commandsPath,
+	})
+	if err != nil {
+		t.Fatalf("dispatchNode(create with lima commands file) error = %v", err)
+	}
+
+	node, ok := value.(Node)
+	if !ok {
+		t.Fatalf("expected Node result, got %T", value)
+	}
+	if got := node.LimaCommands.Start; got != "{{binary}} start {{instance_name}} --tty=false" {
+		t.Fatalf("expected node create to load start override, got %q", got)
+	}
+}
+
+func TestDispatchNodeCloneLoadsLimaCommandsFile(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	sourceNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "source-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(source-node) error = %v", err)
+	}
+
+	commandsPath := filepath.Join(t.TempDir(), "node-clone-lima.yaml")
+	if err := os.WriteFile(commandsPath, []byte("clone: \"{{binary}} clone {{source_instance}} {{target_instance}} --tty=false\"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lima commands) error = %v", err)
+	}
+
+	value, err := dispatchNode(ctx, service, []string{
+		"clone",
+		sourceNode.ID,
+		"--node-slug", "cloned-node",
+		"--lima-commands-file", commandsPath,
+	})
+	if err != nil {
+		t.Fatalf("dispatchNode(clone with lima commands file) error = %v", err)
+	}
+
+	node, ok := value.(Node)
+	if !ok {
+		t.Fatalf("expected Node result, got %T", value)
+	}
+	if got := node.LimaCommands.Clone; got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
+		t.Fatalf("expected node clone to load clone override, got %q", got)
+	}
+}
+
 func TestDispatchPatchCommandGroupIsRejected(t *testing.T) {
 	t.Parallel()
 

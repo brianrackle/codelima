@@ -33,7 +33,6 @@ type ProjectCreateInput struct {
 	EnvironmentConfigs []string
 	SetupCommands      []string
 	Template           string
-	Resources          Resources
 }
 
 type ProjectUpdateInput struct {
@@ -45,7 +44,6 @@ type ProjectUpdateInput struct {
 	SetupCommands           []string
 	ClearSetup              bool
 	Template                *string
-	Resources               *Resources
 }
 
 type ProjectForkInput struct {
@@ -61,14 +59,14 @@ type NodeCreateInput struct {
 	Provider      string
 	AgentProfile  string
 	WorkspaceMode string
-	Resources     Resources
+	LimaCommands  LimaCommandTemplates
 }
 
 type NodeCloneInput struct {
 	SourceNode   string
 	NodeSlug     string
 	AgentProfile string
-	Resources    Resources
+	LimaCommands LimaCommandTemplates
 }
 
 type PatchProposeInput struct {
@@ -83,6 +81,7 @@ func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.
 		lima = NewExecLimaClient()
 	}
 	if execLima, ok := lima.(*ExecLimaClient); ok {
+		execLima.LimaCommands = execLima.LimaCommands.ApplyDefaults(cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates()))
 		execLima.Stdout = stdout
 		execLima.Stderr = stderr
 	}
@@ -305,7 +304,6 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 		DefaultRuntime:      RuntimeVM,
 		DefaultProvider:     ProviderLima,
 		DefaultLimaTemplate: coalesce(input.Template, s.cfg.DefaultTemplate),
-		DefaultResources:    input.Resources.ApplyDefaults(s.cfg.DefaultResources),
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -407,10 +405,6 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 
 	if input.Template != nil {
 		project.DefaultLimaTemplate = *input.Template
-	}
-
-	if input.Resources != nil {
-		project.DefaultResources = input.Resources.ApplyDefaults(project.DefaultResources)
 	}
 
 	project.UpdatedAt = s.now()
@@ -622,7 +616,7 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 		DefaultRuntime:      source.DefaultRuntime,
 		DefaultProvider:     source.DefaultProvider,
 		DefaultLimaTemplate: source.DefaultLimaTemplate,
-		DefaultResources:    source.DefaultResources,
+		LimaCommands:        source.LimaCommands,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
@@ -701,7 +695,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
-	resources := input.Resources.ApplyDefaults(project.DefaultResources)
 	instanceName, err := s.generateInstanceName(project.Slug, nodeSlug, nodeID)
 	if err != nil {
 		return Node{}, err
@@ -715,11 +708,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		LaunchCommand:     profile.LaunchCommand,
 		Environment:       cloneMap(profile.Environment),
 		Completed:         false,
-	}
-
-	template, err := s.renderTemplate(ctx, project, resources, bootstrap, workspaceMode)
-	if err != nil {
-		return Node{}, err
 	}
 
 	guestWorkspacePath := project.WorkspacePath
@@ -737,9 +725,9 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		Runtime:               runtime,
 		Provider:              provider,
 		LimaInstanceName:      instanceName,
-		RequestedResources:    resources,
 		Status:                NodeStatusCreated,
 		AgentProfileName:      profileName,
+		LimaCommands:          input.LimaCommands,
 		BootstrapCommands:     bootstrap.CombinedCommands(),
 		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
 		WorkspaceMode:         workspaceMode,
@@ -751,6 +739,11 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		UpdatedAt:             s.now(),
 	}
 
+	template, err := s.renderTemplate(ctx, project, node, bootstrap, workspaceMode)
+	if err != nil {
+		return Node{}, err
+	}
+
 	cleanupNodeDir := true
 	cleanupInstance := false
 	defer func() {
@@ -758,7 +751,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 			return
 		}
 		if cleanupInstance {
-			_ = s.lima.Delete(ctx, instanceName)
+			_ = s.lima.Delete(ctx, project, node)
 		}
 		if cleanupNodeDir {
 			_ = os.RemoveAll(s.store.nodeDir(nodeID))
@@ -769,7 +762,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
-	if err := s.lima.Create(ctx, instanceName, s.store.nodeTemplatePath(nodeID)); err != nil {
+	if err := s.lima.Create(ctx, project, node, s.store.nodeTemplatePath(nodeID)); err != nil {
 		return Node{}, err
 	}
 	cleanupInstance = true
@@ -872,7 +865,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 	}
 
 	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != "running" {
-		if err := s.lima.Start(ctx, node.LimaInstanceName); err != nil {
+		if err := s.lima.Start(ctx, project, node); err != nil {
 			return Node{}, err
 		}
 	}
@@ -971,6 +964,11 @@ func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
 		return Node{}, err
 	}
 
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return Node{}, err
+	}
+
 	if node.LastRuntimeObservation != nil && node.LastRuntimeObservation.Status != "running" {
 		node.Status = NodeStatusStopped
 		node.UpdatedAt = s.now()
@@ -980,7 +978,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
 		return node, nil
 	}
 
-	if err := s.lima.Stop(ctx, node.LimaInstanceName); err != nil {
+	if err := s.lima.Stop(ctx, project, node); err != nil {
 		return Node{}, err
 	}
 
@@ -1036,7 +1034,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 
 	sourceWasRunning := sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == "running"
 	if sourceWasRunning {
-		if err := s.lima.Stop(ctx, sourceNode.LimaInstanceName); err != nil {
+		if err := s.lima.Stop(ctx, sourceProject, sourceNode); err != nil {
 			return Node{}, err
 		}
 	}
@@ -1045,7 +1043,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 			return
 		}
 
-		if restartErr := s.lima.Start(ctx, sourceNode.LimaInstanceName); restartErr != nil {
+		if restartErr := s.lima.Start(ctx, sourceProject, sourceNode); restartErr != nil {
 			err = errors.Join(err, restartErr)
 			return
 		}
@@ -1060,16 +1058,9 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		return Node{}, err
 	}
 
-	resources := input.Resources.ApplyDefaults(sourceNode.RequestedResources)
 	nodeID := newID()
 	instanceName, err := s.generateInstanceName(sourceProject.Slug, childNodeSlug, nodeID)
 	if err != nil {
-		return Node{}, err
-	}
-
-	if err := s.lima.Clone(ctx, sourceNode.LimaInstanceName, instanceName, CloneOptions{
-		Resources: resources,
-	}); err != nil {
 		return Node{}, err
 	}
 
@@ -1077,11 +1068,6 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	bootstrap.InstallCommands = append([]string(nil), sourceBootstrap.InstallCommands...)
 	bootstrap.SetupCommands = append([]string(nil), sourceBootstrap.SetupCommands...)
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
-
-	template, err := s.renderTemplate(ctx, sourceProject, resources, bootstrap, nodeWorkspaceMode(sourceNode))
-	if err != nil {
-		return Node{}, err
-	}
 
 	childNode = Node{
 		ID:                    nodeID,
@@ -1091,9 +1077,9 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		Runtime:               RuntimeVM,
 		Provider:              ProviderLima,
 		LimaInstanceName:      instanceName,
-		RequestedResources:    resources,
 		Status:                NodeStatusCreated,
 		AgentProfileName:      sourceNode.AgentProfileName,
+		LimaCommands:          input.LimaCommands.ApplyDefaults(sourceNode.LimaCommands),
 		BootstrapCommands:     append([]string(nil), sourceNode.BootstrapCommands...),
 		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
 		WorkspaceMode:         nodeWorkspaceMode(sourceNode),
@@ -1106,12 +1092,21 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		UpdatedAt:             s.now(),
 	}
 
+	if err := s.lima.Clone(ctx, sourceProject, sourceNode, childNode); err != nil {
+		return Node{}, err
+	}
+
+	template, err := s.renderTemplate(ctx, sourceProject, childNode, bootstrap, nodeWorkspaceMode(sourceNode))
+	if err != nil {
+		return Node{}, err
+	}
+
 	reconciledChildNode, err := s.reconcileNode(ctx, childNode, false)
 	if err != nil {
 		return Node{}, err
 	}
 	if reconciledChildNode.LastRuntimeObservation != nil && reconciledChildNode.LastRuntimeObservation.Status == "running" {
-		if err := s.lima.Stop(ctx, childNode.LimaInstanceName); err != nil {
+		if err := s.lima.Stop(ctx, sourceProject, childNode); err != nil {
 			return Node{}, err
 		}
 		reconciledChildNode, err = s.reconcileNode(ctx, childNode, false)
@@ -1162,7 +1157,12 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 		return Node{}, err
 	}
 
-	if err := s.lima.Delete(ctx, node.LimaInstanceName); err != nil {
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return Node{}, err
+	}
+
+	if err := s.lima.Delete(ctx, project, node); err != nil {
 		return Node{}, err
 	}
 
@@ -1208,13 +1208,18 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 		return err
 	}
 
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return err
+	}
+
 	command = normalizeShellCommand(command)
 	workdir := s.nodeGuestWorkspacePath(node)
 	interactive := len(command) == 0
 	if interactive {
 		command = interactiveShellLaunchCommand()
 	}
-	return s.lima.Shell(ctx, node.LimaInstanceName, command, workdir, interactive, ShellStreams{
+	return s.lima.Shell(ctx, project, node, command, workdir, interactive, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
 		Stderr: s.stderr,
@@ -1637,8 +1642,8 @@ func (s *Service) generateInstanceName(projectSlug, nodeSlug, nodeID string) (st
 	return instanceName, nil
 }
 
-func (s *Service) renderTemplate(ctx context.Context, project Project, resources Resources, bootstrap BootstrapState, workspaceMode string) ([]byte, error) {
-	rawTemplate, err := s.lima.BaseTemplate(ctx, project.DefaultLimaTemplate)
+func (s *Service) renderTemplate(ctx context.Context, project Project, node Node, bootstrap BootstrapState, workspaceMode string) ([]byte, error) {
+	rawTemplate, err := s.lima.BaseTemplate(ctx, project, node.LimaCommands, project.DefaultLimaTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -1648,9 +1653,9 @@ func (s *Service) renderTemplate(ctx context.Context, project Project, resources
 		return nil, metadataCorruption("failed to parse base lima template", err, nil)
 	}
 
-	document["cpus"] = resources.CPUs
-	document["memory"] = fmt.Sprintf("%dGiB", resources.MemoryGiB)
-	document["disk"] = fmt.Sprintf("%dGiB", resources.DiskGiB)
+	delete(document, "cpus")
+	delete(document, "memory")
+	delete(document, "disk")
 	document["mounts"] = renderWorkspaceMounts(project.WorkspacePath, workspaceMode)
 
 	templateBytes, err := yaml.Marshal(document)
@@ -1666,12 +1671,17 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		return nil
 	}
 
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return err
+	}
+
 	workdir := s.nodeGuestWorkspacePath(node)
 	script := command
 	if workdir != "" {
 		script = fmt.Sprintf("cd %q && %s", workdir, command)
 	}
-	return s.lima.Shell(ctx, node.LimaInstanceName, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+	return s.lima.Shell(ctx, project, node, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
 }
 
 func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, node Node) error {
@@ -1688,18 +1698,25 @@ func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, no
 
 func (s *Service) seedGuestWorkspace(ctx context.Context, project Project, node Node) error {
 	targetPath := s.nodeGuestWorkspacePath(node)
-	targetParent := filepath.Dir(targetPath)
-	prepareScript := fmt.Sprintf(
-		`sudo rm -rf %q && sudo mkdir -p %q && sudo chown "$(id -un)":"$(id -gn)" %q`,
-		targetPath,
-		targetParent,
-		targetParent,
-	)
-	if err := s.lima.Shell(ctx, node.LimaInstanceName, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
+	prepareScript, err := s.resolveWorkspaceSeedPrepareCommand(project, node, project.WorkspacePath, targetPath)
+	if err != nil {
 		return err
 	}
 
-	return s.lima.CopyToGuest(ctx, node.LimaInstanceName, project.WorkspacePath, targetPath, true)
+	if err := s.lima.Shell(ctx, project, node, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
+		return err
+	}
+
+	return s.lima.CopyToGuest(ctx, project, node, project.WorkspacePath, targetPath, true)
+}
+
+func (s *Service) resolveWorkspaceSeedPrepareCommand(project Project, node Node, sourcePath, targetPath string) (string, error) {
+	return resolveConfiguredLimaCommand("limactl", s.cfg.LimaCommands, project, node.LimaCommands, limaCommandWorkspaceSeedPrepare, map[string]string{
+		"instance_name": shellQuote(node.LimaInstanceName),
+		"source_path":   shellQuote(sourcePath),
+		"target_path":   shellQuote(targetPath),
+		"target_parent": shellQuote(filepath.Dir(targetPath)),
+	})
 }
 
 func normalizeShellCommand(command []string) []string {

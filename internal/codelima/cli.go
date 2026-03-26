@@ -211,9 +211,6 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		workspace := flags.String("workspace", "", "")
 		agentProfile := flags.String("agent-profile", "", "")
 		template := flags.String("template", "", "")
-		cpus := flags.Int("cpus", 0, "")
-		memoryGiB := flags.Int("memory-gib", 0, "")
-		diskGiB := flags.Int("disk-gib", 0, "")
 		var environmentConfigs stringSliceFlag
 		var setupCommands stringSliceFlag
 		flags.Var(&environmentConfigs, "env-config", "")
@@ -232,7 +229,6 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 			EnvironmentConfigs: []string(environmentConfigs),
 			SetupCommands:      []string(setupCommands),
 			Template:           *template,
-			Resources:          Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
 		})
 	case "list":
 		flags := flag.NewFlagSet("project list", flag.ContinueOnError)
@@ -257,9 +253,6 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		clearSetup := flags.Bool("clear-setup-commands", false, "")
 		clearEnvironment := flags.Bool("clear-env-commands", false, "")
 		clearEnvironmentConfigs := flags.Bool("clear-env-configs", false, "")
-		cpus := flags.Int("cpus", 0, "")
-		memoryGiB := flags.Int("memory-gib", 0, "")
-		diskGiB := flags.Int("disk-gib", 0, "")
 		var environmentConfigs stringSliceFlag
 		var setupCommands stringSliceFlag
 		flags.Var(&environmentConfigs, "env-config", "")
@@ -293,10 +286,6 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		if *template != "" {
 			templatePtr = template
 		}
-		var resources *Resources
-		if *cpus > 0 || *memoryGiB > 0 || *diskGiB > 0 {
-			resources = &Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB}
-		}
 		return service.ProjectUpdate(target, ProjectUpdateInput{
 			Slug:                    slugPtr,
 			WorkspacePath:           workspacePtr,
@@ -306,7 +295,6 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 			SetupCommands:           []string(setupCommands),
 			ClearSetup:              *clearSetup || *clearEnvironment,
 			Template:                templatePtr,
-			Resources:               resources,
 		})
 	case "delete":
 		if len(args) < 2 {
@@ -369,14 +357,16 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		runtime := flags.String("runtime", RuntimeVM, "")
 		provider := flags.String("provider", ProviderLima, "")
 		agentProfile := flags.String("agent-profile", "", "")
-		cpus := flags.Int("cpus", 0, "")
-		memoryGiB := flags.Int("memory-gib", 0, "")
-		diskGiB := flags.Int("disk-gib", 0, "")
+		limaCommandsFile := flags.String("lima-commands-file", "", "")
 		if err := flags.Parse(args[1:]); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
 		if *project == "" {
 			return nil, invalidArgument("--project is required", nil)
+		}
+		limaCommands, err := loadOptionalLimaCommandsFile(*limaCommandsFile)
+		if err != nil {
+			return nil, err
 		}
 		return service.NodeCreate(ctx, NodeCreateInput{
 			Project:       *project,
@@ -385,7 +375,7 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 			Provider:      *provider,
 			AgentProfile:  *agentProfile,
 			WorkspaceMode: *workspaceMode,
-			Resources:     Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
+			LimaCommands:  limaCommands,
 		})
 	case "list":
 		flags := flag.NewFlagSet("node list", flag.ContinueOnError)
@@ -423,9 +413,7 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		flags.SetOutput(io.Discard)
 		nodeSlug := flags.String("node-slug", "", "")
 		agentProfile := flags.String("agent-profile", "", "")
-		cpus := flags.Int("cpus", 0, "")
-		memoryGiB := flags.Int("memory-gib", 0, "")
-		diskGiB := flags.Int("disk-gib", 0, "")
+		limaCommandsFile := flags.String("lima-commands-file", "", "")
 		remaining := args[1:]
 		sourceNode := ""
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
@@ -441,11 +429,15 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		if sourceNode == "" {
 			return nil, invalidArgument("node clone requires <source-node>", nil)
 		}
+		limaCommands, err := loadOptionalLimaCommandsFile(*limaCommandsFile)
+		if err != nil {
+			return nil, err
+		}
 		node, err := service.NodeClone(ctx, NodeCloneInput{
 			SourceNode:   sourceNode,
 			NodeSlug:     *nodeSlug,
 			AgentProfile: *agentProfile,
-			Resources:    Resources{CPUs: *cpus, MemoryGiB: *memoryGiB, DiskGiB: *diskGiB},
+			LimaCommands: limaCommands,
 		})
 		if err != nil {
 			return nil, err

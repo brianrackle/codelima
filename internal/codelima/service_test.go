@@ -13,6 +13,7 @@ type fakeLima struct {
 	baseTemplate []byte
 	observations map[string]RuntimeObservation
 	calls        []string
+	invocations  []string
 	shellCalls   []fakeShellCall
 	copyCalls    []fakeCopyCall
 	createErr    error
@@ -38,17 +39,25 @@ type fakeCopyCall struct {
 
 func newFakeLima() *fakeLima {
 	return &fakeLima{
-		baseTemplate: []byte("arch: aarch64\nimages: []\nmounts: []\n"),
+		baseTemplate: []byte("arch: aarch64\nimages: []\ncpus: 1\nmemory: 1GiB\ndisk: 10GiB\nmounts: []\n"),
 		observations: map[string]RuntimeObservation{},
 		calls:        []string{},
+		invocations:  []string{},
 		shellCalls:   []fakeShellCall{},
 		copyCalls:    []fakeCopyCall{},
 		cloneStatus:  "stopped",
 	}
 }
 
-func (f *fakeLima) BaseTemplate(_ context.Context, _ string) ([]byte, error) {
+func (f *fakeLima) BaseTemplate(_ context.Context, project Project, nodeCommands LimaCommandTemplates, locator string) ([]byte, error) {
 	f.calls = append(f.calls, "template")
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, nodeCommands, limaCommandTemplateCopy, map[string]string{
+		"locator": shellQuote(locator),
+	})
+	if err != nil {
+		return nil, err
+	}
+	f.invocations = append(f.invocations, "template:"+command)
 	return append([]byte(nil), f.baseTemplate...), nil
 }
 
@@ -64,55 +73,103 @@ func (f *fakeLima) List(_ context.Context) ([]RuntimeObservation, error) {
 	return observations, nil
 }
 
-func (f *fakeLima) Create(_ context.Context, instanceName, _ string) error {
-	f.calls = append(f.calls, "create:"+instanceName)
+func (f *fakeLima) Create(_ context.Context, project Project, node Node, templatePath string) error {
+	f.calls = append(f.calls, "create:"+node.LimaInstanceName)
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCreate, map[string]string{
+		"instance_name": shellQuote(node.LimaInstanceName),
+		"template_path": shellQuote(templatePath),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "create:"+command)
 	if f.createErr != nil {
 		return f.createErr
 	}
-	f.observations[instanceName] = RuntimeObservation{Name: instanceName, Exists: true, Status: "stopped", Dir: "/fake/" + instanceName}
+	f.observations[node.LimaInstanceName] = RuntimeObservation{Name: node.LimaInstanceName, Exists: true, Status: "stopped", Dir: "/fake/" + node.LimaInstanceName}
 	return nil
 }
 
-func (f *fakeLima) Start(_ context.Context, instanceName string) error {
-	f.calls = append(f.calls, "start:"+instanceName)
-	observation := f.observations[instanceName]
+func (f *fakeLima) Start(_ context.Context, project Project, node Node) error {
+	f.calls = append(f.calls, "start:"+node.LimaInstanceName)
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStart, map[string]string{
+		"instance_name": shellQuote(node.LimaInstanceName),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "start:"+command)
+	observation := f.observations[node.LimaInstanceName]
 	observation.Status = "running"
 	observation.Exists = true
-	observation.Name = instanceName
-	f.observations[instanceName] = observation
+	observation.Name = node.LimaInstanceName
+	f.observations[node.LimaInstanceName] = observation
 	return nil
 }
 
-func (f *fakeLima) Stop(_ context.Context, instanceName string) error {
-	f.calls = append(f.calls, "stop:"+instanceName)
-	observation := f.observations[instanceName]
+func (f *fakeLima) Stop(_ context.Context, project Project, node Node) error {
+	f.calls = append(f.calls, "stop:"+node.LimaInstanceName)
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStop, map[string]string{
+		"instance_name": shellQuote(node.LimaInstanceName),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "stop:"+command)
+	observation := f.observations[node.LimaInstanceName]
 	observation.Status = "stopped"
 	observation.Exists = true
-	observation.Name = instanceName
-	f.observations[instanceName] = observation
+	observation.Name = node.LimaInstanceName
+	f.observations[node.LimaInstanceName] = observation
 	return nil
 }
 
-func (f *fakeLima) Delete(_ context.Context, instanceName string) error {
-	f.calls = append(f.calls, "delete:"+instanceName)
-	delete(f.observations, instanceName)
+func (f *fakeLima) Delete(_ context.Context, project Project, node Node) error {
+	f.calls = append(f.calls, "delete:"+node.LimaInstanceName)
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandDelete, map[string]string{
+		"instance_name": shellQuote(node.LimaInstanceName),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "delete:"+command)
+	delete(f.observations, node.LimaInstanceName)
 	return nil
 }
 
-func (f *fakeLima) Clone(_ context.Context, sourceInstance, targetInstance string, _ CloneOptions) error {
-	f.calls = append(f.calls, "clone:"+sourceInstance+"->"+targetInstance)
+func (f *fakeLima) Clone(_ context.Context, project Project, sourceNode, targetNode Node) error {
+	f.calls = append(f.calls, "clone:"+sourceNode.LimaInstanceName+"->"+targetNode.LimaInstanceName)
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, targetNode.LimaCommands, limaCommandClone, map[string]string{
+		"source_instance": shellQuote(sourceNode.LimaInstanceName),
+		"target_instance": shellQuote(targetNode.LimaInstanceName),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "clone:"+command)
 	status := f.cloneStatus
 	if strings.TrimSpace(status) == "" {
 		status = "stopped"
 	}
-	f.observations[targetInstance] = RuntimeObservation{Name: targetInstance, Exists: true, Status: status, Dir: "/fake/" + targetInstance}
+	f.observations[targetNode.LimaInstanceName] = RuntimeObservation{Name: targetNode.LimaInstanceName, Exists: true, Status: status, Dir: "/fake/" + targetNode.LimaInstanceName}
 	return nil
 }
 
-func (f *fakeLima) CopyToGuest(_ context.Context, instanceName, sourcePath, targetPath string, recursive bool) error {
-	f.calls = append(f.calls, "copy:"+instanceName+":"+sourcePath+"->"+targetPath)
+func (f *fakeLima) CopyToGuest(_ context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
+	f.calls = append(f.calls, "copy:"+node.LimaInstanceName+":"+sourcePath+"->"+targetPath)
+	command, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCopy, map[string]string{
+		"source_path":    shellQuote(sourcePath),
+		"target_path":    shellQuote(targetPath),
+		"instance_name":  shellQuote(node.LimaInstanceName),
+		"copy_target":    shellQuote(node.LimaInstanceName + ":" + targetPath),
+		"recursive_flag": shellFlagFragment("-r", recursive),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "copy:"+command)
 	f.copyCalls = append(f.copyCalls, fakeCopyCall{
-		instanceName: instanceName,
+		instanceName: node.LimaInstanceName,
 		sourcePath:   sourcePath,
 		targetPath:   targetPath,
 		recursive:    recursive,
@@ -120,10 +177,24 @@ func (f *fakeLima) CopyToGuest(_ context.Context, instanceName, sourcePath, targ
 	return nil
 }
 
-func (f *fakeLima) Shell(_ context.Context, instanceName string, command []string, workdir string, interactive bool, _ ShellStreams) error {
-	f.calls = append(f.calls, "shell:"+instanceName+":"+strings.Join(command, " "))
+func (f *fakeLima) Shell(_ context.Context, project Project, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
+	f.calls = append(f.calls, "shell:"+node.LimaInstanceName+":"+strings.Join(command, " "))
+	workdirFlag := ""
+	if workdir != "" {
+		workdirFlag = prefixedShellFragment("--workdir", shellQuote(workdir))
+	}
+	resolved, err := resolveConfiguredLimaCommand("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandShell, map[string]string{
+		"instance_name": shellQuote(node.LimaInstanceName),
+		"workdir":       shellQuote(workdir),
+		"workdir_flag":  workdirFlag,
+		"command_args":  shellCommandArgsFragment(command),
+	})
+	if err != nil {
+		return err
+	}
+	f.invocations = append(f.invocations, "shell:"+resolved)
 	f.shellCalls = append(f.shellCalls, fakeShellCall{
-		instanceName: instanceName,
+		instanceName: node.LimaInstanceName,
 		command:      append([]string(nil), command...),
 		workdir:      workdir,
 		interactive:  interactive,
@@ -269,6 +340,9 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 	if !containsPrefix(service.lima.(*fakeLima).calls, "create:"+node.LimaInstanceName) {
 		t.Fatalf("expected limactl create delegation")
 	}
+	if !containsSubstring(service.lima.(*fakeLima).invocations, "create:'limactl' create -y --name '"+node.LimaInstanceName+"' --cpus=2 --memory=4 --disk=20 ") {
+		t.Fatalf("expected create invocation to include resource flags, invocations = %v", service.lima.(*fakeLima).invocations)
+	}
 
 	templateBytes, err := os.ReadFile(node.GeneratedTemplatePath)
 	if err != nil {
@@ -277,6 +351,11 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 
 	if strings.Contains(string(templateBytes), "location: "+workspace) {
 		t.Fatalf("expected generated template to avoid mounting host workspace, got %s", string(templateBytes))
+	}
+	for _, unexpected := range []string{"\ncpus:", "\nmemory:", "\ndisk:"} {
+		if strings.Contains(string(templateBytes), unexpected) {
+			t.Fatalf("expected generated template to omit VM resource keys, got %s", string(templateBytes))
+		}
 	}
 
 	node, err = service.NodeStart(ctx, node.ID)
@@ -384,6 +463,53 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	}
 }
 
+func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	project.LimaCommands.WorkspaceSeedPrepare = "echo preparing {{instance_name}} {{target_path}} {{target_parent}}"
+	if err := service.store.SaveProject(project); err != nil {
+		t.Fatalf("SaveProject(custom workspace seed prepare command) error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if _, err := service.NodeStart(ctx, node.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	if len(service.lima.(*fakeLima).shellCalls) == 0 {
+		t.Fatalf("expected workspace seed prepare command to run")
+	}
+
+	firstCall := service.lima.(*fakeLima).shellCalls[0]
+	if firstCall.instanceName != node.LimaInstanceName {
+		t.Fatalf("expected workspace seed prepare to target %q, got %q", node.LimaInstanceName, firstCall.instanceName)
+	}
+
+	expected := "echo preparing " + shellQuote(node.LimaInstanceName) + " " + shellQuote(workspace) + " " + shellQuote(filepath.Dir(workspace))
+	if got := strings.Join(firstCall.command, " "); got != "sh -lc "+expected {
+		t.Fatalf("expected workspace seed prepare command %q, got %q", "sh -lc "+expected, got)
+	}
+}
+
 func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
 	t.Parallel()
 
@@ -413,6 +539,80 @@ func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected failed node create to remove partial metadata, found %d entries", len(entries))
+	}
+}
+
+func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	project.LimaCommands = LimaCommandTemplates{
+		Create:       "{{binary}} create --name {{instance_name}} --cpus=8 --memory=16 --disk=100 {{template_path}} --vm-type=vz",
+		Start:        "{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'",
+		Stop:         "{{binary}} stop {{instance_name}} --preserve-state",
+		Delete:       "{{binary}} delete {{instance_name}} --archive",
+		Clone:        "{{binary}} clone {{source_instance}} {{target_instance}} --vm-type=vz",
+		Copy:         "{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}} --checksum",
+		Shell:        "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}} --debug",
+		TemplateCopy: "{{binary}} template copy --fill {{locator}} -",
+	}
+	if err := service.store.SaveProject(project); err != nil {
+		t.Fatalf("SaveProject(custom commands) error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if _, err := service.NodeStart(ctx, node.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: node.ID,
+		NodeSlug:   "root-node-clone",
+	})
+	if err != nil {
+		t.Fatalf("NodeClone() error = %v", err)
+	}
+
+	if _, err := service.NodeDelete(ctx, childNode.ID); err != nil {
+		t.Fatalf("NodeDelete() error = %v", err)
+	}
+
+	invocations := service.lima.(*fakeLima).invocations
+	for _, expected := range []string{
+		"template:'limactl' template copy --fill 'template:default' -",
+		"create:'limactl' create --name ",
+		"--cpus=8 --memory=16 --disk=100",
+		"--vm-type=vz",
+		"start:'limactl' start '" + node.LimaInstanceName + "' --set '.nestedvirtualization=true'",
+		"stop:'limactl' stop '" + node.LimaInstanceName + "' --preserve-state",
+		"clone:'limactl' clone '" + node.LimaInstanceName + "' '" + childNode.LimaInstanceName + "'",
+		"copy:'limactl' copy -r ",
+		"--checksum",
+		"shell:'limactl' shell --workdir ",
+		"--debug",
+		"delete:'limactl' delete '" + childNode.LimaInstanceName + "' --archive",
+	} {
+		if !containsSubstring(invocations, expected) {
+			t.Fatalf("expected invocation containing %q, got %v", expected, invocations)
+		}
 	}
 }
 
@@ -942,6 +1142,52 @@ func TestDispatchProjectCreateAndUpdateEnvironmentCommandFlags(t *testing.T) {
 	}
 	if len(project.SetupCommands) != 0 {
 		t.Fatalf("expected cleared environment commands, got %v", project.SetupCommands)
+	}
+}
+
+func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+		LimaCommands: LimaCommandTemplates{
+			Clone: "{{binary}} clone {{source_instance}} {{target_instance}} --set '.nestedvirtualization=true'",
+			Start: "{{binary}} start {{instance_name}} --vm-type=vz",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: node.ID,
+		NodeSlug:   "root-node-clone",
+	})
+	if err != nil {
+		t.Fatalf("NodeClone() error = %v", err)
+	}
+
+	if childNode.LimaCommands.Clone != node.LimaCommands.Clone {
+		t.Fatalf("expected cloned node to inherit clone command override %q, got %q", node.LimaCommands.Clone, childNode.LimaCommands.Clone)
+	}
+	if childNode.LimaCommands.Start != node.LimaCommands.Start {
+		t.Fatalf("expected cloned node to inherit start command override %q, got %q", node.LimaCommands.Start, childNode.LimaCommands.Start)
+	}
+	if !containsSubstring(service.lima.(*fakeLima).invocations, "--set '.nestedvirtualization=true'") {
+		t.Fatalf("expected clone invocation to use inherited node-specific clone command override, invocations = %v", service.lima.(*fakeLima).invocations)
 	}
 }
 

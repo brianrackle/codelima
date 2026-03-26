@@ -37,44 +37,34 @@ const (
 	PatchStatusFailed    = "failed"
 )
 
-type Resources struct {
-	CPUs      int `json:"cpus" yaml:"cpus"`
-	MemoryGiB int `json:"memory_gib" yaml:"memory_gib"`
-	DiskGiB   int `json:"disk_gib" yaml:"disk_gib"`
-}
-
-func (r Resources) ApplyDefaults(defaults Resources) Resources {
-	if r.CPUs == 0 {
-		r.CPUs = defaults.CPUs
-	}
-
-	if r.MemoryGiB == 0 {
-		r.MemoryGiB = defaults.MemoryGiB
-	}
-
-	if r.DiskGiB == 0 {
-		r.DiskGiB = defaults.DiskGiB
-	}
-
-	return r
+type LimaCommandTemplates struct {
+	TemplateCopy         string `json:"template_copy,omitempty" yaml:"template_copy,omitempty"`
+	Create               string `json:"create,omitempty" yaml:"create,omitempty"`
+	Start                string `json:"start,omitempty" yaml:"start,omitempty"`
+	Stop                 string `json:"stop,omitempty" yaml:"stop,omitempty"`
+	Delete               string `json:"delete,omitempty" yaml:"delete,omitempty"`
+	Clone                string `json:"clone,omitempty" yaml:"clone,omitempty"`
+	WorkspaceSeedPrepare string `json:"workspace_seed_prepare,omitempty" yaml:"workspace_seed_prepare,omitempty"`
+	Copy                 string `json:"copy,omitempty" yaml:"copy,omitempty"`
+	Shell                string `json:"shell,omitempty" yaml:"shell,omitempty"`
 }
 
 type Project struct {
-	ID                  string     `json:"id" yaml:"id"`
-	Slug                string     `json:"slug" yaml:"slug"`
-	WorkspacePath       string     `json:"workspace_path" yaml:"workspace_path"`
-	ParentProjectID     string     `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
-	ForkBaseSnapshotID  string     `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
-	AgentProfileName    string     `json:"agent_profile_name" yaml:"agent_profile_name"`
-	EnvironmentConfigs  []string   `json:"environment_configs" yaml:"environment_configs"`
-	SetupCommands       []string   `json:"setup_commands" yaml:"setup_commands"`
-	DefaultRuntime      string     `json:"default_runtime" yaml:"default_runtime"`
-	DefaultProvider     string     `json:"default_provider" yaml:"default_provider"`
-	DefaultLimaTemplate string     `json:"default_lima_template" yaml:"default_lima_template"`
-	DefaultResources    Resources  `json:"default_resources" yaml:"default_resources"`
-	CreatedAt           time.Time  `json:"created_at" yaml:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at" yaml:"updated_at"`
-	DeletedAt           *time.Time `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	ID                  string               `json:"id" yaml:"id"`
+	Slug                string               `json:"slug" yaml:"slug"`
+	WorkspacePath       string               `json:"workspace_path" yaml:"workspace_path"`
+	ParentProjectID     string               `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
+	ForkBaseSnapshotID  string               `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
+	AgentProfileName    string               `json:"agent_profile_name" yaml:"agent_profile_name"`
+	EnvironmentConfigs  []string             `json:"environment_configs" yaml:"environment_configs"`
+	SetupCommands       []string             `json:"setup_commands" yaml:"setup_commands"`
+	DefaultRuntime      string               `json:"default_runtime" yaml:"default_runtime"`
+	DefaultProvider     string               `json:"default_provider" yaml:"default_provider"`
+	DefaultLimaTemplate string               `json:"default_lima_template" yaml:"default_lima_template"`
+	LimaCommands        LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
+	CreatedAt           time.Time            `json:"created_at" yaml:"created_at"`
+	UpdatedAt           time.Time            `json:"updated_at" yaml:"updated_at"`
+	DeletedAt           *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
 type EnvironmentConfig struct {
@@ -95,29 +85,29 @@ type RuntimeObservation struct {
 }
 
 type Node struct {
-	ID                     string              `json:"id" yaml:"id"`
-	Slug                   string              `json:"slug" yaml:"slug"`
-	ProjectID              string              `json:"project_id" yaml:"project_id"`
-	ParentNodeID           string              `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
-	Runtime                string              `json:"runtime" yaml:"runtime"`
-	Provider               string              `json:"provider" yaml:"provider"`
-	LimaInstanceName       string              `json:"lima_instance_name" yaml:"lima_instance_name"`
-	RequestedResources     Resources           `json:"requested_resources" yaml:"requested_resources"`
-	Status                 string              `json:"status" yaml:"status"`
-	AgentProfileName       string              `json:"agent_profile_name" yaml:"agent_profile_name"`
-	BootstrapCommands      []string            `json:"bootstrap_commands" yaml:"bootstrap_commands"`
-	GeneratedTemplatePath  string              `json:"generated_template_path" yaml:"generated_template_path"`
-	WorkspaceMode          string              `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
-	GuestWorkspacePath     string              `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
-	WorkspaceMountPath     string              `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
-	WorkspaceSeeded        bool                `json:"workspace_seeded" yaml:"workspace_seeded"`
-	BootstrapCompleted     bool                `json:"bootstrap_completed" yaml:"bootstrap_completed"`
-	BootstrapCompletedAt   *time.Time          `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
-	CreatedAt              time.Time           `json:"created_at" yaml:"created_at"`
-	UpdatedAt              time.Time           `json:"updated_at" yaml:"updated_at"`
-	DeletedAt              *time.Time          `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-	LastReconciledAt       *time.Time          `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
-	LastRuntimeObservation *RuntimeObservation `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
+	ID                     string               `json:"id" yaml:"id"`
+	Slug                   string               `json:"slug" yaml:"slug"`
+	ProjectID              string               `json:"project_id" yaml:"project_id"`
+	ParentNodeID           string               `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime                string               `json:"runtime" yaml:"runtime"`
+	Provider               string               `json:"provider" yaml:"provider"`
+	LimaInstanceName       string               `json:"lima_instance_name" yaml:"lima_instance_name"`
+	Status                 string               `json:"status" yaml:"status"`
+	AgentProfileName       string               `json:"agent_profile_name" yaml:"agent_profile_name"`
+	LimaCommands           LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
+	BootstrapCommands      []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	GeneratedTemplatePath  string               `json:"generated_template_path" yaml:"generated_template_path"`
+	WorkspaceMode          string               `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath     string               `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath     string               `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded        bool                 `json:"workspace_seeded" yaml:"workspace_seeded"`
+	BootstrapCompleted     bool                 `json:"bootstrap_completed" yaml:"bootstrap_completed"`
+	BootstrapCompletedAt   *time.Time           `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
+	CreatedAt              time.Time            `json:"created_at" yaml:"created_at"`
+	UpdatedAt              time.Time            `json:"updated_at" yaml:"updated_at"`
+	DeletedAt              *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	LastReconciledAt       *time.Time           `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
+	LastRuntimeObservation *RuntimeObservation  `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
 }
 
 type BootstrapState struct {
@@ -243,22 +233,22 @@ type ProjectTreeNode struct {
 }
 
 type projectWire struct {
-	ID                  string     `json:"id" yaml:"id"`
-	Slug                string     `json:"slug" yaml:"slug"`
-	WorkspacePath       string     `json:"workspace_path" yaml:"workspace_path"`
-	ParentProjectID     string     `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
-	ForkBaseSnapshotID  string     `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
-	AgentProfileName    string     `json:"agent_profile_name" yaml:"agent_profile_name"`
-	EnvironmentConfigs  []string   `json:"environment_configs" yaml:"environment_configs"`
-	EnvironmentCommands []string   `json:"environment_commands" yaml:"environment_commands"`
-	SetupCommands       []string   `json:"setup_commands,omitempty" yaml:"setup_commands,omitempty"`
-	DefaultRuntime      string     `json:"default_runtime" yaml:"default_runtime"`
-	DefaultProvider     string     `json:"default_provider" yaml:"default_provider"`
-	DefaultLimaTemplate string     `json:"default_lima_template" yaml:"default_lima_template"`
-	DefaultResources    Resources  `json:"default_resources" yaml:"default_resources"`
-	CreatedAt           time.Time  `json:"created_at" yaml:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at" yaml:"updated_at"`
-	DeletedAt           *time.Time `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	ID                  string               `json:"id" yaml:"id"`
+	Slug                string               `json:"slug" yaml:"slug"`
+	WorkspacePath       string               `json:"workspace_path" yaml:"workspace_path"`
+	ParentProjectID     string               `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
+	ForkBaseSnapshotID  string               `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
+	AgentProfileName    string               `json:"agent_profile_name" yaml:"agent_profile_name"`
+	EnvironmentConfigs  []string             `json:"environment_configs" yaml:"environment_configs"`
+	EnvironmentCommands []string             `json:"environment_commands" yaml:"environment_commands"`
+	SetupCommands       []string             `json:"setup_commands,omitempty" yaml:"setup_commands,omitempty"`
+	DefaultRuntime      string               `json:"default_runtime" yaml:"default_runtime"`
+	DefaultProvider     string               `json:"default_provider" yaml:"default_provider"`
+	DefaultLimaTemplate string               `json:"default_lima_template" yaml:"default_lima_template"`
+	LimaCommands        LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
+	CreatedAt           time.Time            `json:"created_at" yaml:"created_at"`
+	UpdatedAt           time.Time            `json:"updated_at" yaml:"updated_at"`
+	DeletedAt           *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
 func (p Project) MarshalJSON() ([]byte, error) {
@@ -302,7 +292,7 @@ func newProjectWire(project Project) projectWire {
 		DefaultRuntime:      project.DefaultRuntime,
 		DefaultProvider:     project.DefaultProvider,
 		DefaultLimaTemplate: project.DefaultLimaTemplate,
-		DefaultResources:    project.DefaultResources,
+		LimaCommands:        project.LimaCommands,
 		CreatedAt:           project.CreatedAt,
 		UpdatedAt:           project.UpdatedAt,
 		DeletedAt:           project.DeletedAt,
@@ -310,7 +300,7 @@ func newProjectWire(project Project) projectWire {
 }
 
 func (w projectWire) project() Project {
-	return Project{
+	project := Project{
 		ID:                  w.ID,
 		Slug:                w.Slug,
 		WorkspacePath:       w.WorkspacePath,
@@ -322,11 +312,13 @@ func (w projectWire) project() Project {
 		DefaultRuntime:      w.DefaultRuntime,
 		DefaultProvider:     w.DefaultProvider,
 		DefaultLimaTemplate: w.DefaultLimaTemplate,
-		DefaultResources:    w.DefaultResources,
+		LimaCommands:        w.LimaCommands,
 		CreatedAt:           w.CreatedAt,
 		UpdatedAt:           w.UpdatedAt,
 		DeletedAt:           w.DeletedAt,
 	}
+
+	return project
 }
 
 type bootstrapStateWire struct {

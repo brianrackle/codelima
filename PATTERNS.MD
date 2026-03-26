@@ -15,6 +15,11 @@ Normal node and tree reads skip those directories so older failed writes do not 
 Lima interactions are isolated behind `LimaClient`.
 Tests use a fake implementation to assert delegation behavior without creating real VMs, while the production path uses `limactl`.
 
+## Command-Template-First Lima Overrides
+
+The authoritative default Lima command templates live in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`, including `workspace_seed_prepare` for the guest-side directory preparation step used by copy-mode workspaces.
+Projects and nodes can each override any subset of those commands under the same `lima_commands` key, with precedence `config.yaml`, then `project.yaml`, then `node.yaml`. Project and node metadata files without explicit overrides include commented example blocks so operators can discover the shape in place. Runtime expansion happens with placeholders like `{{instance_name}}`, `{{template_path}}`, `{{command_args}}`, `{{target_path}}`, and `{{target_parent}}`, while advanced per-node create-time overrides are seeded through `node create --lima-commands-file`, `node clone --lima-commands-file`, or the matching TUI dialog field before `node.yaml` already exists on disk.
+
 ## Snapshot Then Promote
 
 Fork flows never mutate a target workspace before an immutable snapshot exists.
@@ -58,7 +63,7 @@ The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball i
 ## Guest Workspace Seed
 
 New nodes default to `copy` workspace mode.
-In that mode, the first successful start copies the host workspace into the guest at the same absolute path, which keeps guest edits isolated while preserving the expected path layout for project environment commands and shell entry.
+In that mode, the first successful start resolves `lima_commands.workspace_seed_prepare` to clear and recreate the guest target path, then runs `lima_commands.copy` to copy the host workspace into the guest at the same absolute path. That keeps guest edits isolated while preserving the expected path layout for project environment commands and shell entry.
 
 ## Workspace Mode Per Node
 
