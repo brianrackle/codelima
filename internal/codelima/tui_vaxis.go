@@ -195,6 +195,11 @@ type vaxisTUIApp struct {
 	terminalBodyRect  tuiRect
 }
 
+const (
+	terminalViewToggleFooterHint = "Alt-`/F6"
+	terminalViewToggleTextHint   = "Alt-` or F6"
+)
+
 func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
 	tree, err := service.ProjectTree("", false)
 	if err != nil {
@@ -929,7 +934,7 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 		[]tuiDialogField{
 			newTUIInputField("slug", "Node Slug", project.Slug+"-node", true),
 			newTUIValueSelectorField("workspace_mode", "Workspace Mode", WorkspaceModeCopy, true, workspaceModeDisplay, nil),
-			newTUIInputField("lima_commands_file", "Lima Commands File", "", false),
+			newTUIInputField("lima_commands_file", "Lima Commands File (optional)", "", false),
 		},
 		func(values map[string]string) error {
 			limaCommands, err := loadOptionalLimaCommandsFile(values["lima_commands_file"])
@@ -1375,7 +1380,7 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
 		},
 		[]tuiDialogField{
 			newTUIInputField("node_slug", "Cloned Node Slug", node.Slug+"-clone", true),
-			newTUIInputField("lima_commands_file", "Lima Commands File", "", false),
+			newTUIInputField("lima_commands_file", "Lima Commands File (optional)", "", false),
 		},
 		func(values map[string]string) error {
 			limaCommands, err := loadOptionalLimaCommandsFile(values["lima_commands_file"])
@@ -1701,7 +1706,7 @@ func (a *vaxisTUIApp) draw() {
 				a.drawTerminalSelection(termBody, session.terminal.String(), selectionStyle)
 			}
 		} else {
-			termBody.Println(0, vaxis.Segment{Text: "Shell session is not running. Select the node again or press Alt-` to reopen.", Style: mutedStyle})
+			termBody.Println(0, vaxis.Segment{Text: fmt.Sprintf("Shell session is not running. Select the node again or press %s to reopen.", terminalViewToggleTextHint), Style: mutedStyle})
 		}
 	} else {
 		a.drawDetails(termBody, entry, headerStyle, mutedStyle)
@@ -1833,7 +1838,7 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		}
 		row++
 		if nodeAutoStartsSession(entry.node) {
-			win.Println(row, vaxis.Segment{Text: "Node is running. Press Alt-` to focus its terminal session.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to focus its terminal session.", terminalViewToggleTextHint), Style: mutedStyle})
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session, or edit the node file directly for advanced per-node Lima command overrides.", Style: mutedStyle})
 		}
@@ -1886,14 +1891,14 @@ func drawTerminalPane(win vaxis.Window, style vaxis.Style) vaxis.Window {
 
 func renderFooter(focus tuiFocus, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		return "Alt-` tree focus   q quit"
+		return terminalViewToggleFooterHint + " tree focus   q quit"
 	}
 
 	parts := make([]string, 0, 10)
 	if entry.kind != "" {
 		parts = append(parts, "Up/Down move", "Left/Right collapse")
 		if entry.kind == tuiTreeEntryNode && nodeAutoStartsSession(entry.node) {
-			parts = append(parts, "Alt-` shell focus")
+			parts = append(parts, terminalViewToggleFooterHint+" shell focus")
 		}
 	}
 
@@ -1925,7 +1930,7 @@ func tuiEntryLabel(entry tuiTreeEntry) string {
 }
 
 func isTerminalViewToggleKey(key vaxis.Key) bool {
-	return key.Matches('`', vaxis.ModAlt)
+	return key.Matches('`', vaxis.ModAlt) || key.Matches(vaxis.KeyF06)
 }
 
 func isQuitKey(key vaxis.Key) bool {

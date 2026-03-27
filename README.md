@@ -199,14 +199,15 @@ Basic layout:
 | ▼ api                     | Project: api                                |
 |   • api-copy    STOPPED   | Node: api-copy  Mode: copy                  |
 |   • api-mount   RUNNING   |                                             |
-| ▼ billing                 | Alt-` toggles tree focus <-> terminal focus |
+| ▼ billing                 | Alt-`/F6 toggles tree focus <-> terminal focus |
 |   • billing-a   RUNNING   |                                             |
 +---------------------------+---------------------------------------------+
 ```
 
 Fast key reference:
 
-- `Alt-\``: toggle between tree focus and terminal focus
+- `Alt-\`` or `F6`: toggle between tree focus and terminal focus
+- macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want `Alt-\`` to work
 - `q`: quit the TUI
 - `Up` / `Down`: move selection in the tree
 - `Left` / `Right`: collapse or expand projects in the tree

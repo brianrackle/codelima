@@ -311,3 +311,29 @@ Disadvantages:
 - The root cause may depend on upstream Ghostty VT internals outside this repository.
 - A true terminal-level fix is likely more invasive than the current localized workaround.
 - Validating the final behavior may require more real-terminal integration testing than the current automated regression test.
+
+### 13. Validate the TUI `F6` focus-toggle fallback in Terminal.app and decide whether an Apple-specific shortcut is still needed
+
+Problem:
+
+- The TUI now accepts `F6` alongside `Alt-\`` for switching between tree focus and terminal focus so macOS Terminal.app users are not blocked by the default `Option` behavior.
+- Automated tests cover the matcher and focus transitions, but this March 27, 2026 change was developed from a Ghostty host session, not a real Terminal.app session.
+- Terminal.app users may still prefer a more ergonomic Apple-specific fallback if `fn`-modified function keys prove awkward on common laptop keyboards.
+
+Suggested solution:
+
+- Run the `QA.md` TUI verification flow from a real Terminal.app session and confirm `F6` toggles focus in both directions while ordinary shell input remains unaffected.
+- Verify the updated README guidance about `Use Option as Meta key`, then decide whether the documented `F6` fallback is sufficient or whether CodeLima should also support a second Apple-friendly non-printing shortcut.
+- If a different fallback is needed, add a targeted regression test for the new binding and update the footer/help copy in one place alongside the matcher.
+
+Advantages:
+
+- Confirms the new fallback solves the exact host-terminal problem that prompted the change.
+- Keeps the documented macOS guidance aligned with verified behavior instead of assumption.
+- Provides a clear decision point before adding more shortcuts that could complicate shell input handling.
+
+Disadvantages:
+
+- Requires real Terminal.app access and manual verification rather than pure unit coverage.
+- A second Apple-specific binding would increase shortcut surface area and help-text complexity.
+- Function-key behavior can vary with host keyboard settings, which may make the final choice somewhat environment-specific.

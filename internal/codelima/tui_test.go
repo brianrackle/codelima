@@ -501,7 +501,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "root-node", Status: NodeStatusRunning},
 	}
 	got = renderFooter(tuiFocusTree, runningNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   Alt-` shell focus   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected running-node footer with shell focus and node actions, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -518,7 +518,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 	}
 
 	got = renderFooter(tuiFocusTerminal, runningNodeEntry)
-	if got != "Alt-` tree focus   q quit" {
+	if got != terminalViewToggleFooterHint+" tree focus   q quit" {
 		t.Fatalf("expected terminal footer without mouse hints, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -562,14 +562,20 @@ func TestLayoutTUIBodyHidesTreeWhenTerminalFocused(t *testing.T) {
 	}
 }
 
-func TestTerminalViewToggleKeyMatchesAltBacktickOnly(t *testing.T) {
+func TestTerminalViewToggleKeyMatchesAltBacktickOrF6(t *testing.T) {
 	t.Parallel()
 
 	if !isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
 		t.Fatalf("expected Alt+` to match the terminal view toggle key")
 	}
+	if !isTerminalViewToggleKey(vaxis.Key{Keycode: vaxis.KeyF06}) {
+		t.Fatalf("expected F6 to match the terminal view toggle key")
+	}
 	if isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
 		t.Fatalf("expected Super+` not to match the terminal view toggle key")
+	}
+	if isTerminalViewToggleKey(vaxis.Key{Keycode: vaxis.KeyF05}) {
+		t.Fatalf("expected F5 not to match the terminal view toggle key")
 	}
 	if isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`'}) {
 		t.Fatalf("expected bare ` not to match the terminal view toggle key")
@@ -887,6 +893,83 @@ func TestTUIHandleKeyAltBacktickTogglesFocusBackToTreeAndShowsTree(t *testing.T)
 	}
 	if app.state.focus != tuiFocusTree {
 		t.Fatalf("expected Alt+` to return focus to the tree, got %q", app.state.focus)
+	}
+	if layout := layoutTUIBody(120, app.state.focus); !layout.treeVisible {
+		t.Fatalf("expected tree focus to show the tree")
+	}
+}
+
+func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
+	if err != nil {
+		t.Fatalf("handleKey(F6) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected F6 to toggle terminal view, not quit")
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected F6 to focus the terminal, got %q", app.state.focus)
+	}
+	if layout := layoutTUIBody(120, app.state.focus); layout.treeVisible {
+		t.Fatalf("expected terminal focus to hide the tree")
+	}
+}
+
+func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITree(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+	app.sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: newFakeTUITerminal(),
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
+	if err != nil {
+		t.Fatalf("handleKey(F6) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected F6 to toggle terminal view, not quit")
+	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected F6 to return focus to the tree, got %q", app.state.focus)
 	}
 	if layout := layoutTUIBody(120, app.state.focus); !layout.treeVisible {
 		t.Fatalf("expected tree focus to show the tree")
@@ -1585,6 +1668,9 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	if len(app.dialog.Fields) != 3 {
 		t.Fatalf("expected create node dialog to prompt for slug, workspace mode, and an optional lima commands file, got %#v", app.dialog.Fields)
 	}
+	if got := app.dialog.Fields[2].Label; got != "Lima Commands File (optional)" {
+		t.Fatalf("expected create node dialog to label the lima commands field as optional, got %q", got)
+	}
 	if err := app.dialog.Fields[1].Activate(); err != nil {
 		t.Fatalf("workspace mode selector activate error = %v", err)
 	}
@@ -2159,6 +2245,9 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	}
 	if app.dialog == nil || app.dialog.Title != "Clone Node" {
 		t.Fatalf("expected clone node dialog, got %#v", app.dialog)
+	}
+	if got := app.dialog.Fields[1].Label; got != "Lima Commands File (optional)" {
+		t.Fatalf("expected clone node dialog to label the lima commands field as optional, got %q", got)
 	}
 	limaCommandsPath := filepath.Join(t.TempDir(), "tui-node-clone-lima.yaml")
 	if err := os.WriteFile(limaCommandsPath, []byte("clone: \"{{binary}} clone {{source_instance}} {{target_instance}} --tty=false\"\n"), 0o644); err != nil {

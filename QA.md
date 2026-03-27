@@ -476,10 +476,10 @@ Inside the TUI verify:
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
 - selecting `qa-tui-a` opens its shell session automatically
-- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` shell focus
-- `Alt-\`` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
-- use `Alt-\`` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
-- press `Alt-\`` again to return to the tree and confirm the split layout is restored
+- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` or `F6` shell focus
+- `Alt-\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
+- use `Alt-\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
+- press `Alt-\`` or `F6` again to return to the tree and confirm the split layout is restored
 - select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
 - drag over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
