@@ -575,7 +575,7 @@ func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
 
 	project.LimaCommands = LimaCommandTemplates{
 		Create:       []string{"{{binary}} create --name {{instance_name}} --cpus=8 --memory=16 --disk=100 {{template_path}} --vm-type=vz"},
-		Start:        []string{"{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'"},
+		Start:        []string{"{{binary}} start {{instance_name}} --set '.nestedVirtualization=true'"},
 		Stop:         []string{"{{binary}} stop {{instance_name}} --preserve-state"},
 		Delete:       []string{"{{binary}} delete {{instance_name}} --archive"},
 		Clone:        []string{"{{binary}} clone {{source_instance}} {{target_instance}} --vm-type=vz"},
@@ -617,7 +617,7 @@ func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
 		"create:'limactl' create --name ",
 		"--cpus=8 --memory=16 --disk=100",
 		"--vm-type=vz",
-		"start:'limactl' start '" + node.LimaInstanceName + "' --set '.nestedvirtualization=true'",
+		"start:'limactl' start '" + node.LimaInstanceName + "' --set '.nestedVirtualization=true'",
 		"stop:'limactl' stop '" + node.LimaInstanceName + "' --preserve-state",
 		"clone:'limactl' clone '" + node.LimaInstanceName + "' '" + childNode.LimaInstanceName + "'",
 		"copy:'limactl' copy -r ",
@@ -1180,7 +1180,7 @@ func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
 		Project: project.ID,
 		Slug:    "root-node",
 		LimaCommands: LimaCommandTemplates{
-			Clone: []string{"{{binary}} clone {{source_instance}} {{target_instance}} --set '.nestedvirtualization=true'"},
+			Clone: []string{"{{binary}} clone {{source_instance}} {{target_instance}} --set '.nestedVirtualization=true'"},
 			Start: []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
 		},
 	})
@@ -1202,7 +1202,7 @@ func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
 	if strings.Join(childNode.LimaCommands.Start, "|") != strings.Join(node.LimaCommands.Start, "|") {
 		t.Fatalf("expected cloned node to inherit start command override %q, got %q", node.LimaCommands.Start, childNode.LimaCommands.Start)
 	}
-	if !containsSubstring(service.lima.(*fakeLima).invocations, "--set '.nestedvirtualization=true'") {
+	if !containsSubstring(service.lima.(*fakeLima).invocations, "--set '.nestedVirtualization=true'") {
 		t.Fatalf("expected clone invocation to use inherited node-specific clone command override, invocations = %v", service.lima.(*fakeLima).invocations)
 	}
 }

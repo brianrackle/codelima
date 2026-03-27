@@ -65,7 +65,7 @@ func TestExecLimaClientStartUsesProjectScopedCommandTemplate(t *testing.T) {
 
 	project := Project{
 		LimaCommands: LimaCommandTemplates{
-			Start: []string{"{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'"},
+			Start: []string{"{{binary}} start {{instance_name}} --set '.nestedVirtualization=true'"},
 		},
 	}
 
@@ -73,10 +73,10 @@ func TestExecLimaClientStartUsesProjectScopedCommandTemplate(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	if !strings.Contains(stdout.String(), "stdout:start demo-node --set .nestedvirtualization=true") {
+	if !strings.Contains(stdout.String(), "stdout:start demo-node --set .nestedVirtualization=true") {
 		t.Fatalf("expected stdout stream to include custom start command, got %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "stderr:start demo-node --set .nestedvirtualization=true") {
+	if !strings.Contains(stderr.String(), "stderr:start demo-node --set .nestedVirtualization=true") {
 		t.Fatalf("expected stderr stream to include custom start command, got %q", stderr.String())
 	}
 }
@@ -141,7 +141,7 @@ func TestExecLimaClientStartUsesNodeScopedCommandTemplate(t *testing.T) {
 
 	project := Project{
 		LimaCommands: LimaCommandTemplates{
-			Start: []string{"{{binary}} start {{instance_name}} --set '.nestedvirtualization=true'"},
+			Start: []string{"{{binary}} start {{instance_name}} --set '.nestedVirtualization=true'"},
 		},
 	}
 	node := Node{

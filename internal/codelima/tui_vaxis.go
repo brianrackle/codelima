@@ -1825,21 +1825,11 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 			row++
 		}
 		if len(entry.project.LimaCommands.Bootstrap) == 0 {
-			win.Println(row, vaxis.Segment{Text: "Bootstrap commands: none", Style: mutedStyle})
-			row++
+			win.Println(row, vaxis.Segment{Text: "Project bootstrap commands: none", Style: mutedStyle})
 		} else {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Bootstrap commands: %d", len(entry.project.LimaCommands.Bootstrap)), Style: mutedStyle})
-			row++
-			for index, command := range entry.project.LimaCommands.Bootstrap {
-				if index >= 3 {
-					win.Println(row, vaxis.Segment{Text: fmt.Sprintf("... %d more", len(entry.project.LimaCommands.Bootstrap)-index), Style: mutedStyle})
-					row++
-					break
-				}
-				win.Println(row, vaxis.Segment{Text: fmt.Sprintf("%d. %s", index+1, command), Style: mutedStyle})
-				row++
-			}
+			win.Println(row, vaxis.Segment{Text: "Project bootstrap commands: configured", Style: mutedStyle})
 		}
+		row++
 		row++
 		win.Println(row, vaxis.Segment{Text: "Create nodes, update the project binding, or edit the project file directly for advanced settings such as Lima command overrides.", Style: mutedStyle})
 	case tuiTreeEntryNode:

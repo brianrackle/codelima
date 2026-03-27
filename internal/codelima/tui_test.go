@@ -1934,6 +1934,72 @@ func TestTUIDrawProjectDetailsShowProjectFilePathAndManualEditGuidance(t *testin
 	}
 }
 
+func TestTUIDrawProjectDetailsSummarizeBootstrapCommandsAndEnvironmentConfigs(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+	for _, slug := range []string{"shared-dev-a", "shared-dev-b"} {
+		if _, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+			Slug:              slug,
+			BootstrapCommands: []string{"./script/setup"},
+		}); err != nil {
+			t.Fatalf("EnvironmentConfigCreate(%s) error = %v", slug, err)
+		}
+	}
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:               "root",
+		WorkspacePath:      workspace,
+		EnvironmentConfigs: []string{"shared-dev-a", "shared-dev-b"},
+		BootstrapCommands:  []string{"./script/setup", "direnv allow"},
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+
+	tree, err := service.ProjectTree("", false)
+	if err != nil {
+		t.Fatalf("ProjectTree() error = %v", err)
+	}
+
+	state, err := newTUIState(tree, newFakeTUISessionManager())
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		vx:       newRenderTestVaxis(t, 220, 30),
+	}
+	defer app.vx.Close()
+
+	selectTUIEntry(t, app, "project:"+project.ID)
+	app.draw()
+
+	rendered := renderedScreenText(t, app.vx, 220, 30)
+	if !strings.Contains(rendered, "Environment configs: "+commaSeparatedValues([]string{"shared-dev-a", "shared-dev-b"})) {
+		t.Fatalf("expected rendered project details to include selected environment configs, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Project bootstrap commands: configured") {
+		t.Fatalf("expected rendered project details to summarize configured project bootstrap commands, got:\n%s", rendered)
+	}
+	for _, unexpected := range []string{
+		"Bootstrap commands:",
+		"1. ./script/setup",
+		"2. direnv allow",
+		"./script/setup",
+		"direnv allow",
+	} {
+		if strings.Contains(rendered, unexpected) {
+			t.Fatalf("expected rendered project details to omit %q, got:\n%s", unexpected, rendered)
+		}
+	}
+}
+
 func TestTUIEnvironmentConfigCreationAndProjectAssignment(t *testing.T) {
 	t.Parallel()
 
