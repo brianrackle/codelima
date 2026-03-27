@@ -7,30 +7,18 @@ Ghostty should own terminal semantics, while CodeLima owns TUI layout, focus man
 
 The keyboard path already moved in that direction.
 The runtime-loaded bridge and packaged Ghostty API surface have now been widened to a Ghostling-era upstream baseline.
-The remaining work is mostly about letting Ghostty own more of mouse handling, viewport state, render semantics, and terminal-side effects.
+Mouse encoding now follows that same model too.
+The remaining work is mostly about letting Ghostty own more of viewport state, render semantics, and terminal-side effects.
 
 ## Current Baseline
 
 - Ghostty already owns VT parsing, screen state, cursor state, hyperlink metadata, and terminal mode tracking.
 - CodeLima now uses Ghostty's key encoder for supported keys, with fallback to the legacy Go encoder for unsupported keys or older Ghostty libraries.
+- CodeLima now uses Ghostty's mouse encoder for terminal mouse reporting, with fallback to the legacy Go encoder for unavailable APIs or unsupported mouse events.
 - CodeLima now packages a newer upstream `libghostty-vt` commit and adapts it through a local compatibility bridge instead of the older inline reduced API surface.
 - The Ghostty integration still uses the runtime-loaded `libghostty-vt` bridge rather than direct linking.
 
 ## Remaining Gaps
-
-### 2. Move mouse encoding into Ghostty
-
-CodeLima still hand-encodes mouse events.
-Ghostling uses Ghostty's mouse encoder and syncs it from terminal state.
-
-- Replace the local mouse-escape generation with Ghostty mouse encoding.
-- Let Ghostty decide the active mouse protocol from terminal mode.
-- Preserve CodeLima-specific host behaviors such as copy gestures and focus changes above that layer.
-
-Why it matters:
-
-- Reduces local escape-sequence logic.
-- Improves correctness for mouse mode changes and protocol differences.
 
 ### 3. Move viewport scrolling and scrollback ownership into Ghostty
 
@@ -89,11 +77,10 @@ Why it matters:
 
 ## Recommended Order
 
-1. Move mouse encoding into Ghostty.
-2. Move viewport scrolling into Ghostty.
-3. Improve render/background semantics.
-4. Shift more terminal effects to Ghostty callbacks.
-5. Make PTY writes backpressure-aware.
+1. Move viewport scrolling into Ghostty.
+2. Improve render/background semantics.
+3. Shift more terminal effects to Ghostty callbacks.
+4. Make PTY writes backpressure-aware.
 
 ## Non-Goals
 
@@ -104,4 +91,4 @@ Why it matters:
 ## Related Tracking
 
 - `TODO.md` item 1 tracks the host-terminal background follow-up.
-- `TODO.md` item 10 tracks the next Ghostty follow-up: moving mouse encoding into Ghostty.
+- `TODO.md` item 10 tracks the next Ghostty follow-up: moving viewport scrolling into Ghostty.

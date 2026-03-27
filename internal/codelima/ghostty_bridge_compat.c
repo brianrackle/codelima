@@ -937,3 +937,76 @@ GhosttyResult ghostty_bridge_key_encoder_encode_event(
 	ghostty.key_event_free(event);
 	return result;
 }
+
+GhosttyResult ghostty_bridge_mouse_encoder_new(GhosttyMouseEncoder* encoder) {
+	if (!ghostty_bridge_has_mouse_encoder_api()) {
+		return GHOSTTY_INVALID_VALUE;
+	}
+	return ghostty.mouse_encoder_new(NULL, encoder);
+}
+
+void ghostty_bridge_mouse_encoder_free(GhosttyMouseEncoder encoder) {
+	if (ghostty.mouse_encoder_free != NULL) {
+		ghostty.mouse_encoder_free(encoder);
+	}
+}
+
+void ghostty_bridge_mouse_encoder_reset(GhosttyMouseEncoder encoder) {
+	if (ghostty.mouse_encoder_reset != NULL) {
+		ghostty.mouse_encoder_reset(encoder);
+	}
+}
+
+GhosttyResult ghostty_bridge_mouse_encoder_encode_event(
+	GhosttyMouseEncoder encoder,
+	GhosttyBridgeTerminal term,
+	GhosttyMouseAction action,
+	bool has_button,
+	GhosttyMouseButton button,
+	GhosttyMods mods,
+	GhosttyMousePosition position,
+	const GhosttyMouseEncoderSize* size,
+	bool any_button_pressed,
+	bool track_last_cell,
+	char* out_buffer,
+	size_t out_buffer_size,
+	size_t* out_len
+) {
+	if (!ghostty_bridge_has_mouse_encoder_api() || encoder == NULL || term == NULL) {
+		return GHOSTTY_INVALID_VALUE;
+	}
+
+	ghostty.mouse_encoder_setopt_from_terminal(encoder, term->terminal);
+	if (size != NULL) {
+		ghostty.mouse_encoder_setopt(encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, size);
+	}
+	ghostty.mouse_encoder_setopt(
+		encoder,
+		GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
+		&any_button_pressed
+	);
+	ghostty.mouse_encoder_setopt(
+		encoder,
+		GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,
+		&track_last_cell
+	);
+
+	GhosttyMouseEvent event = NULL;
+	GhosttyResult result = ghostty.mouse_event_new(NULL, &event);
+	if (result != GHOSTTY_SUCCESS || event == NULL) {
+		return result;
+	}
+
+	ghostty.mouse_event_set_action(event, action);
+	if (has_button) {
+		ghostty.mouse_event_set_button(event, button);
+	} else {
+		ghostty.mouse_event_clear_button(event);
+	}
+	ghostty.mouse_event_set_mods(event, mods);
+	ghostty.mouse_event_set_position(event, position);
+
+	result = ghostty.mouse_encoder_encode(encoder, event, out_buffer, out_buffer_size, out_len);
+	ghostty.mouse_event_free(event);
+	return result;
+}

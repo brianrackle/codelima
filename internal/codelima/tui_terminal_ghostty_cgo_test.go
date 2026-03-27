@@ -154,6 +154,116 @@ func TestGhosttyKeyEncoderFallsBackForUnsupportedFunctionKeys(t *testing.T) {
 	}
 }
 
+func TestGhosttyMouseEncoderMatchesLegacyCommonSequences(t *testing.T) {
+	cases := []struct {
+		name             string
+		setup            string
+		mouse            vaxis.Mouse
+		mouseButtonsDown int
+		want             string
+	}{
+		{
+			name:  "sgr-press",
+			setup: "\x1b[?1000h\x1b[?1006h",
+			mouse: vaxis.Mouse{
+				Col:       4,
+				Row:       2,
+				Button:    vaxis.MouseLeftButton,
+				EventType: vaxis.EventPress,
+			},
+			want: "\x1b[<0;5;3M",
+		},
+		{
+			name:  "sgr-release",
+			setup: "\x1b[?1000h\x1b[?1006h",
+			mouse: vaxis.Mouse{
+				Col:       4,
+				Row:       2,
+				Button:    vaxis.MouseLeftButton,
+				EventType: vaxis.EventRelease,
+			},
+			want: "\x1b[<0;5;3m",
+		},
+		{
+			name:  "drag-motion",
+			setup: "\x1b[?1002h\x1b[?1006h",
+			mouse: vaxis.Mouse{
+				Col:       4,
+				Row:       2,
+				Button:    vaxis.MouseLeftButton,
+				EventType: vaxis.EventMotion,
+			},
+			mouseButtonsDown: 1,
+			want:             "\x1b[<32;5;3M",
+		},
+		{
+			name:  "any-motion-without-button",
+			setup: "\x1b[?1003h\x1b[?1006h",
+			mouse: vaxis.Mouse{
+				Col:       4,
+				Row:       2,
+				Button:    vaxis.MouseNoButton,
+				EventType: vaxis.EventMotion,
+			},
+			want: "\x1b[<35;5;3M",
+		},
+		{
+			name:  "wheel-up",
+			setup: "\x1b[?1000h\x1b[?1006h",
+			mouse: vaxis.Mouse{
+				Col:       4,
+				Row:       2,
+				Button:    vaxis.MouseWheelUp,
+				EventType: vaxis.EventPress,
+			},
+			want: "\x1b[<64;5;3M",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+			if err != nil {
+				t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+			}
+			defer terminal.Close()
+
+			ghostty, ok := terminal.(*ghosttyTUITerminal)
+			if !ok {
+				t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+			}
+			if ghostty.mouseEncoder == nil {
+				t.Skip("ghostty mouse encoder unavailable in this test environment")
+			}
+
+			ghostty.ingestPTY([]byte(tc.setup))
+			got, handled := ghostty.mouseEncoder.Encode(tc.mouse, ghostty.term, ghostty.cols, ghostty.rows, tc.mouseButtonsDown)
+			if !handled {
+				t.Fatalf("expected ghostty mouse encoder to handle %#v", tc.mouse)
+			}
+			if got != tc.want {
+				t.Fatalf("ghostty mouse encoding = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGhosttyMouseEncoderFallsBackWithoutEncoder(t *testing.T) {
+	t.Parallel()
+
+	mouse := vaxis.Mouse{
+		Col:       4,
+		Row:       2,
+		Button:    vaxis.MouseLeftButton,
+		EventType: vaxis.EventPress,
+	}
+	got := encodeTUITerminalMouseWithGhostty(mouse, nil, nil, 80, 24, 0, true, true, true)
+	if got != "\x1b[<0;5;3M" {
+		t.Fatalf("fallback mouse encoding = %q, want %q", got, "\x1b[<0;5;3M")
+	}
+}
+
 func TestGhosttyTerminalDoesNotWriteOSCWarningsToStderr(t *testing.T) {
 	ghosttyStderrCaptureMu.Lock()
 	defer ghosttyStderrCaptureMu.Unlock()

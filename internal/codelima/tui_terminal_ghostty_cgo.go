@@ -119,6 +119,13 @@ func newGhosttyTUITerminal(nodeID string, postEvent func(vaxis.Event)) (tuiTermi
 			}
 			return encoder
 		}(),
+		mouseEncoder: func() *ghosttyMouseEncoder {
+			encoder, err := newGhosttyMouseEncoder()
+			if err != nil {
+				return nil
+			}
+			return encoder
+		}(),
 		cols: 80,
 		rows: 24,
 	}, nil
@@ -193,10 +200,11 @@ func ghosttyVTCandidates() []string {
 }
 
 type ghosttyTUITerminal struct {
-	nodeID     string
-	postEvent  func(vaxis.Event)
-	term       C.GhosttyBridgeTerminal
-	keyEncoder *ghosttyKeyEncoder
+	nodeID       string
+	postEvent    func(vaxis.Event)
+	term         C.GhosttyBridgeTerminal
+	keyEncoder   *ghosttyKeyEncoder
+	mouseEncoder *ghosttyMouseEncoder
 
 	mu                   sync.Mutex
 	cmd                  *exec.Cmd
@@ -204,6 +212,7 @@ type ghosttyTUITerminal struct {
 	cols                 int
 	rows                 int
 	focused              bool
+	mouseButtonsDown     int
 	scrollOffset         int
 	snapshot             string
 	drawRows             []ghosttyRowSource
@@ -218,6 +227,10 @@ type ghosttyTUITerminal struct {
 
 type ghosttyKeyEncoder struct {
 	encoder C.GhosttyKeyEncoder
+}
+
+type ghosttyMouseEncoder struct {
+	encoder C.GhosttyMouseEncoder
 }
 
 func newGhosttyKeyEncoder() (*ghosttyKeyEncoder, error) {
@@ -244,6 +257,37 @@ func (e *ghosttyKeyEncoder) Close() {
 	e.encoder = nil
 }
 
+func newGhosttyMouseEncoder() (*ghosttyMouseEncoder, error) {
+	if err := loadGhosttyVT(); err != nil {
+		return nil, err
+	}
+	if !bool(C.ghostty_bridge_has_mouse_encoder_api()) {
+		return nil, errors.New("ghostty mouse encoder API unavailable")
+	}
+
+	var encoder C.GhosttyMouseEncoder
+	if result := C.ghostty_bridge_mouse_encoder_new(&encoder); result != C.GHOSTTY_SUCCESS || encoder == nil {
+		return nil, fmt.Errorf("create ghostty mouse encoder: %d", int(result))
+	}
+
+	return &ghosttyMouseEncoder{encoder: encoder}, nil
+}
+
+func (e *ghosttyMouseEncoder) Close() {
+	if e == nil || e.encoder == nil {
+		return
+	}
+	C.ghostty_bridge_mouse_encoder_free(e.encoder)
+	e.encoder = nil
+}
+
+func (e *ghosttyMouseEncoder) Reset() {
+	if e == nil || e.encoder == nil {
+		return
+	}
+	C.ghostty_bridge_mouse_encoder_reset(e.encoder)
+}
+
 func encodeTUITerminalKeyWithGhostty(key vaxis.Key, encoder *ghosttyKeyEncoder, applicationKeypad bool, cursorKeysApplication bool) string {
 	if key.EventType == vaxis.EventPaste {
 		return key.Text
@@ -255,6 +299,26 @@ func encodeTUITerminalKeyWithGhostty(key vaxis.Key, encoder *ghosttyKeyEncoder, 
 	}
 
 	return encodeTUITerminalKey(key, applicationKeypad, cursorKeysApplication)
+}
+
+func encodeTUITerminalMouseWithGhostty(
+	mouse vaxis.Mouse,
+	encoder *ghosttyMouseEncoder,
+	term C.GhosttyBridgeTerminal,
+	cols int,
+	rows int,
+	mouseButtonsDown int,
+	sgr bool,
+	drag bool,
+	motion bool,
+) string {
+	if encoder != nil {
+		if encoded, handled := encoder.Encode(mouse, term, cols, rows, mouseButtonsDown); handled {
+			return encoded
+		}
+	}
+
+	return encodeTUITerminalMouse(mouse, sgr, drag, motion)
 }
 
 func (e *ghosttyKeyEncoder) Encode(key vaxis.Key, applicationKeypad bool, cursorKeysApplication bool) (string, bool) {
@@ -336,6 +400,75 @@ func (e *ghosttyKeyEncoder) Encode(key vaxis.Key, applicationKeypad bool, cursor
 	return string(buffer[:int(outLen)]), true
 }
 
+func (e *ghosttyMouseEncoder) Encode(
+	mouse vaxis.Mouse,
+	term C.GhosttyBridgeTerminal,
+	cols int,
+	rows int,
+	mouseButtonsDown int,
+) (string, bool) {
+	if e == nil || e.encoder == nil || term == nil || cols <= 0 || rows <= 0 {
+		return "", false
+	}
+
+	action := ghosttyMouseActionForVaxis(mouse.EventType)
+	hasButton, button, ok := ghosttyMouseButtonForVaxis(mouse.Button)
+	if !ok {
+		return "", false
+	}
+
+	size := ghosttyMouseEncoderSizeForTerminal(cols, rows)
+	position := ghosttyMousePositionForVaxis(mouse)
+	mods := ghosttyModsForVaxis(mouse.Modifiers)
+	anyButtonPressed := ghosttyMouseAnyButtonPressed(mouse, mouseButtonsDown)
+	trackLastCell := C.bool(true)
+
+	buffer := make([]byte, 64)
+	var outLen C.size_t
+	result := C.ghostty_bridge_mouse_encoder_encode_event(
+		e.encoder,
+		term,
+		action,
+		C.bool(hasButton),
+		button,
+		mods,
+		position,
+		&size,
+		C.bool(anyButtonPressed),
+		trackLastCell,
+		(*C.char)(unsafe.Pointer(&buffer[0])),
+		C.size_t(len(buffer)),
+		&outLen,
+	)
+	if result == C.GHOSTTY_OUT_OF_SPACE {
+		buffer = make([]byte, int(outLen))
+		var bufferPtr *C.char
+		if len(buffer) > 0 {
+			bufferPtr = (*C.char)(unsafe.Pointer(&buffer[0]))
+		}
+		result = C.ghostty_bridge_mouse_encoder_encode_event(
+			e.encoder,
+			term,
+			action,
+			C.bool(hasButton),
+			button,
+			mods,
+			position,
+			&size,
+			C.bool(anyButtonPressed),
+			trackLastCell,
+			bufferPtr,
+			C.size_t(len(buffer)),
+			&outLen,
+		)
+	}
+	if result != C.GHOSTTY_SUCCESS {
+		return "", false
+	}
+
+	return string(buffer[:int(outLen)]), true
+}
+
 func ghosttyKeyActionForVaxis(eventType vaxis.EventType) C.GhosttyKeyAction {
 	switch eventType {
 	case vaxis.EventRelease:
@@ -344,6 +477,84 @@ func ghosttyKeyActionForVaxis(eventType vaxis.EventType) C.GhosttyKeyAction {
 		return C.GHOSTTY_KEY_ACTION_REPEAT
 	default:
 		return C.GHOSTTY_KEY_ACTION_PRESS
+	}
+}
+
+func ghosttyMouseActionForVaxis(eventType vaxis.EventType) C.GhosttyMouseAction {
+	switch eventType {
+	case vaxis.EventRelease:
+		return C.GHOSTTY_MOUSE_ACTION_RELEASE
+	case vaxis.EventMotion:
+		return C.GHOSTTY_MOUSE_ACTION_MOTION
+	default:
+		return C.GHOSTTY_MOUSE_ACTION_PRESS
+	}
+}
+
+func ghosttyMouseButtonForVaxis(button vaxis.MouseButton) (bool, C.GhosttyMouseButton, bool) {
+	switch button {
+	case vaxis.MouseNoButton:
+		return false, C.GHOSTTY_MOUSE_BUTTON_UNKNOWN, true
+	case vaxis.MouseLeftButton:
+		return true, C.GHOSTTY_MOUSE_BUTTON_LEFT, true
+	case vaxis.MouseMiddleButton:
+		return true, C.GHOSTTY_MOUSE_BUTTON_MIDDLE, true
+	case vaxis.MouseRightButton:
+		return true, C.GHOSTTY_MOUSE_BUTTON_RIGHT, true
+	case vaxis.MouseWheelUp:
+		return true, C.GHOSTTY_MOUSE_BUTTON_FOUR, true
+	case vaxis.MouseWheelDown:
+		return true, C.GHOSTTY_MOUSE_BUTTON_FIVE, true
+	case vaxis.MouseButton8:
+		return true, C.GHOSTTY_MOUSE_BUTTON_EIGHT, true
+	case vaxis.MouseButton9:
+		return true, C.GHOSTTY_MOUSE_BUTTON_NINE, true
+	case vaxis.MouseButton10:
+		return true, C.GHOSTTY_MOUSE_BUTTON_TEN, true
+	case vaxis.MouseButton11:
+		return true, C.GHOSTTY_MOUSE_BUTTON_ELEVEN, true
+	default:
+		return false, C.GHOSTTY_MOUSE_BUTTON_UNKNOWN, false
+	}
+}
+
+func ghosttyMouseEncoderSizeForTerminal(cols int, rows int) C.GhosttyMouseEncoderSize {
+	return C.GhosttyMouseEncoderSize{
+		size:          C.size_t(C.sizeof_GhosttyMouseEncoderSize),
+		screen_width:  C.uint32_t(cols),
+		screen_height: C.uint32_t(rows),
+		cell_width:    1,
+		cell_height:   1,
+	}
+}
+
+func ghosttyMousePositionForVaxis(mouse vaxis.Mouse) C.GhosttyMousePosition {
+	return C.GhosttyMousePosition{
+		x: C.float(float32(mouse.Col) + 0.5),
+		y: C.float(float32(mouse.Row) + 0.5),
+	}
+}
+
+func ghosttyMouseAnyButtonPressed(mouse vaxis.Mouse, mouseButtonsDown int) bool {
+	if mouseButtonsDown > 0 {
+		return true
+	}
+	switch mouse.EventType {
+	case vaxis.EventPress:
+		return ghosttyTrackedMouseButton(mouse.Button)
+	case vaxis.EventMotion:
+		return ghosttyTrackedMouseButton(mouse.Button)
+	default:
+		return false
+	}
+}
+
+func ghosttyTrackedMouseButton(button vaxis.MouseButton) bool {
+	switch button {
+	case vaxis.MouseNoButton, vaxis.MouseWheelUp, vaxis.MouseWheelDown:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -904,13 +1115,37 @@ func (t *ghosttyTUITerminal) handleMouseLocked(event vaxis.Mouse) {
 		return
 	}
 
-	encoded := encodeTUITerminalMouse(
+	encoded := encodeTUITerminalMouseWithGhostty(
 		event,
+		t.mouseEncoder,
+		t.term,
+		t.cols,
+		t.rows,
+		t.mouseButtonsDown,
 		t.getModeLocked(ghosttyModeMouseSGR, false),
 		t.getModeLocked(ghosttyModeMouseDrag, false) || t.getModeLocked(ghosttyModeMouseMotion, false),
 		t.getModeLocked(ghosttyModeMouseMotion, false),
 	)
+	t.updateMouseButtonsDownLocked(event)
 	t.writePTYLocked(encoded)
+}
+
+func (t *ghosttyTUITerminal) updateMouseButtonsDownLocked(event vaxis.Mouse) {
+	if !ghosttyTrackedMouseButton(event.Button) {
+		if event.EventType == vaxis.EventRelease && event.Button == vaxis.MouseNoButton {
+			t.mouseButtonsDown = 0
+		}
+		return
+	}
+
+	switch event.EventType {
+	case vaxis.EventPress:
+		t.mouseButtonsDown++
+	case vaxis.EventRelease:
+		if t.mouseButtonsDown > 0 {
+			t.mouseButtonsDown--
+		}
+	}
 }
 
 func (t *ghosttyTUITerminal) handleWheelLocked(button vaxis.MouseButton) bool {
@@ -992,6 +1227,9 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 			t.cols = width
 			t.rows = height
 			C.ghostty_bridge_terminal_resize(t.term, C.int(width), C.int(height))
+			if t.mouseEncoder != nil {
+				t.mouseEncoder.Reset()
+			}
 			if t.pty != nil {
 				_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
 			}
@@ -1226,9 +1464,11 @@ func (t *ghosttyTUITerminal) Close() {
 		cmd := t.cmd
 		term := t.term
 		keyEncoder := t.keyEncoder
+		mouseEncoder := t.mouseEncoder
 		t.pty = nil
 		t.term = nil
 		t.keyEncoder = nil
+		t.mouseEncoder = nil
 		t.mu.Unlock()
 
 		if ptyFile != nil {
@@ -1246,6 +1486,9 @@ func (t *ghosttyTUITerminal) Close() {
 		}
 		if keyEncoder != nil {
 			keyEncoder.Close()
+		}
+		if mouseEncoder != nil {
+			mouseEncoder.Close()
 		}
 	})
 }
@@ -1340,10 +1583,12 @@ func (t *ghosttyTUITerminal) finish(err error) {
 	t.closed = true
 	term := t.term
 	keyEncoder := t.keyEncoder
+	mouseEncoder := t.mouseEncoder
 	postEvent := !t.suppressEvent
 	t.term = nil
 	t.pty = nil
 	t.keyEncoder = nil
+	t.mouseEncoder = nil
 	t.mu.Unlock()
 
 	if term != nil {
@@ -1354,6 +1599,9 @@ func (t *ghosttyTUITerminal) finish(err error) {
 	}
 	if keyEncoder != nil {
 		keyEncoder.Close()
+	}
+	if mouseEncoder != nil {
+		mouseEncoder.Close()
 	}
 	if postEvent && t.postEvent != nil {
 		t.postEvent(tuiTerminalClosedEvent{NodeID: t.nodeID, Err: err})

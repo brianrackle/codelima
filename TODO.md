@@ -235,30 +235,30 @@ Disadvantages:
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
 
-### 10. Move embedded-terminal mouse encoding into Ghostty now that the widened bridge exposes the upstream mouse API
+### 10. Move embedded-terminal viewport scrolling and scrollback ownership into Ghostty
 
 Problem:
 
-- The embedded terminal still hand-encodes mouse events in Go even though the packaged Ghostty bridge now exposes the upstream mouse encoder surface.
-- Ghostling lets Ghostty choose the active mouse protocol and reporting format from terminal state, while CodeLima still duplicates that protocol logic locally.
-- That duplication keeps mouse-mode behavior more fragile than the keyboard path, which already moved into Ghostty.
+- The embedded terminal still keeps a local `scrollOffset` and local scrollback math even though the packaged Ghostty bridge now exposes viewport scrolling APIs.
+- Ghostling treats the terminal viewport as Ghostty-owned state, while CodeLima still duplicates that viewport position locally and then re-derives the visible rows from Ghostty plus the extra offset.
+- That duplication keeps scrollback behavior more fragile than the keyboard and mouse paths, which have already moved closer to Ghostty-owned input encoding.
 
 Suggested solution:
 
-- Add a Ghostty-backed mouse encoder wrapper alongside the existing key encoder wrapper.
-- Feed terminal mode state into Ghostty's mouse encoder instead of selecting SGR versus classic reporting locally.
-- Keep CodeLima-specific host behaviors, such as focus changes and non-terminal gestures, above that encoder boundary.
+- Replace the local `scrollOffset` model with Ghostty viewport scrolling calls and terminal-owned viewport state.
+- Use Ghostty as the source of truth for which slice of history is visible, and keep only presentation and host-side gesture routing in the TUI layer.
+- Preserve existing local behaviors such as copy gestures and focus management above that viewport boundary.
 
 Advantages:
 
-- Removes another chunk of escape-sequence logic from Go.
-- Brings mouse handling closer to the same ownership boundary Ghostling uses.
-- Reduces the risk of local mouse protocol drift when terminal modes change.
+- Removes duplicated scroll state from Go.
+- Brings scrollback behavior closer to the same ownership boundary Ghostling uses.
+- Reduces the risk of local viewport drift when alternate-screen and scrollback state change.
 
 Disadvantages:
 
-- Adds another Ghostty-backed input path that needs coverage in automated tests and manual QA.
-- Requires careful separation between terminal mouse reporting and CodeLima's host-level mouse UX.
+- Requires careful migration of wheel handling, scrollback rendering, and selection lookups to Ghostty-owned viewport APIs.
+- Changes in scroll ownership will need coverage in automated tests and manual QA to avoid regressions in copy, hyperlinks, and local scrollback behavior.
 
 ### 11. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
 

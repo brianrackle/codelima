@@ -85,4 +85,23 @@ GhosttyResult ghostty_bridge_key_encoder_encode_event(
 	size_t* out_len
 );
 
+GhosttyResult ghostty_bridge_mouse_encoder_new(GhosttyMouseEncoder* encoder);
+void ghostty_bridge_mouse_encoder_free(GhosttyMouseEncoder encoder);
+void ghostty_bridge_mouse_encoder_reset(GhosttyMouseEncoder encoder);
+GhosttyResult ghostty_bridge_mouse_encoder_encode_event(
+	GhosttyMouseEncoder encoder,
+	GhosttyBridgeTerminal term,
+	GhosttyMouseAction action,
+	bool has_button,
+	GhosttyMouseButton button,
+	GhosttyMods mods,
+	GhosttyMousePosition position,
+	const GhosttyMouseEncoderSize* size,
+	bool any_button_pressed,
+	bool track_last_cell,
+	char* out_buffer,
+	size_t out_buffer_size,
+	size_t* out_len
+);
+
 #endif
