@@ -20,24 +20,88 @@ import (
 
 var ghosttyStderrCaptureMu sync.Mutex
 
-func TestGhosttyStyleForColorsLeavesDefaultBackgroundTransparent(t *testing.T) {
+func TestGhosttyStyleForColorsLeavesDefaultColorsUnset(t *testing.T) {
 	t.Parallel()
 
-	style := ghosttyStyleForColors(0xAABBCC, 0x000000, 0x000000)
-	if style.Foreground != vaxis.HexColor(0xAABBCC) {
-		t.Fatalf("foreground = %v, want %v", style.Foreground, vaxis.HexColor(0xAABBCC))
+	style := ghosttyStyleForColors(0xAABBCC, 0x112233, false, false)
+	if style.Foreground != vaxis.ColorDefault {
+		t.Fatalf("foreground = %v, want default foreground", style.Foreground)
 	}
 	if style.Background != vaxis.ColorDefault {
 		t.Fatalf("background = %v, want default background", style.Background)
 	}
 }
 
-func TestGhosttyStyleForColorsPreservesNonDefaultBackground(t *testing.T) {
+func TestGhosttyStyleForColorsPreservesExplicitColors(t *testing.T) {
 	t.Parallel()
 
-	style := ghosttyStyleForColors(0xAABBCC, 0x112233, 0x000000)
+	style := ghosttyStyleForColors(0xAABBCC, 0x112233, true, true)
+	if style.Foreground != vaxis.HexColor(0xAABBCC) {
+		t.Fatalf("foreground = %v, want %v", style.Foreground, vaxis.HexColor(0xAABBCC))
+	}
 	if style.Background != vaxis.HexColor(0x112233) {
 		t.Fatalf("background = %v, want %v", style.Background, vaxis.HexColor(0x112233))
+	}
+}
+
+func TestGhosttyTerminalLeavesDefaultColorsUnset(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	vx := newRenderTestVaxis(t, 80, 24)
+	defer vx.Close()
+
+	ghostty.ingestPTY([]byte("X"))
+	win := vx.Window()
+	win.Clear()
+	ghostty.Draw(win)
+
+	style := renderedCellStyle(t, vx, 0, 0)
+	if style.Foreground != vaxis.ColorDefault {
+		t.Fatalf("foreground = %v, want default foreground", style.Foreground)
+	}
+	if style.Background != vaxis.ColorDefault {
+		t.Fatalf("background = %v, want default background", style.Background)
+	}
+}
+
+func TestGhosttyTerminalPreservesExplicitBackgroundEqualToDefault(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	vx := newRenderTestVaxis(t, 80, 24)
+	defer vx.Close()
+
+	defaultBackground := ghostty.defaultBackgroundRGBLocked()
+	ghostty.ingestPTY([]byte(fmt.Sprintf(
+		"\x1b[48;2;%d;%d;%dmX\x1b[0m",
+		(defaultBackground>>16)&0xFF,
+		(defaultBackground>>8)&0xFF,
+		defaultBackground&0xFF,
+	)))
+	win := vx.Window()
+	win.Clear()
+	ghostty.Draw(win)
+
+	style := renderedCellStyle(t, vx, 0, 0)
+	if style.Background != vaxis.HexColor(defaultBackground) {
+		t.Fatalf("background = %v, want explicit %v", style.Background, vaxis.HexColor(defaultBackground))
 	}
 }
 

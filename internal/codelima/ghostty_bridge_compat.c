@@ -279,8 +279,26 @@ static GhosttyColorRgb ghostty_bridge_resolve_style_color(const GhosttyStyleColo
 	}
 }
 
+static bool ghostty_bridge_style_color_is_default(const GhosttyStyleColor* color) {
+	return color == NULL || color->tag == GHOSTTY_STYLE_COLOR_NONE;
+}
+
 static GhosttyColorRgb ghostty_bridge_resolve_fg_from_style(const GhosttyStyle* style, const GhosttyRenderStateColors* colors) {
 	return ghostty_bridge_resolve_style_color(style == NULL ? NULL : &style->fg_color, colors, colors->foreground);
+}
+
+static bool ghostty_bridge_bg_is_default(GhosttyCell raw, const GhosttyStyle* style) {
+	GhosttyCellContentTag tag = GHOSTTY_CELL_CONTENT_CODEPOINT;
+	if (!ghostty_bridge_result_ok(ghostty.cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &tag))) {
+		return true;
+	}
+	switch (tag) {
+	case GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE:
+	case GHOSTTY_CELL_CONTENT_BG_COLOR_RGB:
+		return false;
+	default:
+		return ghostty_bridge_style_color_is_default(style == NULL ? NULL : &style->bg_color);
+	}
 }
 
 static GhosttyColorRgb ghostty_bridge_resolve_bg_from_cell(GhosttyCell raw, const GhosttyStyle* style, const GhosttyRenderStateColors* colors) {
@@ -361,6 +379,7 @@ static uint8_t ghostty_bridge_grapheme_extra_len_from_ref(const GhosttyGridRef* 
 static void ghostty_bridge_resolved_cell_init(GhosttyResolvedCell* out) {
 	memset(out, 0, sizeof(*out));
 	out->width = 1;
+	out->color_flags = GHOSTTY_CELL_BG_DEFAULT | GHOSTTY_CELL_FG_DEFAULT;
 }
 
 static void ghostty_bridge_fill_cell_base(GhosttyCell raw, const GhosttyStyle* style, GhosttyResolvedCell* out) {
@@ -582,16 +601,21 @@ static int ghostty_bridge_fill_viewport_cell(struct ghostty_bridge_terminal* bri
 	GhosttyColorRgb fg = colors->foreground;
 	GhosttyColorRgb bg = colors->background;
 	uint32_t grapheme_len = 0;
+	bool fg_default = true;
+	bool bg_default = true;
 
 	if (!ghostty_bridge_result_ok(ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW, &raw))) {
 		return 0;
 	}
 	(void)ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style);
-	(void)ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &fg);
-	(void)ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &bg);
+	fg_default = !ghostty_bridge_result_ok(ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &fg));
+	bg_default = !ghostty_bridge_result_ok(ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &bg));
 	(void)ghostty.render_state_row_cells_get(bridge->row_cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &grapheme_len);
 
 	ghostty_bridge_fill_cell_base(raw, &style, out);
+	out->color_flags = 0;
+	if (fg_default) out->color_flags |= GHOSTTY_CELL_FG_DEFAULT;
+	if (bg_default) out->color_flags |= GHOSTTY_CELL_BG_DEFAULT;
 	out->fg_r = fg.r;
 	out->fg_g = fg.g;
 	out->fg_b = fg.b;
@@ -757,6 +781,9 @@ static int ghostty_bridge_fill_scrollback_cell(struct ghostty_bridge_terminal* b
 		return 0;
 	}
 	ghostty_bridge_fill_cell_base(raw, &style, out);
+	out->color_flags = 0;
+	if (ghostty_bridge_style_color_is_default(&style.fg_color)) out->color_flags |= GHOSTTY_CELL_FG_DEFAULT;
+	if (ghostty_bridge_bg_is_default(raw, &style)) out->color_flags |= GHOSTTY_CELL_BG_DEFAULT;
 	GhosttyColorRgb fg = ghostty_bridge_resolve_fg_from_style(&style, colors);
 	GhosttyColorRgb bg = ghostty_bridge_resolve_bg_from_cell(raw, &style, colors);
 	out->fg_r = fg.r;

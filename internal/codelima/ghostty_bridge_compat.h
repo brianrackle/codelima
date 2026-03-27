@@ -16,7 +16,7 @@ typedef struct {
 	uint8_t width;
 	uint16_t hyperlink_id;
 	uint8_t grapheme_len;
-	uint8_t _pad;
+	uint8_t color_flags;
 } GhosttyResolvedCell;
 
 typedef enum {
@@ -33,6 +33,9 @@ typedef enum {
 #define GHOSTTY_CELL_INVISIBLE     (1 << 5)
 #define GHOSTTY_CELL_BLINK         (1 << 6)
 #define GHOSTTY_CELL_FAINT         (1 << 7)
+
+#define GHOSTTY_CELL_BG_DEFAULT (1 << 0)
+#define GHOSTTY_CELL_FG_DEFAULT (1 << 1)
 
 int ghostty_bridge_load(const char* path);
 const char* ghostty_bridge_last_error(void);

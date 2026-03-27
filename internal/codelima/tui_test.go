@@ -116,6 +116,23 @@ func renderedCellGrapheme(t *testing.T, vx *vaxis.Vaxis, col, row int) string {
 	return cell.FieldByName("Character").FieldByName("Grapheme").String()
 }
 
+func renderedCellStyle(t *testing.T, vx *vaxis.Vaxis, col, row int) vaxis.Style {
+	t.Helper()
+
+	buf := reflect.ValueOf(vx).Elem().FieldByName("screenNext").Elem().FieldByName("buf")
+	cell := buf.Index(row).Index(col)
+	style := cell.FieldByName("Style")
+	return vaxis.Style{
+		Hyperlink:       style.FieldByName("Hyperlink").String(),
+		HyperlinkParams: style.FieldByName("HyperlinkParams").String(),
+		Foreground:      vaxis.Color(style.FieldByName("Foreground").Uint()),
+		Background:      vaxis.Color(style.FieldByName("Background").Uint()),
+		UnderlineColor:  vaxis.Color(style.FieldByName("UnderlineColor").Uint()),
+		UnderlineStyle:  vaxis.UnderlineStyle(style.FieldByName("UnderlineStyle").Uint()),
+		Attribute:       vaxis.AttributeMask(style.FieldByName("Attribute").Uint()),
+	}
+}
+
 func renderedScreenText(t *testing.T, vx *vaxis.Vaxis, width, height int) string {
 	t.Helper()
 

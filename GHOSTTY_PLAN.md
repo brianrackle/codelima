@@ -9,7 +9,8 @@ The keyboard path already moved in that direction.
 The runtime-loaded bridge and packaged Ghostty API surface have now been widened to a Ghostling-era upstream baseline.
 Mouse encoding now follows that same model too.
 Viewport scrolling and scrollback ownership now follow that same model too.
-The remaining work is mostly about letting Ghostty own more of render semantics and terminal-side effects.
+Render-time default-color semantics now follow that same model too.
+The remaining work is mostly about letting Ghostty own more of terminal-side effects and transport behavior.
 
 ## Current Baseline
 
@@ -17,23 +18,11 @@ The remaining work is mostly about letting Ghostty own more of render semantics 
 - CodeLima now uses Ghostty's key encoder for supported keys, with fallback to the legacy Go encoder for unsupported keys or older Ghostty libraries.
 - CodeLima now uses Ghostty's mouse encoder for terminal mouse reporting, with fallback to the legacy Go encoder for unavailable APIs or unsupported mouse events.
 - CodeLima now uses Ghostty's viewport scrolling and scrollbar state as the source of truth for embedded-terminal scrollback position.
+- CodeLima now uses Ghostty's explicit-versus-default cell color semantics instead of inferring terminal defaults by RGB equality.
 - CodeLima now packages a newer upstream `libghostty-vt` commit and adapts it through a local compatibility bridge instead of the older inline reduced API surface.
 - The Ghostty integration still uses the runtime-loaded `libghostty-vt` bridge rather than direct linking.
 
 ## Remaining Gaps
-
-### 4. Improve render semantics for default background and transparency
-
-CodeLima still has a known ambiguity around Ghostty default background versus explicit cell background.
-
-- Feed the host terminal background into the Ghostty terminal configuration.
-- Prefer Ghostty render-state semantics that can distinguish "default background" from "explicit background equal to default."
-- Keep transparent-default behavior only when the terminal state actually means default background.
-
-Why it matters:
-
-- Improves visual correctness on non-black themes.
-- Avoids treating explicit app backgrounds as transparent by accident.
 
 ### 5. Prefer Ghostty terminal effects and callbacks over local response polling
 
@@ -65,9 +54,8 @@ Why it matters:
 
 ## Recommended Order
 
-1. Improve render/background semantics.
-2. Shift more terminal effects to Ghostty callbacks.
-3. Make PTY writes backpressure-aware.
+1. Shift more terminal effects to Ghostty callbacks.
+2. Make PTY writes backpressure-aware.
 
 ## Non-Goals
 
@@ -77,5 +65,5 @@ Why it matters:
 
 ## Related Tracking
 
-- `TODO.md` item 1 tracks the host-terminal background follow-up.
+- `TODO.md` item 1 tracks the narrower host-theme/default-color sync follow-up if Ghostty exposes configurable terminal defaults later.
 - `TODO.md` item 10 tracks the next Ghostty follow-up: preferring Ghostty terminal effects and callbacks over local polling.

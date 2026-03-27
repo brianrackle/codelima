@@ -6,27 +6,26 @@
 
 Problem:
 
-- The current Ghostty background fix treats any cell whose background matches Ghostty's default background as transparent.
-- This makes the pane inherit the host terminal background, but Ghostty is not yet configured with the host terminal's actual background color.
-- Because of that, if an application explicitly paints the same RGB value as Ghostty's default background, the renderer cannot distinguish that from "use terminal default".
+- Embedded-terminal rendering now uses Ghostty's explicit-versus-default cell semantics, so pane rendering no longer depends on guessing based on RGB equality.
+- Ghostty itself still keeps its own internal default colors, and guest applications that query terminal defaults can still observe those Ghostty-side values rather than the outer host terminal theme.
+- If upstream Ghostty eventually exposes configurable terminal default colors, CodeLima may still want to pass the host terminal colors through so guest-visible default-color queries align with the outer terminal theme too.
 
 Suggested solution:
 
-- Query the host terminal background through Vaxis during TUI startup.
-- Pass that color into the Ghostty terminal configuration at creation time.
-- Keep the current transparent-default rendering behavior, but compare against the configured host-matched default background instead of Ghostty's internal default alone.
-- If needed, refresh that value when the host terminal emits a color-theme change event.
+- Query the host terminal foreground and background through Vaxis during TUI startup when a matching Ghostty configuration surface exists.
+- Pass those colors into Ghostty's terminal defaults or palette configuration instead of relying only on Vaxis-side `ColorDefault` rendering.
+- Refresh that configuration when the host terminal emits a color-theme change event if Ghostty terminals need to stay aligned during a long-running TUI session.
 
 Advantages:
 
-- Better visual accuracy for non-black host themes.
-- Reduces the chance of explicit application backgrounds being mistaken for default-background cells.
-- Keeps the current Ghostty-plus-Vaxis architecture intact.
+- Makes guest-visible default-color queries align better with the outer terminal theme.
+- Keeps the embedded Ghostty model closer to the colors the user actually sees in the host terminal.
+- Builds on the current Ghostty-plus-Vaxis architecture instead of reintroducing RGB-equality guessing.
 
 Disadvantages:
 
+- Depends on Ghostty exposing a supported way to configure terminal default colors at runtime or startup.
 - Adds startup coordination between the Vaxis host terminal and the Ghostty backend.
-- Requires timeout and failure handling around host color queries.
 - Theme changes become more stateful if existing terminals need to be updated in place.
 
 ### 2. Add a reliable fullscreen TUI visual verification path

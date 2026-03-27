@@ -201,21 +201,20 @@ type ghosttyTUITerminal struct {
 	keyEncoder   *ghosttyKeyEncoder
 	mouseEncoder *ghosttyMouseEncoder
 
-	mu                   sync.Mutex
-	cmd                  *exec.Cmd
-	pty                  *os.File
-	cols                 int
-	rows                 int
-	focused              bool
-	mouseButtonsDown     int
-	snapshot             string
-	defaultBackgroundRGB uint32
-	closed               bool
-	suppressEvent        bool
-	redrawPending        bool
-	waitOnce             sync.Once
-	waitErr              error
-	closeOnce            sync.Once
+	mu               sync.Mutex
+	cmd              *exec.Cmd
+	pty              *os.File
+	cols             int
+	rows             int
+	focused          bool
+	mouseButtonsDown int
+	snapshot         string
+	closed           bool
+	suppressEvent    bool
+	redrawPending    bool
+	waitOnce         sync.Once
+	waitErr          error
+	closeOnce        sync.Once
 }
 
 type ghosttyKeyEncoder struct {
@@ -1226,7 +1225,6 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 		}
 
 		C.ghostty_bridge_render_state_update(t.term)
-		t.defaultBackgroundRGB = uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
 
 		viewport := make([]C.GhosttyResolvedCell, width*height)
 		if len(viewport) > 0 {
@@ -1271,7 +1269,7 @@ func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, cells []
 	var line strings.Builder
 	for col := 0; col < t.cols; col++ {
 		cell := cells[col]
-		style := ghosttyCellStyle(cell, t.defaultBackgroundRGB)
+		style := ghosttyCellStyle(cell)
 		if cell.hyperlink_id != 0 {
 			if target, ok := t.hyperlinkAtLocked(row, col); ok {
 				style.Hyperlink = target
@@ -1315,11 +1313,12 @@ func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, cells []
 	return line.String()
 }
 
-func ghosttyCellStyle(cell C.GhosttyResolvedCell, defaultBackgroundRGB uint32) vaxis.Style {
+func ghosttyCellStyle(cell C.GhosttyResolvedCell) vaxis.Style {
 	style := ghosttyStyleForColors(
 		ghosttyRGB(uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)),
 		ghosttyRGB(uint8(cell.bg_r), uint8(cell.bg_g), uint8(cell.bg_b)),
-		defaultBackgroundRGB,
+		cell.color_flags&C.GHOSTTY_CELL_FG_DEFAULT == 0,
+		cell.color_flags&C.GHOSTTY_CELL_BG_DEFAULT == 0,
 	)
 	if cell.flags&C.GHOSTTY_CELL_BOLD != 0 {
 		style.Attribute |= vaxis.AttrBold
@@ -1348,11 +1347,12 @@ func ghosttyCellStyle(cell C.GhosttyResolvedCell, defaultBackgroundRGB uint32) v
 	return style
 }
 
-func ghosttyStyleForColors(foregroundRGB, backgroundRGB, defaultBackgroundRGB uint32) vaxis.Style {
-	style := vaxis.Style{
-		Foreground: vaxis.HexColor(foregroundRGB),
+func ghosttyStyleForColors(foregroundRGB, backgroundRGB uint32, explicitForeground bool, explicitBackground bool) vaxis.Style {
+	style := vaxis.Style{}
+	if explicitForeground {
+		style.Foreground = vaxis.HexColor(foregroundRGB)
 	}
-	if backgroundRGB != defaultBackgroundRGB {
+	if explicitBackground {
 		style.Background = vaxis.HexColor(backgroundRGB)
 	}
 	return style
@@ -1569,6 +1569,16 @@ func (t *ghosttyTUITerminal) scrollbarLocked() (ghosttyScrollbarState, bool) {
 func (t *ghosttyTUITerminal) viewportAtBottomLocked() bool {
 	return withGhosttyStderrSuppressed(func() bool {
 		return t.viewportAtBottomLockedRaw()
+	})
+}
+
+func (t *ghosttyTUITerminal) defaultBackgroundRGBLocked() uint32 {
+	if t.term == nil {
+		return 0
+	}
+	return withGhosttyStderrSuppressed(func() uint32 {
+		C.ghostty_bridge_render_state_update(t.term)
+		return uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
 	})
 }
 
