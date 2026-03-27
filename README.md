@@ -217,7 +217,9 @@ Fast key reference:
 - on a selected node: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
 - mouse: click tree entries to select, click links to open them, drag terminal text to copy, `Shift`-drag to force local copy, wheel-scroll local terminal scrollback when the guest is not capturing the mouse
 
-Create Project dialog:
+Project and node forms, menus, selectors, and progress views replace the right pane instead of opening centered modals, so the tree stays visible while you work through them.
+
+Create Project form in the right pane:
 
 ```text
 +--------------------------- Create Project ----------------------------+
@@ -227,7 +229,7 @@ Create Project dialog:
 +--------------------------------------------------------------------+
 ```
 
-Create Node dialog:
+Create Node form in the right pane:
 
 ```text
 +---------------------------- Create Node -----------------------------+

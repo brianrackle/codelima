@@ -213,13 +213,13 @@ Disadvantages:
 Problem:
 
 - This change is covered by automated tests, `make verify`, and host-side manual runs of the non-interactive `QA.md` flows: `List Verification`, `Doctor And Incomplete Node Cleanup Verification`, `Tree Verification`, `Shell Verification`, `Workspace Mode Verification`, `Environment Config Verification`, `Clone Verification`, `Workspace Rebind Verification`, and `Packaging Verification`.
-- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, mouse selection, hyperlink activation, and embedded-terminal behavior checks.
+- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, right-pane dialog and selector flows, mouse selection, hyperlink activation, and embedded-terminal behavior checks.
 - That leaves one operator-facing end-to-end verification flow incomplete even though the Lima-backed CLI flows were exercised locally.
 
 Suggested solution:
 
 - Run the `TUI Verification` section from `QA.md` in a real terminal session on a host with working Lima boot support.
-- Confirm the interactive focus toggles, preserved per-node terminal state, mouse-copy behavior, hyperlink opening, and streamed progress overlay behavior.
+- Confirm the interactive focus toggles, preserved per-node terminal state, right-pane transient-view behavior, mouse-copy behavior, hyperlink opening, and streamed progress output.
 - Confirm cleanup completes afterward so no verification-only Lima instances or metadata remain.
 
 Advantages:

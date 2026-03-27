@@ -463,9 +463,10 @@ Run the TUI:
 
 Inside the TUI verify:
 
-- the left pane renders the available projects and nodes, and the right pane renders either node details or one visible terminal
-- press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
-- press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm it appears as a second top-level project without a long frozen pause
+- the left pane renders the available projects and nodes, and the right pane renders either node details, one visible terminal, or the currently active form/menu/selector/progress view
+- no centered modal overlays appear; transient interactions replace the right pane while the tree remains visible
+- press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately in the right pane, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
+- press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm the dialog and selector both use the right pane without a long frozen pause
 - select project `qa-tui-extra`, confirm the right pane lists `qa-shared` under environment configs
 - with `qa-tui-extra` selected and the tree focused, confirm the right pane shows a `Project file:` path under the workspace path so the metadata file can be edited manually when needed
 - with `qa-tui-extra` selected and the tree focused, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text

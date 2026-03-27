@@ -164,6 +164,8 @@ type fakeTUITerminal struct {
 	events        []vaxis.Event
 	startCols     int
 	startRows     int
+	focusCalls    int
+	blurCalls     int
 }
 
 func newFakeTUISessionManager() *fakeTUISessionManager {
@@ -202,9 +204,9 @@ func (f *fakeTUITerminal) Draw(win vaxis.Window) {
 
 func (f *fakeTUITerminal) Close() {}
 
-func (f *fakeTUITerminal) Focus() {}
+func (f *fakeTUITerminal) Focus() { f.focusCalls++ }
 
-func (f *fakeTUITerminal) Blur() {}
+func (f *fakeTUITerminal) Blur() { f.blurCalls++ }
 
 func (f *fakeTUITerminal) String() string {
 	return f.snapshot
@@ -312,28 +314,147 @@ func TestNewGhosttyTUITerminalLoadsWhenLibraryInstalled(t *testing.T) {
 	}
 }
 
-func TestTUIDrawOverlayClearsCoveredCells(t *testing.T) {
+func TestTUIDrawTransientRightPaneContentUsesSplitLayout(t *testing.T) {
 	t.Parallel()
 
-	vx := newRenderTestVaxis(t, 20, 10)
-	defer vx.Close()
-
-	window := vx.Window()
-	window.Fill(vaxis.Cell{Character: vaxis.Character{Grapheme: "x", Width: 1}})
-
-	app := &vaxisTUIApp{}
-	app.drawOverlay(window, 10, 5, func(overlay vaxis.Window) {
-		overlay.Println(0, vaxis.Segment{Text: "A"})
-	})
-
-	if got := renderedCellGrapheme(t, vx, 6, 3); got != " " {
-		t.Fatalf("expected overlay interior to be cleared to space, got %q", got)
+	cases := []struct {
+		name      string
+		title     string
+		configure func(*vaxisTUIApp)
+	}{
+		{
+			name:  "dialog",
+			title: "Create Project",
+			configure: func(app *vaxisTUIApp) {
+				app.dialog = newTUIDialog(
+					"Create Project",
+					"Create",
+					nil,
+					[]tuiDialogField{newTUIInputField("slug", "Project Slug", "", true)},
+					nil,
+				)
+			},
+		},
+		{
+			name:  "menu",
+			title: "Environment Configs",
+			configure: func(app *vaxisTUIApp) {
+				app.menu = &tuiMenu{
+					Title:   "Environment Configs",
+					Entries: []tuiMenuEntry{{Key: 'c', Label: "Create Config"}},
+				}
+			},
+		},
+		{
+			name:  "selector",
+			title: "Select Environment Configs",
+			configure: func(app *vaxisTUIApp) {
+				app.selector = newTUISelector(
+					"Select Environment Configs",
+					nil,
+					[]tuiSelectorOption{{Label: "codex", Value: "codex"}},
+					nil,
+					false,
+					nil,
+				)
+			},
+		},
+		{
+			name:  "operation",
+			title: "Starting root-node",
+			configure: func(app *vaxisTUIApp) {
+				app.operation = &tuiOperationState{
+					Title: "Starting root-node",
+					Lines: []string{"waiting for command output..."},
+				}
+			},
+		},
 	}
-	if got := renderedCellGrapheme(t, vx, 5, 2); got != "A" {
-		t.Fatalf("expected overlay draw callback to render text, got %q", got)
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			service, _ := newTestService(t)
+			sessions := newFakeTUISessionManager()
+			state, err := newTUIState(testTUITree(t), sessions)
+			if err != nil {
+				t.Fatalf("newTUIState() error = %v", err)
+			}
+			if err := state.focusTerminal(); err != nil {
+				t.Fatalf("focusTerminal() error = %v", err)
+			}
+
+			vx := newRenderTestVaxis(t, 100, 24)
+			defer vx.Close()
+
+			app := &vaxisTUIApp{
+				ctx:      ctx,
+				service:  service,
+				state:    state,
+				sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+				vx:       vx,
+			}
+			tc.configure(app)
+
+			app.draw()
+
+			layout := layoutTUIBody(100, tuiFocusTree)
+			if got := renderedCellGrapheme(t, vx, layout.termCol+1, 2); got != string(tc.title[0]) {
+				t.Fatalf("expected %s title to start in the right pane, got %q", tc.name, got)
+			}
+
+			rendered := renderedScreenText(t, vx, 100, 24)
+			if !strings.Contains(rendered, "Projects / Nodes") {
+				t.Fatalf("expected %s to keep the tree visible, got:\n%s", tc.name, rendered)
+			}
+		})
 	}
-	if got := renderedCellGrapheme(t, vx, 0, 0); got != "x" {
-		t.Fatalf("expected cells outside overlay to remain unchanged, got %q", got)
+}
+
+func TestTUISyncSessionFocusBlursHiddenTerminalWhenDialogOpen(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	state.activeNodeID = "node-root"
+	state.focus = tuiFocusTerminal
+
+	terminal := newFakeTUITerminal()
+	sessions.sessions["node-root"] = &tuiSession{
+		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+		terminal: terminal,
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: sessions,
+		dialog: newTUIDialog(
+			"Create Project",
+			"Create",
+			nil,
+			[]tuiDialogField{newTUIInputField("slug", "Project Slug", "", true)},
+			nil,
+		),
+	}
+
+	app.syncSessionFocus()
+
+	if terminal.focusCalls != 0 {
+		t.Fatalf("expected hidden terminal not to be focused, got %d focus calls", terminal.focusCalls)
+	}
+	if terminal.blurCalls != 1 {
+		t.Fatalf("expected hidden terminal to be blurred once, got %d blur calls", terminal.blurCalls)
 	}
 }
 

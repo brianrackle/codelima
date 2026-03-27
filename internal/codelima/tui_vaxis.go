@@ -1494,8 +1494,9 @@ func (a *vaxisTUIApp) finishTerminalSelection(nodeID string, nodeSlug string, sn
 }
 
 func (a *vaxisTUIApp) syncSessionFocus() {
+	focus := a.effectiveLayoutFocus()
 	for nodeID, session := range a.sessions.sessions {
-		if nodeID == a.state.activeNodeID && a.state.focus == tuiFocusTerminal {
+		if nodeID == a.state.activeNodeID && focus == tuiFocusTerminal {
 			session.terminal.Focus()
 			continue
 		}
@@ -1587,7 +1588,7 @@ func (a *vaxisTUIApp) drawTerminalSelection(win vaxis.Window, snapshot string, s
 	}
 }
 
-func (a *vaxisTUIApp) drawOperationOverlay(win vaxis.Window, headerStyle, mutedStyle vaxis.Style) {
+func (a *vaxisTUIApp) drawOperationPane(win vaxis.Window, headerStyle, mutedStyle vaxis.Style) {
 	if a.operation == nil {
 		return
 	}
@@ -1607,6 +1608,59 @@ func (a *vaxisTUIApp) drawOperationOverlay(win vaxis.Window, headerStyle, mutedS
 	}
 	for index, line := range lines {
 		a.printLinkifiedLine(body, index+2, line, mutedStyle)
+	}
+}
+
+func (a *vaxisTUIApp) rightPaneOverrideActive() bool {
+	return a.menu != nil || a.dialog != nil || a.selector != nil || a.operation != nil
+}
+
+func (a *vaxisTUIApp) effectiveLayoutFocus() tuiFocus {
+	if a.rightPaneOverrideActive() {
+		return tuiFocusTree
+	}
+	return a.state.focus
+}
+
+func (a *vaxisTUIApp) drawRightPane(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle, selectionStyle vaxis.Style) {
+	switch {
+	case a.operation != nil:
+		a.drawOperationPane(win, headerStyle, mutedStyle)
+	case a.selector != nil:
+		a.selector.Draw(win, headerStyle, mutedStyle)
+	case a.dialog != nil:
+		a.dialog.Draw(win, headerStyle, mutedStyle, errorStyle)
+	case a.menu != nil:
+		a.menu.Draw(win, headerStyle, mutedStyle)
+	case entry.kind == tuiTreeEntryNode && a.sessions.HasSession(entry.node.ID):
+		if session, ok := a.sessions.Session(entry.node.ID); ok {
+			session.terminal.Draw(win)
+			if a.selection != nil && a.selection.nodeID == entry.node.ID {
+				a.drawTerminalSelection(win, session.terminal.String(), selectionStyle)
+			}
+		} else {
+			win.Println(0, vaxis.Segment{Text: fmt.Sprintf("Shell session is not running. Select the node again or press %s to reopen.", terminalViewToggleTextHint), Style: mutedStyle})
+		}
+	default:
+		a.drawDetails(win, entry, headerStyle, mutedStyle)
+	}
+}
+
+func (a *vaxisTUIApp) activePaneFooter(entry tuiTreeEntry, focus tuiFocus) string {
+	switch {
+	case a.operation != nil:
+		return "q quit   Ctrl+c quit"
+	case a.selector != nil:
+		if a.selector.Multi {
+			return "Up/Down move   Space toggle   Enter confirm   Ctrl+u clear   Esc cancel   Ctrl+c quit"
+		}
+		return "Up/Down move   Enter confirm   Esc cancel   Ctrl+c quit"
+	case a.dialog != nil:
+		return "Tab/Up/Down move   Enter submit/open   Right choose   Ctrl+s submit   Esc cancel   Ctrl+c quit"
+	case a.menu != nil:
+		return "Press a key to choose   Esc cancel   Ctrl+c quit"
+	default:
+		return renderFooter(focus, entry)
 	}
 }
 
@@ -1661,9 +1715,9 @@ func (a *vaxisTUIApp) draw() {
 
 	bodyTop := 1
 	bodyHeight := height - bodyTop - 1
-	layout := layoutTUIBody(width, a.state.focus)
+	layoutFocus := a.effectiveLayoutFocus()
+	layout := layoutTUIBody(width, layoutFocus)
 	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
-	termBody := drawTerminalPane(termOuter, mutedStyle)
 
 	if layout.treeVisible {
 		treeOuter := window.New(0, bodyTop, layout.treeWidth, bodyHeight)
@@ -1692,55 +1746,28 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	entry := a.state.selectedEntry()
-	termInnerWidth, termInnerHeight := termBody.Size()
-	termOriginCol, termOriginRow := termBody.Origin()
-	a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight}
 	if a.sessions != nil {
-		a.sessions.SetPreferredTerminalSize(termInnerWidth, termInnerHeight)
+		cols, rows := tuiEmbeddedTerminalSize(width, height, layoutFocus)
+		a.sessions.SetPreferredTerminalSize(cols, rows)
 	}
 
-	if entry.kind == tuiTreeEntryNode && a.sessions.HasSession(entry.node.ID) {
-		if session, ok := a.sessions.Session(entry.node.ID); ok {
-			session.terminal.Draw(termBody)
-			if a.selection != nil && a.selection.nodeID == entry.node.ID {
-				a.drawTerminalSelection(termBody, session.terminal.String(), selectionStyle)
-			}
-		} else {
-			termBody.Println(0, vaxis.Segment{Text: fmt.Sprintf("Shell session is not running. Select the node again or press %s to reopen.", terminalViewToggleTextHint), Style: mutedStyle})
-		}
+	if a.rightPaneOverrideActive() {
+		a.drawRightPane(termOuter, entry, headerStyle, mutedStyle, errorStyle, selectionStyle)
 	} else {
-		a.drawDetails(termBody, entry, headerStyle, mutedStyle)
+		termBody := drawTerminalPane(termOuter, mutedStyle)
+		termInnerWidth, termInnerHeight := termBody.Size()
+		termOriginCol, termOriginRow := termBody.Origin()
+		a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight}
+		a.drawRightPane(termBody, entry, headerStyle, mutedStyle, errorStyle, selectionStyle)
 	}
 
-	footer := renderFooter(a.state.focus, entry)
+	footer := a.activePaneFooter(entry, layoutFocus)
 	footerStyle := mutedStyle
 	if a.status != "" {
 		footer = a.status
 		footerStyle = errorStyle
 	}
 	window.Println(height-1, vaxis.Segment{Text: footer, Style: footerStyle})
-
-	if a.menu != nil {
-		a.drawOverlay(window, 56, 11, func(overlay vaxis.Window) {
-			a.menu.Draw(overlay, headerStyle, mutedStyle)
-		})
-	}
-	if a.dialog != nil {
-		dialogHeight := 8 + len(a.dialog.Description) + len(a.dialog.Fields)*3
-		a.drawOverlay(window, 72, dialogHeight, func(overlay vaxis.Window) {
-			a.dialog.Draw(overlay, headerStyle, mutedStyle, errorStyle)
-		})
-	}
-	if a.selector != nil {
-		a.drawOverlay(window, 72, a.selector.Height(), func(overlay vaxis.Window) {
-			a.selector.Draw(overlay, headerStyle, mutedStyle)
-		})
-	}
-	if a.operation != nil {
-		a.drawOverlay(window, 92, 14, func(overlay vaxis.Window) {
-			a.drawOperationOverlay(overlay, headerStyle, mutedStyle)
-		})
-	}
 
 	a.vx.Render()
 }
@@ -1845,25 +1872,6 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 	default:
 		win.Println(0, vaxis.Segment{Text: "Press [a] to create a project or select a project or node in the tree.", Style: mutedStyle})
 	}
-}
-
-func (a *vaxisTUIApp) drawOverlay(win vaxis.Window, width int, height int, draw func(vaxis.Window)) {
-	winWidth, winHeight := win.Size()
-	if width > winWidth-4 {
-		width = winWidth - 4
-	}
-	if height > winHeight-4 {
-		height = winHeight - 4
-	}
-	if width < 10 || height < 4 {
-		return
-	}
-
-	col := (winWidth - width) / 2
-	row := (winHeight - height) / 2
-	overlay := win.New(col, row, width, height)
-	overlay.Fill(vaxis.Cell{Character: vaxis.Character{Grapheme: " ", Width: 1}})
-	draw(overlay)
 }
 
 func drawTerminalPane(win vaxis.Window, style vaxis.Style) vaxis.Window {
