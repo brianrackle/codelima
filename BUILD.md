@@ -17,7 +17,7 @@ make verify
 What each target does:
 
 - `make init`
-  - installs Go, `golangci-lint`, Zig, and the patched `libghostty-vt`
+  - installs Go, `golangci-lint`, Zig, and a locally patched upstream `libghostty-vt` build
   - downloads Go modules
 - `make build`
   - builds `./bin/codelima`
@@ -181,8 +181,20 @@ Check:
 
 ### `make init` fails when relinking Ghostty
 
-The Ghostty installer maintains `.tooling/<os>-<arch>/ghostty-vt/current`.
-If relinking fails, rerun `make init`; the installer now removes the old symlink before recreating it.
+The Ghostty installer maintains both:
+
+- `.tooling/<os>-<arch>/ghostty-vt/current`
+- `.tooling/ghostty-vt/current`
+
+The first path is the real per-platform install root.
+The second path is a compatibility link used by the cgo bridge include path.
+
+If relinking fails, rerun `make init`; the installer removes and recreates both links.
+
+### `make init` stalls while building Ghostty
+
+The Ghostty installer now vendors Ghostty's `uucode` package into its temporary checkout before running Zig.
+That keeps the local `libghostty-vt` build from depending on a live Zig package fetch in the middle of `make init` or `make ghostty-vt`.
 
 ### Release publishes assets but does not update Homebrew
 

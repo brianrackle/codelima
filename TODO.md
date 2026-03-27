@@ -235,31 +235,30 @@ Disadvantages:
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
 
-### 10. Widen the runtime-loaded Ghostty bridge if the current symbol surface blocks newer input and render APIs
+### 10. Move embedded-terminal mouse encoding into Ghostty now that the widened bridge exposes the upstream mouse API
 
 Problem:
 
-- The embedded terminal now uses Ghostty's key encoder through the existing `dlopen` bridge, but Ghostling uses a broader Ghostty API surface for keyboard-mode state, mouse encoding, viewport scrolling, and richer render semantics.
-- The current bridge in `internal/codelima/tui_terminal_ghostty_cgo.go` still exposes only a reduced subset of the available Ghostty C API.
-- If newer Ghostty APIs remain unavailable because the runtime-loaded bridge does not surface them, future Ghostty-aligned improvements will stall behind bridge work instead of the TUI behavior itself.
+- The embedded terminal still hand-encodes mouse events in Go even though the packaged Ghostty bridge now exposes the upstream mouse encoder surface.
+- Ghostling lets Ghostty choose the active mouse protocol and reporting format from terminal state, while CodeLima still duplicates that protocol logic locally.
+- That duplication keeps mouse-mode behavior more fragile than the keyboard path, which already moved into Ghostty.
 
 Suggested solution:
 
-- Audit the currently packaged `libghostty-vt` exports against the Ghostling-style APIs we want next.
-- Add optional symbol loading for the needed Ghostty surfaces before considering a packaging-model change.
-- Only revisit direct linking if runtime loading itself, rather than the missing symbol bridge, is what blocks the next useful Ghostty integration step.
+- Add a Ghostty-backed mouse encoder wrapper alongside the existing key encoder wrapper.
+- Feed terminal mode state into Ghostty's mouse encoder instead of selecting SGR versus classic reporting locally.
+- Keep CodeLima-specific host behaviors, such as focus changes and non-terminal gestures, above that encoder boundary.
 
 Advantages:
 
-- Keeps the current runtime-library discovery and packaging model intact.
-- Makes future Ghostty-backed input and rendering improvements incremental instead of all-or-nothing.
-- Separates "missing bridge surface" from "runtime loading is the wrong architecture".
+- Removes another chunk of escape-sequence logic from Go.
+- Brings mouse handling closer to the same ownership boundary Ghostling uses.
+- Reduces the risk of local mouse protocol drift when terminal modes change.
 
 Disadvantages:
 
-- Increases the size and maintenance burden of the cgo bridge layer.
-- Some newer Ghostty APIs may still need packaging or header updates even after the symbol bridge widens.
-- Optional-symbol compatibility paths add more branches to test.
+- Adds another Ghostty-backed input path that needs coverage in automated tests and manual QA.
+- Requires careful separation between terminal mouse reporting and CodeLima's host-level mouse UX.
 
 ### 11. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
 

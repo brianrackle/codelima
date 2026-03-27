@@ -1,32 +1,106 @@
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 0a749be..4e8c9aa 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -212,6 +212,8 @@ comptime {
+         @export(&c.terminal_mode_get, .{ .name = "ghostty_terminal_mode_get" });
+         @export(&c.terminal_mode_set, .{ .name = "ghostty_terminal_mode_set" });
+         @export(&c.terminal_get, .{ .name = "ghostty_terminal_get" });
++        @export(&c.terminal_get_hyperlink_uri, .{ .name = "ghostty_terminal_get_hyperlink_uri" });
++        @export(&c.terminal_get_scrollback_hyperlink_uri, .{ .name = "ghostty_terminal_get_scrollback_hyperlink_uri" });
+         @export(&c.terminal_grid_ref, .{ .name = "ghostty_terminal_grid_ref" });
+         @export(&c.grid_ref_cell, .{ .name = "ghostty_grid_ref_cell" });
+         @export(&c.grid_ref_row, .{ .name = "ghostty_grid_ref_row" });
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index d854ac6..31cd2c3 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -138,6 +138,8 @@ pub const terminal_scroll_viewport = terminal.scroll_viewport;
+ pub const terminal_mode_get = terminal.mode_get;
+ pub const terminal_mode_set = terminal.mode_set;
+ pub const terminal_get = terminal.get;
++pub const terminal_get_hyperlink_uri = terminal.get_hyperlink_uri;
++pub const terminal_get_scrollback_hyperlink_uri = terminal.get_scrollback_hyperlink_uri;
+ pub const terminal_grid_ref = terminal.grid_ref;
+
+ const grid_ref = @import("grid_ref.zig");
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+index 113e00b..969b148 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -439,7 +439,7 @@ pub fn newWithConfig(
-     wrapper.handler = ResponseHandler.init(alloc, &wrapper.terminal, &wrapper.response_buffer);
- 
-     // Initialize stream with the handler
--    wrapper.stream = ResponseStream.init(wrapper.handler);
-+    wrapper.stream = ResponseStream.initAlloc(alloc, wrapper.handler);
- 
-     wrapper.* = .{
-         .alloc = alloc,
-@@ -162,6 +162,12 @@ const ResponseHandler = struct {
-                     else => {},
-                 }
-             },
-+            .query_modify_key_format => {
-+                const mode: u8 = if (self.terminal.flags.modify_other_keys_2) 2 else 0;
-+                var buf: [16]u8 = undefined;
-+                const resp = std.fmt.bufPrint(&buf, "\x1B[>4;{}m", .{mode}) catch return;
-+                try self.response_buffer.appendSlice(self.alloc, resp);
-+            },
-             .active_status_display => self.terminal.status_display = value,
-             .decaln => try self.terminal.decaln(),
-             .full_reset => self.terminal.fullReset(),
+@@ -575,6 +575,67 @@ pub fn grid_ref(
+     return .success;
+ }
+
++pub fn get_hyperlink_uri(
++    terminal_: Terminal,
++    row: c_int,
++    col: c_int,
++    out: [*]u8,
++    buf_size: usize,
++) callconv(.c) c_int {
++    const t: *ZigTerminal = (terminal_ orelse return -1).terminal;
++    if (row < 0 or col < 0) return -1;
++
++    const pin = t.screens.active.pages.pin(.{ .active = .{ .y = @intCast(row) } }) orelse return -1;
++    const cells = pin.cells(.all);
++    const page = pin.node.data;
++    const x: usize = @intCast(col);
++    if (x >= cells.len) return -1;
++
++    const cell = &cells[x];
++    if (!cell.hyperlink) return 0;
++
++    const hyperlink_id = page.lookupHyperlink(cell) orelse return 0;
++    const hyperlink = page.hyperlink_set.get(page.memory, hyperlink_id);
++    const uri = hyperlink.uri.slice(page.memory);
++    if (uri.len == 0) return 0;
++    if (buf_size < uri.len) return -1;
++
++    @memcpy(out[0..uri.len], uri);
++    return @intCast(uri.len);
++}
++
++pub fn get_scrollback_hyperlink_uri(
++    terminal_: Terminal,
++    offset: c_int,
++    col: c_int,
++    out: [*]u8,
++    buf_size: usize,
++) callconv(.c) c_int {
++    const t: *ZigTerminal = (terminal_ orelse return -1).terminal;
++    if (offset < 0 or col < 0) return -1;
++
++    const scrollback_len = t.screens.active.pages.total_rows - t.rows;
++    if (@as(usize, @intCast(offset)) >= scrollback_len) return -1;
++
++    const pin = t.screens.active.pages.pin(.{ .history = .{ .y = @intCast(offset) } }) orelse return -1;
++    const cells = pin.cells(.all);
++    const page = pin.node.data;
++    const x: usize = @intCast(col);
++    if (x >= cells.len) return -1;
++
++    const cell = &cells[x];
++    if (!cell.hyperlink) return 0;
++
++    const hyperlink_id = page.lookupHyperlink(cell) orelse return 0;
++    const hyperlink = page.hyperlink_set.get(page.memory, hyperlink_id);
++    const uri = hyperlink.uri.slice(page.memory);
++    if (uri.len == 0) return 0;
++    if (buf_size < uri.len) return -1;
++
++    @memcpy(out[0..uri.len], uri);
++    return @intCast(uri.len);
++}
++
+ pub fn free(terminal_: Terminal) callconv(.c) void {
+     const wrapper = terminal_ orelse return;
+     const t = wrapper.terminal;
 diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
+index 04410e9..10460a6 100644
 --- a/src/terminal/stream.zig
 +++ b/src/terminal/stream.zig
-@@ -89,6 +89,7 @@ pub const Action = union(Key) {
+@@ -90,6 +90,7 @@ pub const Action = union(Key) {
      save_cursor,
      restore_cursor,
      modify_key_format: ansi.ModifyKeyFormat,
@@ -34,7 +108,7 @@ diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
      mouse_shift_capture: bool,
      protected_mode_off,
      protected_mode_iso,
-@@ -190,6 +191,7 @@ pub const Action = union(Key) {
+@@ -187,6 +188,7 @@ pub const Action = union(Key) {
              "save_cursor",
              "restore_cursor",
              "modify_key_format",
@@ -42,13 +116,13 @@ diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
              "mouse_shift_capture",
              "protected_mode_off",
              "protected_mode_iso",
-@@ -1504,6 +1506,14 @@ pub fn Stream(comptime Handler: type) type {
- 
-                                 try self.handler.vt(.modify_key_format, format);
+@@ -1471,6 +1473,14 @@ pub fn Stream(comptime H: type) type {
+
+                                 self.handler.vt(.modify_key_format, format);
                              },
 +                            '?' => blk: {
 +                                if (input.params.len == 1 and input.params[0] == 4) {
-+                                    try self.handler.vt(.query_modify_key_format, {});
++                                    self.handler.vt(.query_modify_key_format, {});
 +                                    break :blk;
 +                                }
 +
@@ -57,7 +131,7 @@ diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
  
                              else => log.warn(
                                  "unknown CSI m with intermediate: {}",
-@@ -1825,8 +1827,10 @@ pub fn Stream(comptime Handler: type) type {
+@@ -1792,8 +1802,10 @@ pub fn Stream(comptime H: type) type {
                                  ),
                                  inline 22, 23 => |number| if ((input.params.len == 2 or
                                      input.params.len == 3) and
@@ -69,10 +143,37 @@ diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
                                          input.params[1] == 2))
                                  {
                                      // push/pop title
+diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
+index 8e0f911..d04d490 100644
+--- a/src/terminal/stream_terminal.zig
++++ b/src/terminal/stream_terminal.zig
+@@ -220,6 +220,7 @@ pub const Handler = struct {
+                     else => {},
+                 }
+             },
++            .query_modify_key_format => self.queryModifyKeyFormat(),
+             .active_status_display => self.terminal.status_display = value,
+             .decaln => try self.terminal.decaln(),
+             .full_reset => self.terminal.fullReset(),
+@@ -441,6 +442,12 @@ pub const Handler = struct {
+         self.writePty(buf[0..len :0]);
+     }
+-
++    fn queryModifyKeyFormat(self: *Handler) void {
++        var buf: [32]u8 = undefined;
++        const mode: u8 = if (self.terminal.flags.modify_other_keys_2) 2 else 0;
++        const resp = std.fmt.bufPrintZ(&buf, "\x1b[>4;{}m", .{mode}) catch return;
++        self.writePty(resp);
++    }
++
+     fn queryKittyKeyboard(self: *Handler) void {
+         // Max response is "\x1b[?31u\x00" (7 bytes): the flags are a u5 (max 31).
+         var buf: [32]u8 = undefined;
 diff --git a/src/termio/stream_handler.zig b/src/termio/stream_handler.zig
+index fb3a6b3..a9388b3 100644
 --- a/src/termio/stream_handler.zig
 +++ b/src/termio/stream_handler.zig
-@@ -268,6 +268,7 @@ pub const StreamHandler = struct {
+@@ -290,6 +290,7 @@ pub const StreamHandler = struct {
              .save_cursor => try self.saveCursor(),
              .restore_cursor => try self.restoreCursor(),
              .modify_key_format => try self.setModifyKeyFormat(value),
@@ -80,7 +181,7 @@ diff --git a/src/termio/stream_handler.zig b/src/termio/stream_handler.zig
              .protected_mode_off => self.terminal.setProtectedMode(.off),
              .protected_mode_iso => self.terminal.setProtectedMode(.iso),
              .protected_mode_dec => self.terminal.setProtectedMode(.dec),
-@@ -522,6 +523,19 @@ pub const StreamHandler = struct {
+@@ -609,6 +610,19 @@ pub const StreamHandler = struct {
          }
      }
  
@@ -98,16 +199,5 @@ diff --git a/src/termio/stream_handler.zig b/src/termio/stream_handler.zig
 +    }
 +
      fn requestMode(self: *StreamHandler, mode: terminal.Mode) !void {
-         const tag: terminal.modes.ModeTag = @bitCast(@intFromEnum(mode));
-         const code: u8 = if (self.terminal.modes.get(mode)) 1 else 2;
-diff --git a/src/terminal/stream_readonly.zig b/src/terminal/stream_readonly.zig
---- a/src/terminal/stream_readonly.zig
-+++ b/src/terminal/stream_readonly.zig
-@@ -189,6 +189,7 @@ pub const Handler = struct {
-             .device_attributes,
-             .device_status,
-             .kitty_keyboard_query,
-+            .query_modify_key_format,
-             .window_title,
-             .report_pwd,
-             .show_desktop_notification,
+         self.sendModeReport(self.terminal.modes.getReport(.fromMode(mode)));
+     }

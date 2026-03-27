@@ -5,344 +5,8 @@ package codelima
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../.tooling/ghostty-vt/current/include
 #cgo linux LDFLAGS: -ldl
-#include <stdbool.h>
-#include <stdint.h>
-#include <stddef.h>
-#include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#include <dlfcn.h>
-#include <ghostty/vt/key/encoder.h>
-#include <ghostty/vt/key/event.h>
-
-typedef void* GhosttyTerminal;
-
-typedef struct {
-	uint32_t codepoint;
-	uint8_t fg_r, fg_g, fg_b;
-	uint8_t bg_r, bg_g, bg_b;
-	uint8_t flags;
-	uint8_t width;
-	uint16_t hyperlink_id;
-	uint8_t grapheme_len;
-	uint8_t _pad;
-} GhosttyCell;
-
-typedef enum {
-	GHOSTTY_DIRTY_NONE = 0,
-	GHOSTTY_DIRTY_PARTIAL = 1,
-	GHOSTTY_DIRTY_FULL = 2
-} GhosttyDirty;
-
-#define GHOSTTY_CELL_BOLD          (1 << 0)
-#define GHOSTTY_CELL_ITALIC        (1 << 1)
-#define GHOSTTY_CELL_UNDERLINE     (1 << 2)
-#define GHOSTTY_CELL_STRIKETHROUGH (1 << 3)
-#define GHOSTTY_CELL_INVERSE       (1 << 4)
-#define GHOSTTY_CELL_INVISIBLE     (1 << 5)
-#define GHOSTTY_CELL_BLINK         (1 << 6)
-#define GHOSTTY_CELL_FAINT         (1 << 7)
-
-typedef struct {
-	void* handle;
-	GhosttyTerminal (*terminal_new)(int cols, int rows);
-	void (*terminal_free)(GhosttyTerminal term);
-	void (*terminal_resize)(GhosttyTerminal term, int cols, int rows);
-	void (*terminal_write)(GhosttyTerminal term, const uint8_t* data, size_t len);
-	GhosttyDirty (*render_state_update)(GhosttyTerminal term);
-	uint32_t (*render_state_get_bg_color)(GhosttyTerminal term);
-	bool (*render_state_get_cursor_visible)(GhosttyTerminal term);
-	int (*render_state_get_cursor_x)(GhosttyTerminal term);
-	int (*render_state_get_cursor_y)(GhosttyTerminal term);
-	void (*render_state_mark_clean)(GhosttyTerminal term);
-	int (*render_state_get_viewport)(GhosttyTerminal term, GhosttyCell* out_buffer, size_t buffer_size);
-	int (*render_state_get_grapheme)(GhosttyTerminal term, int row, int col, uint32_t* out_buffer, size_t buffer_size);
-	bool (*terminal_is_alternate_screen)(GhosttyTerminal term);
-	bool (*terminal_has_mouse_tracking)(GhosttyTerminal term);
-	bool (*terminal_get_mode)(GhosttyTerminal term, int mode, bool is_ansi);
-	int (*terminal_get_scrollback_length)(GhosttyTerminal term);
-	int (*terminal_get_scrollback_line)(GhosttyTerminal term, int offset, GhosttyCell* out_buffer, size_t buffer_size);
-	int (*terminal_get_scrollback_grapheme)(GhosttyTerminal term, int offset, int col, uint32_t* out_buffer, size_t buffer_size);
-	bool (*terminal_is_row_wrapped)(GhosttyTerminal term, int row);
-	int (*terminal_get_hyperlink_uri)(GhosttyTerminal term, int row, int col, uint8_t* out_buffer, size_t buffer_size);
-	int (*terminal_get_scrollback_hyperlink_uri)(GhosttyTerminal term, int offset, int col, uint8_t* out_buffer, size_t buffer_size);
-	bool (*terminal_has_response)(GhosttyTerminal term);
-	int (*terminal_read_response)(GhosttyTerminal term, uint8_t* out_buffer, size_t buffer_size);
-	GhosttyResult (*key_encoder_new)(const GhosttyAllocator* allocator, GhosttyKeyEncoder* encoder);
-	void (*key_encoder_free)(GhosttyKeyEncoder encoder);
-	void (*key_encoder_setopt)(GhosttyKeyEncoder encoder, GhosttyKeyEncoderOption option, const void* value);
-	GhosttyResult (*key_encoder_encode)(GhosttyKeyEncoder encoder, GhosttyKeyEvent event, char* out_buffer, size_t out_buffer_size, size_t* out_len);
-	GhosttyResult (*key_event_new)(const GhosttyAllocator* allocator, GhosttyKeyEvent* event);
-	void (*key_event_free)(GhosttyKeyEvent event);
-	void (*key_event_set_action)(GhosttyKeyEvent event, GhosttyKeyAction action);
-	void (*key_event_set_key)(GhosttyKeyEvent event, GhosttyKey key);
-	void (*key_event_set_mods)(GhosttyKeyEvent event, GhosttyMods mods);
-	void (*key_event_set_consumed_mods)(GhosttyKeyEvent event, GhosttyMods consumed_mods);
-	void (*key_event_set_utf8)(GhosttyKeyEvent event, const char* utf8, size_t len);
-	void (*key_event_set_unshifted_codepoint)(GhosttyKeyEvent event, uint32_t codepoint);
-} ghostty_api;
-
-static ghostty_api ghostty;
-static char ghostty_last_error[512];
-
-static int ghostty_bridge_set_error(const char* message) {
-	if (message == NULL) {
-		message = "unknown ghostty error";
-	}
-	snprintf(ghostty_last_error, sizeof(ghostty_last_error), "%s", message);
-	return 0;
-}
-
-static int ghostty_bridge_set_symbol_error(const char* symbol) {
-	const char* err = dlerror();
-	if (err == NULL) {
-		err = "unknown symbol lookup error";
-	}
-	snprintf(ghostty_last_error, sizeof(ghostty_last_error), "load ghostty symbol %s: %s", symbol, err);
-	return 0;
-}
-
-static int ghostty_bridge_load(const char* path) {
-	if (ghostty.handle != NULL) {
-		return 1;
-	}
-
-	void* handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-	if (handle == NULL) {
-		return ghostty_bridge_set_error(dlerror());
-	}
-
-	memset(&ghostty, 0, sizeof(ghostty));
-	ghostty.handle = handle;
-
-	#define LOAD_GHOSTTY_SYMBOL(field, symbol, type) \
-		do { \
-			dlerror(); \
-			ghostty.field = (type)dlsym(handle, symbol); \
-			if (ghostty.field == NULL) { \
-				dlclose(handle); \
-				memset(&ghostty, 0, sizeof(ghostty)); \
-				return ghostty_bridge_set_symbol_error(symbol); \
-			} \
-		} while (0)
-
-	#define LOAD_GHOSTTY_OPTIONAL_SYMBOL(field, symbol, type) \
-		do { \
-			dlerror(); \
-			ghostty.field = (type)dlsym(handle, symbol); \
-			dlerror(); \
-		} while (0)
-
-	LOAD_GHOSTTY_SYMBOL(terminal_new, "ghostty_terminal_new", GhosttyTerminal (*)(int, int));
-	LOAD_GHOSTTY_SYMBOL(terminal_free, "ghostty_terminal_free", void (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(terminal_resize, "ghostty_terminal_resize", void (*)(GhosttyTerminal, int, int));
-	LOAD_GHOSTTY_SYMBOL(terminal_write, "ghostty_terminal_write", void (*)(GhosttyTerminal, const uint8_t*, size_t));
-	LOAD_GHOSTTY_SYMBOL(render_state_update, "ghostty_render_state_update", GhosttyDirty (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(render_state_get_bg_color, "ghostty_render_state_get_bg_color", uint32_t (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(render_state_get_cursor_visible, "ghostty_render_state_get_cursor_visible", bool (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(render_state_get_cursor_x, "ghostty_render_state_get_cursor_x", int (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(render_state_get_cursor_y, "ghostty_render_state_get_cursor_y", int (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(render_state_mark_clean, "ghostty_render_state_mark_clean", void (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(render_state_get_viewport, "ghostty_render_state_get_viewport", int (*)(GhosttyTerminal, GhosttyCell*, size_t));
-	LOAD_GHOSTTY_SYMBOL(render_state_get_grapheme, "ghostty_render_state_get_grapheme", int (*)(GhosttyTerminal, int, int, uint32_t*, size_t));
-	LOAD_GHOSTTY_SYMBOL(terminal_is_alternate_screen, "ghostty_terminal_is_alternate_screen", bool (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(terminal_has_mouse_tracking, "ghostty_terminal_has_mouse_tracking", bool (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(terminal_get_mode, "ghostty_terminal_get_mode", bool (*)(GhosttyTerminal, int, bool));
-	LOAD_GHOSTTY_SYMBOL(terminal_get_scrollback_length, "ghostty_terminal_get_scrollback_length", int (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(terminal_get_scrollback_line, "ghostty_terminal_get_scrollback_line", int (*)(GhosttyTerminal, int, GhosttyCell*, size_t));
-	LOAD_GHOSTTY_SYMBOL(terminal_get_scrollback_grapheme, "ghostty_terminal_get_scrollback_grapheme", int (*)(GhosttyTerminal, int, int, uint32_t*, size_t));
-	LOAD_GHOSTTY_SYMBOL(terminal_is_row_wrapped, "ghostty_terminal_is_row_wrapped", bool (*)(GhosttyTerminal, int));
-	LOAD_GHOSTTY_SYMBOL(terminal_get_hyperlink_uri, "ghostty_terminal_get_hyperlink_uri", int (*)(GhosttyTerminal, int, int, uint8_t*, size_t));
-	LOAD_GHOSTTY_SYMBOL(terminal_get_scrollback_hyperlink_uri, "ghostty_terminal_get_scrollback_hyperlink_uri", int (*)(GhosttyTerminal, int, int, uint8_t*, size_t));
-	LOAD_GHOSTTY_SYMBOL(terminal_has_response, "ghostty_terminal_has_response", bool (*)(GhosttyTerminal));
-	LOAD_GHOSTTY_SYMBOL(terminal_read_response, "ghostty_terminal_read_response", int (*)(GhosttyTerminal, uint8_t*, size_t));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_new, "ghostty_key_encoder_new", GhosttyResult (*)(const GhosttyAllocator*, GhosttyKeyEncoder*));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_free, "ghostty_key_encoder_free", void (*)(GhosttyKeyEncoder));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_setopt, "ghostty_key_encoder_setopt", void (*)(GhosttyKeyEncoder, GhosttyKeyEncoderOption, const void*));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_encode, "ghostty_key_encoder_encode", GhosttyResult (*)(GhosttyKeyEncoder, GhosttyKeyEvent, char*, size_t, size_t*));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_new, "ghostty_key_event_new", GhosttyResult (*)(const GhosttyAllocator*, GhosttyKeyEvent*));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_free, "ghostty_key_event_free", void (*)(GhosttyKeyEvent));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_set_action, "ghostty_key_event_set_action", void (*)(GhosttyKeyEvent, GhosttyKeyAction));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_set_key, "ghostty_key_event_set_key", void (*)(GhosttyKeyEvent, GhosttyKey));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_set_mods, "ghostty_key_event_set_mods", void (*)(GhosttyKeyEvent, GhosttyMods));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_set_consumed_mods, "ghostty_key_event_set_consumed_mods", void (*)(GhosttyKeyEvent, GhosttyMods));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_set_utf8, "ghostty_key_event_set_utf8", void (*)(GhosttyKeyEvent, const char*, size_t));
-	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_event_set_unshifted_codepoint, "ghostty_key_event_set_unshifted_codepoint", void (*)(GhosttyKeyEvent, uint32_t));
-
-	#undef LOAD_GHOSTTY_OPTIONAL_SYMBOL
-	#undef LOAD_GHOSTTY_SYMBOL
-	ghostty_last_error[0] = '\0';
-	return 1;
-}
-
-static const char* ghostty_bridge_last_error(void) {
-	return ghostty_last_error;
-}
-
-static GhosttyTerminal ghostty_bridge_terminal_new(int cols, int rows) {
-	return ghostty.terminal_new(cols, rows);
-}
-
-static void ghostty_bridge_terminal_free(GhosttyTerminal term) {
-	ghostty.terminal_free(term);
-}
-
-static void ghostty_bridge_terminal_resize(GhosttyTerminal term, int cols, int rows) {
-	ghostty.terminal_resize(term, cols, rows);
-}
-
-static void ghostty_bridge_terminal_write(GhosttyTerminal term, const uint8_t* data, size_t len) {
-	ghostty.terminal_write(term, data, len);
-}
-
-static GhosttyDirty ghostty_bridge_render_state_update(GhosttyTerminal term) {
-	return ghostty.render_state_update(term);
-}
-
-static uint32_t ghostty_bridge_render_state_get_bg_color(GhosttyTerminal term) {
-	return ghostty.render_state_get_bg_color(term);
-}
-
-static bool ghostty_bridge_render_state_get_cursor_visible(GhosttyTerminal term) {
-	return ghostty.render_state_get_cursor_visible(term);
-}
-
-static int ghostty_bridge_render_state_get_cursor_x(GhosttyTerminal term) {
-	return ghostty.render_state_get_cursor_x(term);
-}
-
-static int ghostty_bridge_render_state_get_cursor_y(GhosttyTerminal term) {
-	return ghostty.render_state_get_cursor_y(term);
-}
-
-static void ghostty_bridge_render_state_mark_clean(GhosttyTerminal term) {
-	ghostty.render_state_mark_clean(term);
-}
-
-static int ghostty_bridge_render_state_get_viewport(GhosttyTerminal term, GhosttyCell* out_buffer, size_t buffer_size) {
-	return ghostty.render_state_get_viewport(term, out_buffer, buffer_size);
-}
-
-static int ghostty_bridge_render_state_get_grapheme(GhosttyTerminal term, int row, int col, uint32_t* out_buffer, size_t buffer_size) {
-	return ghostty.render_state_get_grapheme(term, row, col, out_buffer, buffer_size);
-}
-
-static bool ghostty_bridge_terminal_is_alternate_screen(GhosttyTerminal term) {
-	return ghostty.terminal_is_alternate_screen(term);
-}
-
-static bool ghostty_bridge_terminal_has_mouse_tracking(GhosttyTerminal term) {
-	return ghostty.terminal_has_mouse_tracking(term);
-}
-
-static bool ghostty_bridge_terminal_get_mode(GhosttyTerminal term, int mode, bool is_ansi) {
-	return ghostty.terminal_get_mode(term, mode, is_ansi);
-}
-
-static int ghostty_bridge_terminal_get_scrollback_length(GhosttyTerminal term) {
-	return ghostty.terminal_get_scrollback_length(term);
-}
-
-static int ghostty_bridge_terminal_get_scrollback_line(GhosttyTerminal term, int offset, GhosttyCell* out_buffer, size_t buffer_size) {
-	return ghostty.terminal_get_scrollback_line(term, offset, out_buffer, buffer_size);
-}
-
-static int ghostty_bridge_terminal_get_scrollback_grapheme(GhosttyTerminal term, int offset, int col, uint32_t* out_buffer, size_t buffer_size) {
-	return ghostty.terminal_get_scrollback_grapheme(term, offset, col, out_buffer, buffer_size);
-}
-
-static bool ghostty_bridge_terminal_is_row_wrapped(GhosttyTerminal term, int row) {
-	return ghostty.terminal_is_row_wrapped(term, row);
-}
-
-static int ghostty_bridge_terminal_get_hyperlink_uri(GhosttyTerminal term, int row, int col, uint8_t* out_buffer, size_t buffer_size) {
-	return ghostty.terminal_get_hyperlink_uri(term, row, col, out_buffer, buffer_size);
-}
-
-static int ghostty_bridge_terminal_get_scrollback_hyperlink_uri(GhosttyTerminal term, int offset, int col, uint8_t* out_buffer, size_t buffer_size) {
-	return ghostty.terminal_get_scrollback_hyperlink_uri(term, offset, col, out_buffer, buffer_size);
-}
-
-static bool ghostty_bridge_terminal_has_response(GhosttyTerminal term) {
-	return ghostty.terminal_has_response(term);
-}
-
-static int ghostty_bridge_terminal_read_response(GhosttyTerminal term, uint8_t* out_buffer, size_t buffer_size) {
-	return ghostty.terminal_read_response(term, out_buffer, buffer_size);
-}
-
-static bool ghostty_bridge_has_key_encoder_api(void) {
-	return ghostty.key_encoder_new != NULL &&
-		ghostty.key_encoder_free != NULL &&
-		ghostty.key_encoder_setopt != NULL &&
-		ghostty.key_encoder_encode != NULL &&
-		ghostty.key_event_new != NULL &&
-		ghostty.key_event_free != NULL &&
-		ghostty.key_event_set_action != NULL &&
-		ghostty.key_event_set_key != NULL &&
-		ghostty.key_event_set_mods != NULL &&
-		ghostty.key_event_set_consumed_mods != NULL &&
-		ghostty.key_event_set_utf8 != NULL &&
-		ghostty.key_event_set_unshifted_codepoint != NULL;
-}
-
-static GhosttyResult ghostty_bridge_key_encoder_new(GhosttyKeyEncoder* encoder) {
-	if (!ghostty_bridge_has_key_encoder_api()) {
-		return GHOSTTY_INVALID_VALUE;
-	}
-	return ghostty.key_encoder_new(NULL, encoder);
-}
-
-static void ghostty_bridge_key_encoder_free(GhosttyKeyEncoder encoder) {
-	if (ghostty.key_encoder_free != NULL) {
-		ghostty.key_encoder_free(encoder);
-	}
-}
-
-static void ghostty_bridge_key_encoder_setopt_bool(GhosttyKeyEncoder encoder, GhosttyKeyEncoderOption option, bool value) {
-	if (ghostty.key_encoder_setopt == NULL) {
-		return;
-	}
-	ghostty.key_encoder_setopt(encoder, option, &value);
-}
-
-static GhosttyResult ghostty_bridge_key_encoder_encode_event(
-	GhosttyKeyEncoder encoder,
-	GhosttyKeyAction action,
-	GhosttyKey key,
-	GhosttyMods mods,
-	const char* utf8,
-	size_t utf8_len,
-	uint32_t unshifted_codepoint,
-	char* out_buffer,
-	size_t out_buffer_size,
-	size_t* out_len
-) {
-	if (!ghostty_bridge_has_key_encoder_api()) {
-		return GHOSTTY_INVALID_VALUE;
-	}
-
-	GhosttyKeyEvent event = NULL;
-	GhosttyResult result = ghostty.key_event_new(NULL, &event);
-	if (result != GHOSTTY_SUCCESS || event == NULL) {
-		return result;
-	}
-
-	ghostty.key_event_set_action(event, action);
-	ghostty.key_event_set_key(event, key);
-	ghostty.key_event_set_mods(event, mods);
-	ghostty.key_event_set_consumed_mods(event, 0);
-	if (utf8 != NULL && utf8_len > 0) {
-		ghostty.key_event_set_utf8(event, utf8, utf8_len);
-	}
-	if (unshifted_codepoint != 0) {
-		ghostty.key_event_set_unshifted_codepoint(event, unshifted_codepoint);
-	}
-
-	result = ghostty.key_encoder_encode(encoder, event, out_buffer, out_buffer_size, out_len);
-	ghostty.key_event_free(event);
-	return result;
-}
+#include "ghostty_bridge_compat.h"
 */
 import "C"
 
@@ -437,7 +101,7 @@ func newGhosttyTUITerminal(nodeID string, postEvent func(vaxis.Event)) (tuiTermi
 		return nil, err
 	}
 
-	term := withGhosttyStderrSuppressed(func() C.GhosttyTerminal {
+	term := withGhosttyStderrSuppressed(func() C.GhosttyBridgeTerminal {
 		return C.ghostty_bridge_terminal_new(80, 24)
 	})
 	if term == nil {
@@ -531,7 +195,7 @@ func ghosttyVTCandidates() []string {
 type ghosttyTUITerminal struct {
 	nodeID     string
 	postEvent  func(vaxis.Event)
-	term       C.GhosttyTerminal
+	term       C.GhosttyBridgeTerminal
 	keyEncoder *ghosttyKeyEncoder
 
 	mu                   sync.Mutex
@@ -1337,11 +1001,11 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 		C.ghostty_bridge_render_state_update(t.term)
 		t.defaultBackgroundRGB = uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
 
-		viewport := make([]C.GhosttyCell, width*height)
+		viewport := make([]C.GhosttyResolvedCell, width*height)
 		if len(viewport) > 0 {
 			count := int(C.ghostty_bridge_render_state_get_viewport(
 				t.term,
-				(*C.GhosttyCell)(unsafe.Pointer(&viewport[0])),
+				(*C.GhosttyResolvedCell)(unsafe.Pointer(&viewport[0])),
 				C.size_t(len(viewport)),
 			))
 			if count < 0 {
@@ -1363,18 +1027,18 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 			start = 0
 		}
 
-		scrollbackRowBuffer := make([]C.GhosttyCell, width)
+		scrollbackRowBuffer := make([]C.GhosttyResolvedCell, width)
 		lineTexts := make([]string, 0, height)
 		for visibleRow := 0; visibleRow < height; visibleRow++ {
 			virtualRow := start + visibleRow
 			rowSource := ghosttyRowSource{}
-			var cells []C.GhosttyCell
+			var cells []C.GhosttyResolvedCell
 			if virtualRow < scrollbackLength {
 				rowSource = ghosttyRowSource{scrollback: true, index: virtualRow}
 				count := int(C.ghostty_bridge_terminal_get_scrollback_line(
 					t.term,
 					C.int(virtualRow),
-					(*C.GhosttyCell)(unsafe.Pointer(&scrollbackRowBuffer[0])),
+					(*C.GhosttyResolvedCell)(unsafe.Pointer(&scrollbackRowBuffer[0])),
 					C.size_t(len(scrollbackRowBuffer)),
 				))
 				if count < 0 {
@@ -1417,7 +1081,7 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 	}
 }
 
-func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSource ghosttyRowSource, cells []C.GhosttyCell) string {
+func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSource ghosttyRowSource, cells []C.GhosttyResolvedCell) string {
 	var line strings.Builder
 	for col := 0; col < t.cols; col++ {
 		cell := cells[col]
@@ -1465,7 +1129,7 @@ func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSourc
 	return line.String()
 }
 
-func ghosttyCellStyle(cell C.GhosttyCell, defaultBackgroundRGB uint32) vaxis.Style {
+func ghosttyCellStyle(cell C.GhosttyResolvedCell, defaultBackgroundRGB uint32) vaxis.Style {
 	style := ghosttyStyleForColors(
 		ghosttyRGB(uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)),
 		ghosttyRGB(uint8(cell.bg_r), uint8(cell.bg_g), uint8(cell.bg_b)),
@@ -1512,7 +1176,7 @@ func ghosttyRGB(r, g, b uint8) uint32 {
 	return uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 }
 
-func (t *ghosttyTUITerminal) graphemeLocked(rowSource ghosttyRowSource, col int, cell C.GhosttyCell) string {
+func (t *ghosttyTUITerminal) graphemeLocked(rowSource ghosttyRowSource, col int, cell C.GhosttyResolvedCell) string {
 	if cell.grapheme_len == 0 {
 		if cell.codepoint == 0 {
 			return " "

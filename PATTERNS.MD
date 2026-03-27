@@ -15,6 +15,10 @@ Normal node and tree reads skip those directories so older failed writes do not 
 Lima interactions are isolated behind `LimaClient`.
 Tests use a fake implementation to assert delegation behavior without creating real VMs, while the production path uses `limactl`.
 
+## Native Library Compatibility Bridge
+
+When CodeLima runtime-loads a native library whose upstream C API changes faster than the Go call sites should, keep the adaptation in dedicated compatibility files instead of inline cgo blocks. The compatibility layer owns `dlopen` symbol resolution, capability probing, and any mapping from newer upstream types or callbacks to the narrower app-facing surface, so later rebases stay localized.
+
 ## Command-Template-First Lima Overrides
 
 The authoritative default Lima command templates live in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`, including `bootstrap` for first-start guest bootstrap work and `workspace_seed_prepare` for the copy-mode guest directory preparation step.

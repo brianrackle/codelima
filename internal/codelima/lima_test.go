@@ -198,3 +198,37 @@ func TestExecLimaClientStartRunsMultipleConfiguredCommands(t *testing.T) {
 		t.Fatalf("expected both commands to run in order, got %q", got)
 	}
 }
+
+func TestExecLimaClientShellDoesNotDuplicateOutputWhenStreamsReuseClientWriter(t *testing.T) {
+	t.Parallel()
+
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "limactl")
+	script := "#!/usr/bin/env sh\n" +
+		"printf 'workspace-path\\n'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake limactl) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	client := &ExecLimaClient{
+		Binary: scriptPath,
+		Stdout: &stdout,
+	}
+
+	if err := client.Shell(
+		context.Background(),
+		Project{},
+		Node{LimaInstanceName: "demo-node"},
+		[]string{"pwd"},
+		"/workspace",
+		false,
+		ShellStreams{Stdout: &stdout},
+	); err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	if got := strings.TrimSpace(stdout.String()); got != "workspace-path" {
+		t.Fatalf("expected one shell output line, got %q", got)
+	}
+}

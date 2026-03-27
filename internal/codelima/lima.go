@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -491,6 +492,16 @@ func multiWriter(writers ...io.Writer) io.Writer {
 		if writer == nil {
 			continue
 		}
+		duplicate := false
+		for _, existing := range filtered {
+			if sameWriter(existing, writer) {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			continue
+		}
 		filtered = append(filtered, writer)
 	}
 
@@ -502,4 +513,18 @@ func multiWriter(writers ...io.Writer) io.Writer {
 	default:
 		return io.MultiWriter(filtered...)
 	}
+}
+
+func sameWriter(a, b io.Writer) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	leftType := reflect.TypeOf(a)
+	rightType := reflect.TypeOf(b)
+	if leftType != rightType || !leftType.Comparable() {
+		return false
+	}
+
+	return a == b
 }
