@@ -285,3 +285,29 @@ Disadvantages:
 - The root cause may live in Lima rather than this repository, which could limit how much can be fixed locally.
 - Introducing timeouts or degraded-ready behavior would add lifecycle-policy decisions around what counts as a successful start.
 - Reproducing the stall consistently may require host-specific Lima state that is hard to model in automated tests.
+
+### 12. Replace the embedded-terminal width-growth redraw shim with a terminal-native fix
+
+Problem:
+
+- Embedded Ghostty terminal sessions now send `Ctrl-L` to shell-like primary-screen apps after width growth so readline prompts repaint cleanly instead of leaving duplicated wrapped fragments behind.
+- That workaround fixes the reproduced `bash` prompt corruption, but it relies on application-level redraw behavior rather than solving the underlying mismatch between Ghostty resize reflow and shell `SIGWINCH` cleanup sequences.
+- A narrower terminal-native fix would reduce the chance of surprising behavior in other primary-screen applications that happen to match the current guard.
+
+Suggested solution:
+
+- Reproduce the prompt-redraw sequence against upstream Ghostty VT behavior and confirm whether the long-term fix belongs in Ghostty, in the bridge, or in how CodeLima sequences PTY resize and emulator resize.
+- Replace the `Ctrl-L` shim with a terminal-level approach once a clean fix exists, then keep the current `bash` width-growth regression test as coverage for the final behavior.
+- If the fix requires an upstream Ghostty patch, vendor that patch through the existing `ghostty-vt-codelima.patch` flow and document the narrower integration contract in the relevant ADR.
+
+Advantages:
+
+- Removes unsolicited redraw input from primary-screen applications.
+- Makes embedded-terminal resize behavior rely on terminal semantics rather than shell conventions.
+- Keeps the prompt-corruption regression covered while reducing workaround-specific behavior.
+
+Disadvantages:
+
+- The root cause may depend on upstream Ghostty VT internals outside this repository.
+- A true terminal-level fix is likely more invasive than the current localized workaround.
+- Validating the final behavior may require more real-terminal integration testing than the current automated regression test.

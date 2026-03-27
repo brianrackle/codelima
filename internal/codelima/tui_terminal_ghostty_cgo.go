@@ -1467,6 +1467,7 @@ func (t *ghosttyTUITerminal) resizeLocked(width, height int) {
 		return
 	}
 
+	oldWidth := t.cols
 	t.cols = width
 	t.rows = height
 	C.ghostty_bridge_terminal_resize(t.term, C.int(width), C.int(height))
@@ -1475,7 +1476,25 @@ func (t *ghosttyTUITerminal) resizeLocked(width, height int) {
 	}
 	if t.pty != nil {
 		_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
+		if t.shouldRequestPrimaryScreenRedrawLocked(oldWidth, width) {
+			// Bash/readline prompt redraws can leave stale wrapped fragments after
+			// width growth, so ask shell-like primary-screen sessions to repaint.
+			t.writePTYLocked("\x0c")
+		}
 	}
+}
+
+func (t *ghosttyTUITerminal) shouldRequestPrimaryScreenRedrawLocked(previousWidth, width int) bool {
+	if t.term == nil || t.pty == nil || width <= previousWidth {
+		return false
+	}
+	if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
+		return false
+	}
+	if bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term)) {
+		return false
+	}
+	return t.viewportAtBottomLockedRaw()
 }
 
 func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, cells []C.GhosttyResolvedCell) string {

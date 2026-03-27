@@ -260,6 +260,71 @@ func TestGhosttyTerminalPreservesExplicitBackgroundEqualToDefault(t *testing.T) 
 	}
 }
 
+func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	renderSnapshot := func(width, height int) string {
+		vx := newRenderTestVaxis(t, width, height)
+		defer vx.Close()
+
+		win := vx.Window()
+		win.Clear()
+		ghostty.Draw(win)
+		return renderedScreenText(t, vx, width, height)
+	}
+
+	ghostty.Resize(24, 12)
+
+	cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-i")
+	cmd.Env = append(os.Environ(),
+		"TERM="+tuiEmbeddedTermEnv,
+		`PS1=brianrackle@lima-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianrackle/Projects/codelima\$ `,
+	)
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+
+	waitForCondition(t, 5*time.Second, func() bool {
+		return strings.Contains(strings.ReplaceAll(renderSnapshot(24, 12), "\n", ""), "brianrackle@lima-codelima")
+	}, "bash prompt to appear")
+
+	for _, width := range []int{28, 32, 40, 48, 56, 64, 72, 80} {
+		ghostty.Resize(width, 12)
+		time.Sleep(50 * time.Millisecond)
+	}
+	wide := renderSnapshot(80, 12)
+
+	got := strings.Join(nonEmptyRenderedLines(wide), "\n")
+	want := strings.Join([]string{
+		"brianrackle@lima-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianra",
+		"ckle/Projects/codelima$",
+	}, "\n")
+	if got != want {
+		t.Fatalf("rendered terminal after width growth = %q, want %q", got, want)
+	}
+}
+
+func nonEmptyRenderedLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
 func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
 	t.Parallel()
 
