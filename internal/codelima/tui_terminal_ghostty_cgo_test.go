@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -860,7 +862,40 @@ func TestGhosttyTerminalSuppressesUnknownParserWarningsFromStderr(t *testing.T) 
 
 func TestGhosttyTerminalRoundTripsSttyRawPrompt(t *testing.T) {
 	script := newSttyRawPromptScript(t)
-	runGhosttySttyRawPrompt(t, exec.Command("bash", "-lc", script.body), script.readyPath, script.resultPath)
+	runGhosttySttyRawPrompt(t, exec.Command("bash", script.scriptPath), script.readyPath, script.resultPath)
+}
+
+func TestNestedPTYScriptCommandUsesPlatformSpecificScriptArgs(t *testing.T) {
+	t.Parallel()
+
+	scriptPath := "/tmp/path with spaces/stty-raw-prompt.sh"
+	tests := []struct {
+		name string
+		goos string
+		want []string
+	}{
+		{
+			name: "darwin",
+			goos: "darwin",
+			want: []string{"script", "-q", "/dev/null", "bash", scriptPath},
+		},
+		{
+			name: "linux",
+			goos: "linux",
+			want: []string{"script", "-q", "-c", "bash " + shellQuote(scriptPath), "/dev/null"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cmd := newNestedPTYScriptCommandForOS(tt.goos, scriptPath)
+			if !reflect.DeepEqual(cmd.Args, tt.want) {
+				t.Fatalf("newNestedPTYScriptCommandForOS(%q) args = %v, want %v", tt.goos, cmd.Args, tt.want)
+			}
+		})
+	}
 }
 
 func TestGhosttyTerminalRoundTripsSttyRawPromptThroughNestedPTY(t *testing.T) {
@@ -869,7 +904,7 @@ func TestGhosttyTerminalRoundTripsSttyRawPromptThroughNestedPTY(t *testing.T) {
 	}
 
 	script := newSttyRawPromptScript(t)
-	runGhosttySttyRawPrompt(t, exec.Command("script", "-q", "/dev/null", "bash", "-lc", script.body), script.readyPath, script.resultPath)
+	runGhosttySttyRawPrompt(t, newNestedPTYScriptCommand(script.scriptPath), script.readyPath, script.resultPath)
 }
 
 func captureGhosttyProcessStderr(t *testing.T, fn func()) string {
@@ -930,7 +965,7 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) {
 }
 
 type sttyRawPromptScript struct {
-	body       string
+	scriptPath string
 	readyPath  string
 	resultPath string
 }
@@ -942,8 +977,8 @@ func newSttyRawPromptScript(t *testing.T) sttyRawPromptScript {
 	readyPath := filepath.Join(tempDir, "ready")
 	resultPath := filepath.Join(tempDir, "result")
 	errorPath := filepath.Join(tempDir, "restore.err")
-	return sttyRawPromptScript{
-		body: fmt.Sprintf(`
+	scriptPath := filepath.Join(tempDir, "stty-raw-prompt.sh")
+	body := fmt.Sprintf(`
 save_state="$(/bin/stty -g)"
 printf ready > %q
 /bin/stty raw -echo
@@ -953,10 +988,26 @@ if /bin/stty "${save_state}" 2>%q; then
 else
   printf 'fail:%%s\nstate=%%s\n' "$(/bin/cat %q)" "${save_state}" > %q
 fi
-`, readyPath, errorPath, resultPath, errorPath, resultPath),
+`, readyPath, errorPath, resultPath, errorPath, resultPath)
+	if err := os.WriteFile(scriptPath, []byte(body), 0o700); err != nil {
+		t.Fatalf("WriteFile(stty raw prompt script) error = %v", err)
+	}
+	return sttyRawPromptScript{
+		scriptPath: scriptPath,
 		readyPath:  readyPath,
 		resultPath: resultPath,
 	}
+}
+
+func newNestedPTYScriptCommand(scriptPath string) *exec.Cmd {
+	return newNestedPTYScriptCommandForOS(runtime.GOOS, scriptPath)
+}
+
+func newNestedPTYScriptCommandForOS(goos string, scriptPath string) *exec.Cmd {
+	if goos == "linux" {
+		return exec.Command("script", "-q", "-c", "bash "+shellQuote(scriptPath), "/dev/null")
+	}
+	return exec.Command("script", "-q", "/dev/null", "bash", scriptPath)
 }
 
 func runGhosttySttyRawPrompt(t *testing.T, cmd *exec.Cmd, readyPath string, resultPath string) {

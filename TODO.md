@@ -337,3 +337,29 @@ Disadvantages:
 - Requires real Terminal.app access and manual verification rather than pure unit coverage.
 - A second Apple-specific binding would increase shortcut surface area and help-text complexity.
 - Function-key behavior can vary with host keyboard settings, which may make the final choice somewhat environment-specific.
+
+### 14. Validate the nested-PTY Ghostty raw-prompt regression test on Ubuntu 24.04
+
+Problem:
+
+- `TestGhosttyTerminalRoundTripsSttyRawPromptThroughNestedPTY` timed out in the Ubuntu 24.04 CI job because the test used the BSD `script file command ...` argv form, while util-linux `script` expects `-c` for an explicit command string.
+- The test has been updated to build the nested-PTY command per platform, but that follow-up has only been exercised on macOS plus pure argument-shape unit coverage.
+- This session does not have a running Linux container or VM, so the util-linux path still needs a real Ubuntu confirmation outside of unit tests.
+
+Suggested solution:
+
+- Rerun `make verify` on an Ubuntu 24.04 environment after this patch lands and confirm `TestGhosttyTerminalRoundTripsSttyRawPromptThroughNestedPTY` completes without the previous `ready`-file timeout.
+- If the Linux run still flakes, capture the nested `script` process tree and the Ghostty PTY command arguments in test logs so the remaining discrepancy can be narrowed quickly.
+- Keep the platform-specific command-builder unit test alongside the end-to-end Ghostty regression so future portability regressions fail closer to the source.
+
+Advantages:
+
+- Closes the exact CI portability gap that prompted this fix.
+- Distinguishes a resolved argv-compatibility bug from any remaining Linux-specific Ghostty PTY timing issue.
+- Leaves a clear audit trail for why this test now has platform-specific `script` handling.
+
+Disadvantages:
+
+- Requires access to a real Ubuntu environment with Ghostty test prerequisites available.
+- If util-linux behavior varies across distro versions, more probing may still be needed than this change alone provides.
+- Adds one more manual Linux-specific follow-up item to the QA backlog.
