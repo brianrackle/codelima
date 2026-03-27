@@ -1087,8 +1087,9 @@ func (t *ghosttyTUITerminal) Update(event vaxis.Event) {
 	case vaxis.Mouse:
 		t.handleMouseLocked(event)
 	case vaxis.ColorThemeUpdate:
+		t.setColorThemeModeLocked(event.Mode)
 		if t.getModeLocked(ghosttyModeColorScheme, false) {
-			t.writePTYLocked(fmt.Sprintf("\x1b[?997;%dn", event.Mode))
+			t.reportColorThemeModeLocked()
 		}
 	}
 }
@@ -1579,6 +1580,26 @@ func (t *ghosttyTUITerminal) defaultBackgroundRGBLocked() uint32 {
 	return withGhosttyStderrSuppressed(func() uint32 {
 		C.ghostty_bridge_render_state_update(t.term)
 		return uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
+	})
+}
+
+func (t *ghosttyTUITerminal) setColorThemeModeLocked(mode vaxis.ColorThemeMode) {
+	if t.term == nil {
+		return
+	}
+	withGhosttyStderrSuppressed(func() struct{} {
+		C.ghostty_bridge_terminal_set_color_theme_mode(t.term, C.int(mode))
+		return struct{}{}
+	})
+}
+
+func (t *ghosttyTUITerminal) reportColorThemeModeLocked() {
+	if t.term == nil {
+		return
+	}
+	withGhosttyStderrSuppressed(func() struct{} {
+		C.ghostty_bridge_terminal_report_color_theme_mode(t.term)
+		return struct{}{}
 	})
 }
 

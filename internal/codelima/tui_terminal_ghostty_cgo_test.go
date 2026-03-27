@@ -439,6 +439,159 @@ func TestGhosttyTerminalAnswersModifyOtherKeysQueryWithoutWarnings(t *testing.T)
 	}
 }
 
+func TestGhosttyTerminalAnswersColorSchemeQueryFromStoredTheme(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	ghostty.mu.Lock()
+	ghostty.setColorThemeModeLocked(vaxis.LightMode)
+	ghostty.mu.Unlock()
+
+	stderrOutput := captureGhosttyProcessStderr(t, func() {
+		ghostty.ingestPTY([]byte("\x1b[?996n"))
+	})
+	if strings.TrimSpace(stderrOutput) != "" {
+		t.Fatalf("expected no Ghostty parser warnings, got %q", stderrOutput)
+	}
+
+	if got, want := ghostty.readPendingResponses(), "\x1b[?997;2n"; got != want {
+		t.Fatalf("color-scheme query response = %q, want %q", got, want)
+	}
+}
+
+func TestGhosttyTerminalReportsColorThemeUpdateWhenModeEnabled(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("open pipe for terminal update guard: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	ghostty.mu.Lock()
+	ghostty.pty = writer
+	ghostty.mu.Unlock()
+
+	ghostty.ingestPTY([]byte("\x1b[?2031h"))
+	stderrOutput := captureGhosttyProcessStderr(t, func() {
+		ghostty.Update(vaxis.ColorThemeUpdate{Mode: vaxis.DarkMode})
+	})
+	if strings.TrimSpace(stderrOutput) != "" {
+		t.Fatalf("expected no Ghostty parser warnings, got %q", stderrOutput)
+	}
+
+	if got, want := ghostty.readPendingResponses(), "\x1b[?997;1n"; got != want {
+		t.Fatalf("color-theme update report = %q, want %q", got, want)
+	}
+}
+
+func TestGhosttyTerminalAnswersPrimaryDeviceAttributesQuery(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	stderrOutput := captureGhosttyProcessStderr(t, func() {
+		ghostty.ingestPTY([]byte("\x1b[c"))
+	})
+	if strings.TrimSpace(stderrOutput) != "" {
+		t.Fatalf("expected no Ghostty parser warnings, got %q", stderrOutput)
+	}
+
+	if got, want := ghostty.readPendingResponses(), "\x1b[?62;18;22c"; got != want {
+		t.Fatalf("primary device attributes response = %q, want %q", got, want)
+	}
+}
+
+func TestGhosttyTerminalAnswersXtwinopsSizeQuery(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	stderrOutput := captureGhosttyProcessStderr(t, func() {
+		ghostty.ingestPTY([]byte("\x1b[18t"))
+	})
+	if strings.TrimSpace(stderrOutput) != "" {
+		t.Fatalf("expected no Ghostty parser warnings, got %q", stderrOutput)
+	}
+
+	if got, want := ghostty.readPendingResponses(), "\x1b[8;24;80t"; got != want {
+		t.Fatalf("XTWINOPS size query response = %q, want %q", got, want)
+	}
+}
+
+func TestGhosttyTerminalAnswersXtversionQuery(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	stderrOutput := captureGhosttyProcessStderr(t, func() {
+		ghostty.ingestPTY([]byte("\x1b[>q"))
+	})
+	if strings.TrimSpace(stderrOutput) != "" {
+		t.Fatalf("expected no Ghostty parser warnings, got %q", stderrOutput)
+	}
+
+	if got, want := ghostty.readPendingResponses(), "\x1bP>|codelima\x1b\\"; got != want {
+		t.Fatalf("XTVERSION response = %q, want %q", got, want)
+	}
+}
+
 func TestGhosttyTerminalIgnoresVimTitleStackQueriesWithoutWarnings(t *testing.T) {
 	ghosttyStderrCaptureMu.Lock()
 	defer ghosttyStderrCaptureMu.Unlock()

@@ -57,6 +57,8 @@ int ghostty_bridge_render_state_get_grapheme(GhosttyBridgeTerminal term, int row
 bool ghostty_bridge_terminal_is_alternate_screen(GhosttyBridgeTerminal term);
 bool ghostty_bridge_terminal_has_mouse_tracking(GhosttyBridgeTerminal term);
 bool ghostty_bridge_terminal_get_mode(GhosttyBridgeTerminal term, int mode, bool is_ansi);
+void ghostty_bridge_terminal_set_color_theme_mode(GhosttyBridgeTerminal term, int mode);
+void ghostty_bridge_terminal_report_color_theme_mode(GhosttyBridgeTerminal term);
 bool ghostty_bridge_terminal_get_scrollbar(GhosttyBridgeTerminal term, GhosttyTerminalScrollbar* out_scrollbar);
 void ghostty_bridge_terminal_scroll_viewport_top(GhosttyBridgeTerminal term);
 void ghostty_bridge_terminal_scroll_viewport_bottom(GhosttyBridgeTerminal term);

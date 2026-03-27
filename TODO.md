@@ -234,31 +234,31 @@ Disadvantages:
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
 
-### 10. Prefer Ghostty terminal effects and callbacks over local response polling
+### 10. Make Ghostty PTY writes backpressure-aware
 
 Problem:
 
-- The embedded terminal still polls terminal responses locally even though the packaged Ghostty bridge now exposes richer terminal callback options.
-- Ghostling registers Ghostty callbacks for terminal-driven actions such as title changes, device attributes, size queries, and color-scheme reporting, while CodeLima still drains response bytes through local polling loops.
-- That keeps terminal-side effects further away from Ghostty's ownership boundary than the keyboard, mouse, and viewport paths.
+- The embedded terminal now answers supported terminal queries through Ghostty callbacks, but the PTY transport path still uses the simpler synchronous write model.
+- Large or repeated writes still go through direct `io.WriteString` calls on the UI-side code path, and bridge-generated response bytes are still drained synchronously from Go.
+- Ghostling handles PTY backpressure and partial writes more explicitly, which is still the main remaining gap in CodeLima's Ghostty-aligned terminal transport.
 
 Suggested solution:
 
-- Add narrow bridge helpers for the Ghostty terminal callbacks that match the terminal-driven actions CodeLima already supports.
-- Prefer Ghostty callback registration for PTY writes, title changes, device attributes, XT version, size queries, and color-scheme responses where the packaged API supports them.
-- Leave only CodeLima-specific event routing and UI updates in the Go TUI layer.
+- Introduce a narrow write queue or nonblocking PTY write loop for the embedded terminal path.
+- Handle partial writes and temporary `EAGAIN`-style backpressure explicitly instead of assuming whole writes succeed immediately.
+- Keep the change focused on transport behavior so terminal semantics continue to stay in Ghostty and UI event routing stays in Go.
 
 Advantages:
 
-- Simplifies terminal response plumbing in Go.
-- Keeps terminal-side behavior closer to Ghostty's own model.
-- Reduces the amount of local polling logic that has to stay in sync with upstream Ghostty behavior.
+- Reduces the risk of UI stalls during heavy terminal traffic.
+- Makes the embedded terminal transport more robust under bursts of input or output.
+- Completes the main remaining Ghostty-versus-Ghostling transport gap without reopening the earlier terminal-semantics work.
 
 Disadvantages:
 
-- Requires compatibility wrappers around several different callback signatures.
-- Some CodeLima-specific behavior may still need local state or event forwarding above the callback layer.
-- The callback migration will need coverage in automated tests and manual QA to avoid regressions in title updates and terminal responses.
+- Requires careful queueing and lifecycle management around PTY teardown.
+- Adds more state and error handling to a code path that is currently very small.
+- Will need targeted tests plus manual QA to avoid regressions in interactive shell behavior.
 
 ### 11. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
 

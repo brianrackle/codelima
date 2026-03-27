@@ -15,6 +15,9 @@ struct ghostty_bridge_terminal {
 	uint8_t* response_buf;
 	size_t response_len;
 	size_t response_cap;
+	bool has_color_scheme;
+	GhosttyColorScheme color_scheme;
+	int color_theme_mode;
 };
 
 typedef struct {
@@ -140,6 +143,80 @@ static void ghostty_bridge_write_pty_cb(GhosttyTerminal terminal, void* userdata
 	}
 	memcpy(bridge->response_buf + bridge->response_len, data, len);
 	bridge->response_len += len;
+}
+
+static bool ghostty_bridge_color_scheme_for_mode(int mode, GhosttyColorScheme* out_scheme) {
+	if (out_scheme == NULL) {
+		return false;
+	}
+	switch (mode) {
+	case 1:
+		*out_scheme = GHOSTTY_COLOR_SCHEME_DARK;
+		return true;
+	case 2:
+		*out_scheme = GHOSTTY_COLOR_SCHEME_LIGHT;
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void ghostty_bridge_report_color_theme_mode(struct ghostty_bridge_terminal* bridge) {
+	if (bridge == NULL || bridge->terminal == NULL || !bridge->has_color_scheme) {
+		return;
+	}
+	char response[32];
+	int n = snprintf(response, sizeof(response), "\x1b[?997;%dn", bridge->color_theme_mode);
+	if (n <= 0 || (size_t)n >= sizeof(response)) {
+		return;
+	}
+	ghostty_bridge_write_pty_cb(bridge->terminal, bridge, (const uint8_t*)response, (size_t)n);
+}
+
+static bool ghostty_bridge_color_scheme_cb(GhosttyTerminal terminal, void* userdata, GhosttyColorScheme* out_scheme) {
+	(void)terminal;
+	struct ghostty_bridge_terminal* bridge = (struct ghostty_bridge_terminal*)userdata;
+	if (bridge == NULL || out_scheme == NULL || !bridge->has_color_scheme) {
+		return false;
+	}
+	*out_scheme = bridge->color_scheme;
+	return true;
+}
+
+static bool ghostty_bridge_device_attributes_cb(GhosttyTerminal terminal, void* userdata, GhosttyDeviceAttributes* out_attrs) {
+	(void)terminal;
+	(void)userdata;
+	if (out_attrs == NULL) {
+		return false;
+	}
+	memset(out_attrs, 0, sizeof(*out_attrs));
+	out_attrs->primary.conformance_level = GHOSTTY_DA_CONFORMANCE_VT220;
+	out_attrs->primary.features[0] = GHOSTTY_DA_FEATURE_WINDOWING;
+	out_attrs->primary.features[1] = GHOSTTY_DA_FEATURE_ANSI_COLOR;
+	out_attrs->primary.num_features = 2;
+	out_attrs->secondary.device_type = GHOSTTY_DA_DEVICE_TYPE_VT220;
+	return true;
+}
+
+static bool ghostty_bridge_size_cb(GhosttyTerminal terminal, void* userdata, GhosttySizeReportSize* out_size) {
+	(void)userdata;
+	if (terminal == NULL || out_size == NULL) {
+		return false;
+	}
+	memset(out_size, 0, sizeof(*out_size));
+	return ghostty_bridge_result_ok(ghostty.terminal_get(terminal, GHOSTTY_TERMINAL_DATA_ROWS, &out_size->rows)) &&
+		ghostty_bridge_result_ok(ghostty.terminal_get(terminal, GHOSTTY_TERMINAL_DATA_COLS, &out_size->columns));
+}
+
+static GhosttyString ghostty_bridge_xtversion_cb(GhosttyTerminal terminal, void* userdata) {
+	(void)terminal;
+	(void)userdata;
+	static const uint8_t version[] = "codelima";
+	GhosttyString str = {
+		.ptr = version,
+		.len = sizeof(version) - 1,
+	};
+	return str;
 }
 
 int ghostty_bridge_load(const char* path) {
@@ -465,6 +542,34 @@ GhosttyBridgeTerminal ghostty_bridge_terminal_new(int cols, int rows) {
 		return NULL;
 	}
 
+	result = ghostty.terminal_set(bridge->terminal, GHOSTTY_TERMINAL_OPT_COLOR_SCHEME, (const void*)&ghostty_bridge_color_scheme_cb);
+	if (!ghostty_bridge_result_ok(result)) {
+		ghostty_bridge_terminal_free(bridge);
+		ghostty_bridge_set_result_error("set ghostty color_scheme callback", result);
+		return NULL;
+	}
+
+	result = ghostty.terminal_set(bridge->terminal, GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES, (const void*)&ghostty_bridge_device_attributes_cb);
+	if (!ghostty_bridge_result_ok(result)) {
+		ghostty_bridge_terminal_free(bridge);
+		ghostty_bridge_set_result_error("set ghostty device_attributes callback", result);
+		return NULL;
+	}
+
+	result = ghostty.terminal_set(bridge->terminal, GHOSTTY_TERMINAL_OPT_SIZE, (const void*)&ghostty_bridge_size_cb);
+	if (!ghostty_bridge_result_ok(result)) {
+		ghostty_bridge_terminal_free(bridge);
+		ghostty_bridge_set_result_error("set ghostty size callback", result);
+		return NULL;
+	}
+
+	result = ghostty.terminal_set(bridge->terminal, GHOSTTY_TERMINAL_OPT_XTVERSION, (const void*)&ghostty_bridge_xtversion_cb);
+	if (!ghostty_bridge_result_ok(result)) {
+		ghostty_bridge_terminal_free(bridge);
+		ghostty_bridge_set_result_error("set ghostty xtversion callback", result);
+		return NULL;
+	}
+
 	ghostty_last_error[0] = '\0';
 	return bridge;
 }
@@ -721,6 +826,23 @@ bool ghostty_bridge_terminal_get_mode(GhosttyBridgeTerminal term, int mode, bool
 		return false;
 	}
 	return value;
+}
+
+void ghostty_bridge_terminal_set_color_theme_mode(GhosttyBridgeTerminal term, int mode) {
+	struct ghostty_bridge_terminal* bridge = term;
+	if (bridge == NULL) {
+		return;
+	}
+	GhosttyColorScheme scheme = GHOSTTY_COLOR_SCHEME_DARK;
+	bridge->has_color_scheme = ghostty_bridge_color_scheme_for_mode(mode, &scheme);
+	if (bridge->has_color_scheme) {
+		bridge->color_scheme = scheme;
+		bridge->color_theme_mode = mode;
+	}
+}
+
+void ghostty_bridge_terminal_report_color_theme_mode(GhosttyBridgeTerminal term) {
+	ghostty_bridge_report_color_theme_mode(term);
 }
 
 bool ghostty_bridge_terminal_get_scrollbar(GhosttyBridgeTerminal term, GhosttyTerminalScrollbar* out_scrollbar) {

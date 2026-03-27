@@ -10,7 +10,8 @@ The runtime-loaded bridge and packaged Ghostty API surface have now been widened
 Mouse encoding now follows that same model too.
 Viewport scrolling and scrollback ownership now follow that same model too.
 Render-time default-color semantics now follow that same model too.
-The remaining work is mostly about letting Ghostty own more of terminal-side effects and transport behavior.
+Terminal-driven query responses now follow that same model too.
+The remaining work is now focused on terminal transport behavior.
 
 ## Current Baseline
 
@@ -20,23 +21,10 @@ The remaining work is mostly about letting Ghostty own more of terminal-side eff
 - CodeLima now uses Ghostty's viewport scrolling and scrollbar state as the source of truth for embedded-terminal scrollback position.
 - CodeLima now uses Ghostty's explicit-versus-default cell color semantics instead of inferring terminal defaults by RGB equality.
 - CodeLima now packages a newer upstream `libghostty-vt` commit and adapts it through a local compatibility bridge instead of the older inline reduced API surface.
+- CodeLima now answers color-scheme, XTWINOPS size, device-attributes, and XTVERSION terminal queries through Ghostty callback registration instead of local handcrafted response strings.
 - The Ghostty integration still uses the runtime-loaded `libghostty-vt` bridge rather than direct linking.
 
 ## Remaining Gaps
-
-### 5. Prefer Ghostty terminal effects and callbacks over local response polling
-
-CodeLima still polls terminal responses manually in several places.
-Ghostling registers Ghostty effects for terminal-driven actions.
-
-- Shift more terminal response handling onto Ghostty callbacks where the API supports it.
-- Use Ghostty-provided hooks for PTY writes, title changes, and other terminal-originated responses where useful.
-- Leave only CodeLima-specific event routing in the TUI layer.
-
-Why it matters:
-
-- Simplifies response plumbing.
-- Keeps terminal-side behavior closer to Ghostty's model instead of local polling loops.
 
 ### 6. Make PTY writes backpressure-aware
 
@@ -54,8 +42,7 @@ Why it matters:
 
 ## Recommended Order
 
-1. Shift more terminal effects to Ghostty callbacks.
-2. Make PTY writes backpressure-aware.
+1. Make PTY writes backpressure-aware.
 
 ## Non-Goals
 
@@ -66,4 +53,4 @@ Why it matters:
 ## Related Tracking
 
 - `TODO.md` item 1 tracks the narrower host-theme/default-color sync follow-up if Ghostty exposes configurable terminal defaults later.
-- `TODO.md` item 10 tracks the next Ghostty follow-up: preferring Ghostty terminal effects and callbacks over local polling.
+- `TODO.md` item 10 tracks the remaining Ghostty follow-up: making PTY writes backpressure-aware.
