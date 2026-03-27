@@ -147,6 +147,34 @@ func TestGhosttyPTYWriterFlushesQueuedWrites(t *testing.T) {
 	}, "queued PTY writes to flush")
 }
 
+func TestGhosttyTerminalPreservesDelayedInitialOutput(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	cmd := exec.Command("sh", "-lc", "sleep 0.2; printf prompt; sleep 0.2")
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+
+	vx := newRenderTestVaxis(t, 24, 4)
+	defer vx.Close()
+
+	waitForCondition(t, 2*time.Second, func() bool {
+		win := vx.Window()
+		win.Clear()
+		ghostty.Draw(win)
+		return strings.Contains(renderedScreenText(t, vx, 24, 4), "prompt")
+	}, "delayed ghostty PTY output to reach the rendered terminal")
+}
+
 func TestGhosttyStyleForColorsLeavesDefaultColorsUnset(t *testing.T) {
 	t.Parallel()
 

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 	"github.com/containerd/console"
@@ -161,6 +162,8 @@ type fakeTUITerminal struct {
 	termEnv       string
 	capturesMouse bool
 	events        []vaxis.Event
+	startCols     int
+	startRows     int
 }
 
 func newFakeTUISessionManager() *fakeTUISessionManager {
@@ -180,6 +183,11 @@ func newFakeTUITerminal() *fakeTUITerminal {
 
 func (f *fakeTUITerminal) Start(*exec.Cmd) error {
 	return nil
+}
+
+func (f *fakeTUITerminal) Resize(width, height int) {
+	f.startCols = width
+	f.startRows = height
 }
 
 func (f *fakeTUITerminal) Update(event vaxis.Event) {
@@ -645,6 +653,98 @@ func TestTUIStateAutoSwitchesAndReusesPerNodeSessions(t *testing.T) {
 	state.focusTree()
 	if state.focus != tuiFocusTree {
 		t.Fatalf("expected tree focus, got %q", state.focus)
+	}
+}
+
+func TestTUISessionStoreUsesPreferredTerminalSizeForNewSessions(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	sessions.SetPreferredTerminalSize(79, 20)
+
+	originalFactory := newSessionTUITerminal
+	var terminal *fakeTUITerminal
+	newSessionTUITerminal = func(string, func(vaxis.Event)) tuiTerminal {
+		terminal = newFakeTUITerminal()
+		return terminal
+	}
+	defer func() {
+		newSessionTUITerminal = originalFactory
+	}()
+
+	err := sessions.EnsureSession(Node{ID: "node-root", Slug: "root-node"})
+	if err != nil {
+		t.Fatalf("EnsureSession() error = %v", err)
+	}
+	if terminal == nil {
+		t.Fatal("expected EnsureSession() to allocate a terminal")
+	}
+	if terminal.startCols != 79 || terminal.startRows != 20 {
+		t.Fatalf("expected session terminal to start at 79x20, got %dx%d", terminal.startCols, terminal.startRows)
+	}
+}
+
+func TestTUIDrawUpdatesPreferredTerminalSizeForFutureSessions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	state, err := newTUIState(testTUITree(t), nil)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	vx := newRenderTestVaxis(t, 100, 24)
+	defer vx.Close()
+
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: sessions,
+		vx:       vx,
+	}
+
+	app.draw()
+
+	wantCols, wantRows := tuiEmbeddedTerminalSize(100, 24, tuiFocusTree)
+	if sessions.preferredCols != wantCols || sessions.preferredRows != wantRows {
+		t.Fatalf("expected draw() to record terminal size %dx%d, got %dx%d", wantCols, wantRows, sessions.preferredCols, sessions.preferredRows)
+	}
+}
+
+func TestVaxisTUITerminalPreservesInitialOutputWhenStartedAtPaneSize(t *testing.T) {
+	t.Parallel()
+
+	terminal := newTUIVaxisTerminal("node-root", func(vaxis.Event) {})
+	terminal.Resize(12, 3)
+
+	cmd := exec.Command("sh", "-lc", "printf prompt; sleep 1")
+	if err := terminal.Start(cmd); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer terminal.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(terminal.String(), "prompt") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(terminal.String(), "prompt") {
+		t.Fatalf("expected terminal buffer to contain initial output, got %q", terminal.String())
+	}
+
+	vx := newRenderTestVaxis(t, 12, 3)
+	defer vx.Close()
+
+	terminal.Draw(vx.Window())
+
+	rendered := renderedScreenText(t, vx, 12, 3)
+	if !strings.Contains(rendered, "prompt") {
+		t.Fatalf("expected rendered terminal to preserve initial output, got:\n%s", rendered)
 	}
 }
 

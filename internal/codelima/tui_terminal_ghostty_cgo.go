@@ -1118,26 +1118,7 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 		return err
 	}
 
-	writeFD, err := unix.Dup(int(ptyFile.Fd()))
-	if err != nil {
-		_ = ptyFile.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
-		return fmt.Errorf("duplicate ghostty pty write fd: %w", err)
-	}
-	if err := unix.SetNonblock(writeFD, true); err != nil {
-		_ = unix.Close(writeFD)
-		_ = ptyFile.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = cmd.Wait()
-		return fmt.Errorf("set ghostty pty write fd nonblocking: %w", err)
-	}
-	ptyWriteFile := os.NewFile(uintptr(writeFD), ptyFile.Name()+"-write")
-	ptyWriter := newGhosttyPTYWriter(ptyWriteFile, waitGhosttyPTYWritable, func(err error) {
+	ptyWriter := newGhosttyPTYWriter(ptyFile, nil, func(err error) {
 		if t.postEvent != nil {
 			t.postEvent(tuiTerminalErrorEvent{
 				NodeID: t.nodeID,
@@ -1154,6 +1135,14 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 
 	go t.readLoop()
 	return nil
+}
+
+func (t *ghosttyTUITerminal) Resize(width, height int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.resizeLocked(width, height)
+	t.invalidateLocked()
 }
 
 func (t *ghosttyTUITerminal) readLoop() {
@@ -1427,17 +1416,7 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 		return
 	}
 	if !withGhosttyStderrSuppressed(func() bool {
-		if width != t.cols || height != t.rows {
-			t.cols = width
-			t.rows = height
-			C.ghostty_bridge_terminal_resize(t.term, C.int(width), C.int(height))
-			if t.mouseEncoder != nil {
-				t.mouseEncoder.Reset()
-			}
-			if t.pty != nil {
-				_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
-			}
-		}
+		t.resizeLocked(width, height)
 
 		C.ghostty_bridge_render_state_update(t.term)
 
@@ -1477,6 +1456,25 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 		return true
 	}) {
 		return
+	}
+}
+
+func (t *ghosttyTUITerminal) resizeLocked(width, height int) {
+	if t.closed || t.term == nil || width <= 0 || height <= 0 {
+		return
+	}
+	if width == t.cols && height == t.rows {
+		return
+	}
+
+	t.cols = width
+	t.rows = height
+	C.ghostty_bridge_terminal_resize(t.term, C.int(width), C.int(height))
+	if t.mouseEncoder != nil {
+		t.mouseEncoder.Reset()
+	}
+	if t.pty != nil {
+		_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
 	}
 }
 

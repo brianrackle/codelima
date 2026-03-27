@@ -8,6 +8,7 @@ import (
 
 type tuiTerminal interface {
 	Start(*exec.Cmd) error
+	Resize(width, height int)
 	Update(vaxis.Event)
 	Draw(vaxis.Window)
 	Close()

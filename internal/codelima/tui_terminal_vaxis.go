@@ -38,11 +38,36 @@ func newTUIVaxisTerminal(nodeID string, postEvent func(vaxis.Event)) tuiTerminal
 }
 
 type vaxisTUITerminal struct {
-	model *term.Model
+	model       *term.Model
+	started     bool
+	pendingCols int
+	pendingRows int
 }
 
 func (t *vaxisTUITerminal) Start(cmd *exec.Cmd) error {
-	return t.model.Start(cmd)
+	var err error
+	if t.pendingCols > 0 && t.pendingRows > 0 {
+		err = t.model.StartWithSize(cmd, t.pendingCols, t.pendingRows)
+	} else {
+		err = t.model.Start(cmd)
+	}
+	if err != nil {
+		return err
+	}
+	t.started = true
+	return nil
+}
+
+func (t *vaxisTUITerminal) Resize(width, height int) {
+	if t == nil || t.model == nil || width <= 0 || height <= 0 {
+		return
+	}
+
+	t.pendingCols = width
+	t.pendingRows = height
+	if t.started {
+		t.model.Resize(width, height)
+	}
 }
 
 func (t *vaxisTUITerminal) Update(event vaxis.Event) {

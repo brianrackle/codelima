@@ -30,6 +30,9 @@ type tuiSessionStore struct {
 	service   *Service
 	postEvent func(vaxis.Event)
 	sessions  map[string]*tuiSession
+
+	preferredCols int
+	preferredRows int
 }
 
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
@@ -41,9 +44,20 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 	}
 }
 
+var newSessionTUITerminal = newTUITerminal
+
 func (s *tuiSessionStore) HasSession(nodeID string) bool {
 	_, ok := s.sessions[nodeID]
 	return ok
+}
+
+func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
+	if cols <= 0 || rows <= 0 {
+		return
+	}
+
+	s.preferredCols = cols
+	s.preferredRows = rows
 }
 
 func (s *tuiSessionStore) EnsureSession(node Node) error {
@@ -59,7 +73,10 @@ func (s *tuiSessionStore) EnsureSession(node Node) error {
 	command := exec.CommandContext(s.ctx, executable, "--home", s.service.cfg.MetadataRoot, "shell", node.ID)
 	command.Env = os.Environ()
 
-	terminal := newTUITerminal(node.ID, s.postEvent)
+	terminal := newSessionTUITerminal(node.ID, s.postEvent)
+	if s.preferredCols > 0 && s.preferredRows > 0 {
+		terminal.Resize(s.preferredCols, s.preferredRows)
+	}
 	if err := terminal.Start(command); err != nil {
 		return err
 	}
@@ -218,6 +235,9 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
 			execLima.Stderr = stderr
 		}()
 	}
+	winWidth, winHeight := vx.Window().Size()
+	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
+	sessions.SetPreferredTerminalSize(cols, rows)
 	app.syncSessionFocus()
 	app.draw()
 
@@ -1670,6 +1690,9 @@ func (a *vaxisTUIApp) draw() {
 	termInnerWidth, termInnerHeight := termBody.Size()
 	termOriginCol, termOriginRow := termBody.Origin()
 	a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight}
+	if a.sessions != nil {
+		a.sessions.SetPreferredTerminalSize(termInnerWidth, termInnerHeight)
+	}
 
 	if entry.kind == tuiTreeEntryNode && a.sessions.HasSession(entry.node.ID) {
 		if session, ok := a.sessions.Session(entry.node.ID); ok {
@@ -1715,6 +1738,28 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	a.vx.Render()
+}
+
+func tuiEmbeddedTerminalSize(width int, height int, focus tuiFocus) (cols, rows int) {
+	if width <= 0 || height <= 0 {
+		return 0, 0
+	}
+
+	bodyHeight := height - 2
+	if bodyHeight <= 0 {
+		return 0, 0
+	}
+
+	layout := layoutTUIBody(width, focus)
+	rows = bodyHeight
+	if bodyHeight > 2 {
+		rows = bodyHeight - 2
+	}
+
+	if layout.termWidth <= 0 || rows <= 0 {
+		return 0, 0
+	}
+	return layout.termWidth, rows
 }
 
 func tuiMutedStyle() vaxis.Style {

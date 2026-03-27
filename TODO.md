@@ -259,3 +259,29 @@ Disadvantages:
 - The delete path will need more careful failure handling around partially deleted runtime state.
 - Fixing the ordering may require broader changes in how runtime-backed service mutations reconcile metadata.
 - A durable cleanup record or retry path would add state and complexity to node lifecycle management.
+
+### 11. Investigate Lima-backed `node start` hangs when the optional containerd readiness check never completes
+
+Problem:
+
+- During fresh-VM manual QA reruns on March 27, 2026, some new nodes reached a usable Lima guest state, but the `codelima node start` command never returned because Lima kept retrying its optional `containerd binaries to be installed` readiness probe.
+- In that state, `limactl shell` worked and the guest was reachable, but codelima metadata stayed behind the real VM state until the stuck start process was killed and cleanup was done manually.
+- This blocked fresh reruns of the `Clone Verification` flow and one extra TUI smoke on newly created QA nodes, even though the Ghostty prompt regression itself was reproduced and fixed separately.
+
+Suggested solution:
+
+- Reproduce the condition on a clean QA home and capture the corresponding Lima hostagent logs plus codelima progress output to confirm whether the stall is entirely external or whether codelima should stop waiting once the instance is otherwise usable.
+- Decide whether codelima should keep delegating fully to Lima readiness, impose its own timeout or degraded-ready state for optional Lima checks, or expose clearer progress when Lima is stuck on optional requirements.
+- Add a regression test or operator-facing diagnostic coverage once the expected behavior is chosen so future `node start` hangs are easier to detect and triage.
+
+Advantages:
+
+- Clarifies whether this is a codelima lifecycle bug, a Lima integration edge case, or a host-environment problem.
+- Improves operator trust in `node start` by avoiding silent hangs when the VM is already reachable.
+- Makes future QA reruns more reliable for flows that need fresh nodes.
+
+Disadvantages:
+
+- The root cause may live in Lima rather than this repository, which could limit how much can be fixed locally.
+- Introducing timeouts or degraded-ready behavior would add lifecycle-policy decisions around what counts as a successful start.
+- Reproducing the stall consistently may require host-specific Lima state that is hard to model in automated tests.
