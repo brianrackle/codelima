@@ -54,6 +54,10 @@ int ghostty_bridge_render_state_get_grapheme(GhosttyBridgeTerminal term, int row
 bool ghostty_bridge_terminal_is_alternate_screen(GhosttyBridgeTerminal term);
 bool ghostty_bridge_terminal_has_mouse_tracking(GhosttyBridgeTerminal term);
 bool ghostty_bridge_terminal_get_mode(GhosttyBridgeTerminal term, int mode, bool is_ansi);
+bool ghostty_bridge_terminal_get_scrollbar(GhosttyBridgeTerminal term, GhosttyTerminalScrollbar* out_scrollbar);
+void ghostty_bridge_terminal_scroll_viewport_top(GhosttyBridgeTerminal term);
+void ghostty_bridge_terminal_scroll_viewport_bottom(GhosttyBridgeTerminal term);
+void ghostty_bridge_terminal_scroll_viewport_delta(GhosttyBridgeTerminal term, intptr_t delta);
 int ghostty_bridge_terminal_get_scrollback_length(GhosttyBridgeTerminal term);
 int ghostty_bridge_terminal_get_scrollback_line(GhosttyBridgeTerminal term, int offset, GhosttyResolvedCell* out_buffer, size_t buffer_size);
 int ghostty_bridge_terminal_get_scrollback_grapheme(GhosttyBridgeTerminal term, int offset, int col, uint32_t* out_buffer, size_t buffer_size);

@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define CODELIMA_GHOSTTY_SCROLLBACK_LINES 10000
+
 struct ghostty_bridge_terminal {
 	GhosttyTerminal terminal;
 	GhosttyRenderState render_state;
@@ -394,7 +396,7 @@ GhosttyBridgeTerminal ghostty_bridge_terminal_new(int cols, int rows) {
 	GhosttyTerminalOptions opts = {
 		.cols = (uint16_t)cols,
 		.rows = (uint16_t)rows,
-		.max_scrollback = 0,
+		.max_scrollback = CODELIMA_GHOSTTY_SCROLLBACK_LINES,
 	};
 	GhosttyResult result = ghostty.terminal_new(NULL, &bridge->terminal, opts);
 	if (!ghostty_bridge_result_ok(result) || bridge->terminal == NULL) {
@@ -695,6 +697,42 @@ bool ghostty_bridge_terminal_get_mode(GhosttyBridgeTerminal term, int mode, bool
 		return false;
 	}
 	return value;
+}
+
+bool ghostty_bridge_terminal_get_scrollbar(GhosttyBridgeTerminal term, GhosttyTerminalScrollbar* out_scrollbar) {
+	struct ghostty_bridge_terminal* bridge = term;
+	if (bridge == NULL || bridge->terminal == NULL || out_scrollbar == NULL) {
+		return false;
+	}
+	memset(out_scrollbar, 0, sizeof(*out_scrollbar));
+	return ghostty_bridge_result_ok(
+		ghostty.terminal_get(bridge->terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR, out_scrollbar)
+	);
+}
+
+static void ghostty_bridge_terminal_scroll_viewport(struct ghostty_bridge_terminal* bridge, GhosttyTerminalScrollViewportTag tag, intptr_t delta) {
+	if (bridge == NULL || bridge->terminal == NULL || ghostty.terminal_scroll_viewport == NULL) {
+		return;
+	}
+	GhosttyTerminalScrollViewport behavior;
+	memset(&behavior, 0, sizeof(behavior));
+	behavior.tag = tag;
+	if (tag == GHOSTTY_SCROLL_VIEWPORT_DELTA) {
+		behavior.value.delta = delta;
+	}
+	ghostty.terminal_scroll_viewport(bridge->terminal, behavior);
+}
+
+void ghostty_bridge_terminal_scroll_viewport_top(GhosttyBridgeTerminal term) {
+	ghostty_bridge_terminal_scroll_viewport(term, GHOSTTY_SCROLL_VIEWPORT_TOP, 0);
+}
+
+void ghostty_bridge_terminal_scroll_viewport_bottom(GhosttyBridgeTerminal term) {
+	ghostty_bridge_terminal_scroll_viewport(term, GHOSTTY_SCROLL_VIEWPORT_BOTTOM, 0);
+}
+
+void ghostty_bridge_terminal_scroll_viewport_delta(GhosttyBridgeTerminal term, intptr_t delta) {
+	ghostty_bridge_terminal_scroll_viewport(term, GHOSTTY_SCROLL_VIEWPORT_DELTA, delta);
 }
 
 int ghostty_bridge_terminal_get_scrollback_length(GhosttyBridgeTerminal term) {

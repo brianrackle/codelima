@@ -45,11 +45,6 @@ const (
 	ghosttyModeColorScheme       = 2031
 )
 
-type ghosttyRowSource struct {
-	scrollback bool
-	index      int
-}
-
 type ghosttyAPILoadState struct {
 	once sync.Once
 	err  error
@@ -213,9 +208,7 @@ type ghosttyTUITerminal struct {
 	rows                 int
 	focused              bool
 	mouseButtonsDown     int
-	scrollOffset         int
 	snapshot             string
-	drawRows             []ghosttyRowSource
 	defaultBackgroundRGB uint32
 	closed               bool
 	suppressEvent        bool
@@ -231,6 +224,12 @@ type ghosttyKeyEncoder struct {
 
 type ghosttyMouseEncoder struct {
 	encoder C.GhosttyMouseEncoder
+}
+
+type ghosttyScrollbarState struct {
+	total  int
+	offset int
+	length int
 }
 
 func newGhosttyKeyEncoder() (*ghosttyKeyEncoder, error) {
@@ -998,12 +997,6 @@ func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
 			C.size_t(len(data)),
 		)
 		t.drainResponsesLockedRaw()
-
-		if C.ghostty_bridge_terminal_is_alternate_screen(t.term) {
-			t.scrollOffset = 0
-		} else {
-			t.clampScrollLockedRaw()
-		}
 		return struct{}{}
 	})
 	t.invalidateLocked()
@@ -1075,7 +1068,7 @@ func (t *ghosttyTUITerminal) Update(event vaxis.Event) {
 
 	switch event := event.(type) {
 	case vaxis.Key:
-		t.scrollOffset = 0
+		t.scrollViewportBottomLocked()
 		t.writePTYLocked(encodeTUITerminalKeyWithGhostty(
 			event,
 			t.keyEncoder,
@@ -1084,12 +1077,12 @@ func (t *ghosttyTUITerminal) Update(event vaxis.Event) {
 		))
 	case vaxis.PasteStartEvent:
 		if t.getModeLocked(ghosttyModeBracketedPaste, false) {
-			t.scrollOffset = 0
+			t.scrollViewportBottomLocked()
 			t.writePTYLocked("\x1B[200~")
 		}
 	case vaxis.PasteEndEvent:
 		if t.getModeLocked(ghosttyModeBracketedPaste, false) {
-			t.scrollOffset = 0
+			t.scrollViewportBottomLocked()
 			t.writePTYLocked("\x1B[201~")
 		}
 	case vaxis.Mouse:
@@ -1173,32 +1166,29 @@ func (t *ghosttyTUITerminal) handleWheelLocked(button vaxis.MouseButton) bool {
 		return false
 	}
 
-	maxOffset := withGhosttyStderrSuppressed(func() int {
-		return int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
-	})
-	if maxOffset <= 0 && t.scrollOffset == 0 {
+	scrollbar, ok := t.scrollbarLocked()
+	if !ok || scrollbar.total <= scrollbar.length {
 		return false
 	}
 
 	const scrollStep = 3
+	delta := 0
 	switch button {
 	case vaxis.MouseWheelUp:
-		if maxOffset == 0 {
+		if scrollbar.offset <= 0 {
 			return false
 		}
-		t.scrollOffset += scrollStep
-		if t.scrollOffset > maxOffset {
-			t.scrollOffset = maxOffset
-		}
+		delta = -scrollStep
 	case vaxis.MouseWheelDown:
-		t.scrollOffset -= scrollStep
-		if t.scrollOffset < 0 {
-			t.scrollOffset = 0
+		if scrollbar.offset+scrollbar.length >= scrollbar.total {
+			return false
 		}
+		delta = scrollStep
 	default:
 		return false
 	}
 
+	t.scrollViewportDeltaLocked(delta)
 	t.invalidateLocked()
 	return true
 }
@@ -1233,7 +1223,6 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 			if t.pty != nil {
 				_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
 			}
-			t.clampScrollLockedRaw()
 		}
 
 		C.ghostty_bridge_render_state_update(t.term)
@@ -1251,63 +1240,22 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 			}
 		}
 
-		scrollbackLength := int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
-		if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
-			t.scrollOffset = 0
-		} else if t.scrollOffset > scrollbackLength {
-			t.scrollOffset = scrollbackLength
-		}
-
-		rows := make([]ghosttyRowSource, 0, height)
-		totalLines := scrollbackLength + height
-		start := totalLines - height - t.scrollOffset
-		if start < 0 {
-			start = 0
-		}
-
-		scrollbackRowBuffer := make([]C.GhosttyResolvedCell, width)
 		lineTexts := make([]string, 0, height)
 		for visibleRow := 0; visibleRow < height; visibleRow++ {
-			virtualRow := start + visibleRow
-			rowSource := ghosttyRowSource{}
-			var cells []C.GhosttyResolvedCell
-			if virtualRow < scrollbackLength {
-				rowSource = ghosttyRowSource{scrollback: true, index: virtualRow}
-				count := int(C.ghostty_bridge_terminal_get_scrollback_line(
-					t.term,
-					C.int(virtualRow),
-					(*C.GhosttyResolvedCell)(unsafe.Pointer(&scrollbackRowBuffer[0])),
-					C.size_t(len(scrollbackRowBuffer)),
-				))
-				if count < 0 {
-					continue
-				}
-				cells = scrollbackRowBuffer
-			} else {
-				rowSource = ghosttyRowSource{index: virtualRow - scrollbackLength}
-				offset := rowSource.index * width
-				if offset+width > len(viewport) {
-					continue
-				}
-				cells = viewport[offset : offset+width]
+			offset := visibleRow * width
+			if offset+width > len(viewport) {
+				break
 			}
-
-			lineTexts = append(lineTexts, t.drawCellsLocked(win, visibleRow, rowSource, cells))
-			rows = append(rows, rowSource)
+			lineTexts = append(lineTexts, t.drawCellsLocked(win, visibleRow, viewport[offset:offset+width]))
 		}
 
-		t.drawRows = rows
 		t.snapshot = strings.Join(lineTexts, "\n")
 
-		if t.focused && t.scrollOffset == 0 && bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term)) {
+		if t.focused && t.viewportAtBottomLockedRaw() && bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term)) {
 			cursorRow := int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
 			cursorCol := int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
-			for rowIndex, rowSource := range rows {
-				if rowSource.scrollback || rowSource.index != cursorRow {
-					continue
-				}
-				win.ShowCursor(cursorCol, rowIndex, vaxis.CursorBlock)
-				break
+			if cursorRow >= 0 && cursorRow < height && cursorCol >= 0 && cursorCol < width {
+				win.ShowCursor(cursorCol, cursorRow, vaxis.CursorBlock)
 			}
 		}
 
@@ -1319,13 +1267,13 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 	}
 }
 
-func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSource ghosttyRowSource, cells []C.GhosttyResolvedCell) string {
+func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, cells []C.GhosttyResolvedCell) string {
 	var line strings.Builder
 	for col := 0; col < t.cols; col++ {
 		cell := cells[col]
 		style := ghosttyCellStyle(cell, t.defaultBackgroundRGB)
 		if cell.hyperlink_id != 0 {
-			if target, ok := t.hyperlinkAtLocked(rowSource, col); ok {
+			if target, ok := t.hyperlinkAtLocked(row, col); ok {
 				style.Hyperlink = target
 				if style.UnderlineStyle == 0 {
 					style.UnderlineStyle = vaxis.UnderlineSingle
@@ -1333,7 +1281,7 @@ func (t *ghosttyTUITerminal) drawCellsLocked(win vaxis.Window, row int, rowSourc
 			}
 		}
 
-		grapheme := t.graphemeLocked(rowSource, col, cell)
+		grapheme := t.graphemeLocked(row, col, cell)
 		if grapheme == "" {
 			grapheme = " "
 		}
@@ -1414,7 +1362,7 @@ func ghosttyRGB(r, g, b uint8) uint32 {
 	return uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 }
 
-func (t *ghosttyTUITerminal) graphemeLocked(rowSource ghosttyRowSource, col int, cell C.GhosttyResolvedCell) string {
+func (t *ghosttyTUITerminal) graphemeLocked(row int, col int, cell C.GhosttyResolvedCell) string {
 	if cell.grapheme_len == 0 {
 		if cell.codepoint == 0 {
 			return " "
@@ -1423,24 +1371,13 @@ func (t *ghosttyTUITerminal) graphemeLocked(rowSource ghosttyRowSource, col int,
 	}
 
 	codepoints := make([]C.uint32_t, int(cell.grapheme_len)+1)
-	var count int
-	if rowSource.scrollback {
-		count = int(C.ghostty_bridge_terminal_get_scrollback_grapheme(
-			t.term,
-			C.int(rowSource.index),
-			C.int(col),
-			(*C.uint32_t)(unsafe.Pointer(&codepoints[0])),
-			C.size_t(len(codepoints)),
-		))
-	} else {
-		count = int(C.ghostty_bridge_render_state_get_grapheme(
-			t.term,
-			C.int(rowSource.index),
-			C.int(col),
-			(*C.uint32_t)(unsafe.Pointer(&codepoints[0])),
-			C.size_t(len(codepoints)),
-		))
-	}
+	count := int(C.ghostty_bridge_render_state_get_grapheme(
+		t.term,
+		C.int(row),
+		C.int(col),
+		(*C.uint32_t)(unsafe.Pointer(&codepoints[0])),
+		C.size_t(len(codepoints)),
+	))
 	if count <= 0 {
 		if cell.codepoint == 0 {
 			return " "
@@ -1527,11 +1464,11 @@ func (t *ghosttyTUITerminal) HyperlinkAt(col, row int) (string, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if row < 0 || row >= len(t.drawRows) || col < 0 || col >= t.cols || t.term == nil {
+	if row < 0 || row >= t.rows || col < 0 || col >= t.cols || t.term == nil {
 		return "", false
 	}
 	return withGhosttyStderrSuppressed(func() hyperlinkResult {
-		target, ok := t.hyperlinkAtLocked(t.drawRows[row], col)
+		target, ok := t.hyperlinkAtLocked(row, col)
 		return hyperlinkResult{target: target, ok: ok}
 	}).unpack()
 }
@@ -1548,26 +1485,15 @@ func (t *ghosttyTUITerminal) CapturesMouse() bool {
 	})
 }
 
-func (t *ghosttyTUITerminal) hyperlinkAtLocked(rowSource ghosttyRowSource, col int) (string, bool) {
+func (t *ghosttyTUITerminal) hyperlinkAtLocked(row int, col int) (string, bool) {
 	buffer := make([]byte, 2048)
-	var n int
-	if rowSource.scrollback {
-		n = int(C.ghostty_bridge_terminal_get_scrollback_hyperlink_uri(
-			t.term,
-			C.int(rowSource.index),
-			C.int(col),
-			(*C.uint8_t)(unsafe.Pointer(&buffer[0])),
-			C.size_t(len(buffer)),
-		))
-	} else {
-		n = int(C.ghostty_bridge_terminal_get_hyperlink_uri(
-			t.term,
-			C.int(rowSource.index),
-			C.int(col),
-			(*C.uint8_t)(unsafe.Pointer(&buffer[0])),
-			C.size_t(len(buffer)),
-		))
-	}
+	n := int(C.ghostty_bridge_terminal_get_hyperlink_uri(
+		t.term,
+		C.int(row),
+		C.int(col),
+		(*C.uint8_t)(unsafe.Pointer(&buffer[0])),
+		C.size_t(len(buffer)),
+	))
 	if n <= 0 {
 		return "", false
 	}
@@ -1627,25 +1553,72 @@ func (t *ghosttyTUITerminal) getModeLocked(mode int, isANSI bool) bool {
 	})
 }
 
-func (t *ghosttyTUITerminal) clampScrollLocked() {
+func (t *ghosttyTUITerminal) scrollbarLocked() (ghosttyScrollbarState, bool) {
+	if t.term == nil {
+		return ghosttyScrollbarState{}, false
+	}
+	var state ghosttyScrollbarState
+	ok := withGhosttyStderrSuppressed(func() bool {
+		var rawOK bool
+		state, rawOK = t.scrollbarLockedRaw()
+		return rawOK
+	})
+	return state, ok
+}
+
+func (t *ghosttyTUITerminal) viewportAtBottomLocked() bool {
+	return withGhosttyStderrSuppressed(func() bool {
+		return t.viewportAtBottomLockedRaw()
+	})
+}
+
+func (t *ghosttyTUITerminal) scrollbarLockedRaw() (ghosttyScrollbarState, bool) {
+	if t.term == nil {
+		return ghosttyScrollbarState{}, false
+	}
+	var scrollbar C.GhosttyTerminalScrollbar
+	if !bool(C.ghostty_bridge_terminal_get_scrollbar(t.term, &scrollbar)) {
+		return ghosttyScrollbarState{}, false
+	}
+	return ghosttyScrollbarState{
+		total:  int(scrollbar.total),
+		offset: int(scrollbar.offset),
+		length: int(scrollbar.len),
+	}, true
+}
+
+func (t *ghosttyTUITerminal) viewportAtBottomLockedRaw() bool {
+	if t.term == nil {
+		return true
+	}
+	if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
+		return true
+	}
+	scrollbar, ok := t.scrollbarLockedRaw()
+	if !ok || scrollbar.total <= scrollbar.length {
+		return true
+	}
+	return scrollbar.offset+scrollbar.length >= scrollbar.total
+}
+
+func (t *ghosttyTUITerminal) scrollViewportBottomLocked() {
+	if t.term == nil {
+		return
+	}
 	withGhosttyStderrSuppressed(func() struct{} {
-		t.clampScrollLockedRaw()
+		C.ghostty_bridge_terminal_scroll_viewport_bottom(t.term)
 		return struct{}{}
 	})
 }
 
-func (t *ghosttyTUITerminal) clampScrollLockedRaw() {
-	if t.term == nil {
-		t.scrollOffset = 0
+func (t *ghosttyTUITerminal) scrollViewportDeltaLocked(delta int) {
+	if t.term == nil || delta == 0 {
 		return
 	}
-	maxOffset := int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
-	if t.scrollOffset > maxOffset {
-		t.scrollOffset = maxOffset
-	}
-	if t.scrollOffset < 0 {
-		t.scrollOffset = 0
-	}
+	withGhosttyStderrSuppressed(func() struct{} {
+		C.ghostty_bridge_terminal_scroll_viewport_delta(t.term, C.intptr_t(delta))
+		return struct{}{}
+	})
 }
 
 type hyperlinkResult struct {

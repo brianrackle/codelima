@@ -235,30 +235,31 @@ Disadvantages:
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
 
-### 10. Move embedded-terminal viewport scrolling and scrollback ownership into Ghostty
+### 10. Prefer Ghostty terminal effects and callbacks over local response polling
 
 Problem:
 
-- The embedded terminal still keeps a local `scrollOffset` and local scrollback math even though the packaged Ghostty bridge now exposes viewport scrolling APIs.
-- Ghostling treats the terminal viewport as Ghostty-owned state, while CodeLima still duplicates that viewport position locally and then re-derives the visible rows from Ghostty plus the extra offset.
-- That duplication keeps scrollback behavior more fragile than the keyboard and mouse paths, which have already moved closer to Ghostty-owned input encoding.
+- The embedded terminal still polls terminal responses locally even though the packaged Ghostty bridge now exposes richer terminal callback options.
+- Ghostling registers Ghostty callbacks for terminal-driven actions such as title changes, device attributes, size queries, and color-scheme reporting, while CodeLima still drains response bytes through local polling loops.
+- That keeps terminal-side effects further away from Ghostty's ownership boundary than the keyboard, mouse, and viewport paths.
 
 Suggested solution:
 
-- Replace the local `scrollOffset` model with Ghostty viewport scrolling calls and terminal-owned viewport state.
-- Use Ghostty as the source of truth for which slice of history is visible, and keep only presentation and host-side gesture routing in the TUI layer.
-- Preserve existing local behaviors such as copy gestures and focus management above that viewport boundary.
+- Add narrow bridge helpers for the Ghostty terminal callbacks that match the terminal-driven actions CodeLima already supports.
+- Prefer Ghostty callback registration for PTY writes, title changes, device attributes, XT version, size queries, and color-scheme responses where the packaged API supports them.
+- Leave only CodeLima-specific event routing and UI updates in the Go TUI layer.
 
 Advantages:
 
-- Removes duplicated scroll state from Go.
-- Brings scrollback behavior closer to the same ownership boundary Ghostling uses.
-- Reduces the risk of local viewport drift when alternate-screen and scrollback state change.
+- Simplifies terminal response plumbing in Go.
+- Keeps terminal-side behavior closer to Ghostty's own model.
+- Reduces the amount of local polling logic that has to stay in sync with upstream Ghostty behavior.
 
 Disadvantages:
 
-- Requires careful migration of wheel handling, scrollback rendering, and selection lookups to Ghostty-owned viewport APIs.
-- Changes in scroll ownership will need coverage in automated tests and manual QA to avoid regressions in copy, hyperlinks, and local scrollback behavior.
+- Requires compatibility wrappers around several different callback signatures.
+- Some CodeLima-specific behavior may still need local state or event forwarding above the callback layer.
+- The callback migration will need coverage in automated tests and manual QA to avoid regressions in title updates and terminal responses.
 
 ### 11. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
 

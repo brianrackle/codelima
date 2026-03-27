@@ -8,31 +8,19 @@ Ghostty should own terminal semantics, while CodeLima owns TUI layout, focus man
 The keyboard path already moved in that direction.
 The runtime-loaded bridge and packaged Ghostty API surface have now been widened to a Ghostling-era upstream baseline.
 Mouse encoding now follows that same model too.
-The remaining work is mostly about letting Ghostty own more of viewport state, render semantics, and terminal-side effects.
+Viewport scrolling and scrollback ownership now follow that same model too.
+The remaining work is mostly about letting Ghostty own more of render semantics and terminal-side effects.
 
 ## Current Baseline
 
 - Ghostty already owns VT parsing, screen state, cursor state, hyperlink metadata, and terminal mode tracking.
 - CodeLima now uses Ghostty's key encoder for supported keys, with fallback to the legacy Go encoder for unsupported keys or older Ghostty libraries.
 - CodeLima now uses Ghostty's mouse encoder for terminal mouse reporting, with fallback to the legacy Go encoder for unavailable APIs or unsupported mouse events.
+- CodeLima now uses Ghostty's viewport scrolling and scrollbar state as the source of truth for embedded-terminal scrollback position.
 - CodeLima now packages a newer upstream `libghostty-vt` commit and adapts it through a local compatibility bridge instead of the older inline reduced API surface.
 - The Ghostty integration still uses the runtime-loaded `libghostty-vt` bridge rather than direct linking.
 
 ## Remaining Gaps
-
-### 3. Move viewport scrolling and scrollback ownership into Ghostty
-
-CodeLima still keeps a parallel local `scrollOffset` model.
-Ghostling treats viewport state as terminal-owned data.
-
-- Replace local scrollback math with Ghostty viewport scrolling APIs.
-- Use Ghostty as the source of truth for scroll position and visible history.
-- Keep only the TUI presentation and input routing logic locally.
-
-Why it matters:
-
-- Removes duplicated scroll state.
-- Reduces the chance of local scrollback drifting from Ghostty's real terminal state.
 
 ### 4. Improve render semantics for default background and transparency
 
@@ -77,10 +65,9 @@ Why it matters:
 
 ## Recommended Order
 
-1. Move viewport scrolling into Ghostty.
-2. Improve render/background semantics.
-3. Shift more terminal effects to Ghostty callbacks.
-4. Make PTY writes backpressure-aware.
+1. Improve render/background semantics.
+2. Shift more terminal effects to Ghostty callbacks.
+3. Make PTY writes backpressure-aware.
 
 ## Non-Goals
 
@@ -91,4 +78,4 @@ Why it matters:
 ## Related Tracking
 
 - `TODO.md` item 1 tracks the host-terminal background follow-up.
-- `TODO.md` item 10 tracks the next Ghostty follow-up: moving viewport scrolling into Ghostty.
+- `TODO.md` item 10 tracks the next Ghostty follow-up: preferring Ghostty terminal effects and callbacks over local polling.

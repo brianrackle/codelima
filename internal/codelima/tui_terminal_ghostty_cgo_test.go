@@ -264,6 +264,65 @@ func TestGhosttyMouseEncoderFallsBackWithoutEncoder(t *testing.T) {
 	}
 }
 
+func TestGhosttyTerminalWheelScrollUsesGhosttyViewportState(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	var output strings.Builder
+	for i := 0; i < 64; i++ {
+		fmt.Fprintf(&output, "line %02d\n", i)
+	}
+	ghostty.ingestPTY([]byte(output.String()))
+
+	ghostty.mu.Lock()
+	defer ghostty.mu.Unlock()
+
+	initial, ok := ghostty.scrollbarLocked()
+	if !ok {
+		t.Fatal("expected Ghostty scrollbar state")
+	}
+	if initial.total <= initial.length {
+		t.Fatalf("expected scrollback, got total=%d length=%d", initial.total, initial.length)
+	}
+	if !ghostty.viewportAtBottomLocked() {
+		t.Fatal("expected viewport to start at bottom")
+	}
+	if !ghostty.handleWheelLocked(vaxis.MouseWheelUp) {
+		t.Fatal("expected wheel-up to scroll Ghostty viewport")
+	}
+
+	scrolled, ok := ghostty.scrollbarLocked()
+	if !ok {
+		t.Fatal("expected Ghostty scrollbar state after scrolling")
+	}
+	if scrolled.offset >= initial.offset {
+		t.Fatalf("expected viewport offset to move upward, got initial=%d scrolled=%d", initial.offset, scrolled.offset)
+	}
+	if ghostty.viewportAtBottomLocked() {
+		t.Fatal("expected viewport to be away from bottom after scrolling")
+	}
+
+	ghostty.scrollViewportBottomLocked()
+	reset, ok := ghostty.scrollbarLocked()
+	if !ok {
+		t.Fatal("expected Ghostty scrollbar state after resetting viewport")
+	}
+	if !ghostty.viewportAtBottomLocked() {
+		t.Fatal("expected viewport to return to bottom")
+	}
+	if reset.offset+reset.length < reset.total {
+		t.Fatalf("expected bottom-aligned scrollbar state, got offset=%d length=%d total=%d", reset.offset, reset.length, reset.total)
+	}
+}
+
 func TestGhosttyTerminalDoesNotWriteOSCWarningsToStderr(t *testing.T) {
 	ghosttyStderrCaptureMu.Lock()
 	defer ghosttyStderrCaptureMu.Unlock()
