@@ -20,6 +20,133 @@ import (
 
 var ghosttyStderrCaptureMu sync.Mutex
 
+type ghosttyFakePTYWriteStep struct {
+	n   int
+	err error
+}
+
+type ghosttyFakePTYWriteTarget struct {
+	mu     sync.Mutex
+	steps  []ghosttyFakePTYWriteStep
+	output bytes.Buffer
+	closed bool
+}
+
+func (t *ghosttyFakePTYWriteTarget) Write(data []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if len(t.steps) > 0 {
+		step := t.steps[0]
+		t.steps = t.steps[1:]
+		n := step.n
+		if n > len(data) {
+			n = len(data)
+		}
+		if n > 0 {
+			_, _ = t.output.Write(data[:n])
+		}
+		return n, step.err
+	}
+	if t.closed {
+		return 0, os.ErrClosed
+	}
+	_, _ = t.output.Write(data)
+	return len(data), nil
+}
+
+func (t *ghosttyFakePTYWriteTarget) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closed = true
+	return nil
+}
+
+func (t *ghosttyFakePTYWriteTarget) Fd() uintptr {
+	return 0
+}
+
+func (t *ghosttyFakePTYWriteTarget) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.output.String()
+}
+
+func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool, description string) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
+}
+
+func TestGhosttyWriteAllToPTYHandlesPartialWrites(t *testing.T) {
+	t.Parallel()
+
+	target := &ghosttyFakePTYWriteTarget{
+		steps: []ghosttyFakePTYWriteStep{
+			{n: 1},
+			{n: 2},
+		},
+	}
+
+	if err := ghosttyWriteAllToPTY(target, []byte("abc"), nil); err != nil {
+		t.Fatalf("ghosttyWriteAllToPTY() error = %v", err)
+	}
+	if got := target.String(); got != "abc" {
+		t.Fatalf("ghosttyWriteAllToPTY() wrote %q, want %q", got, "abc")
+	}
+}
+
+func TestGhosttyWriteAllToPTYWaitsForTemporaryBackpressure(t *testing.T) {
+	t.Parallel()
+
+	target := &ghosttyFakePTYWriteTarget{
+		steps: []ghosttyFakePTYWriteStep{
+			{n: 0, err: unix.EAGAIN},
+			{n: 3},
+		},
+	}
+
+	waitCalls := 0
+	if err := ghosttyWriteAllToPTY(target, []byte("abc"), func(fd int) error {
+		waitCalls++
+		return nil
+	}); err != nil {
+		t.Fatalf("ghosttyWriteAllToPTY() error = %v", err)
+	}
+	if waitCalls != 1 {
+		t.Fatalf("waitWritable calls = %d, want 1", waitCalls)
+	}
+	if got := target.String(); got != "abc" {
+		t.Fatalf("ghosttyWriteAllToPTY() wrote %q, want %q", got, "abc")
+	}
+}
+
+func TestGhosttyPTYWriterFlushesQueuedWrites(t *testing.T) {
+	t.Parallel()
+
+	target := &ghosttyFakePTYWriteTarget{}
+	writer := newGhosttyPTYWriter(target, func(fd int) error { return nil }, nil)
+	defer writer.Close()
+
+	if !writer.Enqueue([]byte("ab")) {
+		t.Fatal("expected first enqueue to succeed")
+	}
+	if !writer.Enqueue([]byte("cd")) {
+		t.Fatal("expected second enqueue to succeed")
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		return target.String() == "abcd"
+	}, "queued PTY writes to flush")
+}
+
 func TestGhosttyStyleForColorsLeavesDefaultColorsUnset(t *testing.T) {
 	t.Parallel()
 

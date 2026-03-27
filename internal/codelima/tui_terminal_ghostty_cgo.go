@@ -204,6 +204,7 @@ type ghosttyTUITerminal struct {
 	mu               sync.Mutex
 	cmd              *exec.Cmd
 	pty              *os.File
+	ptyWriter        *ghosttyPTYWriter
 	cols             int
 	rows             int
 	focused          bool
@@ -229,6 +230,24 @@ type ghosttyScrollbarState struct {
 	total  int
 	offset int
 	length int
+}
+
+type ghosttyPTYWriteTarget interface {
+	Write([]byte) (int, error)
+	Close() error
+	Fd() uintptr
+}
+
+type ghosttyPTYWriter struct {
+	target       ghosttyPTYWriteTarget
+	waitWritable func(fd int) error
+	onError      func(error)
+
+	mu     sync.Mutex
+	cond   *sync.Cond
+	queue  bytes.Buffer
+	closed bool
+	done   chan struct{}
 }
 
 func newGhosttyKeyEncoder() (*ghosttyKeyEncoder, error) {
@@ -269,6 +288,165 @@ func newGhosttyMouseEncoder() (*ghosttyMouseEncoder, error) {
 	}
 
 	return &ghosttyMouseEncoder{encoder: encoder}, nil
+}
+
+func newGhosttyPTYWriter(target ghosttyPTYWriteTarget, waitWritable func(fd int) error, onError func(error)) *ghosttyPTYWriter {
+	writer := &ghosttyPTYWriter{
+		target:       target,
+		waitWritable: waitWritable,
+		onError:      onError,
+		done:         make(chan struct{}),
+	}
+	writer.cond = sync.NewCond(&writer.mu)
+	go writer.loop()
+	return writer
+}
+
+func (w *ghosttyPTYWriter) Enqueue(data []byte) bool {
+	if w == nil || len(data) == 0 {
+		return false
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return false
+	}
+	_, _ = w.queue.Write(data)
+	w.cond.Signal()
+	return true
+}
+
+func (w *ghosttyPTYWriter) Close() {
+	if w == nil {
+		return
+	}
+
+	w.mu.Lock()
+	alreadyClosed := w.closed
+	w.closed = true
+	w.queue.Reset()
+	w.cond.Broadcast()
+	target := w.target
+	done := w.done
+	w.mu.Unlock()
+
+	if !alreadyClosed && target != nil {
+		_ = target.Close()
+	}
+	<-done
+}
+
+func (w *ghosttyPTYWriter) loop() {
+	defer close(w.done)
+
+	for {
+		chunk, ok := w.nextChunk()
+		if !ok {
+			return
+		}
+		if err := ghosttyWriteAllToPTY(w.target, chunk, w.waitWritable); err != nil {
+			if w.isClosed() || isGhosttyPTYClosedError(err) {
+				return
+			}
+			if w.onError != nil {
+				w.onError(err)
+			}
+			return
+		}
+	}
+}
+
+func (w *ghosttyPTYWriter) nextChunk() ([]byte, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for w.queue.Len() == 0 && !w.closed {
+		w.cond.Wait()
+	}
+	if w.queue.Len() == 0 {
+		return nil, false
+	}
+
+	chunk := append([]byte(nil), w.queue.Bytes()...)
+	w.queue.Reset()
+	return chunk, true
+}
+
+func (w *ghosttyPTYWriter) isClosed() bool {
+	if w == nil {
+		return true
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.closed
+}
+
+func ghosttyWriteAllToPTY(target ghosttyPTYWriteTarget, data []byte, waitWritable func(fd int) error) error {
+	if target == nil || len(data) == 0 {
+		return nil
+	}
+
+	for len(data) > 0 {
+		n, err := target.Write(data)
+		if n > 0 {
+			data = data[n:]
+		}
+		if len(data) == 0 && err == nil {
+			return nil
+		}
+		if err == nil {
+			if n == 0 {
+				if waitWritable == nil {
+					return io.ErrShortWrite
+				}
+				if err := waitWritable(int(target.Fd())); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if isGhosttyPTYWouldBlockError(err) {
+			if waitWritable == nil {
+				continue
+			}
+			if err := waitWritable(int(target.Fd())); err != nil {
+				return err
+			}
+			continue
+		}
+		return err
+	}
+
+	return nil
+}
+
+func waitGhosttyPTYWritable(fd int) error {
+	if fd < 0 {
+		return unix.EBADF
+	}
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}
+	for {
+		_, err := unix.Poll(fds, -1)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err
+	}
+}
+
+func isGhosttyPTYWouldBlockError(err error) bool {
+	return errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK)
+}
+
+func isGhosttyPTYClosedError(err error) bool {
+	return errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, unix.EBADF) ||
+		errors.Is(err, unix.EIO)
 }
 
 func (e *ghosttyMouseEncoder) Close() {
@@ -940,9 +1118,38 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 		return err
 	}
 
+	writeFD, err := unix.Dup(int(ptyFile.Fd()))
+	if err != nil {
+		_ = ptyFile.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		return fmt.Errorf("duplicate ghostty pty write fd: %w", err)
+	}
+	if err := unix.SetNonblock(writeFD, true); err != nil {
+		_ = unix.Close(writeFD)
+		_ = ptyFile.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+		return fmt.Errorf("set ghostty pty write fd nonblocking: %w", err)
+	}
+	ptyWriteFile := os.NewFile(uintptr(writeFD), ptyFile.Name()+"-write")
+	ptyWriter := newGhosttyPTYWriter(ptyWriteFile, waitGhosttyPTYWritable, func(err error) {
+		if t.postEvent != nil {
+			t.postEvent(tuiTerminalErrorEvent{
+				NodeID: t.nodeID,
+				Err:    fmt.Errorf("write embedded terminal pty: %w", err),
+			})
+		}
+	})
+
 	t.mu.Lock()
 	t.cmd = cmd
 	t.pty = ptyFile
+	t.ptyWriter = ptyWriter
 	t.mu.Unlock()
 
 	go t.readLoop()
@@ -1009,7 +1216,7 @@ func (t *ghosttyTUITerminal) drainResponsesLocked() {
 }
 
 func (t *ghosttyTUITerminal) drainResponsesLockedRaw() {
-	if t.pty == nil || t.term == nil {
+	if t.ptyWriter == nil || t.term == nil {
 		return
 	}
 
@@ -1023,7 +1230,7 @@ func (t *ghosttyTUITerminal) drainResponsesLockedRaw() {
 		if n <= 0 {
 			return
 		}
-		_, _ = t.pty.Write(buffer[:n])
+		t.writePTYBytesLocked(buffer[:n])
 	}
 }
 
@@ -1194,10 +1401,17 @@ func (t *ghosttyTUITerminal) handleWheelLocked(button vaxis.MouseButton) bool {
 }
 
 func (t *ghosttyTUITerminal) writePTYLocked(value string) {
-	if value == "" || t.pty == nil {
+	if value == "" {
 		return
 	}
-	_, _ = io.WriteString(t.pty, value)
+	t.writePTYBytesLocked([]byte(value))
+}
+
+func (t *ghosttyTUITerminal) writePTYBytesLocked(data []byte) {
+	if len(data) == 0 || t.ptyWriter == nil {
+		return
+	}
+	t.ptyWriter.Enqueue(data)
 }
 
 func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
@@ -1399,16 +1613,21 @@ func (t *ghosttyTUITerminal) Close() {
 		t.suppressEvent = true
 		t.closed = true
 		ptyFile := t.pty
+		ptyWriter := t.ptyWriter
 		cmd := t.cmd
 		term := t.term
 		keyEncoder := t.keyEncoder
 		mouseEncoder := t.mouseEncoder
 		t.pty = nil
+		t.ptyWriter = nil
 		t.term = nil
 		t.keyEncoder = nil
 		t.mouseEncoder = nil
 		t.mu.Unlock()
 
+		if ptyWriter != nil {
+			ptyWriter.Close()
+		}
 		if ptyFile != nil {
 			_ = ptyFile.Close()
 		}
@@ -1509,15 +1728,24 @@ func (t *ghosttyTUITerminal) finish(err error) {
 	}
 	t.closed = true
 	term := t.term
+	ptyFile := t.pty
+	ptyWriter := t.ptyWriter
 	keyEncoder := t.keyEncoder
 	mouseEncoder := t.mouseEncoder
 	postEvent := !t.suppressEvent
 	t.term = nil
 	t.pty = nil
+	t.ptyWriter = nil
 	t.keyEncoder = nil
 	t.mouseEncoder = nil
 	t.mu.Unlock()
 
+	if ptyWriter != nil {
+		ptyWriter.Close()
+	}
+	if ptyFile != nil {
+		_ = ptyFile.Close()
+	}
 	if term != nil {
 		withGhosttyStderrSuppressed(func() struct{} {
 			C.ghostty_bridge_terminal_free(term)

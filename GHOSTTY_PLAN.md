@@ -11,7 +11,8 @@ Mouse encoding now follows that same model too.
 Viewport scrolling and scrollback ownership now follow that same model too.
 Render-time default-color semantics now follow that same model too.
 Terminal-driven query responses now follow that same model too.
-The remaining work is now focused on terminal transport behavior.
+Terminal transport now follows that same model too.
+The current Ghostling-inspired gap list is complete.
 
 ## Current Baseline
 
@@ -22,27 +23,16 @@ The remaining work is now focused on terminal transport behavior.
 - CodeLima now uses Ghostty's explicit-versus-default cell color semantics instead of inferring terminal defaults by RGB equality.
 - CodeLima now packages a newer upstream `libghostty-vt` commit and adapts it through a local compatibility bridge instead of the older inline reduced API surface.
 - CodeLima now answers color-scheme, XTWINOPS size, device-attributes, and XTVERSION terminal queries through Ghostty callback registration instead of local handcrafted response strings.
+- CodeLima now routes embedded-terminal input and Ghostty-generated PTY responses through a dedicated nonblocking PTY write loop that handles partial writes and temporary backpressure explicitly.
 - The Ghostty integration still uses the runtime-loaded `libghostty-vt` bridge rather than direct linking.
 
 ## Remaining Gaps
 
-### 6. Make PTY writes backpressure-aware
-
-CodeLima still uses the simpler synchronous PTY write path.
-Ghostling handles nonblocking PTY behavior and partial writes more explicitly.
-
-- Make PTY writes resilient to partial-write and temporary-blocking cases.
-- Avoid doing large or repeated writes in a way that can stall the UI path.
-- Keep the implementation narrow and focused on the terminal transport.
-
-Why it matters:
-
-- Reduces the risk of UI stalls under heavy terminal output or input bursts.
-- Makes the embedded terminal path more robust.
+None in the current Ghostling-inspired implementation list.
 
 ## Recommended Order
 
-1. Make PTY writes backpressure-aware.
+The tracked Ghostling-inspired gap list is complete.
 
 ## Non-Goals
 
@@ -53,4 +43,4 @@ Why it matters:
 ## Related Tracking
 
 - `TODO.md` item 1 tracks the narrower host-theme/default-color sync follow-up if Ghostty exposes configurable terminal defaults later.
-- `TODO.md` item 10 tracks the remaining Ghostty follow-up: making PTY writes backpressure-aware.
+- `TODO.md` item 9 tracks the remaining full human `TUI Verification` run on a real terminal session.

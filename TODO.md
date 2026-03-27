@@ -234,33 +234,7 @@ Disadvantages:
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
 
-### 10. Make Ghostty PTY writes backpressure-aware
-
-Problem:
-
-- The embedded terminal now answers supported terminal queries through Ghostty callbacks, but the PTY transport path still uses the simpler synchronous write model.
-- Large or repeated writes still go through direct `io.WriteString` calls on the UI-side code path, and bridge-generated response bytes are still drained synchronously from Go.
-- Ghostling handles PTY backpressure and partial writes more explicitly, which is still the main remaining gap in CodeLima's Ghostty-aligned terminal transport.
-
-Suggested solution:
-
-- Introduce a narrow write queue or nonblocking PTY write loop for the embedded terminal path.
-- Handle partial writes and temporary `EAGAIN`-style backpressure explicitly instead of assuming whole writes succeed immediately.
-- Keep the change focused on transport behavior so terminal semantics continue to stay in Ghostty and UI event routing stays in Go.
-
-Advantages:
-
-- Reduces the risk of UI stalls during heavy terminal traffic.
-- Makes the embedded terminal transport more robust under bursts of input or output.
-- Completes the main remaining Ghostty-versus-Ghostling transport gap without reopening the earlier terminal-semantics work.
-
-Disadvantages:
-
-- Requires careful queueing and lifecycle management around PTY teardown.
-- Adds more state and error handling to a code path that is currently very small.
-- Will need targeted tests plus manual QA to avoid regressions in interactive shell behavior.
-
-### 11. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
+### 10. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
 
 Problem:
 
