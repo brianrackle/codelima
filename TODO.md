@@ -183,33 +183,7 @@ Disadvantages:
 - May reveal other places where stdout/stderr routing is broader than intended.
 - Could require test doubles or refactoring around Lima readiness checks to isolate probe output cleanly.
 
-### 8. Fix the environment-config QA flow where updated config commands do not reach later node bootstrap verification
-
-Problem:
-
-- During the full `QA.md` rerun, the matrix repeatedly stopped in `Environment Config Verification` after `environment update qa-shared --env-command 'pwd >/dev/null'` and a later `node create --project qa-env-b --slug qa-env-b-node`.
-- The failure appears before the TUI-specific checks for the current task and is unrelated to the header/menu copy changes.
-- The likely fault is that the updated reusable environment config is not being reflected in the created node's resolved `bootstrap.json` as the QA flow expects.
-
-Suggested solution:
-
-- Trace the environment-config update and node bootstrap resolution path to confirm whether updated config commands replace the previous command list for future nodes.
-- Add a focused regression that updates a reusable environment config, creates a fresh node from a referencing project, and asserts the new command appears in that node's bootstrap state.
-- Fix either the environment-config persistence path or the project command resolution path so new nodes always receive the latest referenced config commands.
-
-Advantages:
-
-- Restores the documented `QA.md` environment-config verification flow.
-- Improves confidence that reusable configs behave predictably after updates.
-- Prevents stale bootstrap command sets from being baked into newly created nodes.
-
-Disadvantages:
-
-- May require refactoring around config update semantics versus append/replace semantics.
-- Could surface compatibility assumptions in current tests or user workflows.
-- Needs real Lima-backed verification because the issue appears in the full end-to-end flow rather than only unit tests.
-
-### 9. Design and implement a replacement for the removed patch-based file return flow
+### 8. Design and implement a replacement for the removed patch-based file return flow
 
 Problem:
 
@@ -235,7 +209,7 @@ Disadvantages:
 - The final solution may require larger storage and workflow changes than the removed patch surface.
 - Deferring the replacement leaves unused internal patch code in the codebase for now.
 
-### 10. Complete the interactive `TUI Verification` flow from `QA.md` on a real terminal session
+### 9. Complete the interactive `TUI Verification` flow from `QA.md` on a real terminal session
 
 Problem:
 
@@ -260,3 +234,55 @@ Disadvantages:
 - Requires an interactive terminal session plus Lima-backed guest boot support.
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
+
+### 10. Widen the runtime-loaded Ghostty bridge if the current symbol surface blocks newer input and render APIs
+
+Problem:
+
+- The embedded terminal now uses Ghostty's key encoder through the existing `dlopen` bridge, but Ghostling uses a broader Ghostty API surface for keyboard-mode state, mouse encoding, viewport scrolling, and richer render semantics.
+- The current bridge in `internal/codelima/tui_terminal_ghostty_cgo.go` still exposes only a reduced subset of the available Ghostty C API.
+- If newer Ghostty APIs remain unavailable because the runtime-loaded bridge does not surface them, future Ghostty-aligned improvements will stall behind bridge work instead of the TUI behavior itself.
+
+Suggested solution:
+
+- Audit the currently packaged `libghostty-vt` exports against the Ghostling-style APIs we want next.
+- Add optional symbol loading for the needed Ghostty surfaces before considering a packaging-model change.
+- Only revisit direct linking if runtime loading itself, rather than the missing symbol bridge, is what blocks the next useful Ghostty integration step.
+
+Advantages:
+
+- Keeps the current runtime-library discovery and packaging model intact.
+- Makes future Ghostty-backed input and rendering improvements incremental instead of all-or-nothing.
+- Separates "missing bridge surface" from "runtime loading is the wrong architecture".
+
+Disadvantages:
+
+- Increases the size and maintenance burden of the cgo bridge layer.
+- Some newer Ghostty APIs may still need packaging or header updates even after the symbol bridge widens.
+- Optional-symbol compatibility paths add more branches to test.
+
+### 11. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
+
+Problem:
+
+- During manual `QA.md` reruns, `node delete` removed the node from local metadata and then failed with `NotFound: node not found` while the corresponding Lima VM instance was still running.
+- After that partial failure, `node list` showed no node, but `limactl list` still showed the live instance, so cleanup had to be finished manually with `limactl delete -f`.
+- This happened in both the `List Verification` and `Shell Verification` flows, so it appears to be a repeatable service-ordering bug rather than a one-off verification artifact.
+
+Suggested solution:
+
+- Trace the `node delete` service path to confirm whether metadata is being removed before runtime teardown and reconciliation complete.
+- Reorder the delete flow so the runtime instance is stopped and deleted, or a durable cleanup record is kept, before the node metadata becomes unreachable by normal commands.
+- Add a regression test that deletes a running node and asserts both the metadata and the Lima instance are gone afterward.
+
+Advantages:
+
+- Prevents leaked Lima instances after routine node deletion.
+- Keeps `node list`, `node show`, and `limactl list` from diverging after a failed delete.
+- Removes the need for manual `limactl delete -f` cleanup during QA and normal use.
+
+Disadvantages:
+
+- The delete path will need more careful failure handling around partially deleted runtime state.
+- Fixing the ordering may require broader changes in how runtime-backed service mutations reconcile metadata.
+- A durable cleanup record or retry path would add state and complexity to node lifecycle management.

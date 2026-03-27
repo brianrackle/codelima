@@ -41,6 +41,119 @@ func TestGhosttyStyleForColorsPreservesNonDefaultBackground(t *testing.T) {
 	}
 }
 
+func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
+	t.Parallel()
+
+	encoder, err := newGhosttyKeyEncoder()
+	if err != nil {
+		t.Skipf("ghostty key encoder unavailable in this test environment: %v", err)
+	}
+	defer encoder.Close()
+
+	cases := []struct {
+		name                  string
+		key                   vaxis.Key
+		applicationKeypad     bool
+		cursorKeysApplication bool
+		want                  string
+	}{
+		{
+			name: "cursor-normal",
+			key:  vaxis.Key{Keycode: vaxis.KeyUp},
+			want: "\x1b[A",
+		},
+		{
+			name:                  "cursor-application",
+			key:                   vaxis.Key{Keycode: vaxis.KeyUp},
+			cursorKeysApplication: true,
+			want:                  "\x1bOA",
+		},
+		{
+			name: "ctrl-c",
+			key: vaxis.Key{
+				Keycode:        'c',
+				BaseLayoutCode: 'c',
+				Modifiers:      vaxis.ModCtrl,
+			},
+			want: "\x03",
+		},
+		{
+			name: "alt-x",
+			key: vaxis.Key{
+				Keycode:        'x',
+				BaseLayoutCode: 'x',
+				Modifiers:      vaxis.ModAlt,
+			},
+			want: "\x1bx",
+		},
+		{
+			name: "shifted-punctuation",
+			key: vaxis.Key{
+				Text:           ":",
+				Keycode:        ';',
+				ShiftedCode:    ':',
+				BaseLayoutCode: ';',
+				Modifiers:      vaxis.ModShift,
+			},
+			want: ":",
+		},
+		{
+			name: "paste-text",
+			key: vaxis.Key{
+				Text:      "hello",
+				EventType: vaxis.EventPaste,
+			},
+			want: "hello",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := encodeTUITerminalKeyWithGhostty(tc.key, encoder, tc.applicationKeypad, tc.cursorKeysApplication)
+			if got != tc.want {
+				t.Fatalf("encodeTUITerminalKeyWithGhostty() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGhosttyKeyEncoderSuppressesReleaseEvents(t *testing.T) {
+	t.Parallel()
+
+	encoder, err := newGhosttyKeyEncoder()
+	if err != nil {
+		t.Skipf("ghostty key encoder unavailable in this test environment: %v", err)
+	}
+	defer encoder.Close()
+
+	got := encodeTUITerminalKeyWithGhostty(vaxis.Key{
+		Keycode:        'a',
+		BaseLayoutCode: 'a',
+		EventType:      vaxis.EventRelease,
+	}, encoder, false, false)
+	if got != "" {
+		t.Fatalf("release key encoded as %q, want empty sequence", got)
+	}
+}
+
+func TestGhosttyKeyEncoderFallsBackForUnsupportedFunctionKeys(t *testing.T) {
+	t.Parallel()
+
+	encoder, err := newGhosttyKeyEncoder()
+	if err != nil {
+		t.Skipf("ghostty key encoder unavailable in this test environment: %v", err)
+	}
+	defer encoder.Close()
+
+	got := encodeTUITerminalKeyWithGhostty(vaxis.Key{Keycode: vaxis.KeyF26}, encoder, false, false)
+	if got != "\x1B[1;5Q" {
+		t.Fatalf("unsupported Ghostty key should fall back to legacy encoding, got %q", got)
+	}
+}
+
 func TestGhosttyTerminalDoesNotWriteOSCWarningsToStderr(t *testing.T) {
 	ghosttyStderrCaptureMu.Lock()
 	defer ghosttyStderrCaptureMu.Unlock()
