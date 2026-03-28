@@ -21,6 +21,16 @@ type fakeLima struct {
 	cloneStatus  string
 	listCalls    int
 	listErr      error
+	createGate   *fakeLimaGate
+	startGate    *fakeLimaGate
+	stopGate     *fakeLimaGate
+	deleteGate   *fakeLimaGate
+	cloneGate    *fakeLimaGate
+}
+
+type fakeLimaGate struct {
+	entered chan string
+	release chan struct{}
 }
 
 type fakeShellCall struct {
@@ -46,6 +56,25 @@ func newFakeLima() *fakeLima {
 		shellCalls:   []fakeShellCall{},
 		copyCalls:    []fakeCopyCall{},
 		cloneStatus:  "stopped",
+	}
+}
+
+func newFakeLimaGate() *fakeLimaGate {
+	return &fakeLimaGate{
+		entered: make(chan string, 8),
+		release: make(chan struct{}),
+	}
+}
+
+func (g *fakeLimaGate) block(call string) {
+	if g == nil {
+		return
+	}
+	if g.entered != nil {
+		g.entered <- call
+	}
+	if g.release != nil {
+		<-g.release
 	}
 }
 
@@ -90,6 +119,7 @@ func (f *fakeLima) Create(_ context.Context, project Project, node Node, templat
 	if f.createErr != nil {
 		return f.createErr
 	}
+	f.createGate.block(node.LimaInstanceName)
 	f.observations[node.LimaInstanceName] = RuntimeObservation{Name: node.LimaInstanceName, Exists: true, Status: "stopped", Dir: "/fake/" + node.LimaInstanceName}
 	return nil
 }
@@ -105,6 +135,7 @@ func (f *fakeLima) Start(_ context.Context, project Project, node Node) error {
 	for _, command := range commands {
 		f.invocations = append(f.invocations, "start:"+command)
 	}
+	f.startGate.block(node.LimaInstanceName)
 	observation := f.observations[node.LimaInstanceName]
 	observation.Status = "running"
 	observation.Exists = true
@@ -124,6 +155,7 @@ func (f *fakeLima) Stop(_ context.Context, project Project, node Node) error {
 	for _, command := range commands {
 		f.invocations = append(f.invocations, "stop:"+command)
 	}
+	f.stopGate.block(node.LimaInstanceName)
 	observation := f.observations[node.LimaInstanceName]
 	observation.Status = "stopped"
 	observation.Exists = true
@@ -143,6 +175,7 @@ func (f *fakeLima) Delete(_ context.Context, project Project, node Node) error {
 	for _, command := range commands {
 		f.invocations = append(f.invocations, "delete:"+command)
 	}
+	f.deleteGate.block(node.LimaInstanceName)
 	delete(f.observations, node.LimaInstanceName)
 	return nil
 }
@@ -159,6 +192,7 @@ func (f *fakeLima) Clone(_ context.Context, project Project, sourceNode, targetN
 	for _, command := range commands {
 		f.invocations = append(f.invocations, "clone:"+command)
 	}
+	f.cloneGate.block(targetNode.LimaInstanceName)
 	status := f.cloneStatus
 	if strings.TrimSpace(status) == "" {
 		status = "stopped"
@@ -1520,8 +1554,17 @@ func TestInteractiveShellLaunchCommandRepairsGNUSttyBeforeExec(t *testing.T) {
 	if !strings.Contains(got, "uutils coreutils") {
 		t.Fatalf("expected interactive shell command to detect uutils stty, got %q", got)
 	}
-	if !strings.Contains(got, `exec "${SHELL:-/bin/bash}" -l`) {
-		t.Fatalf("expected interactive shell command to exec the user's login shell, got %q", got)
+	if !strings.Contains(got, `"${SHELL:-/bin/bash}" -l`) {
+		t.Fatalf("expected interactive shell command to run the user's login shell, got %q", got)
+	}
+	if !strings.Contains(got, `mktemp "${HOME}/.codelima-inputrc.XXXXXX"`) {
+		t.Fatalf("expected interactive shell command to create a temporary inputrc, got %q", got)
+	}
+	if !strings.Contains(got, `"\e[27;2;13~": "\C-v\C-j"`) {
+		t.Fatalf("expected interactive shell command to bind modifyOtherKeys shift-enter, got %q", got)
+	}
+	if !strings.Contains(got, `"\e[13;2u": "\C-v\C-j"`) {
+		t.Fatalf("expected interactive shell command to bind CSI-u shift-enter, got %q", got)
 	}
 }
 

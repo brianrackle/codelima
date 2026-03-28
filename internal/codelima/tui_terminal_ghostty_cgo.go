@@ -464,12 +464,18 @@ func (e *ghosttyMouseEncoder) Reset() {
 	C.ghostty_bridge_mouse_encoder_reset(e.encoder)
 }
 
-func encodeTUITerminalKeyWithGhostty(key vaxis.Key, encoder *ghosttyKeyEncoder, applicationKeypad bool, cursorKeysApplication bool) string {
+func encodeTUITerminalKeyWithGhostty(
+	key vaxis.Key,
+	encoder *ghosttyKeyEncoder,
+	term C.GhosttyBridgeTerminal,
+	applicationKeypad bool,
+	cursorKeysApplication bool,
+) string {
 	if key.EventType == vaxis.EventPaste {
 		return key.Text
 	}
 	if encoder != nil {
-		if encoded, handled := encoder.Encode(key, applicationKeypad, cursorKeysApplication); handled {
+		if encoded, handled := encoder.Encode(key, term, applicationKeypad, cursorKeysApplication); handled {
 			return encoded
 		}
 	}
@@ -497,7 +503,12 @@ func encodeTUITerminalMouseWithGhostty(
 	return encodeTUITerminalMouse(mouse, sgr, drag, motion)
 }
 
-func (e *ghosttyKeyEncoder) Encode(key vaxis.Key, applicationKeypad bool, cursorKeysApplication bool) (string, bool) {
+func (e *ghosttyKeyEncoder) Encode(
+	key vaxis.Key,
+	term C.GhosttyBridgeTerminal,
+	applicationKeypad bool,
+	cursorKeysApplication bool,
+) (string, bool) {
 	if e == nil || e.encoder == nil {
 		return "", false
 	}
@@ -517,14 +528,16 @@ func (e *ghosttyKeyEncoder) Encode(key vaxis.Key, applicationKeypad bool, cursor
 		return "", false
 	}
 
-	cursor := C.bool(cursorKeysApplication)
-	C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION, cursor)
-	keypad := C.bool(applicationKeypad)
-	C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION, keypad)
-	altEscPrefix := C.bool(true)
-	C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX, altEscPrefix)
-	modifyOtherKeysState2 := C.bool(false)
-	C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2, modifyOtherKeysState2)
+	if !bool(C.ghostty_bridge_key_encoder_setopt_from_terminal(e.encoder, term)) {
+		cursor := C.bool(cursorKeysApplication)
+		C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_CURSOR_KEY_APPLICATION, cursor)
+		keypad := C.bool(applicationKeypad)
+		C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_KEYPAD_KEY_APPLICATION, keypad)
+		altEscPrefix := C.bool(true)
+		C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_ALT_ESC_PREFIX, altEscPrefix)
+		modifyOtherKeysState2 := C.bool(false)
+		C.ghostty_bridge_key_encoder_setopt_bool(e.encoder, C.GHOSTTY_KEY_ENCODER_OPT_MODIFY_OTHER_KEYS_STATE_2, modifyOtherKeysState2)
+	}
 
 	text := ghosttyTextForVaxis(key)
 	var textPtr *C.char
@@ -1267,6 +1280,7 @@ func (t *ghosttyTUITerminal) Update(event vaxis.Event) {
 		t.writePTYLocked(encodeTUITerminalKeyWithGhostty(
 			event,
 			t.keyEncoder,
+			t.term,
 			t.getModeLocked(ghosttyModeApplicationKeypad, false),
 			t.getModeLocked(ghosttyModeCursorKeys, false),
 		))

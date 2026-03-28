@@ -81,6 +81,7 @@ bool ghostty_bridge_has_render_row_cells_api(void);
 GhosttyResult ghostty_bridge_key_encoder_new(GhosttyKeyEncoder* encoder);
 void ghostty_bridge_key_encoder_free(GhosttyKeyEncoder encoder);
 void ghostty_bridge_key_encoder_setopt_bool(GhosttyKeyEncoder encoder, GhosttyKeyEncoderOption option, bool value);
+bool ghostty_bridge_key_encoder_setopt_from_terminal(GhosttyKeyEncoder encoder, GhosttyBridgeTerminal term);
 GhosttyResult ghostty_bridge_key_encoder_encode_event(
 	GhosttyKeyEncoder encoder,
 	GhosttyKeyAction action,

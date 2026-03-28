@@ -1,7 +1,6 @@
 package codelima
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -61,30 +60,21 @@ func TestScreenBufferHyperlinkAtReturnsCellHyperlink(t *testing.T) {
 	}
 }
 
-func TestExtractTerminalSelectionAcrossLines(t *testing.T) {
-	t.Parallel()
-
-	selection := tuiTerminalSelection{
-		start: tuiPoint{col: 1, row: 0},
-		end:   tuiPoint{col: 2, row: 1},
-	}
-	text := extractTerminalSelection("abc   \ndef   \nxyz   ", selection)
-	if text != "bc\ndef" {
-		t.Fatalf("expected multi-line selection, got %q", text)
-	}
-}
-
 func TestTUIProgressWriterFlushesPendingLine(t *testing.T) {
 	t.Parallel()
 
+	const operationID = "op-start-node"
 	lines := []string{}
 	writer := newTUIProgressWriter(func(event vaxis.Event) {
 		progress, ok := event.(tuiOperationProgressEvent)
 		if !ok {
 			t.Fatalf("unexpected event type %T", event)
 		}
+		if progress.OperationID != operationID {
+			t.Fatalf("unexpected operation id %q", progress.OperationID)
+		}
 		lines = append(lines, progress.Line)
-	})
+	}, operationID)
 
 	if _, err := writer.Write([]byte("line one\nline two")); err != nil {
 		t.Fatalf("Write() error = %v", err)
@@ -93,33 +83,5 @@ func TestTUIProgressWriterFlushesPendingLine(t *testing.T) {
 
 	if strings.Join(lines, "|") != "line one|line two" {
 		t.Fatalf("unexpected progress lines: %v", lines)
-	}
-}
-
-func TestCopyTextToClipboardWithFallsBackToTerminalClipboard(t *testing.T) {
-	t.Parallel()
-
-	pushed := ""
-	err := copyTextToClipboardWith("copied text", func(text string) {
-		pushed = text
-	}, func(string) error {
-		return errors.New("native clipboard unavailable")
-	})
-	if err != nil {
-		t.Fatalf("copyTextToClipboardWith() error = %v", err)
-	}
-	if pushed != "copied text" {
-		t.Fatalf("expected terminal clipboard fallback, got %q", pushed)
-	}
-}
-
-func TestCopyTextToClipboardWithReturnsNativeErrorWithoutFallback(t *testing.T) {
-	t.Parallel()
-
-	err := copyTextToClipboardWith("copied text", nil, func(string) error {
-		return errors.New("native clipboard unavailable")
-	})
-	if err == nil {
-		t.Fatalf("expected native clipboard error without terminal fallback")
 	}
 }

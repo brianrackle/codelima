@@ -359,16 +359,6 @@ func TestTUIDrawTransientRightPaneContentUsesSplitLayout(t *testing.T) {
 				)
 			},
 		},
-		{
-			name:  "operation",
-			title: "Starting root-node",
-			configure: func(app *vaxisTUIApp) {
-				app.operation = &tuiOperationState{
-					Title: "Starting root-node",
-					Lines: []string{"waiting for command output..."},
-				}
-			},
-		},
 	}
 
 	for _, tc := range cases {
@@ -411,6 +401,54 @@ func TestTUIDrawTransientRightPaneContentUsesSplitLayout(t *testing.T) {
 				t.Fatalf("expected %s to keep the tree visible, got:\n%s", tc.name, rendered)
 			}
 		})
+	}
+}
+
+func TestTUIDrawBackgroundOperationKeepsSelectedNodeInPrimaryPane(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(testTUITreeWithCreatedNode(t), sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	vx := newRenderTestVaxis(t, 100, 24)
+	defer vx.Close()
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		vx:       vx,
+		operations: map[string]*tuiOperationState{
+			"op-node-start": {
+				ID:            "op-node-start",
+				Title:         "Starting created-node",
+				DisplayStatus: "starting",
+				EntryKeys:     []string{"node:node-created"},
+				ResourceKeys:  []string{"node:node-created"},
+				Lines:         []string{"waiting for command output..."},
+			},
+		},
+		operationOrder: []string{"op-node-start"},
+	}
+	selectTUIEntry(t, app, "node:node-created")
+
+	app.draw()
+
+	rendered := renderedScreenText(t, vx, 100, 24)
+	if !strings.Contains(rendered, "created-node  STARTING") {
+		t.Fatalf("expected tree to render the background operation status, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Status: starting") {
+		t.Fatalf("expected details pane to render the background operation status, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Background tasks") || !strings.Contains(rendered, "Starting created-node") {
+		t.Fatalf("expected details pane to summarize the background task, got:\n%s", rendered)
 	}
 }
 
@@ -1313,7 +1351,7 @@ func TestTUIMouseReleaseOpensTerminalHyperlinkWithoutDrag(t *testing.T) {
 	}
 }
 
-func TestTUIMouseDragCopiesTerminalSelectionWithoutShift(t *testing.T) {
+func TestTUIMouseDragDoesNotOpenTerminalHyperlinkWithoutGuestCapture(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1325,13 +1363,15 @@ func TestTUIMouseDragCopiesTerminalSelectionWithoutShift(t *testing.T) {
 	}
 
 	terminal := newFakeTUITerminal()
-	terminal.snapshot = "pwd\n/workspace/demo\n"
 
-	var copied string
+	opened := ""
 	app := &vaxisTUIApp{
-		ctx:              ctx,
-		service:          service,
-		copySelection:    func(text string) error { copied = text; return nil },
+		ctx:      ctx,
+		service:  service,
+		openLink: func(target string) error { opened = target; return nil },
+		screenHyperlinkAt: func(col, row int) (string, bool) {
+			return "https://example.com/drag", col >= 11 && col <= 14 && row == 6
+		},
 		state:            state,
 		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
@@ -1366,14 +1406,17 @@ func TestTUIMouseDragCopiesTerminalSelectionWithoutShift(t *testing.T) {
 		t.Fatalf("handleMouse(selection release) error = %v", err)
 	}
 
-	if copied != "work" {
-		t.Fatalf("expected copied selection, got %q", copied)
+	if opened != "" {
+		t.Fatalf("expected drag to avoid opening a terminal hyperlink, got %q", opened)
 	}
-	if app.status != "copied 4 bytes from root-node" {
-		t.Fatalf("expected copy status, got %q", app.status)
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected drag without guest mouse capture to keep tree focus, got %q", app.state.focus)
 	}
 	if len(terminal.events) != 0 {
-		t.Fatalf("expected local selection to avoid forwarding mouse events, got %d events", len(terminal.events))
+		t.Fatalf("expected drag without guest mouse capture to avoid forwarding mouse events, got %d events", len(terminal.events))
+	}
+	if app.terminalMouse != nil {
+		t.Fatalf("expected terminal mouse gesture to clear after release")
 	}
 }
 
@@ -1390,13 +1433,10 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 
 	terminal := newFakeTUITerminal()
 	terminal.capturesMouse = true
-	terminal.snapshot = "pwd\n/workspace/demo\n"
 
-	var copied string
 	app := &vaxisTUIApp{
 		ctx:              ctx,
 		service:          service,
-		copySelection:    func(text string) error { copied = text; return nil },
 		state:            state,
 		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
@@ -1417,9 +1457,6 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 		}
 	}
 
-	if copied != "" {
-		t.Fatalf("expected mouse-capturing terminal to skip local copy, got %q", copied)
-	}
 	if len(terminal.events) != 3 {
 		t.Fatalf("expected guest mouse forwarding, got %d events", len(terminal.events))
 	}
@@ -1428,7 +1465,7 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 	}
 }
 
-func TestTUIShiftDragCopiesTerminalSelectionWhenTerminalCapturesMouse(t *testing.T) {
+func TestTUIShiftDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1441,13 +1478,10 @@ func TestTUIShiftDragCopiesTerminalSelectionWhenTerminalCapturesMouse(t *testing
 
 	terminal := newFakeTUITerminal()
 	terminal.capturesMouse = true
-	terminal.snapshot = "pwd\n/workspace/demo\n"
 
-	var copied string
 	app := &vaxisTUIApp{
 		ctx:              ctx,
 		service:          service,
-		copySelection:    func(text string) error { copied = text; return nil },
 		state:            state,
 		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
@@ -1468,52 +1502,8 @@ func TestTUIShiftDragCopiesTerminalSelectionWhenTerminalCapturesMouse(t *testing
 		}
 	}
 
-	if copied != "wor" {
-		t.Fatalf("expected shift-drag to force local copy, got %q", copied)
-	}
-	if len(terminal.events) != 0 {
-		t.Fatalf("expected shift-drag selection to avoid guest mouse forwarding, got %d events", len(terminal.events))
-	}
-}
-
-func TestTUIShiftDragCopiesTerminalSelection(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, _ := newTestService(t)
-	state, err := newTUIState(testTUITree(t), newFakeTUISessionManager())
-	if err != nil {
-		t.Fatalf("newTUIState() error = %v", err)
-	}
-
-	var copied string
-	app := &vaxisTUIApp{
-		ctx:           ctx,
-		service:       service,
-		copySelection: func(text string) error { copied = text; return nil },
-		state:         state,
-		sessions:      newTUISessionStore(ctx, service, func(vaxis.Event) {}),
-	}
-
-	app.handleTerminalSelection("node-root", "root-node", "pwd\n/workspace/demo\n", vaxis.Mouse{
-		Col:       1,
-		Row:       1,
-		EventType: vaxis.EventPress,
-	})
-	app.handleTerminalSelection("node-root", "root-node", "pwd\n/workspace/demo\n", vaxis.Mouse{
-		Col:       4,
-		Row:       1,
-		EventType: vaxis.EventRelease,
-	})
-
-	if copied != "work" {
-		t.Fatalf("expected copied selection, got %q", copied)
-	}
-	if app.status != "copied 4 bytes from root-node" {
-		t.Fatalf("expected copy status, got %q", app.status)
-	}
-	if app.selection != nil {
-		t.Fatalf("expected selection to clear after release")
+	if len(terminal.events) != 3 {
+		t.Fatalf("expected shift-drag to reach the guest when it captures mouse, got %d events", len(terminal.events))
 	}
 }
 
@@ -1617,11 +1607,14 @@ func TestTUITerminalClosedEventIsHandledWhileOperationActive(t *testing.T) {
 	}
 
 	app := &vaxisTUIApp{
-		ctx:       ctx,
-		service:   service,
-		state:     state,
-		sessions:  sessions,
-		operation: &tuiOperationState{Title: "Cloning " + node.Slug},
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: sessions,
+		operations: map[string]*tuiOperationState{
+			"op-clone": {ID: "op-clone", Title: "Cloning " + node.Slug, ResourceKeys: []string{"node:" + node.ID}},
+		},
+		operationOrder: []string{"op-clone"},
 	}
 
 	quit, err := app.handleEvent(tuiTerminalClosedEvent{NodeID: node.ID})
@@ -1666,11 +1659,14 @@ func TestTUISourceNodeSessionIsRecreatedAfterCloneClosesIt(t *testing.T) {
 	}
 
 	app := &vaxisTUIApp{
-		ctx:       ctx,
-		service:   service,
-		state:     state,
-		sessions:  sessions,
-		operation: &tuiOperationState{Title: "Cloning " + rootNode.Slug},
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: sessions,
+		operations: map[string]*tuiOperationState{
+			"op-clone": {ID: "op-clone", Title: "Cloning " + rootNode.Slug, ResourceKeys: []string{"node:" + rootNode.ID}},
+		},
+		operationOrder: []string{"op-clone"},
 	}
 
 	quit, err := app.handleEvent(tuiTerminalClosedEvent{NodeID: rootNode.ID})
@@ -2537,6 +2533,166 @@ func TestTUINodeCloneLeavesProviderStartedCloneStoppedUntilExplicitStart(t *test
 	}
 }
 
+func TestTUIBackgroundNodeOperationDoesNotBlockNavigationOrTerminalFocus(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+
+	rootNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+	childNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "child-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(child-node) error = %v", err)
+	}
+	if _, err := service.NodeStart(ctx, childNode.ID); err != nil {
+		t.Fatalf("NodeStart(child-node) error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	startGate := newFakeLimaGate()
+	fake.startGate = startGate
+
+	app, events := newAsyncTestTUIApp(t, ctx, service)
+	selectTUIEntry(t, app, "node:"+rootNode.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeStart}); err != nil {
+		t.Fatalf("performAction(start root-node) error = %v", err)
+	}
+	awaitFakeLimaGate(t, startGate, rootNode.LimaInstanceName)
+
+	if _, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyUp}); err != nil {
+		t.Fatalf("handleKey(Up) error = %v", err)
+	}
+	if got := app.state.selectedEntry().node.ID; got != childNode.ID {
+		t.Fatalf("expected selection to move to child-node, got %q", got)
+	}
+
+	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
+	if err != nil {
+		t.Fatalf("handleKey(Alt+`) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Alt+` to keep the app running")
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected terminal focus while background work is active, got %q", app.state.focus)
+	}
+
+	drainAsyncTUIEvents(t, app, events)
+	close(startGate.release)
+	awaitAsyncTUIState(t, app, events, func() bool {
+		return len(app.operations) == 0
+	}, "background start operation to finish")
+	if got := app.state.selectedEntry().node.ID; got != childNode.ID {
+		t.Fatalf("expected selection to stay on child-node after background completion, got %q", got)
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected terminal focus to stay on child-node after background completion, got %q", app.state.focus)
+	}
+
+	startedNode, err := service.NodeShow(ctx, rootNode.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(root-node) error = %v", err)
+	}
+	if startedNode.Status != NodeStatusRunning {
+		t.Fatalf("expected root-node to finish running, got %q", startedNode.Status)
+	}
+}
+
+func TestTUIBackgroundOperationsAllowNonConflictingActionsAndRejectConflicts(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+
+	rootNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+	childNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "child-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(child-node) error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	startGate := newFakeLimaGate()
+	fake.startGate = startGate
+
+	app, events := newAsyncTestTUIApp(t, ctx, service)
+	selectTUIEntry(t, app, "node:"+rootNode.ID)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeStart}); err != nil {
+		t.Fatalf("performAction(start root-node) error = %v", err)
+	}
+	awaitFakeLimaGate(t, startGate, rootNode.LimaInstanceName)
+
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeDelete}); err == nil {
+		t.Fatalf("expected conflicting delete to be rejected while start is active")
+	}
+
+	selectTUIEntry(t, app, "node:"+childNode.ID)
+	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeStart}); err != nil {
+		t.Fatalf("performAction(start child-node) error = %v", err)
+	}
+	if len(app.operations) != 2 {
+		t.Fatalf("expected two background operations, got %d", len(app.operations))
+	}
+
+	drainAsyncTUIEvents(t, app, events)
+	close(startGate.release)
+	awaitAsyncTUIState(t, app, events, func() bool {
+		return len(app.operations) == 0
+	}, "background start operations to finish")
+
+	rootNode, err = service.NodeShow(ctx, rootNode.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(root-node) error = %v", err)
+	}
+	if rootNode.Status != NodeStatusRunning {
+		t.Fatalf("expected root-node to be running, got %q", rootNode.Status)
+	}
+	childNode, err = service.NodeShow(ctx, childNode.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(child-node) error = %v", err)
+	}
+	if childNode.Status != NodeStatusRunning {
+		t.Fatalf("expected child-node to be running, got %q", childNode.Status)
+	}
+}
+
 func testTUITree(t *testing.T) []ProjectTreeNode {
 	t.Helper()
 
@@ -2652,6 +2808,35 @@ func newTestTUIApp(t *testing.T, ctx context.Context, service *Service, sessions
 	return app
 }
 
+func newAsyncTestTUIApp(t *testing.T, ctx context.Context, service *Service) (*vaxisTUIApp, chan vaxis.Event) {
+	t.Helper()
+
+	events := make(chan vaxis.Event, 64)
+	postEvent := func(event vaxis.Event) {
+		events <- event
+	}
+	sessions := newTUISessionStore(ctx, service, postEvent)
+	tree, err := service.ProjectTree("", false)
+	if err != nil {
+		t.Fatalf("ProjectTree() error = %v", err)
+	}
+	state, err := newTUIState(tree, newSharedFakeTUISessionManager(sessions))
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:        ctx,
+		service:    service,
+		state:      state,
+		sessions:   sessions,
+		postEvent:  postEvent,
+		operations: map[string]*tuiOperationState{},
+	}
+
+	return app, events
+}
+
 func selectTUIEntry(t *testing.T, app *vaxisTUIApp, key string) {
 	t.Helper()
 
@@ -2698,6 +2883,62 @@ func chooseTUIMenuEntry(t *testing.T, app *vaxisTUIApp, label string) {
 	}
 
 	t.Fatalf("expected menu entry %q", label)
+}
+
+func awaitFakeLimaGate(t *testing.T, gate *fakeLimaGate, want string) {
+	t.Helper()
+
+	select {
+	case got := <-gate.entered:
+		if got != want {
+			t.Fatalf("expected fake lima gate for %q, got %q", want, got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for fake lima gate %q", want)
+	}
+}
+
+func drainAsyncTUIEvents(t *testing.T, app *vaxisTUIApp, events <-chan vaxis.Event) {
+	t.Helper()
+
+	for {
+		select {
+		case event := <-events:
+			quit, err := app.handleEvent(event)
+			if err != nil {
+				t.Fatalf("handleEvent(async) error = %v", err)
+			}
+			if quit {
+				t.Fatalf("expected async event handling to keep the app running")
+			}
+		default:
+			return
+		}
+	}
+}
+
+func awaitAsyncTUIState(t *testing.T, app *vaxisTUIApp, events <-chan vaxis.Event, condition func() bool, description string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		drainAsyncTUIEvents(t, app, events)
+		if condition() {
+			return
+		}
+		select {
+		case event := <-events:
+			quit, err := app.handleEvent(event)
+			if err != nil {
+				t.Fatalf("handleEvent(async wait) error = %v", err)
+			}
+			if quit {
+				t.Fatalf("expected async wait for %s to keep the app running", description)
+			}
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatalf("timed out waiting for %s", description)
 }
 
 func chooseTUISelector(t *testing.T, app *vaxisTUIApp, values ...string) {

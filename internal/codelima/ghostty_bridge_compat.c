@@ -1087,6 +1087,14 @@ void ghostty_bridge_key_encoder_setopt_bool(GhosttyKeyEncoder encoder, GhosttyKe
 	ghostty.key_encoder_setopt(encoder, option, &value);
 }
 
+bool ghostty_bridge_key_encoder_setopt_from_terminal(GhosttyKeyEncoder encoder, GhosttyBridgeTerminal term) {
+	if (ghostty.key_encoder_setopt_from_terminal == NULL || encoder == NULL || term == NULL) {
+		return false;
+	}
+	ghostty.key_encoder_setopt_from_terminal(encoder, term->terminal);
+	return true;
+}
+
 GhosttyResult ghostty_bridge_key_encoder_encode_event(
 	GhosttyKeyEncoder encoder,
 	GhosttyKeyAction action,

@@ -463,7 +463,7 @@ Run the TUI:
 
 Inside the TUI verify:
 
-- the left pane renders the available projects and nodes, and the right pane renders either node details, one visible terminal, or the currently active form/menu/selector/progress view
+- the left pane renders the available projects and nodes, and the right pane renders either node details, one visible terminal, or the currently active form/menu/selector view
 - no centered modal overlays appear; transient interactions replace the right pane while the tree remains visible
 - press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately in the right pane, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
 - press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm the dialog and selector both use the right pane without a long frozen pause
@@ -476,18 +476,20 @@ Inside the TUI verify:
 - with `qa-tui-b` selected, confirm the right pane shows `Workspace mode: mounted`
 - with `qa-tui-b` selected, confirm the right pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
-- when node create, start, stop, clone, or delete is in progress, confirm the TUI shows streamed Lima or guest-command output instead of freezing on a blank status line
+- when project or node create, start, stop, clone, or delete is in progress, confirm the TUI keeps accepting non-conflicting input instead of freezing on a blank status line
+- while a long-running project or node mutation is in progress, confirm the selected entry shows a transient task state such as `starting`, `stopping`, `creating`, or `deleting` in the tree or details pane, and that the footer shows background work is still running
 - selecting `qa-tui-a` opens its shell session automatically
 - with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` or `F6` shell focus
 - `Alt-\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
 - use `Alt-\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
 - press `Alt-\`` or `F6` again to return to the tree and confirm the split layout is restored
 - select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
+- while `qa-tui-b` is still starting or stopping, move back to `qa-tui-a`, focus its terminal, and confirm the other node terminal remains usable while the background task completes
 - in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
-- drag over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
+- use your terminal emulator's host-selection bypass gesture over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
 - with the `qa-tui-b` terminal focused and the guest at a normal shell prompt, spin the mouse wheel up and down and confirm local scrollback moves without freezing the app
 - return to the tree, select `qa-tui-a` again, and confirm the partially typed `echo pending-a` input is still present
-- in a focused node terminal, start an app that captures the mouse such as `vim`, then confirm `Shift`-drag still performs a local text copy instead of sending the drag to the guest
+- in a focused node terminal, start an app that captures the mouse such as `vim` or `htop`, confirm plain mouse input reaches the guest app, then use your terminal emulator's host-selection bypass gesture and confirm you can still copy visible terminal text
 - select `qa-tui-b`, press `s`, and confirm the node stops while remaining selectable in the tree
 - with `qa-tui-b` selected, press `c`, clone it into node `qa-tui-b-clone`, then confirm the cloned node appears under project `qa-tui-root`
 - click a visible workspace path in the right pane and confirm the host opens that path or dispatches it to the default `file://` handler

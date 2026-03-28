@@ -1,8 +1,8 @@
 package codelima
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"net/url"
 	"os/exec"
 	"path/filepath"
@@ -20,21 +20,14 @@ type tuiLinkRegion struct {
 	target string
 }
 
-type tuiPoint struct {
-	col int
-	row int
-}
-
-type tuiTerminalSelection struct {
-	nodeID  string
-	start   tuiPoint
-	end     tuiPoint
-	dragged bool
-}
-
 type tuiOperationState struct {
-	Title string
-	Lines []string
+	ID            string
+	Title         string
+	DisplayStatus string
+	SelectionKey  string
+	EntryKeys     []string
+	ResourceKeys  []string
+	Lines         []string
 }
 
 type tuiOperationResult struct {
@@ -44,23 +37,34 @@ type tuiOperationResult struct {
 	ReloadData   bool
 }
 
+type tuiOperationRequest struct {
+	Title         string
+	DisplayStatus string
+	ResourceKeys  []string
+	EntryKeys     []string
+	Run           func(context.Context, *Service) (tuiOperationResult, error)
+}
+
 type tuiOperationProgressEvent struct {
-	Line string
+	OperationID string
+	Line        string
 }
 
 type tuiOperationCompleteEvent struct {
-	Result tuiOperationResult
-	Err    error
+	OperationID string
+	Result      tuiOperationResult
+	Err         error
 }
 
 type tuiProgressWriter struct {
-	post    func(vaxis.Event)
-	mu      sync.Mutex
-	pending string
+	post        func(vaxis.Event)
+	operationID string
+	mu          sync.Mutex
+	pending     string
 }
 
-func newTUIProgressWriter(post func(vaxis.Event)) *tuiProgressWriter {
-	return &tuiProgressWriter{post: post}
+func newTUIProgressWriter(post func(vaxis.Event), operationID string) *tuiProgressWriter {
+	return &tuiProgressWriter{post: post, operationID: operationID}
 }
 
 func (w *tuiProgressWriter) Write(p []byte) (int, error) {
@@ -78,7 +82,7 @@ func (w *tuiProgressWriter) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		w.post(tuiOperationProgressEvent{Line: line})
+		w.post(tuiOperationProgressEvent{OperationID: w.operationID, Line: line})
 	}
 
 	return len(p), nil
@@ -93,7 +97,7 @@ func (w *tuiProgressWriter) Flush() {
 	if line == "" {
 		return
 	}
-	w.post(tuiOperationProgressEvent{Line: line})
+	w.post(tuiOperationProgressEvent{OperationID: w.operationID, Line: line})
 }
 
 var tuiLinkPattern = regexp.MustCompile(`https?://[^\s]+|/[^\s]+`)
@@ -226,71 +230,6 @@ func openHyperlink(target string) error {
 	return nil
 }
 
-func copyTextToClipboard(text string, push func(string)) error {
-	return copyTextToClipboardWith(text, push, writeSystemClipboard)
-}
-
-func copyTextToClipboardWith(text string, push func(string), nativeCopy func(string) error) error {
-	if push != nil {
-		push(text)
-	}
-	if nativeCopy == nil {
-		return nil
-	}
-	if err := nativeCopy(text); err != nil && push == nil {
-		return err
-	}
-	return nil
-}
-
-func writeSystemClipboard(text string) error {
-	command, err := clipboardCommand()
-	if err != nil {
-		return err
-	}
-
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("clipboard stdin: %w", err)
-	}
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		return fmt.Errorf("start clipboard command: %w", err)
-	}
-	if _, err := io.WriteString(stdin, text); err != nil {
-		_ = stdin.Close()
-		return fmt.Errorf("write clipboard text: %w", err)
-	}
-	if err := stdin.Close(); err != nil {
-		return fmt.Errorf("close clipboard stdin: %w", err)
-	}
-	if err := command.Wait(); err != nil {
-		return fmt.Errorf("copy clipboard text: %w", err)
-	}
-	return nil
-}
-
-func clipboardCommand() (*exec.Cmd, error) {
-	switch runtime.GOOS {
-	case "darwin":
-		return exec.Command("pbcopy"), nil
-	case "windows":
-		return exec.Command("cmd", "/c", "clip"), nil
-	default:
-		for _, candidate := range [][]string{
-			{"wl-copy"},
-			{"xclip", "-selection", "clipboard"},
-			{"xsel", "--clipboard", "--input"},
-		} {
-			if _, err := exec.LookPath(candidate[0]); err != nil {
-				continue
-			}
-			return exec.Command(candidate[0], candidate[1:]...), nil
-		}
-		return nil, fmt.Errorf("no clipboard command available")
-	}
-}
-
 func renderedTextWidth(vx *vaxis.Vaxis, text string) int {
 	if vx != nil {
 		return vx.RenderedWidth(text)
@@ -305,58 +244,4 @@ func renderedTextWidth(vx *vaxis.Vaxis, text string) int {
 		width++
 	}
 	return width
-}
-
-func normalizedSelection(selection tuiTerminalSelection) (tuiPoint, tuiPoint) {
-	start := selection.start
-	end := selection.end
-	if end.row < start.row || (end.row == start.row && end.col < start.col) {
-		start, end = end, start
-	}
-	return start, end
-}
-
-func extractTerminalSelection(snapshot string, selection tuiTerminalSelection) string {
-	lines := strings.Split(snapshot, "\n")
-	start, end := normalizedSelection(selection)
-	if len(lines) == 0 || start.row >= len(lines) {
-		return ""
-	}
-	if end.row >= len(lines) {
-		end.row = len(lines) - 1
-	}
-
-	parts := make([]string, 0, end.row-start.row+1)
-	for row := start.row; row <= end.row; row++ {
-		line := []rune(lines[row])
-		if len(line) == 0 {
-			parts = append(parts, "")
-			continue
-		}
-
-		from := 0
-		to := len(line)
-		if row == start.row {
-			from = clampInt(start.col, 0, len(line)-1)
-		}
-		if row == end.row {
-			to = clampInt(end.col+1, 0, len(line))
-		}
-		if from > to {
-			from, to = to, from
-		}
-		parts = append(parts, strings.TrimRight(string(line[from:to]), " "))
-	}
-
-	return strings.Join(parts, "\n")
-}
-
-func clampInt(value, minValue, maxValue int) int {
-	if value < minValue {
-		return minValue
-	}
-	if value > maxValue {
-		return maxValue
-	}
-	return value
 }

@@ -315,6 +315,61 @@ func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
 	}
 }
 
+func TestGhosttyTerminalShiftEnterDoesNotLeakModifyOtherKeysSequenceAtBashPrompt(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	renderSnapshot := func(width, height int) string {
+		vx := newRenderTestVaxis(t, width, height)
+		defer vx.Close()
+
+		win := vx.Window()
+		win.Clear()
+		ghostty.Draw(win)
+		return renderedScreenText(t, vx, width, height)
+	}
+
+	ghostty.Resize(80, 12)
+
+	homeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(homeDir, ".bash_profile"), []byte("export PS1='prompt$ '\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.bash_profile) error = %v", err)
+	}
+
+	cmdArgs := interactiveShellLaunchCommand()
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	cmd.Env = append(os.Environ(),
+		"HOME="+homeDir,
+		"SHELL=/bin/bash",
+		"TERM="+tuiEmbeddedTermEnv,
+		"BASH_SILENCE_DEPRECATION_WARNING=1",
+	)
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+
+	waitForCondition(t, 5*time.Second, func() bool {
+		return strings.Contains(renderSnapshot(80, 12), "prompt$")
+	}, "bash prompt to appear")
+
+	ghostty.Update(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModShift})
+
+	time.Sleep(200 * time.Millisecond)
+
+	screen := renderSnapshot(80, 12)
+	if strings.Contains(screen, ";2;13~") {
+		t.Fatalf("shift-enter leaked modifyOtherKeys sequence at bash prompt: %q", screen)
+	}
+}
+
 func nonEmptyRenderedLines(text string) []string {
 	lines := strings.Split(text, "\n")
 	filtered := make([]string, 0, len(lines))
@@ -384,6 +439,14 @@ func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
 			want: ":",
 		},
 		{
+			name: "shift-enter-matches-legacy",
+			key: vaxis.Key{
+				Keycode:   vaxis.KeyEnter,
+				Modifiers: vaxis.ModShift,
+			},
+			want: "\r",
+		},
+		{
 			name: "paste-text",
 			key: vaxis.Key{
 				Text:      "hello",
@@ -398,11 +461,39 @@ func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := encodeTUITerminalKeyWithGhostty(tc.key, encoder, tc.applicationKeypad, tc.cursorKeysApplication)
+			got := encodeTUITerminalKeyWithGhostty(tc.key, encoder, nil, tc.applicationKeypad, tc.cursorKeysApplication)
 			if got != tc.want {
 				t.Fatalf("encodeTUITerminalKeyWithGhostty() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGhosttyKeyEncoderUsesTerminalModifyOtherKeysMode(t *testing.T) {
+	t.Parallel()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+	if ghostty.keyEncoder == nil {
+		t.Skip("ghostty key encoder unavailable in this test environment")
+	}
+
+	ghostty.ingestPTY([]byte("\x1b[>4;2m"))
+
+	got := encodeTUITerminalKeyWithGhostty(vaxis.Key{
+		Keycode:   vaxis.KeyEnter,
+		Modifiers: vaxis.ModShift,
+	}, ghostty.keyEncoder, ghostty.term, false, false)
+	if got != "\x1b[27;2;13~" {
+		t.Fatalf("modifyOtherKeys shift-enter encoding = %q, want %q", got, "\x1b[27;2;13~")
 	}
 }
 
@@ -419,7 +510,7 @@ func TestGhosttyKeyEncoderSuppressesReleaseEvents(t *testing.T) {
 		Keycode:        'a',
 		BaseLayoutCode: 'a',
 		EventType:      vaxis.EventRelease,
-	}, encoder, false, false)
+	}, encoder, nil, false, false)
 	if got != "" {
 		t.Fatalf("release key encoded as %q, want empty sequence", got)
 	}
@@ -434,7 +525,7 @@ func TestGhosttyKeyEncoderFallsBackForUnsupportedFunctionKeys(t *testing.T) {
 	}
 	defer encoder.Close()
 
-	got := encodeTUITerminalKeyWithGhostty(vaxis.Key{Keycode: vaxis.KeyF26}, encoder, false, false)
+	got := encodeTUITerminalKeyWithGhostty(vaxis.Key{Keycode: vaxis.KeyF26}, encoder, nil, false, false)
 	if got != "\x1B[1;5Q" {
 		t.Fatalf("unsupported Ghostty key should fall back to legacy encoding, got %q", got)
 	}

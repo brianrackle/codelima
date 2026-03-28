@@ -100,6 +100,25 @@ func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+func (s *Service) withIO(stdout, stderr io.Writer) *Service {
+	if s == nil {
+		return nil
+	}
+
+	cloned := *s
+	cloned.stdout = stdout
+	cloned.stderr = stderr
+
+	if execLima, ok := s.lima.(*ExecLimaClient); ok {
+		limaClone := *execLima
+		limaClone.Stdout = stdout
+		limaClone.Stderr = stderr
+		cloned.lima = &limaClone
+	}
+
+	return &cloned
+}
+
 func (s *Service) TUI(ctx context.Context) error {
 	if s.tui == nil {
 		s.tui = newTUIRunner()
@@ -1737,12 +1756,36 @@ func normalizeShellCommand(command []string) []string {
 }
 
 func interactiveShellLaunchCommand() []string {
+	shellInputRCLines := []string{
+		`"\e[27;2;13~": "\C-v\C-j"`,
+		`"\e[13;2u": "\C-v\C-j"`,
+	}
+	shellInputRCArgs := make([]string, 0, len(shellInputRCLines))
+	for _, line := range shellInputRCLines {
+		shellInputRCArgs = append(shellInputRCArgs, shellQuote(line))
+	}
+
 	script := strings.Join([]string{
 		`if [ -x /usr/bin/gnustty ] && /bin/stty --version 2>/dev/null | grep -qi 'uutils coreutils'; then`,
 		`  sudo -n ln -sf /usr/bin/gnustty /bin/stty >/dev/null 2>&1 || true`,
 		`  sudo -n ln -sf /usr/bin/gnustty /usr/bin/stty >/dev/null 2>&1 || true`,
 		`fi`,
-		`exec "${SHELL:-/bin/bash}" -l`,
+		`shell_inputrc=""`,
+		`if [ -n "${HOME:-}" ] && command -v mktemp >/dev/null 2>&1; then`,
+		`  shell_inputrc="$(mktemp "${HOME}/.codelima-inputrc.XXXXXX")"`,
+		`  if [ -f "${HOME}/.inputrc" ]; then`,
+		`    cat "${HOME}/.inputrc" > "${shell_inputrc}"`,
+		`    printf '\n' >> "${shell_inputrc}"`,
+		`  fi`,
+		fmt.Sprintf(`  printf '%%s\n' %s >> "${shell_inputrc}"`, strings.Join(shellInputRCArgs, " ")),
+		`  export INPUTRC="${shell_inputrc}"`,
+		`fi`,
+		`"${SHELL:-/bin/bash}" -l`,
+		`status=$?`,
+		`if [ -n "${shell_inputrc}" ]; then`,
+		`  rm -f "${shell_inputrc}"`,
+		`fi`,
+		`exit "${status}"`,
 	}, "\n")
 
 	return []string{"sh", "-lc", script}

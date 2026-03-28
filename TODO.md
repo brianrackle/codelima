@@ -38,7 +38,7 @@ Problem:
 Suggested solution:
 
 - Add a TUI verification harness that can capture rendered screen state or screenshots with color information intact.
-- Use that harness for terminal-pane visual regressions such as background rendering, hyperlink styling, and selection overlays.
+- Use that harness for terminal-pane visual regressions such as background rendering, hyperlink styling, and scrollback behavior.
 
 Advantages:
 
@@ -213,13 +213,13 @@ Disadvantages:
 Problem:
 
 - This change is covered by automated tests, `make verify`, and host-side manual runs of the non-interactive `QA.md` flows: `List Verification`, `Doctor And Incomplete Node Cleanup Verification`, `Tree Verification`, `Shell Verification`, `Workspace Mode Verification`, `Environment Config Verification`, `Clone Verification`, `Workspace Rebind Verification`, and `Packaging Verification`.
-- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, right-pane dialog and selector flows, mouse selection, hyperlink activation, and embedded-terminal behavior checks.
+- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, right-pane dialog and selector flows, host-bypass text selection, hyperlink activation, modified-key input such as `Shift+Enter`, and embedded-terminal behavior checks.
 - That leaves one operator-facing end-to-end verification flow incomplete even though the Lima-backed CLI flows were exercised locally.
 
 Suggested solution:
 
 - Run the `TUI Verification` section from `QA.md` in a real terminal session on a host with working Lima boot support.
-- Confirm the interactive focus toggles, preserved per-node terminal state, right-pane transient-view behavior, mouse-copy behavior, hyperlink opening, and streamed progress output.
+- Confirm the interactive focus toggles, preserved per-node terminal state, right-pane transient-view behavior, host-bypass text selection, hyperlink opening, modified-key input such as `Shift+Enter`, and streamed progress output.
 - Confirm cleanup completes afterward so no verification-only Lima instances or metadata remain.
 
 Advantages:
@@ -363,3 +363,55 @@ Disadvantages:
 - Requires access to a real Ubuntu environment with Ghostty test prerequisites available.
 - If util-linux behavior varies across distro versions, more probing may still be needed than this change alone provides.
 - Adds one more manual Linux-specific follow-up item to the QA backlog.
+
+### 15. Hide or relabel conflicting TUI action hints while a background task is active
+
+Problem:
+
+- Long-running TUI mutations now run as background tasks and reject conflicting follow-up actions on the same node or project.
+- The footer and action hotkeys still reflect the persisted node or project state, so a selected busy node can continue to advertise actions like `start`, `stop`, `delete`, or `clone` even though pressing them will now return an in-progress error.
+- The behavior is correct, but the hint surface is still one step behind the new background-task model.
+
+Suggested solution:
+
+- Teach the footer and any future contextual action list to consult the active background-task set before rendering action hints.
+- Either hide conflicting actions while the task is active or relabel them with an explicit busy state so the visible shortcuts match what the operator can actually trigger.
+- Keep the existing resource-conflict check in the action path as the final guard even after the hint surface is updated.
+
+Advantages:
+
+- Aligns the visible action hints with the real background-task behavior.
+- Reduces avoidable "already in progress" errors from advertised but temporarily unavailable actions.
+- Makes the async TUI model feel more intentional and self-explanatory.
+
+Disadvantages:
+
+- Adds more coupling between footer rendering and the task manager.
+- Busy-state hint design will need a small UX decision about hiding versus relabeling actions.
+- The underlying persisted node state still differs from the transient task state, so the renderer has to reconcile both sources explicitly.
+
+### 16. Extend the interactive-shell `Shift+Enter` fix beyond bash/readline if non-default guest shells become common
+
+Problem:
+
+- Interactive `codelima shell` sessions and embedded TUI shells now install temporary readline bindings so bash consumes modified-enter sequences as literal newlines instead of echoing fragments like `;2;13~`.
+- That repair is intentionally scoped to the default guest shell path, which is bash on the Lima images CodeLima provisions today.
+- If a user changes their guest login shell to zsh or another line editor, the current `INPUTRC`-based fix will not help because those shells ignore readline configuration.
+
+Suggested solution:
+
+- Validate the current behavior with the default guest bash shell, then decide whether CodeLima should also inject equivalent bindings for zsh (`bindkey`) or other supported interactive shells.
+- If broader coverage is needed, extend the interactive shell wrapper so it installs shell-specific temporary config only for the detected shell, and add focused regressions for each shell family.
+- Keep the terminal-level Ghostty mode propagation in place so full-screen or app-managed terminals can still negotiate their own modified-key behavior independently of the shell wrapper.
+
+Advantages:
+
+- Keeps the current fix narrowly targeted at the shell that CodeLima actually provisions by default.
+- Leaves room to support other guest shells without regressing terminal-app behavior that already works.
+- Makes the compatibility boundary explicit instead of assuming readline settings apply universally.
+
+Disadvantages:
+
+- Users who replace bash with zsh or another shell may still see raw modified-enter sequences until shell-specific bindings are added.
+- Supporting multiple shell families will complicate the interactive shell wrapper and its tests.
+- More shell-specific logic increases the risk of drift between CLI shell sessions and embedded TUI sessions if it is not kept centralized.

@@ -157,6 +157,7 @@ CodeLima manages:
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - browse the project tree, manage selected projects and nodes, and jump between preserved per-node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
+- keep navigating the tree or focus another preserved node terminal while long-running project or node mutations continue in the background
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
 
@@ -215,9 +216,9 @@ Fast key reference:
 - `[g]`: manage reusable environment configs
 - on a selected project: `[n]` create node, `[u]` update project, `[x]` delete project
 - on a selected node: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
-- mouse: click tree entries to select, click links to open them, drag terminal text to copy, `Shift`-drag to force local copy, wheel-scroll local terminal scrollback when the guest is not capturing the mouse
+- mouse: click tree entries to select, click links to open them, and wheel-scroll local terminal scrollback when the guest is not capturing the mouse; use your terminal emulator's host-selection bypass gesture for terminal text selection/copy while mouse-aware apps keep receiving guest mouse input
 
-Project and node forms, menus, selectors, and progress views replace the right pane instead of opening centered modals, so the tree stays visible while you work through them.
+Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish.
 
 Create Project form in the right pane:
 
