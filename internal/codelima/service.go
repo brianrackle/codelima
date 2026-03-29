@@ -504,6 +504,10 @@ func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectT
 	if err != nil {
 		return nil, err
 	}
+	nodes, err = s.reconcileNodes(context.Background(), nodes, true)
+	if err != nil {
+		return nil, err
+	}
 
 	projectMap := map[string]Project{}
 	childrenByParent := map[string][]Project{}
@@ -803,7 +807,12 @@ func (s *Service) NodeList(includeDeleted bool) ([]Node, error) {
 		return nil, err
 	}
 
-	return s.store.ListNodes(includeDeleted)
+	nodes, err := s.store.ListNodes(includeDeleted)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.reconcileNodes(context.Background(), nodes, true)
 }
 
 func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult, error) {
@@ -1890,8 +1899,30 @@ func (s *Service) reconcileNode(ctx context.Context, node Node, persist bool) (N
 		return Node{}, err
 	}
 
-	observation, ok := findObservation(observations, node.LimaInstanceName)
+	return s.reconcileNodeWithObservations(node, observations, persist, s.now())
+}
+
+func (s *Service) reconcileNodes(ctx context.Context, nodes []Node, persist bool) ([]Node, error) {
+	observations, err := s.lima.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	now := s.now()
+	reconciled := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		refreshed, err := s.reconcileNodeWithObservations(node, observations, persist, now)
+		if err != nil {
+			return nil, err
+		}
+		reconciled = append(reconciled, refreshed)
+	}
+
+	return reconciled, nil
+}
+
+func (s *Service) reconcileNodeWithObservations(node Node, observations []RuntimeObservation, persist bool, now time.Time) (Node, error) {
+	observation, ok := findObservation(observations, node.LimaInstanceName)
 	node.LastReconciledAt = &now
 	if ok {
 		node.LastRuntimeObservation = &observation

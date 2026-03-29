@@ -89,6 +89,16 @@ Rebinding a project to a new workspace path is allowed only after all nodes for 
 Human-facing list commands should render concise tables by default instead of dumping full YAML records.
 Keep the column contract stable for quick scanning. When a list represents live infrastructure, include the runtime state directly in the table instead of forcing a second `show` command. Reserve `--json` for full structured output used by automation.
 
+## Batch Runtime Reconciliation
+
+Runtime-backed read surfaces should query Lima once per response and merge those observations onto the returned nodes instead of trusting persisted `running` or `stopped` metadata.
+That keeps `node list`, `node show`, `node status`, and tree-style views aligned with the actual VM state even when a VM was started or stopped outside the normal CodeLima lifecycle path, while still leaving CodeLima-owned lifecycle states such as `created`, `failed`, and `terminated` in local metadata.
+
+## Lifecycle-Only Node Metadata
+
+`node.yaml` should persist only CodeLima-owned lifecycle state plus stable node metadata such as workspace mode, template paths, bootstrap flags, and Lima instance identity.
+Live runtime facts like `running`, `stopped`, `last_runtime_observation`, and `last_reconciled_at` belong to Lima and should be populated in memory on demand instead of being written back into the node metadata file.
+
 ## Project Tree Includes Nodes
 
 Lineage views should expose both projects and their attached nodes.

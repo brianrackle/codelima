@@ -232,3 +232,42 @@ func TestExecLimaClientShellDoesNotDuplicateOutputWhenStreamsReuseClientWriter(t
 		t.Fatalf("expected one shell output line, got %q", got)
 	}
 }
+
+func TestExecLimaClientListDoesNotStreamProbeOutput(t *testing.T) {
+	t.Parallel()
+
+	scriptDir := t.TempDir()
+	scriptPath := filepath.Join(scriptDir, "limactl")
+	script := "#!/usr/bin/env sh\n" +
+		"printf '{\"name\":\"demo-node\",\"status\":\"Running\",\"dir\":\"/fake/demo-node\"}\\n'\n" +
+		"printf 'unexpected-stderr\\n' >&2\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake limactl) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	client := &ExecLimaClient{
+		Binary: scriptPath,
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+
+	observations, err := client.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+
+	if stdout.Len() != 0 {
+		t.Fatalf("expected List() to avoid streaming stdout, got %q", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected List() to avoid streaming stderr, got %q", stderr.String())
+	}
+	if len(observations) != 1 {
+		t.Fatalf("expected one observation, got %#v", observations)
+	}
+	if got := observations[0].Status; got != "running" {
+		t.Fatalf("expected normalized running status, got %q", got)
+	}
+}

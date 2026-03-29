@@ -173,7 +173,7 @@ func projectYAMLBytes(project Project, defaults LimaCommandTemplates) ([]byte, e
 }
 
 func nodeYAMLBytes(node Node, defaults LimaCommandTemplates) ([]byte, error) {
-	data, err := yamlBytes(node)
+	data, err := yamlBytes(newNodeFileWire(node))
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +277,17 @@ func projectFileNeedsRefresh(data []byte, project Project, defaults LimaCommandT
 
 func nodeFileNeedsRefresh(data []byte, node Node, defaults LimaCommandTemplates) bool {
 	current := string(data)
+	persistedLifecycle := nodeLifecycleState(node)
+
+	if strings.Contains(current, "\nstatus:") || strings.Contains(current, "\nlast_reconciled_at:") || strings.Contains(current, "\nlast_runtime_observation:") {
+		return true
+	}
+	if persistedLifecycle != "" && !strings.Contains(current, "\nlifecycle_state: "+persistedLifecycle) {
+		return true
+	}
+	if persistedLifecycle == "" && strings.Contains(current, "\nlifecycle_state:") {
+		return true
+	}
 
 	if node.LimaCommands.IsZero() {
 		if !strings.Contains(current, nodeLimaCommandsTemplateComment) {

@@ -160,10 +160,11 @@ func (s *Store) ensureNodeMetadataFiles() error {
 			return metadataCorruption("failed to read node metadata", err, map[string]any{"path": path})
 		}
 
-		var node Node
-		if err := readYAMLFile(path, &node); err != nil {
+		var wire nodeFileWire
+		if err := readYAMLFile(path, &wire); err != nil {
 			return metadataCorruption("failed to load node", err, map[string]any{"path": path})
 		}
+		node := wire.node()
 
 		project, err := s.ProjectByID(node.ProjectID)
 		if err != nil {
@@ -646,9 +647,9 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState, template []byte) e
 }
 
 func (s *Store) NodeByID(nodeID string) (Node, error) {
-	var node Node
+	var wire nodeFileWire
 	path := s.nodePath(nodeID)
-	if err := readYAMLFile(path, &node); err != nil {
+	if err := readYAMLFile(path, &wire); err != nil {
 		if os.IsNotExist(err) {
 			return Node{}, notFound("node not found", map[string]any{"id": nodeID})
 		}
@@ -656,7 +657,7 @@ func (s *Store) NodeByID(nodeID string) (Node, error) {
 		return Node{}, metadataCorruption("failed to load node", err, map[string]any{"path": path})
 	}
 
-	return node, nil
+	return wire.node(), nil
 }
 
 func (s *Store) NodeByIDOrSlug(value string) (Node, error) {

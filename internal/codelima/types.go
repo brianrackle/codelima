@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -93,6 +94,7 @@ type Node struct {
 	Provider               string               `json:"provider" yaml:"provider"`
 	LimaInstanceName       string               `json:"lima_instance_name" yaml:"lima_instance_name"`
 	Status                 string               `json:"status" yaml:"status"`
+	LifecycleState         string               `json:"-" yaml:"-"`
 	AgentProfileName       string               `json:"agent_profile_name" yaml:"agent_profile_name"`
 	LimaCommands           LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
 	BootstrapCommands      []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
@@ -108,6 +110,137 @@ type Node struct {
 	DeletedAt              *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 	LastReconciledAt       *time.Time           `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
 	LastRuntimeObservation *RuntimeObservation  `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
+}
+
+type nodeFileWire struct {
+	ID                    string               `json:"id" yaml:"id"`
+	Slug                  string               `json:"slug" yaml:"slug"`
+	ProjectID             string               `json:"project_id" yaml:"project_id"`
+	ParentNodeID          string               `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime               string               `json:"runtime" yaml:"runtime"`
+	Provider              string               `json:"provider" yaml:"provider"`
+	LimaInstanceName      string               `json:"lima_instance_name" yaml:"lima_instance_name"`
+	LifecycleState        string               `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
+	Status                string               `json:"status,omitempty" yaml:"status,omitempty"`
+	AgentProfileName      string               `json:"agent_profile_name" yaml:"agent_profile_name"`
+	LimaCommands          LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
+	BootstrapCommands     []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	GeneratedTemplatePath string               `json:"generated_template_path" yaml:"generated_template_path"`
+	WorkspaceMode         string               `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath    string               `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath    string               `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded       bool                 `json:"workspace_seeded" yaml:"workspace_seeded"`
+	BootstrapCompleted    bool                 `json:"bootstrap_completed" yaml:"bootstrap_completed"`
+	BootstrapCompletedAt  *time.Time           `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
+	CreatedAt             time.Time            `json:"created_at" yaml:"created_at"`
+	UpdatedAt             time.Time            `json:"updated_at" yaml:"updated_at"`
+	DeletedAt             *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+}
+
+func normalizeNodeLifecycleState(state string) string {
+	switch strings.TrimSpace(strings.ToLower(state)) {
+	case NodeStatusCreated,
+		NodeStatusProvisioning,
+		NodeStatusRegistering,
+		NodeStatusFailed,
+		NodeStatusTerminating,
+		NodeStatusTerminated:
+		return strings.TrimSpace(strings.ToLower(state))
+	default:
+		return ""
+	}
+}
+
+func legacyNodeStatus(state string) string {
+	switch strings.TrimSpace(strings.ToLower(state)) {
+	case NodeStatusCreated,
+		NodeStatusProvisioning,
+		NodeStatusRegistering,
+		NodeStatusRunning,
+		NodeStatusStopped,
+		NodeStatusFailed,
+		NodeStatusTerminating,
+		NodeStatusTerminated:
+		return strings.TrimSpace(strings.ToLower(state))
+	default:
+		return ""
+	}
+}
+
+func nodeLifecycleState(node Node) string {
+	if state := normalizeNodeLifecycleState(node.Status); state != "" {
+		return state
+	}
+
+	if !node.BootstrapCompleted {
+		return normalizeNodeLifecycleState(node.LifecycleState)
+	}
+
+	return ""
+}
+
+func newNodeFileWire(node Node) nodeFileWire {
+	return nodeFileWire{
+		ID:                    node.ID,
+		Slug:                  node.Slug,
+		ProjectID:             node.ProjectID,
+		ParentNodeID:          node.ParentNodeID,
+		Runtime:               node.Runtime,
+		Provider:              node.Provider,
+		LimaInstanceName:      node.LimaInstanceName,
+		LifecycleState:        nodeLifecycleState(node),
+		AgentProfileName:      node.AgentProfileName,
+		LimaCommands:          node.LimaCommands,
+		BootstrapCommands:     append([]string(nil), node.BootstrapCommands...),
+		GeneratedTemplatePath: node.GeneratedTemplatePath,
+		WorkspaceMode:         node.WorkspaceMode,
+		GuestWorkspacePath:    node.GuestWorkspacePath,
+		WorkspaceMountPath:    node.WorkspaceMountPath,
+		WorkspaceSeeded:       node.WorkspaceSeeded,
+		BootstrapCompleted:    node.BootstrapCompleted,
+		BootstrapCompletedAt:  node.BootstrapCompletedAt,
+		CreatedAt:             node.CreatedAt,
+		UpdatedAt:             node.UpdatedAt,
+		DeletedAt:             node.DeletedAt,
+	}
+}
+
+func (w nodeFileWire) node() Node {
+	lifecycleState := normalizeNodeLifecycleState(w.LifecycleState)
+	legacyStatus := legacyNodeStatus(w.Status)
+	if lifecycleState == "" {
+		lifecycleState = normalizeNodeLifecycleState(legacyStatus)
+	}
+
+	status := lifecycleState
+	if status == "" {
+		status = legacyStatus
+	}
+
+	return Node{
+		ID:                    w.ID,
+		Slug:                  w.Slug,
+		ProjectID:             w.ProjectID,
+		ParentNodeID:          w.ParentNodeID,
+		Runtime:               w.Runtime,
+		Provider:              w.Provider,
+		LimaInstanceName:      w.LimaInstanceName,
+		Status:                status,
+		LifecycleState:        lifecycleState,
+		AgentProfileName:      w.AgentProfileName,
+		LimaCommands:          w.LimaCommands,
+		BootstrapCommands:     append([]string(nil), w.BootstrapCommands...),
+		GeneratedTemplatePath: w.GeneratedTemplatePath,
+		WorkspaceMode:         w.WorkspaceMode,
+		GuestWorkspacePath:    w.GuestWorkspacePath,
+		WorkspaceMountPath:    w.WorkspaceMountPath,
+		WorkspaceSeeded:       w.WorkspaceSeeded,
+		BootstrapCompleted:    w.BootstrapCompleted,
+		BootstrapCompletedAt:  w.BootstrapCompletedAt,
+		CreatedAt:             w.CreatedAt,
+		UpdatedAt:             w.UpdatedAt,
+		DeletedAt:             w.DeletedAt,
+	}
 }
 
 type BootstrapState struct {

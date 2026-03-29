@@ -156,32 +156,6 @@ Disadvantages:
 - May involve subtle changes in PTY versus non-PTY execution behavior.
 - Could expose additional assumptions in current shell tests and verification scripts.
 
-### 7. Stop runtime validation from leaking raw `limactl list --json` output
-
-Problem:
-
-- During manual QA, some runtime-backed commands such as `node start` printed raw `limactl list --json` output before their normal command result.
-- The commands still succeeded, but the leaked JSON makes CLI output noisy and undermines the documented table- and record-oriented command contracts.
-- This looks separate from the existing duplicate-output issue in non-interactive shell mode because it occurred on lifecycle commands rather than `shell -- <cmd>`.
-
-Suggested solution:
-
-- Trace the runtime validation and Lima client paths that call `limactl list --json` before node lifecycle operations.
-- Ensure that probing output is captured for internal parsing instead of being written to command stdout.
-- Add a focused regression test that asserts `node start` and similar lifecycle commands do not emit unrelated Lima JSON records.
-
-Advantages:
-
-- Restores predictable CLI output for both human and scripted use.
-- Keeps lifecycle command output aligned with the documented user-facing contract.
-- Makes manual QA less brittle because command success is not mixed with unrelated probe output.
-
-Disadvantages:
-
-- Requires care around shared Lima client plumbing so progress streaming for real long-running operations still works.
-- May reveal other places where stdout/stderr routing is broader than intended.
-- Could require test doubles or refactoring around Lima readiness checks to isolate probe output cleanly.
-
 ### 8. Design and implement a replacement for the removed patch-based file return flow
 
 Problem:
@@ -415,3 +389,29 @@ Disadvantages:
 - Users who replace bash with zsh or another shell may still see raw modified-enter sequences until shell-specific bindings are added.
 - Supporting multiple shell families will complicate the interactive shell wrapper and its tests.
 - More shell-specific logic increases the risk of drift between CLI shell sessions and embedded TUI sessions if it is not kept centralized.
+
+### 17. Separate durable node lifecycle from live Lima runtime state
+
+Problem:
+
+- `node.yaml` now persists only CodeLima-owned lifecycle metadata, but the in-memory `Node` model and user-facing outputs still expose a single `status` field that mixes lifecycle values with live Lima runtime values.
+- That means callers still have to infer whether a given `status` came from CodeLima lifecycle state such as `failed` or `terminated`, or from a fresh Lima observation such as `running` or `stopped`.
+- The storage-layer split is done, but the API and renderer vocabulary still overlap.
+
+Suggested solution:
+
+- Split the public node model into an explicit lifecycle field for CodeLima-owned states such as `created`, `provisioning`, `failed`, `terminating`, and `terminated`, plus a separate live runtime field sourced from Lima.
+- Update CLI and TUI rendering so operator-facing surfaces can present both concepts deliberately instead of overloading one `status` field.
+- Keep compatibility shims only as long as needed for existing API and test callers.
+
+Advantages:
+
+- Makes Lima the single source of truth for live VM state.
+- Clarifies which parts of node state are CodeLima-owned orchestration metadata versus external runtime facts.
+- Reduces ambiguity for renderers, tests, and future API consumers.
+
+Disadvantages:
+
+- Touches a wide swath of service, CLI, TUI, and test code that currently assumes one `status` field covers both concerns.
+- May require outward-facing output changes or compatibility handling for existing automation.
+- Increases short-term implementation complexity while the codebase transitions to the split model.

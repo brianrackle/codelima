@@ -205,7 +205,7 @@ func (c *ExecLimaClient) BaseTemplate(ctx context.Context, project Project, node
 }
 
 func (c *ExecLimaClient) List(ctx context.Context) ([]RuntimeObservation, error) {
-	stdout, stderr, err := c.run(ctx, 15*time.Second, "list", "--json")
+	stdout, stderr, err := c.runWithOutputs(ctx, 15*time.Second, nil, nil, "list", "--json")
 	if err != nil {
 		return nil, dependencyUnavailable(
 			"limactl list --json failed",
@@ -444,10 +444,6 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 	}
 
 	return nil
-}
-
-func (c *ExecLimaClient) run(ctx context.Context, timeout time.Duration, args ...string) ([]byte, []byte, error) {
-	return c.runWithOutputs(ctx, timeout, c.Stdout, c.Stderr, args...)
 }
 
 func (c *ExecLimaClient) runCommandString(ctx context.Context, timeout time.Duration, command string, stdoutWriter, stderrWriter io.Writer) ([]byte, []byte, error) {

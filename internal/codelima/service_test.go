@@ -513,6 +513,52 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	}
 }
 
+func TestNodeStartClearsCreatedLifecycleStateFromPersistedNodeMetadata(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:              "root",
+		WorkspacePath:     workspace,
+		BootstrapCommands: []string{"./script/setup"},
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	createdData, err := os.ReadFile(service.store.nodePath(node.ID))
+	if err != nil {
+		t.Fatalf("ReadFile(created node.yaml) error = %v", err)
+	}
+	if !strings.Contains(string(createdData), "lifecycle_state: created") {
+		t.Fatalf("expected created node metadata to persist lifecycle_state: created, got %s", string(createdData))
+	}
+
+	if _, err := service.NodeStart(ctx, node.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	startedData, err := os.ReadFile(service.store.nodePath(node.ID))
+	if err != nil {
+		t.Fatalf("ReadFile(started node.yaml) error = %v", err)
+	}
+	if strings.Contains(string(startedData), "lifecycle_state: created") {
+		t.Fatalf("expected started node metadata to drop lifecycle_state: created, got %s", string(startedData))
+	}
+}
+
 func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
 	t.Parallel()
 
@@ -718,6 +764,184 @@ func TestPartialNodeDirectoriesDoNotBlockHealthyNodeOperations(t *testing.T) {
 	}
 	if len(tree) != 1 || len(tree[0].Nodes) != 1 || tree[0].Nodes[0].ID != node.ID {
 		t.Fatalf("expected project tree to include only the healthy node, got %#v", tree)
+	}
+}
+
+func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	firstNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "first-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(first) error = %v", err)
+	}
+	secondNode, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "second-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(second) error = %v", err)
+	}
+
+	bootstrap, err := service.store.LoadBootstrapState(firstNode.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState(first) error = %v", err)
+	}
+	firstNode.Status = NodeStatusStopped
+	firstNode.LastRuntimeObservation = &RuntimeObservation{
+		Name:   firstNode.LimaInstanceName,
+		Exists: true,
+		Status: "stopped",
+	}
+	firstNode.UpdatedAt = service.now()
+	if err := service.store.SaveNode(firstNode, bootstrap, nil); err != nil {
+		t.Fatalf("SaveNode(first) error = %v", err)
+	}
+
+	bootstrap, err = service.store.LoadBootstrapState(secondNode.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState(second) error = %v", err)
+	}
+	secondNode.Status = NodeStatusStopped
+	secondNode.LastRuntimeObservation = &RuntimeObservation{
+		Name:   secondNode.LimaInstanceName,
+		Exists: true,
+		Status: "stopped",
+	}
+	secondNode.UpdatedAt = service.now()
+	if err := service.store.SaveNode(secondNode, bootstrap, nil); err != nil {
+		t.Fatalf("SaveNode(second) error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	fake.observations[firstNode.LimaInstanceName] = RuntimeObservation{
+		Name:   firstNode.LimaInstanceName,
+		Exists: true,
+		Status: "running",
+		Dir:    "/fake/" + firstNode.LimaInstanceName,
+	}
+	fake.observations[secondNode.LimaInstanceName] = RuntimeObservation{
+		Name:   secondNode.LimaInstanceName,
+		Exists: true,
+		Status: "stopped",
+		Dir:    "/fake/" + secondNode.LimaInstanceName,
+	}
+	fake.listCalls = 0
+
+	nodes, err := service.NodeList(false)
+	if err != nil {
+		t.Fatalf("NodeList() error = %v", err)
+	}
+	if fake.listCalls != 1 {
+		t.Fatalf("expected NodeList to reconcile with one lima.List call, got %d", fake.listCalls)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected two nodes, got %#v", nodes)
+	}
+
+	nodeByID := map[string]Node{}
+	for _, node := range nodes {
+		nodeByID[node.ID] = node
+	}
+
+	if got := nodeByID[firstNode.ID].Status; got != NodeStatusRunning {
+		t.Fatalf("expected first node status to reconcile to running, got %q", got)
+	}
+	if got := nodeByID[firstNode.ID].LastRuntimeObservation; got == nil || got.Status != "running" {
+		t.Fatalf("expected first node runtime observation to reconcile to running, got %#v", got)
+	}
+	if got := nodeByID[secondNode.ID].Status; got != NodeStatusStopped {
+		t.Fatalf("expected second node status to remain stopped, got %q", got)
+	}
+
+	storedNode, err := service.store.NodeByIDOrSlug(firstNode.ID)
+	if err != nil {
+		t.Fatalf("NodeByIDOrSlug(first) error = %v", err)
+	}
+	if storedNode.Status != "" {
+		t.Fatalf("expected runtime status to stay out of persisted node metadata, got %q", storedNode.Status)
+	}
+	if storedNode.LastRuntimeObservation != nil {
+		t.Fatalf("expected persisted node metadata to omit runtime observations, got %#v", storedNode.LastRuntimeObservation)
+	}
+}
+
+func TestProjectTreeReconcilesRuntimeStatusInBatch(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.Status = NodeStatusStopped
+	node.LastRuntimeObservation = &RuntimeObservation{
+		Name:   node.LimaInstanceName,
+		Exists: true,
+		Status: "stopped",
+	}
+	node.UpdatedAt = service.now()
+	if err := service.store.SaveNode(node, bootstrap, nil); err != nil {
+		t.Fatalf("SaveNode() error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	fake.observations[node.LimaInstanceName] = RuntimeObservation{
+		Name:   node.LimaInstanceName,
+		Exists: true,
+		Status: "running",
+		Dir:    "/fake/" + node.LimaInstanceName,
+	}
+	fake.listCalls = 0
+
+	tree, err := service.ProjectTree("", false)
+	if err != nil {
+		t.Fatalf("ProjectTree() error = %v", err)
+	}
+	if fake.listCalls != 1 {
+		t.Fatalf("expected ProjectTree to reconcile with one lima.List call, got %d", fake.listCalls)
+	}
+	if len(tree) != 1 || len(tree[0].Nodes) != 1 {
+		t.Fatalf("expected one root project with one node, got %#v", tree)
+	}
+	if got := tree[0].Nodes[0].Status; got != NodeStatusRunning {
+		t.Fatalf("expected tree node status to reconcile to running, got %q", got)
+	}
+	if got := tree[0].Nodes[0].LastRuntimeObservation; got == nil || got.Status != "running" {
+		t.Fatalf("expected tree node runtime observation to reconcile to running, got %#v", got)
 	}
 }
 

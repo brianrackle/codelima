@@ -38,7 +38,7 @@ Expected result:
 - `project list` prints a table with the columns `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`
 - the `project list` row includes `qa-list`, `$ROOT_DIR/test-project-dir`, `vm`, and `codex-cli`
 - `node list` prints a table with the columns `slug`, `uuid`, `workspace_mode`, `workspace_path`, `runtime`, `vm_status`, and `agent`
-- the `node list` row includes `qa-list-node`, `copy`, `$ROOT_DIR/test-project-dir`, `vm`, `created`, and `codex-cli`
+- the `node list` row includes `qa-list-node`, `copy`, `$ROOT_DIR/test-project-dir`, `vm`, `stopped`, and `codex-cli`
 
 Start the node and verify the VM status updates:
 
