@@ -46,6 +46,9 @@ func defaultLimaCommandTemplates() LimaCommandTemplates {
 		Copy: []string{
 			"{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}}",
 		},
+		CopyFromGuest: []string{
+			"{{binary}} copy{{recursive_flag}} {{copy_source}} {{target_path}}",
+		},
 		Shell: []string{
 			"{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}",
 		},
@@ -62,6 +65,7 @@ func (t LimaCommandTemplates) ApplyDefaults(defaults LimaCommandTemplates) LimaC
 	t.Bootstrap = applyDefaultCommandList(t.Bootstrap, defaults.Bootstrap)
 	t.WorkspaceSeedPrepare = applyDefaultCommandList(t.WorkspaceSeedPrepare, defaults.WorkspaceSeedPrepare)
 	t.Copy = applyDefaultCommandList(t.Copy, defaults.Copy)
+	t.CopyFromGuest = applyDefaultCommandList(t.CopyFromGuest, defaults.CopyFromGuest)
 	t.Shell = applyDefaultCommandList(t.Shell, defaults.Shell)
 	return t
 }
@@ -76,6 +80,7 @@ func (t LimaCommandTemplates) IsZero() bool {
 		len(t.Bootstrap) == 0 &&
 		len(t.WorkspaceSeedPrepare) == 0 &&
 		len(t.Copy) == 0 &&
+		len(t.CopyFromGuest) == 0 &&
 		len(t.Shell) == 0
 }
 
@@ -99,6 +104,8 @@ func (t LimaCommandTemplates) templates(kind limaCommandKind) []string {
 		return copyCommandList(t.WorkspaceSeedPrepare)
 	case limaCommandCopy:
 		return copyCommandList(t.Copy)
+	case limaCommandCopyFromGuest:
+		return copyCommandList(t.CopyFromGuest)
 	case limaCommandShell:
 		return copyCommandList(t.Shell)
 	default:
@@ -117,6 +124,7 @@ func (t LimaCommandTemplates) orderedFields() []limaCommandTemplateField {
 		{key: "bootstrap", values: t.Bootstrap},
 		{key: "workspace_seed_prepare", values: t.WorkspaceSeedPrepare},
 		{key: "copy", values: t.Copy},
+		{key: "copy_from_guest", values: t.CopyFromGuest},
 		{key: "shell", values: t.Shell},
 	}
 }

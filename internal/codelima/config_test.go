@@ -28,6 +28,9 @@ func TestDefaultConfigYAMLIncludesGlobalLimaCommandsWithComment(t *testing.T) {
 	if !strings.Contains(output, "workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
 		t.Fatalf("expected config yaml to include default workspace seed prepare command, got %s", output)
 	}
+	if !strings.Contains(output, "copy_from_guest:") || !strings.Contains(output, "{{binary}} copy{{recursive_flag}} {{copy_source}} {{target_path}}") {
+		t.Fatalf("expected config yaml to include default copy_from_guest command, got %s", output)
+	}
 	if !strings.Contains(output, "start:") || !strings.Contains(output, "{{binary}} start -y {{instance_name}}") {
 		t.Fatalf("expected config yaml to include default start command, got %s", output)
 	}
@@ -76,6 +79,9 @@ agent_profiles_dir: /tmp/legacy/_config/agent-profiles
 	}
 	if got := strings.Join(cfg.LimaCommands.WorkspaceSeedPrepare, "|"); got != `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}` {
 		t.Fatalf("expected default workspace seed prepare command, got %q", got)
+	}
+	if got := strings.Join(cfg.LimaCommands.CopyFromGuest, "|"); got != "{{binary}} copy{{recursive_flag}} {{copy_source}} {{target_path}}" {
+		t.Fatalf("expected default copy_from_guest command, got %q", got)
 	}
 	if got := strings.Join(cfg.LimaCommands.Clone, "|"); got != "{{binary}} clone -y {{source_instance}} {{target_instance}}" {
 		t.Fatalf("expected default clone command, got %q", got)

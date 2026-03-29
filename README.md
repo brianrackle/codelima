@@ -22,6 +22,7 @@ That gives you:
 
 - **real VM isolation** for risky agent sessions
 - **two workspace modes**: `copy` for safer experimentation and `mounted` for immediate host sync
+- **workspace airlock for copy mode**: preview and safely promote changed files from an isolated VM back to the host with conflict detection
 - **shared environment configs** for Codex, Claude Code, and custom Linux toolchains
 - **global, project, and node Lima command overrides** when a repo or VM needs non-default `limactl` flags
 - **one control plane** for many repos and many nodes
@@ -57,6 +58,12 @@ codex
 ```
 
 Use `copy` when you want the strongest sandbox boundary around agent actions. Use `mounted` when you intentionally want the VM to act directly on your host workspace with immediate sync.
+When you are ready to bring copy-mode changes home, run:
+
+```sh
+codelima node sync payments-sandbox
+codelima node sync payments-sandbox --apply
+```
 
 ## Install
 
@@ -153,6 +160,7 @@ CodeLima manages:
 - register host workspaces as lineage-aware projects
 - capture immutable snapshots on demand for lineage-aware project workflows
 - create, start, stop, clone, inspect, and delete Lima-backed nodes, choosing either an isolated copied workspace or a writable mounted workspace per node
+- preview and safely apply copy-mode guest changes back to the host with `node sync`, using the original seed snapshot as the merge base
 - detect and clean up incomplete node metadata directories left by failed node creation attempts
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
@@ -180,7 +188,7 @@ Useful global flags:
 - `--json` returns structured output for automation
 - `--log-level LEVEL` reserves a verbosity setting for future CLI logging
 
-`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `workspace_mode` and `vm_status` so both the workspace binding strategy and live VM state are visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
+`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `workspace_mode` and `vm_status` so both the workspace binding strategy and live VM state are visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. `node sync` returns a YAML or JSON summary of the guest-to-host promotion plan or apply result, including changed paths. Use `--json` when you need the full structured payload for scripts.
 
 ## TUI Quick Start
 
@@ -294,6 +302,8 @@ lima_commands:
     - "sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}"
   clone:
     - "{{binary}} clone -y {{source_instance}} {{target_instance}}"
+  copy_from_guest:
+    - "{{binary}} copy{{recursive_flag}} {{copy_source}} {{target_path}}"
 ```
 
 Project override example:
@@ -307,6 +317,8 @@ lima_commands:
     - "install -d {{target_parent}} && rm -rf {{target_path}}"
   copy:
     - "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"
+  copy_from_guest:
+    - "{{binary}} copy --backend=rsync{{recursive_flag}} {{copy_source}} {{target_path}}"
   create:
     - "{{binary}} create -y --name {{instance_name}} --cpus=6 --memory=12 --disk=80 --vm-type=vz {{template_path}}"
   start:
@@ -323,6 +335,8 @@ lima_commands:
     - "{{binary}} start {{instance_name}} --tty=false"
   copy:
     - "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"
+  copy_from_guest:
+    - "{{binary}} copy --backend=rsync{{recursive_flag}} {{copy_source}} {{target_path}} --checksum"
 ```
 
 Global, project, and node overrides follow normal precedence in that order. For the very first `node create` or `node clone`, use `--lima-commands-file` or the TUI `Lima Commands File` field when you need node-specific `create`, `clone`, or `template_copy` overrides to apply before the node metadata file already exists on disk.
@@ -338,6 +352,7 @@ Available placeholders depend on the command and include:
 - `{{source_path}}`
 - `{{target_path}}`
 - `{{target_parent}}`
+- `{{copy_source}}`
 - `{{copy_target}}`
 - `{{recursive_flag}}`
 - `{{workdir_flag}}`
@@ -378,6 +393,19 @@ Practical rule:
 
 - use `copy` when you want the strongest sandbox boundary around a coding agent
 - use `mounted` when you intentionally want the VM to act directly on your host workspace
+
+Copy-mode airlock:
+
+```sh
+codelima shell api-copy
+# edit files in the VM
+exit
+
+codelima node sync api-copy
+codelima node sync api-copy --apply
+```
+
+`node sync` previews the changed guest paths without touching the host. `node sync --apply` promotes those changes back to the host only if the host still applies cleanly against the original workspace-seed snapshot for that node, so a later host edit becomes a conflict instead of silent data loss.
 
 ## Workflow 3: Run Codex Or Claude In A Sandboxed VM With Full In-Guest Permissions
 
@@ -549,6 +577,7 @@ codelima node show NODE
 codelima node start NODE
 codelima node stop NODE
 codelima node clone NODE --node-slug NEW-NODE [--lima-commands-file PATH]
+codelima node sync NODE [--apply]
 codelima node delete NODE
 codelima node status NODE
 codelima node logs NODE
@@ -572,6 +601,7 @@ make run ARGS="environment create --slug shared-dev --bootstrap-command ./script
 make run ARGS="project create --slug root --workspace ./test-project-dir --env-config shared-dev"
 make run ARGS="node create --project root --slug root-node"
 make run ARGS="node start root-node"
+make run ARGS="node sync root-node"
 make run ARGS="shell root-node -- uname -a"
 make tui ARGS="--home /tmp/codelima-dev/.codelima"
 make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist

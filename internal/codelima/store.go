@@ -26,6 +26,7 @@ func (s *Store) EnsureLayout() error {
 		filepath.Join(s.cfg.MetadataRoot, "_config"),
 		s.cfg.AgentProfilesDir,
 		filepath.Join(s.cfg.MetadataRoot, "_locks"),
+		filepath.Join(s.cfg.MetadataRoot, "_tmp"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "environment-configs", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "projects", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance"),
@@ -330,6 +331,10 @@ func (s *Store) patchConflictsPath(patchID string) string {
 
 func (s *Store) patchApplyResultPath(patchID string) string {
 	return filepath.Join(s.patchDir(patchID), "apply-result.json")
+}
+
+func (s *Store) scratchRoot() string {
+	return filepath.Join(s.cfg.MetadataRoot, "_tmp")
 }
 
 func (s *Store) projectSlugIndexPath(slug string) string {

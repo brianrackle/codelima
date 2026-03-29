@@ -182,31 +182,31 @@ Disadvantages:
 - May reveal other places where stdout/stderr routing is broader than intended.
 - Could require test doubles or refactoring around Lima readiness checks to isolate probe output cleanly.
 
-### 8. Design and implement a replacement for the removed patch-based file return flow
+### 8. Surface `node sync` in the TUI
 
 Problem:
 
-- The user-facing patch proposal and apply workflow has been removed from the CLI and TUI.
-- There is no replacement yet for moving file changes from VM-local copied workspaces back to the host when `workspace_mode=copy`.
-- Users still need a deliberate path for synchronizing guest-side edits back to the host without switching every node to `mounted`.
+- Copy-mode nodes now have a CLI workspace airlock through `node sync`, but the TUI still has no direct affordance for previewing or applying that flow.
+- Operators who live in the TUI have to drop out to the CLI to bring sandboxed guest changes back to the host.
+- That leaves the most distinctive copy-mode workflow only partially surfaced in the product UI.
 
 Suggested solution:
 
-- Design a new explicit export or sync flow for copied-workspace nodes that does not depend on lineage patch proposals.
-- Decide whether that replacement should be node-scoped, project-scoped, or workspace-scoped, and whether it should sync whole trees or a selected diff.
-- Once the product direction is settled, remove or rework the remaining internal patch implementation to match the new transfer model.
+- Add a node-scoped right-pane action such as `[y] sync node` for copy-mode nodes.
+- Let the TUI show the same preview summary as the CLI, including changed paths and whether an apply would conflict against the current host workspace.
+- Add an explicit confirmation step for `--apply` so host promotion still feels deliberate inside the terminal UI.
 
 Advantages:
 
-- Replaces the removed feature with a clearer workflow that better matches the copy-versus-mounted workspace model.
-- Avoids preserving an outdated patch UX while the new file-return model is being designed.
-- Creates a cleaner boundary between project lineage management and workspace synchronization.
+- Makes the workspace airlock discoverable without leaving the TUI.
+- Keeps the standout copy-mode workflow consistent across CLI and TUI surfaces.
+- Gives operators a faster path to preview and apply sandboxed guest changes during long TUI sessions.
 
 Disadvantages:
 
-- Users in copy mode temporarily lose any built-in way to push guest-side changes back to the host.
-- The final solution may require larger storage and workflow changes than the removed patch surface.
-- Deferring the replacement leaves unused internal patch code in the codebase for now.
+- Adds another node action, confirmation path, and right-pane state to the TUI.
+- The TUI will need a compact but readable diff-summary presentation for potentially many changed paths.
+- Conflict handling will need careful UX so apply failures remain understandable from inside the TUI.
 
 ### 9. Complete the interactive `TUI Verification` flow from `QA.md` on a real terminal session
 
@@ -258,6 +258,32 @@ Disadvantages:
 
 - The delete path will need more careful failure handling around partially deleted runtime state.
 - Fixing the ordering may require broader changes in how runtime-backed service mutations reconcile metadata.
+
+### 11. Unblock Lima startup on hosts where OpenSSH ControlMaster socket creation fails
+
+Problem:
+
+- Manual QA for `node sync` on this Linux host reached a running VM, but `limactl start` never completed because Lima's third readiness step, `Explicitly start ssh ControlMaster`, looped forever with `muxserver_listen ... ssh.sock: Bad file descriptor`.
+- Direct `limactl shell` invocations failed with the same OpenSSH mux error unless ControlMaster was disabled manually, which means CodeLima cannot currently finish `node start`, `shell`, or `node sync` flows in that environment.
+- The failure appears to be in the Lima-plus-OpenSSH runtime boundary rather than in CodeLima's workspace airlock logic, but it still blocks real end-to-end verification on affected hosts.
+
+Suggested solution:
+
+- Reproduce the issue in a focused harness outside CodeLima so it is clear whether the bug belongs to Lima, OpenSSH 10.x, or the host filesystem/socket behavior.
+- Investigate whether CodeLima can safely opt out of SSH ControlMaster usage for Lima-backed commands on affected hosts, or whether Lima needs an upstream fix or supported toggle.
+- Once a stable workaround exists, add a manual and automated regression path that proves `node start` and non-interactive `shell` commands complete successfully on Linux hosts with the affected OpenSSH stack.
+
+Advantages:
+
+- Restores real host-backed QA coverage for `node start`, `shell`, and `node sync`.
+- Removes a runtime failure that currently looks like a CodeLima hang to end users.
+- Gives a clear boundary for deciding whether the fix belongs in CodeLima or upstream Lima.
+
+Disadvantages:
+
+- The root cause may live outside this repository, which could require upstream coordination or a temporary local workaround.
+- Any CodeLima-side mitigation must be careful not to regress SSH behavior on hosts where Lima's ControlMaster path already works.
+- Building a reliable reproduction harness will take extra time beyond the feature work already completed here.
 - A durable cleanup record or retry path would add state and complexity to node lifecycle management.
 
 ### 11. Investigate Lima-backed `node start` hangs when the optional containerd readiness check never completes

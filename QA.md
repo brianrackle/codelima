@@ -338,6 +338,90 @@ printf 'hello\n' > "$ROOT_DIR/test-project-dir/README.md"
 rm -rf "$WORK_ROOT"
 ```
 
+## Node Sync Verification
+
+This flow verifies that `node sync` acts as a safe workspace airlock for copy-mode nodes: it previews guest changes without mutating the host, applies those changes on demand, and rejects later host drift instead of overwriting it silently.
+
+Prerequisites:
+
+- run `make build`
+- run the commands from the repository root
+
+Setup:
+
+```sh
+ROOT_DIR="$(pwd)"
+WORK_ROOT="$ROOT_DIR/tmp/qa-node-sync"
+rm -rf "$WORK_ROOT"
+mkdir -p "$WORK_ROOT"
+CODELIMA_HOME="$WORK_ROOT/.codelima"
+```
+
+Create and start one copy-mode node:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-sync --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
+./bin/codelima --home "$CODELIMA_HOME" node create --project qa-sync --slug qa-sync-node
+./bin/codelima --home "$CODELIMA_HOME" node start qa-sync-node
+```
+
+Preview guest changes without mutating the host workspace:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" shell qa-sync-node -- sh -lc 'printf "hello\nfrom guest\n" > README.md && printf "guest only\n" > guest-only.txt'
+./bin/codelima --home "$CODELIMA_HOME" node sync qa-sync-node
+cat "$ROOT_DIR/test-project-dir/README.md"
+test ! -e "$ROOT_DIR/test-project-dir/guest-only.txt"
+```
+
+Expected result:
+
+- `node sync qa-sync-node` succeeds
+- the output includes `dry_run: true`
+- the output includes `changed: true`
+- the output lists both `README.md` and `guest-only.txt` under `diff_summary.paths`
+- the final `cat` still prints `hello`
+- the final `test` succeeds because preview did not write `guest-only.txt` into the host workspace
+
+Apply the guest changes back to the host:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" node sync qa-sync-node --apply
+cat "$ROOT_DIR/test-project-dir/README.md"
+cat "$ROOT_DIR/test-project-dir/guest-only.txt"
+```
+
+Expected result:
+
+- `node sync qa-sync-node --apply` succeeds
+- the sync result includes `applied: true`
+- the first `cat` prints `hello` followed by `from guest`
+- the second `cat` prints `guest only`
+
+Create a later host conflict and verify apply is blocked:
+
+```sh
+./bin/codelima --home "$CODELIMA_HOME" shell qa-sync-node -- sh -lc 'printf "guest conflict\n" > README.md'
+printf 'host conflict\n' > "$ROOT_DIR/test-project-dir/README.md"
+./bin/codelima --home "$CODELIMA_HOME" node sync qa-sync-node --apply
+cat "$ROOT_DIR/test-project-dir/README.md"
+```
+
+Expected result:
+
+- the second `node sync qa-sync-node --apply` fails
+- stderr includes `PatchConflict: patch apply preflight failed`
+- the final `cat` still prints `host conflict`
+
+Cleanup:
+
+```sh
+printf 'hello\n' > "$ROOT_DIR/test-project-dir/README.md"
+rm -f "$ROOT_DIR/test-project-dir/guest-only.txt"
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-sync-node
+rm -rf "$WORK_ROOT"
+```
+
 ## Environment Config Verification
 
 This flow verifies that reusable environment configs can be created once, assigned to multiple projects, resolved into new node bootstrap state, and removed only after projects stop referencing them.

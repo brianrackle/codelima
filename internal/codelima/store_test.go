@@ -51,6 +51,9 @@ func TestSaveProjectWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *test
 	if !strings.Contains(output, "#     workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
 		t.Fatalf("expected project metadata to include the default workspace seed prepare command example, got %s", output)
 	}
+	if !strings.Contains(output, "#     copy_from_guest:") || !strings.Contains(output, "{{binary}} copy{{recursive_flag}} {{copy_source}} {{target_path}}") {
+		t.Fatalf("expected project metadata to include the default copy_from_guest command example, got %s", output)
+	}
 	if !strings.Contains(output, "#     start:") || !strings.Contains(output, "{{binary}} start {{instance_name}} --vm-type=vz") {
 		t.Fatalf("expected project metadata to include the global default start command example, got %s", output)
 	}
@@ -178,5 +181,8 @@ func TestSaveNodeWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *testing
 	}
 	if !strings.Contains(output, "#     workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
 		t.Fatalf("expected node metadata to include the workspace seed prepare example, got %s", output)
+	}
+	if !strings.Contains(output, "#     copy_from_guest:") || !strings.Contains(output, "{{binary}} copy{{recursive_flag}} {{copy_source}} {{target_path}}") {
+		t.Fatalf("expected node metadata to include the copy_from_guest example, got %s", output)
 	}
 }

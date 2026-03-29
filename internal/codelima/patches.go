@@ -10,10 +10,22 @@ import (
 	"strings"
 )
 
-func buildPatch(ctx context.Context, baseTree, sourceTree string) ([]byte, DiffSummary, error) {
-	tempRoot, err := os.MkdirTemp("", "codelima-diff-*")
+func buildPatch(ctx context.Context, scratchRoot, baseTree, sourceTree string) ([]byte, DiffSummary, error) {
+	patchBytes, summary, changed, err := buildPatchAllowNoop(ctx, scratchRoot, baseTree, sourceTree)
 	if err != nil {
 		return nil, DiffSummary{}, err
+	}
+	if !changed {
+		return nil, DiffSummary{}, preconditionFailed("patch proposal is a no-op", nil)
+	}
+
+	return patchBytes, summary, nil
+}
+
+func buildPatchAllowNoop(ctx context.Context, scratchRoot, baseTree, sourceTree string) ([]byte, DiffSummary, bool, error) {
+	tempRoot, err := createTempDir(scratchRoot, "codelima-diff-*")
+	if err != nil {
+		return nil, DiffSummary{}, false, err
 	}
 	defer func() {
 		_ = os.RemoveAll(tempRoot)
@@ -22,11 +34,11 @@ func buildPatch(ctx context.Context, baseTree, sourceTree string) ([]byte, DiffS
 	baseDir := filepath.Join(tempRoot, "base")
 	sourceDir := filepath.Join(tempRoot, "source")
 	if err := copyTree(baseTree, baseDir); err != nil {
-		return nil, DiffSummary{}, err
+		return nil, DiffSummary{}, false, err
 	}
 
 	if err := copyTree(sourceTree, sourceDir); err != nil {
-		return nil, DiffSummary{}, err
+		return nil, DiffSummary{}, false, err
 	}
 
 	cmd := exec.CommandContext(ctx, "git", "diff", "--no-index", "--binary", "--src-prefix=a/", "--dst-prefix=b/", "base", "source")
@@ -38,12 +50,12 @@ func buildPatch(ctx context.Context, baseTree, sourceTree string) ([]byte, DiffS
 	err = cmd.Run()
 
 	if err == nil {
-		return nil, DiffSummary{}, preconditionFailed("patch proposal is a no-op", nil)
+		return nil, DiffSummary{}, false, nil
 	}
 
 	var exitErr *exec.ExitError
 	if !As(err, &exitErr) || exitErr.ExitCode() != 1 {
-		return nil, DiffSummary{}, externalCommandFailed(
+		return nil, DiffSummary{}, false, externalCommandFailed(
 			"git diff failed",
 			fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String())),
 			nil,
@@ -53,10 +65,10 @@ func buildPatch(ctx context.Context, baseTree, sourceTree string) ([]byte, DiffS
 	patchBytes := rewritePatchPaths(stdout.Bytes())
 	summary := summarizePatch(patchBytes)
 	if summary.FilesChanged == 0 {
-		return nil, DiffSummary{}, preconditionFailed("patch proposal is a no-op", nil)
+		return nil, DiffSummary{}, false, nil
 	}
 
-	return patchBytes, summary, nil
+	return patchBytes, summary, true, nil
 }
 
 func rewritePatchPaths(patch []byte) []byte {
@@ -115,8 +127,8 @@ func summarizePatch(patch []byte) DiffSummary {
 	return summary
 }
 
-func applyPatchChecked(ctx context.Context, patchPath string, currentTarget SnapshotManifest) (string, error) {
-	stageDir, err := os.MkdirTemp("", "codelima-apply-stage-*")
+func applyPatchChecked(ctx context.Context, scratchRoot, patchPath string, currentTarget SnapshotManifest) (string, error) {
+	stageDir, err := createTempDir(scratchRoot, "codelima-apply-stage-*")
 	if err != nil {
 		return "", err
 	}

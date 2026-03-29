@@ -142,7 +142,7 @@ func TestRunHelpPrintsUsageAndExitsSuccess(t *testing.T) {
 	if !strings.Contains(output, "environment create|list|show|update|delete") {
 		t.Fatalf("expected help output to include the environment group, got %q", output)
 	}
-	if !strings.Contains(output, "node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell") {
+	if !strings.Contains(output, "node create|list|cleanup-incomplete|show|start|stop|clone|sync|delete|status|logs|shell") {
 		t.Fatalf("expected help output to include the incomplete-node cleanup command, got %q", output)
 	}
 	if strings.Contains(output, "patch propose|list|show|approve|apply|reject") {
@@ -262,6 +262,62 @@ func TestDispatchNodeCreateParsesWorkspaceMode(t *testing.T) {
 	}
 	if got := nodeWorkspaceMode(node); got != WorkspaceModeMounted {
 		t.Fatalf("expected mounted workspace mode, got %q", got)
+	}
+}
+
+func TestDispatchNodeSyncParsesApplyFlag(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	nodeValue, err := dispatchNode(ctx, service, []string{
+		"create",
+		"--project", project.ID,
+		"--slug", "root-node",
+	})
+	if err != nil {
+		t.Fatalf("dispatchNode(create) error = %v", err)
+	}
+	node := nodeValue.(Node)
+
+	startedValue, err := dispatchNode(ctx, service, []string{
+		"start",
+		node.ID,
+	})
+	if err != nil {
+		t.Fatalf("dispatchNode(start) error = %v", err)
+	}
+	node = startedValue.(Node)
+
+	fake := service.lima.(*fakeLima)
+	guestRoot := fake.guestRoots[node.LimaInstanceName]
+	writeFile(t, filepath.Join(guestRoot, "README.md"), "hello\nsynced\n")
+
+	value, err := dispatchNode(ctx, service, []string{
+		"sync",
+		node.ID,
+		"--apply",
+	})
+	if err != nil {
+		t.Fatalf("dispatchNode(sync --apply) error = %v", err)
+	}
+
+	result, ok := value.(NodeSyncResult)
+	if !ok {
+		t.Fatalf("expected NodeSyncResult, got %T", value)
+	}
+	if result.DryRun || !result.Applied {
+		t.Fatalf("expected applied sync result, got %#v", result)
 	}
 }
 

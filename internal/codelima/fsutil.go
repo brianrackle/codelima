@@ -194,6 +194,18 @@ func directoryEmpty(path string) (bool, error) {
 	return len(entries) == 0, nil
 }
 
+func createTempDir(root, pattern string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return os.MkdirTemp("", pattern)
+	}
+
+	if err := ensureDir(root); err != nil {
+		return "", err
+	}
+
+	return os.MkdirTemp(root, pattern)
+}
+
 func slugify(input string) string {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {

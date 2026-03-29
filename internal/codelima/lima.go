@@ -28,6 +28,7 @@ type LimaClient interface {
 	Delete(ctx context.Context, project Project, node Node) error
 	Clone(ctx context.Context, project Project, sourceNode, targetNode Node) error
 	CopyToGuest(ctx context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error
+	CopyFromGuest(ctx context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error
 	Shell(ctx context.Context, project Project, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error
 }
 
@@ -57,6 +58,7 @@ const (
 	limaCommandBootstrap            limaCommandKind = "bootstrap"
 	limaCommandWorkspaceSeedPrepare limaCommandKind = "workspace_seed_prepare"
 	limaCommandCopy                 limaCommandKind = "copy"
+	limaCommandCopyFromGuest        limaCommandKind = "copy_from_guest"
 	limaCommandShell                limaCommandKind = "shell"
 )
 
@@ -73,6 +75,7 @@ func supportedLimaCommandKind(kind limaCommandKind) bool {
 		limaCommandBootstrap,
 		limaCommandWorkspaceSeedPrepare,
 		limaCommandCopy,
+		limaCommandCopyFromGuest,
 		limaCommandShell:
 		return true
 	default:
@@ -178,6 +181,19 @@ func shellCommandArgsFragment(args []string) string {
 	}
 
 	return " -- " + shellArgsFragment(args)
+}
+
+func guestCopySourcePath(sourcePath string, recursive bool) string {
+	if !recursive {
+		return sourcePath
+	}
+
+	trimmed := strings.TrimRight(sourcePath, "/")
+	if trimmed == "" {
+		return sourcePath
+	}
+
+	return trimmed + "/."
 }
 
 func (c *ExecLimaClient) BaseTemplate(ctx context.Context, project Project, nodeCommands LimaCommandTemplates, locator string) ([]byte, error) {
@@ -381,6 +397,32 @@ func (c *ExecLimaClient) CopyToGuest(ctx context.Context, project Project, node 
 		if runErr != nil {
 			return externalCommandFailed(
 				"limactl copy failed",
+				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
+				map[string]any{"instance_name": node.LimaInstanceName, "source_path": sourcePath, "target_path": targetPath, "command": command},
+			)
+		}
+	}
+
+	return nil
+}
+
+func (c *ExecLimaClient) CopyFromGuest(ctx context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
+	commands, err := resolveConfiguredLimaCommands(c.Binary, c.LimaCommands, project, node.LimaCommands, limaCommandCopyFromGuest, map[string]string{
+		"source_path":    shellQuote(sourcePath),
+		"target_path":    shellQuote(targetPath),
+		"instance_name":  shellQuote(node.LimaInstanceName),
+		"copy_source":    shellQuote(fmt.Sprintf("%s:%s", node.LimaInstanceName, guestCopySourcePath(sourcePath, recursive))),
+		"recursive_flag": shellFlagFragment("-r", recursive),
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, command := range commands {
+		_, stderr, runErr := c.runCommandString(ctx, 20*time.Minute, command, c.Stdout, c.Stderr)
+		if runErr != nil {
+			return externalCommandFailed(
+				"limactl copy from guest failed",
 				fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(stderr))),
 				map[string]any{"instance_name": node.LimaInstanceName, "source_path": sourcePath, "target_path": targetPath, "command": command},
 			)

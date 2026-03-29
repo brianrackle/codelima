@@ -882,6 +882,18 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 
 	if !bootstrap.Completed {
 		if !node.WorkspaceSeeded {
+			seedSnapshotID := ""
+			if nodeWorkspaceMode(node) == WorkspaceModeCopy {
+				seedSnapshot, err := s.captureStoredSnapshot(project, project.WorkspacePath, newID(), "workspace_seed")
+				if err != nil {
+					node.Status = NodeStatusFailed
+					node.UpdatedAt = s.now()
+					_ = s.store.SaveNode(node, bootstrap, nil)
+					return Node{}, err
+				}
+				seedSnapshotID = seedSnapshot.ID
+			}
+
 			if err := s.prepareGuestWorkspace(ctx, project, node); err != nil {
 				node.Status = NodeStatusFailed
 				node.UpdatedAt = s.now()
@@ -891,6 +903,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 			}
 
 			node.WorkspaceSeeded = true
+			node.WorkspaceSeedSnapshotID = seedSnapshotID
 			node.UpdatedAt = s.now()
 			if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
 				return Node{}, err
@@ -1069,26 +1082,27 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
 	childNode = Node{
-		ID:                    nodeID,
-		Slug:                  childNodeSlug,
-		ProjectID:             sourceProject.ID,
-		ParentNodeID:          sourceNode.ID,
-		Runtime:               RuntimeVM,
-		Provider:              ProviderLima,
-		LimaInstanceName:      instanceName,
-		Status:                NodeStatusCreated,
-		AgentProfileName:      sourceNode.AgentProfileName,
-		LimaCommands:          input.LimaCommands.ApplyDefaults(sourceNode.LimaCommands),
-		BootstrapCommands:     append([]string(nil), sourceNode.BootstrapCommands...),
-		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		WorkspaceMode:         nodeWorkspaceMode(sourceNode),
-		GuestWorkspacePath:    sourceNode.GuestWorkspacePath,
-		WorkspaceMountPath:    sourceNode.WorkspaceMountPath,
-		WorkspaceSeeded:       sourceNode.WorkspaceSeeded,
-		BootstrapCompleted:    bootstrap.Completed,
-		BootstrapCompletedAt:  bootstrap.CompletedAt,
-		CreatedAt:             s.now(),
-		UpdatedAt:             s.now(),
+		ID:                      nodeID,
+		Slug:                    childNodeSlug,
+		ProjectID:               sourceProject.ID,
+		ParentNodeID:            sourceNode.ID,
+		Runtime:                 RuntimeVM,
+		Provider:                ProviderLima,
+		LimaInstanceName:        instanceName,
+		Status:                  NodeStatusCreated,
+		AgentProfileName:        sourceNode.AgentProfileName,
+		LimaCommands:            input.LimaCommands.ApplyDefaults(sourceNode.LimaCommands),
+		BootstrapCommands:       append([]string(nil), sourceNode.BootstrapCommands...),
+		GeneratedTemplatePath:   s.store.nodeTemplatePath(nodeID),
+		WorkspaceMode:           nodeWorkspaceMode(sourceNode),
+		GuestWorkspacePath:      sourceNode.GuestWorkspacePath,
+		WorkspaceMountPath:      sourceNode.WorkspaceMountPath,
+		WorkspaceSeeded:         sourceNode.WorkspaceSeeded,
+		WorkspaceSeedSnapshotID: sourceNode.WorkspaceSeedSnapshotID,
+		BootstrapCompleted:      bootstrap.Completed,
+		BootstrapCompletedAt:    bootstrap.CompletedAt,
+		CreatedAt:               s.now(),
+		UpdatedAt:               s.now(),
 	}
 
 	if err := s.lima.Clone(ctx, sourceProject, sourceNode, childNode); err != nil {
@@ -1178,6 +1192,149 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 	}
 
 	return node, nil
+}
+
+func (s *Service) NodeSync(ctx context.Context, value string, apply bool) (NodeSyncResult, error) {
+	if err := s.EnsureReady(true); err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+	defer func() {
+		_ = lockSet.Close()
+	}()
+
+	node, err := s.store.NodeByIDOrSlug(value)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	project, err := s.store.ProjectByID(node.ProjectID)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	result := NodeSyncResult{
+		NodeID:             node.ID,
+		NodeSlug:           node.Slug,
+		ProjectID:          project.ID,
+		ProjectSlug:        project.Slug,
+		WorkspaceMode:      nodeWorkspaceMode(node),
+		GuestWorkspacePath: s.nodeGuestWorkspacePath(node),
+		HostWorkspacePath:  project.WorkspacePath,
+		DryRun:             !apply,
+		DiffSummary:        DiffSummary{Paths: []string{}},
+	}
+
+	if result.WorkspaceMode != WorkspaceModeCopy {
+		return NodeSyncResult{}, preconditionFailed("node sync is only available for copy-mode nodes", map[string]any{"node_id": node.ID, "workspace_mode": result.WorkspaceMode})
+	}
+	if !node.WorkspaceSeeded {
+		return NodeSyncResult{}, preconditionFailed("node sync requires a seeded copy-mode node; start the node first", map[string]any{"node_id": node.ID})
+	}
+	if node.WorkspaceSeedSnapshotID == "" {
+		return NodeSyncResult{}, preconditionFailed("node sync requires a workspace seed snapshot; recreate or reseed the node", map[string]any{"node_id": node.ID})
+	}
+	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	node, err = s.reconcileNode(ctx, node, false)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != "running" {
+		return NodeSyncResult{}, preconditionFailed("node sync requires a running copy-mode node", map[string]any{"node_id": node.ID, "status": node.Status})
+	}
+
+	baseSnapshot, err := s.store.LoadSnapshot(project.ID, node.WorkspaceSeedSnapshotID)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+	result.BaseSnapshotID = baseSnapshot.ID
+
+	scratchDir, err := createTempDir(s.store.scratchRoot(), "node-sync-*")
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+	defer func() {
+		_ = os.RemoveAll(scratchDir)
+	}()
+
+	pulledWorkspacePath := filepath.Join(scratchDir, "guest-workspace")
+	if err := ensureDir(pulledWorkspacePath); err != nil {
+		return NodeSyncResult{}, err
+	}
+	if err := s.lima.CopyFromGuest(ctx, project, node, s.nodeGuestWorkspacePath(node), pulledWorkspacePath, true); err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	guestProject := project
+	guestProject.WorkspacePath = pulledWorkspacePath
+	guestSnapshot, err := captureSnapshot(guestProject, newID(), "node_sync_source", filepath.Join(scratchDir, "guest-snapshot"), s.cfg.Snapshot.Excludes, s.now())
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	patchBytes, summary, changed, err := buildPatchAllowNoop(ctx, s.store.scratchRoot(), baseSnapshot.TreeRoot, guestSnapshot.TreeRoot)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+	result.DiffSummary = summary
+	result.Changed = changed
+	if !changed || !apply {
+		return result, nil
+	}
+
+	currentTarget, err := captureSnapshot(project, newID(), "node_sync_target", filepath.Join(scratchDir, "target-snapshot"), s.cfg.Snapshot.Excludes, s.now())
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	nextBaseSnapshot, err := s.captureStoredSnapshot(project, pulledWorkspacePath, newID(), "workspace_seed")
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	patchPath := filepath.Join(scratchDir, "workspace.diff")
+	if err := atomicWriteFile(patchPath, patchBytes, 0o644); err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	stageDir, err := applyPatchChecked(ctx, s.store.scratchRoot(), patchPath, currentTarget)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+	defer func() {
+		_ = os.RemoveAll(stageDir)
+	}()
+
+	if err := syncWorkspaceFromTree(currentTarget, stageDir, project.WorkspacePath); err != nil {
+		_ = restoreWorkspace(currentTarget, project.WorkspacePath)
+		return NodeSyncResult{}, err
+	}
+
+	bootstrap, err := s.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	node.WorkspaceSeedSnapshotID = nextBaseSnapshot.ID
+	node.UpdatedAt = s.now()
+	if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	if err := s.store.AppendNodeEvent(node.ID, Event{Timestamp: node.UpdatedAt, Type: "node.sync.applied", Fields: map[string]any{"files_changed": summary.FilesChanged, "base_snapshot_id": baseSnapshot.ID, "next_base_snapshot_id": nextBaseSnapshot.ID}}); err != nil {
+		return NodeSyncResult{}, err
+	}
+
+	result.DryRun = false
+	result.Applied = true
+	return result, nil
 }
 
 func (s *Service) NodeStatus(ctx context.Context, value string) (Node, error) {
@@ -1279,7 +1436,7 @@ func (s *Service) PatchPropose(ctx context.Context, input PatchProposeInput) (Pa
 		return PatchProposal{}, err
 	}
 
-	patchBytes, summary, err := buildPatch(ctx, baseSnapshot.TreeRoot, sourceSnapshot.TreeRoot)
+	patchBytes, summary, err := buildPatch(ctx, s.store.scratchRoot(), baseSnapshot.TreeRoot, sourceSnapshot.TreeRoot)
 	if err != nil {
 		return PatchProposal{}, err
 	}
@@ -1471,7 +1628,7 @@ func (s *Service) PatchApply(ctx context.Context, value string) (PatchProposal, 
 		return PatchProposal{}, err
 	}
 
-	stageDir, err := applyPatchChecked(ctx, s.store.patchDiffPath(proposal.ID), currentTarget)
+	stageDir, err := applyPatchChecked(ctx, s.store.scratchRoot(), s.store.patchDiffPath(proposal.ID), currentTarget)
 	if err != nil {
 		proposal.Status = PatchStatusFailed
 		proposal.UpdatedAt = s.now()
@@ -1712,6 +1869,21 @@ func (s *Service) seedGuestWorkspace(ctx context.Context, project Project, node 
 	}
 
 	return s.lima.CopyToGuest(ctx, project, node, project.WorkspacePath, targetPath, true)
+}
+
+func (s *Service) captureStoredSnapshot(project Project, workspacePath, snapshotID, kind string) (SnapshotManifest, error) {
+	snapshotProject := project
+	snapshotProject.WorkspacePath = workspacePath
+	manifest, err := captureSnapshot(snapshotProject, snapshotID, kind, s.store.snapshotTreePath(project.ID, snapshotID), s.cfg.Snapshot.Excludes, s.now())
+	if err != nil {
+		return SnapshotManifest{}, err
+	}
+
+	if err := s.store.SaveSnapshot(project.ID, manifest); err != nil {
+		return SnapshotManifest{}, err
+	}
+
+	return manifest, nil
 }
 
 func (s *Service) resolveWorkspaceSeedPrepareCommand(project Project, node Node, sourcePath, targetPath string) (string, error) {

@@ -150,8 +150,9 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 		Status:           NodeStatusCreated,
 		AgentProfileName: "codex-cli",
 		LimaCommands: LimaCommandTemplates{
-			Start: []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
-			Copy:  []string{"{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"},
+			Start:         []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
+			Copy:          []string{"{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"},
+			CopyFromGuest: []string{"{{binary}} copy --backend=rsync{{recursive_flag}} {{copy_source}} {{target_path}}"},
 		},
 	}
 
@@ -169,6 +170,9 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 	}
 	if !strings.Contains(output, "copy:") || !strings.Contains(output, "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}") {
 		t.Fatalf("expected yaml output to include copy override, got %s", output)
+	}
+	if !strings.Contains(output, "copy_from_guest:") || !strings.Contains(output, "{{binary}} copy --backend=rsync{{recursive_flag}} {{copy_source}} {{target_path}}") {
+		t.Fatalf("expected yaml output to include copy_from_guest override, got %s", output)
 	}
 
 	node.LimaCommands = LimaCommandTemplates{}
@@ -248,5 +252,40 @@ func TestBootstrapCommentUsesBootstrapCommandsLabel(t *testing.T) {
 
 	if !strings.Contains(comment, "bootstrap_commands") {
 		t.Fatalf("expected bootstrap comment to include bootstrap_commands, got %s", comment)
+	}
+}
+
+func TestNodeSyncResultMarshalsDiffSummary(t *testing.T) {
+	t.Parallel()
+
+	result := NodeSyncResult{
+		NodeID:             "node-1",
+		NodeSlug:           "root-node",
+		ProjectID:          "project-1",
+		ProjectSlug:        "root",
+		WorkspaceMode:      WorkspaceModeCopy,
+		GuestWorkspacePath: "/workspace/root",
+		HostWorkspacePath:  "/workspace/root",
+		BaseSnapshotID:     "snapshot-1",
+		DryRun:             true,
+		Applied:            false,
+		Changed:            true,
+		DiffSummary: DiffSummary{
+			FilesChanged: 1,
+			Paths:        []string{"README.md"},
+		},
+	}
+
+	payload, err := yaml.Marshal(result)
+	if err != nil {
+		t.Fatalf("yaml.Marshal(result) error = %v", err)
+	}
+
+	output := string(payload)
+	if !strings.Contains(output, "workspace_mode: copy") {
+		t.Fatalf("expected node sync result to include workspace mode, got %s", output)
+	}
+	if !strings.Contains(output, "files_changed: 1") || !strings.Contains(output, "README.md") {
+		t.Fatalf("expected node sync result to include diff summary, got %s", output)
 	}
 }

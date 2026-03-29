@@ -21,8 +21,8 @@ When CodeLima runtime-loads a native library whose upstream C API changes faster
 
 ## Command-Template-First Lima Overrides
 
-The authoritative default Lima command templates live in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`, including `bootstrap` for first-start guest bootstrap work and `workspace_seed_prepare` for the copy-mode guest directory preparation step.
-Each `lima_commands` entry is an ordered command list, so one action can execute multiple commands in sequence. Projects and nodes can each override any subset of those command lists under the same key, with precedence `config.yaml`, then `project.yaml`, then `node.yaml`. Project and node metadata files without explicit overrides include commented example blocks so operators can discover the shape in place. Runtime expansion happens with placeholders like `{{instance_name}}`, `{{template_path}}`, `{{command_args}}`, `{{target_path}}`, and `{{target_parent}}`, while advanced per-node create-time overrides are seeded through `node create --lima-commands-file`, `node clone --lima-commands-file`, or the matching TUI dialog field before `node.yaml` already exists on disk.
+The authoritative default Lima command templates live in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`, including `bootstrap` for first-start guest bootstrap work, `workspace_seed_prepare` for the copy-mode guest directory preparation step, and `copy_from_guest` for the copy-mode workspace airlock back to the host.
+Each `lima_commands` entry is an ordered command list, so one action can execute multiple commands in sequence. Projects and nodes can each override any subset of those command lists under the same key, with precedence `config.yaml`, then `project.yaml`, then `node.yaml`. Project and node metadata files without explicit overrides include commented example blocks so operators can discover the shape in place. Runtime expansion happens with placeholders like `{{instance_name}}`, `{{template_path}}`, `{{command_args}}`, `{{target_path}}`, `{{target_parent}}`, `{{copy_source}}`, and `{{copy_target}}`, while advanced per-node create-time overrides are seeded through `node create --lima-commands-file`, `node clone --lima-commands-file`, or the matching TUI dialog field before `node.yaml` already exists on disk.
 
 ## Snapshot Then Promote
 
@@ -67,7 +67,17 @@ The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball i
 ## Guest Workspace Seed
 
 New nodes default to `copy` workspace mode.
-In that mode, the first successful start resolves `lima_commands.workspace_seed_prepare` to clear and recreate the guest target path, then runs `lima_commands.copy` to copy the host workspace into the guest at the same absolute path. That keeps guest edits isolated while preserving the expected path layout for project bootstrap commands and shell entry.
+In that mode, the first successful start captures an immutable workspace-seed snapshot for the host project, resolves `lima_commands.workspace_seed_prepare` to clear and recreate the guest target path, then runs `lima_commands.copy` to copy the host workspace into the guest at the same absolute path. That keeps guest edits isolated while preserving the expected path layout for project bootstrap commands and shell entry, and gives later sync operations a stable base snapshot for conflict-aware promotion.
+
+## Copy-Mode Workspace Airlock
+
+`node sync` treats the copy-mode guest workspace like a sandbox with an airlock back to the host.
+It pulls the current guest tree through `lima_commands.copy_from_guest`, diffs that tree against the node's recorded workspace-seed snapshot, and applies only those guest changes onto the current host workspace. Successful promotion refreshes the node's workspace-seed snapshot to the synced tree so the next `node sync` only includes new guest changes, while host drift against the old seed becomes an apply conflict instead of being overwritten silently.
+
+## Metadata-Root Scratch Space
+
+Short-lived staging work such as patch construction, patch apply preflights, and guest-workspace pulls should live under `CODELIMA_HOME/_tmp` instead of the system temp directory.
+That keeps CodeLima's transient runtime artifacts inside the same operator-owned metadata root as the durable store, which makes sandboxing, cleanup, and troubleshooting more predictable.
 
 ## Workspace Mode Per Node
 

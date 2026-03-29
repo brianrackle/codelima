@@ -47,6 +47,7 @@ type LimaCommandTemplates struct {
 	Bootstrap            []string `json:"bootstrap,omitempty" yaml:"bootstrap,omitempty"`
 	WorkspaceSeedPrepare []string `json:"workspace_seed_prepare,omitempty" yaml:"workspace_seed_prepare,omitempty"`
 	Copy                 []string `json:"copy,omitempty" yaml:"copy,omitempty"`
+	CopyFromGuest        []string `json:"copy_from_guest,omitempty" yaml:"copy_from_guest,omitempty"`
 	Shell                []string `json:"shell,omitempty" yaml:"shell,omitempty"`
 }
 
@@ -85,29 +86,30 @@ type RuntimeObservation struct {
 }
 
 type Node struct {
-	ID                     string               `json:"id" yaml:"id"`
-	Slug                   string               `json:"slug" yaml:"slug"`
-	ProjectID              string               `json:"project_id" yaml:"project_id"`
-	ParentNodeID           string               `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
-	Runtime                string               `json:"runtime" yaml:"runtime"`
-	Provider               string               `json:"provider" yaml:"provider"`
-	LimaInstanceName       string               `json:"lima_instance_name" yaml:"lima_instance_name"`
-	Status                 string               `json:"status" yaml:"status"`
-	AgentProfileName       string               `json:"agent_profile_name" yaml:"agent_profile_name"`
-	LimaCommands           LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
-	BootstrapCommands      []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
-	GeneratedTemplatePath  string               `json:"generated_template_path" yaml:"generated_template_path"`
-	WorkspaceMode          string               `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
-	GuestWorkspacePath     string               `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
-	WorkspaceMountPath     string               `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
-	WorkspaceSeeded        bool                 `json:"workspace_seeded" yaml:"workspace_seeded"`
-	BootstrapCompleted     bool                 `json:"bootstrap_completed" yaml:"bootstrap_completed"`
-	BootstrapCompletedAt   *time.Time           `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
-	CreatedAt              time.Time            `json:"created_at" yaml:"created_at"`
-	UpdatedAt              time.Time            `json:"updated_at" yaml:"updated_at"`
-	DeletedAt              *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-	LastReconciledAt       *time.Time           `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
-	LastRuntimeObservation *RuntimeObservation  `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
+	ID                      string               `json:"id" yaml:"id"`
+	Slug                    string               `json:"slug" yaml:"slug"`
+	ProjectID               string               `json:"project_id" yaml:"project_id"`
+	ParentNodeID            string               `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime                 string               `json:"runtime" yaml:"runtime"`
+	Provider                string               `json:"provider" yaml:"provider"`
+	LimaInstanceName        string               `json:"lima_instance_name" yaml:"lima_instance_name"`
+	Status                  string               `json:"status" yaml:"status"`
+	AgentProfileName        string               `json:"agent_profile_name" yaml:"agent_profile_name"`
+	LimaCommands            LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
+	BootstrapCommands       []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	GeneratedTemplatePath   string               `json:"generated_template_path" yaml:"generated_template_path"`
+	WorkspaceMode           string               `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath      string               `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath      string               `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded         bool                 `json:"workspace_seeded" yaml:"workspace_seeded"`
+	WorkspaceSeedSnapshotID string               `json:"workspace_seed_snapshot_id,omitempty" yaml:"workspace_seed_snapshot_id,omitempty"`
+	BootstrapCompleted      bool                 `json:"bootstrap_completed" yaml:"bootstrap_completed"`
+	BootstrapCompletedAt    *time.Time           `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
+	CreatedAt               time.Time            `json:"created_at" yaml:"created_at"`
+	UpdatedAt               time.Time            `json:"updated_at" yaml:"updated_at"`
+	DeletedAt               *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	LastReconciledAt        *time.Time           `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
+	LastRuntimeObservation  *RuntimeObservation  `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
 }
 
 type BootstrapState struct {
@@ -230,6 +232,21 @@ type ProjectTreeNode struct {
 	Project  Project           `json:"project"`
 	Nodes    []Node            `json:"nodes,omitempty"`
 	Children []ProjectTreeNode `json:"children"`
+}
+
+type NodeSyncResult struct {
+	NodeID             string      `json:"node_id" yaml:"node_id"`
+	NodeSlug           string      `json:"node_slug" yaml:"node_slug"`
+	ProjectID          string      `json:"project_id" yaml:"project_id"`
+	ProjectSlug        string      `json:"project_slug" yaml:"project_slug"`
+	WorkspaceMode      string      `json:"workspace_mode" yaml:"workspace_mode"`
+	GuestWorkspacePath string      `json:"guest_workspace_path" yaml:"guest_workspace_path"`
+	HostWorkspacePath  string      `json:"host_workspace_path" yaml:"host_workspace_path"`
+	BaseSnapshotID     string      `json:"base_snapshot_id,omitempty" yaml:"base_snapshot_id,omitempty"`
+	DryRun             bool        `json:"dry_run" yaml:"dry_run"`
+	Applied            bool        `json:"applied" yaml:"applied"`
+	Changed            bool        `json:"changed" yaml:"changed"`
+	DiffSummary        DiffSummary `json:"diff_summary" yaml:"diff_summary"`
 }
 
 type projectWire struct {
@@ -464,6 +481,7 @@ type limaCommandTemplatesWire struct {
 	Bootstrap            commandList `json:"bootstrap" yaml:"bootstrap"`
 	WorkspaceSeedPrepare commandList `json:"workspace_seed_prepare,omitempty" yaml:"workspace_seed_prepare,omitempty"`
 	Copy                 commandList `json:"copy,omitempty" yaml:"copy,omitempty"`
+	CopyFromGuest        commandList `json:"copy_from_guest,omitempty" yaml:"copy_from_guest,omitempty"`
 	Shell                commandList `json:"shell,omitempty" yaml:"shell,omitempty"`
 }
 
@@ -506,6 +524,7 @@ func (t LimaCommandTemplates) wire() limaCommandTemplatesWire {
 		Bootstrap:            commandList(copyCommandList(t.Bootstrap)),
 		WorkspaceSeedPrepare: commandList(copyCommandList(t.WorkspaceSeedPrepare)),
 		Copy:                 commandList(copyCommandList(t.Copy)),
+		CopyFromGuest:        commandList(copyCommandList(t.CopyFromGuest)),
 		Shell:                commandList(copyCommandList(t.Shell)),
 	}
 }
@@ -521,6 +540,7 @@ func (w limaCommandTemplatesWire) templates() LimaCommandTemplates {
 		Bootstrap:            copyCommandList([]string(w.Bootstrap)),
 		WorkspaceSeedPrepare: copyCommandList([]string(w.WorkspaceSeedPrepare)),
 		Copy:                 copyCommandList([]string(w.Copy)),
+		CopyFromGuest:        copyCommandList([]string(w.CopyFromGuest)),
 		Shell:                copyCommandList([]string(w.Shell)),
 	}
 }

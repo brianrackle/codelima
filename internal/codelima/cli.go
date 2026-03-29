@@ -449,6 +449,26 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 			return nil, err
 		}
 		return node, nil
+	case "sync":
+		flags := flag.NewFlagSet("node sync", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		apply := flags.Bool("apply", false, "")
+		remaining := args[1:]
+		target := ""
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			target = remaining[0]
+			remaining = remaining[1:]
+		}
+		if err := flags.Parse(remaining); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		if target == "" && flags.NArg() > 0 {
+			target = flags.Arg(0)
+		}
+		if target == "" {
+			return nil, invalidArgument("node sync requires <node>", nil)
+		}
+		return service.NodeSync(ctx, target, *apply)
 	case "delete":
 		if len(args) < 2 {
 			return nil, invalidArgument("node delete requires <node>", nil)
@@ -695,7 +715,7 @@ Groups:
   config show
   environment create|list|show|update|delete
   project create|list|show|update|delete|tree|fork
-  node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
+  node create|list|cleanup-incomplete|show|start|stop|clone|sync|delete|status|logs|shell
   shell <node> [-- command...]
 
 Running with no command opens the TUI.

@@ -3,6 +3,7 @@ package codelima
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,9 @@ type fakeLima struct {
 	invocations  []string
 	shellCalls   []fakeShellCall
 	copyCalls    []fakeCopyCall
+	pullCalls    []fakeCopyCall
+	guestRoots   map[string]string
+	tempRoot     string
 	createErr    error
 	failCommand  string
 	cloneStatus  string
@@ -38,6 +42,7 @@ type fakeCopyCall struct {
 }
 
 func newFakeLima() *fakeLima {
+	tempRoot, _ := os.MkdirTemp("", "codelima-fake-lima-*")
 	return &fakeLima{
 		baseTemplate: []byte("arch: aarch64\nimages: []\ncpus: 1\nmemory: 1GiB\ndisk: 10GiB\nmounts: []\n"),
 		observations: map[string]RuntimeObservation{},
@@ -45,6 +50,9 @@ func newFakeLima() *fakeLima {
 		invocations:  []string{},
 		shellCalls:   []fakeShellCall{},
 		copyCalls:    []fakeCopyCall{},
+		pullCalls:    []fakeCopyCall{},
+		guestRoots:   map[string]string{},
+		tempRoot:     tempRoot,
 		cloneStatus:  "stopped",
 	}
 }
@@ -188,7 +196,41 @@ func (f *fakeLima) CopyToGuest(_ context.Context, project Project, node Node, so
 		targetPath:   targetPath,
 		recursive:    recursive,
 	})
+	guestRoot := filepath.Join(f.tempRoot, node.LimaInstanceName)
+	_ = os.RemoveAll(guestRoot)
+	if err := copyTree(sourcePath, guestRoot); err != nil {
+		return err
+	}
+	f.guestRoots[node.LimaInstanceName] = guestRoot
 	return nil
+}
+
+func (f *fakeLima) CopyFromGuest(_ context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
+	f.calls = append(f.calls, "pull:"+node.LimaInstanceName+":"+sourcePath+"->"+targetPath)
+	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCopyFromGuest, map[string]string{
+		"source_path":    shellQuote(sourcePath),
+		"target_path":    shellQuote(targetPath),
+		"instance_name":  shellQuote(node.LimaInstanceName),
+		"copy_source":    shellQuote(fmt.Sprintf("%s:%s", node.LimaInstanceName, guestCopySourcePath(sourcePath, recursive))),
+		"recursive_flag": shellFlagFragment("-r", recursive),
+	})
+	if err != nil {
+		return err
+	}
+	for _, command := range commands {
+		f.invocations = append(f.invocations, "pull:"+command)
+	}
+	f.pullCalls = append(f.pullCalls, fakeCopyCall{
+		instanceName: node.LimaInstanceName,
+		sourcePath:   sourcePath,
+		targetPath:   targetPath,
+		recursive:    recursive,
+	})
+	guestRoot := f.guestRoots[node.LimaInstanceName]
+	if guestRoot == "" {
+		return errors.New("fake guest workspace missing")
+	}
+	return copyTree(guestRoot, targetPath)
 }
 
 func (f *fakeLima) Shell(_ context.Context, project Project, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
@@ -389,6 +431,9 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 
 	if !containsCall(service.lima.(*fakeLima).calls, "copy:"+node.LimaInstanceName+":"+workspace+"->"+workspace) {
 		t.Fatalf("expected workspace copy delegation, calls = %v", service.lima.(*fakeLima).calls)
+	}
+	if node.WorkspaceSeedSnapshotID == "" {
+		t.Fatalf("expected copy-mode node start to record a workspace seed snapshot")
 	}
 
 	if !containsSubstring(service.lima.(*fakeLima).calls, "command -v sh") {
@@ -899,6 +944,283 @@ func TestNodeClonePreservesMountedWorkspaceMode(t *testing.T) {
 	}
 	if childNode.GuestWorkspacePath != "" {
 		t.Fatalf("expected cloned mounted node to keep empty guest workspace path, got %q", childNode.GuestWorkspacePath)
+	}
+}
+
+func TestNodeClonePreservesWorkspaceSeedSnapshotID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	childNode, err := service.NodeClone(ctx, NodeCloneInput{
+		SourceNode: node.ID,
+		NodeSlug:   "child-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeClone() error = %v", err)
+	}
+
+	if childNode.WorkspaceSeedSnapshotID != node.WorkspaceSeedSnapshotID {
+		t.Fatalf("expected cloned node to preserve workspace seed snapshot id %q, got %q", node.WorkspaceSeedSnapshotID, childNode.WorkspaceSeedSnapshotID)
+	}
+}
+
+func TestNodeSyncPreviewSummarizesGuestChangesWithoutMutatingHost(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+	writeFile(t, filepath.Join(workspace, "keep.txt"), "keep\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	guestRoot := fake.guestRoots[node.LimaInstanceName]
+	writeFile(t, filepath.Join(guestRoot, "README.md"), "hello\nfrom guest\n")
+	writeFile(t, filepath.Join(guestRoot, "notes.txt"), "guest only\n")
+	if err := os.Remove(filepath.Join(guestRoot, "keep.txt")); err != nil {
+		t.Fatalf("Remove(guest keep.txt) error = %v", err)
+	}
+
+	result, err := service.NodeSync(ctx, node.ID, false)
+	if err != nil {
+		t.Fatalf("NodeSync(preview) error = %v", err)
+	}
+
+	if !result.DryRun || result.Applied {
+		t.Fatalf("expected preview sync result, got %#v", result)
+	}
+	if !result.Changed {
+		t.Fatalf("expected preview sync to report changes")
+	}
+	if result.DiffSummary.FilesChanged != 3 || result.DiffSummary.AddedFiles != 1 || result.DiffSummary.ModifiedFiles != 1 || result.DiffSummary.DeletedFiles != 1 {
+		t.Fatalf("unexpected diff summary: %#v", result.DiffSummary)
+	}
+	if !containsSubstring(fake.calls, "pull:"+node.LimaInstanceName+":"+workspace+"->") {
+		t.Fatalf("expected guest pull delegation, calls = %v", fake.calls)
+	}
+
+	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(host README) error = %v", err)
+	}
+	if string(content) != "hello\n" {
+		t.Fatalf("expected preview to leave host workspace unchanged, got %q", string(content))
+	}
+	if exists(filepath.Join(workspace, "notes.txt")) {
+		t.Fatalf("expected preview to avoid creating host-only files")
+	}
+}
+
+func TestNodeSyncApplyPromotesGuestChangesAndRefreshesBaseline(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	guestRoot := fake.guestRoots[node.LimaInstanceName]
+	writeFile(t, filepath.Join(guestRoot, "README.md"), "hello\nsynced\n")
+	writeFile(t, filepath.Join(guestRoot, "new.txt"), "new\n")
+	originalSnapshotID := node.WorkspaceSeedSnapshotID
+
+	result, err := service.NodeSync(ctx, node.ID, true)
+	if err != nil {
+		t.Fatalf("NodeSync(apply) error = %v", err)
+	}
+
+	if result.DryRun || !result.Applied || !result.Changed {
+		t.Fatalf("expected applied sync result, got %#v", result)
+	}
+	if result.DiffSummary.FilesChanged != 2 {
+		t.Fatalf("expected two changed files, got %#v", result.DiffSummary)
+	}
+
+	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(host README) error = %v", err)
+	}
+	if string(content) != "hello\nsynced\n" {
+		t.Fatalf("expected host workspace to receive guest changes, got %q", string(content))
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "new.txt")); err != nil {
+		t.Fatalf("expected host workspace to receive new file: %v", err)
+	}
+
+	updatedNode, err := service.NodeShow(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(updated node) error = %v", err)
+	}
+	if updatedNode.WorkspaceSeedSnapshotID == "" || updatedNode.WorkspaceSeedSnapshotID == originalSnapshotID {
+		t.Fatalf("expected sync apply to refresh workspace seed snapshot id, got %q", updatedNode.WorkspaceSeedSnapshotID)
+	}
+}
+
+func TestNodeSyncApplyDetectsHostConflictsFromSeedBaseline(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	node, err = service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	fake := service.lima.(*fakeLima)
+	guestRoot := fake.guestRoots[node.LimaInstanceName]
+	writeFile(t, filepath.Join(guestRoot, "README.md"), "guest change\n")
+	writeFile(t, filepath.Join(workspace, "README.md"), "host change\n")
+
+	if _, err := service.NodeSync(ctx, node.ID, true); err == nil {
+		t.Fatalf("expected sync apply to detect host conflict")
+	}
+
+	content, err := os.ReadFile(filepath.Join(workspace, "README.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(host README) error = %v", err)
+	}
+	if string(content) != "host change\n" {
+		t.Fatalf("expected host workspace to remain unchanged after conflict, got %q", string(content))
+	}
+}
+
+func TestNodeSyncRejectsMountedNodes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project:       project.ID,
+		Slug:          "mounted-node",
+		WorkspaceMode: WorkspaceModeMounted,
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if _, err := service.NodeSync(ctx, node.ID, false); err == nil {
+		t.Fatalf("expected mounted node sync to be rejected")
+	}
+}
+
+func TestNodeSyncRequiresRunningSeededCopyModeNode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: workspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: project.ID,
+		Slug:    "root-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	if _, err := service.NodeSync(ctx, node.ID, false); err == nil {
+		t.Fatalf("expected unstarted node sync to be rejected")
 	}
 }
 
