@@ -33,6 +33,16 @@ make fmt
 make smoke
 ```
 
+## Self-Hosted Development Metadata
+
+The repository includes a sanitized self-host project metadata example at `examples/self-host/project.yaml`.
+It mirrors the CodeLima project configuration used to develop this repository, but replaces host-specific values such as the local checkout path and hard-coded username assumptions.
+
+Before using that file as live metadata, update:
+
+- `workspace_path` to the absolute path of your local `codelima` checkout
+- any bootstrap commands that need host- or distro-specific adjustments for your environment
+
 ## Release Artifacts
 
 Release packaging is native per platform.

@@ -1,0 +1,29 @@
+# Sanitized self-hosting project metadata for developing CodeLima with CodeLima.
+# Replace workspace_path with the local checkout path before using it as live metadata.
+id: 019d25e8-6b6f-73ad-aa54-499f76f03f55
+slug: codelima
+workspace_path: /path/to/codelima
+agent_profile_name: codex-cli
+environment_configs:
+  - codex
+default_runtime: vm
+default_provider: lima
+default_lima_template: template:default
+
+# Project-specific Lima command overrides.
+# Omitted commands inherit from CODELIMA_HOME/_config/config.yaml and can still be overridden per node.
+lima_commands:
+  create:
+    - "{{binary}} create -y --name {{instance_name}} --cpus=6 --memory=16 --disk=100 {{template_path}}"
+  start:
+    - "{{binary}} start -y --set \".nestedVirtualization=true\" {{instance_name}}"
+  bootstrap:
+    - /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    - echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.profile
+    - eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    - sudo apt-get install -yq make build-essential bubblewrap
+    - brew install lima
+    - sudo usermod -aG kvm "$(id -un)"
+    - newgrp kvm
+created_at: 2026-03-25T16:51:22.09521Z
+updated_at: 2026-03-25T16:51:22.09521Z
