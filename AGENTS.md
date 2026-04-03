@@ -26,6 +26,8 @@ Any scoped-out, deferred, or partially completed follow-up work must be recorded
 
 If you switch to another task while the previous task still has meaningful follow-up work available, document that remaining work in `TODO.md` with the problem, a suggested solution, and the main advantages and disadvantages.
 
+Items in `ROADMAP.md` must be marked complete when finished, or marked partially complete when only part of the roadmap item has been delivered.
+
 Any change that affects how the system works internally, such as runtime integrations, rendering behavior, storage layout, or architecture, must be documented as a numbered Architecture Decision Record in `decisions/` using `ADR_TEMPLATE.md`. Product-surface changes like adding a new command do not require an ADR unless they also change the system architecture.
 
 Keep temporary work local to the project under a project-rooted temp directory such as `./tmp/` instead of using system temp directories.

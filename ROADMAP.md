@@ -6,17 +6,19 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 
 ## Priorities
 
-1. Configurable key bindings
+1. TUI right pane terminal and info toggle
+   Plan: [plans/TUI_RIGHT_PANE_TERMINAL_INFO_SPEC.md](/Users/brianrackle/projects/codelima/plans/TUI_RIGHT_PANE_TERMINAL_INFO_SPEC.md)
+2. Configurable key bindings
    Plan: [KEY_BINDINGS_PLAN.md](/Users/brianrackle/personal/codelima/KEY_BINDINGS_PLAN.md)
-2. Sub-project support
+3. Sub-project support
    Plan: [SUB_PROJECT_PLAN.md](/Users/brianrackle/personal/codelima/SUB_PROJECT_PLAN.md)
-3. Project support for localhost or SSH projects with unmanaged nodes and no workspace management
+4. Project support for localhost or SSH projects with unmanaged nodes and no workspace management
    Plan: [LOCALHOST_SSH_PROJECTS_PLAN.md](/Users/brianrackle/personal/codelima/LOCALHOST_SSH_PROJECTS_PLAN.md)
-4. Configuration overall for worktree support
+5. Configuration overall for worktree support
    Plan: [WORKTREE_SUPPORT_PLAN.md](/Users/brianrackle/personal/codelima/WORKTREE_SUPPORT_PLAN.md)
-5. Docker and Firecracker VM or container support
+6. Docker and Firecracker VM or container support
    Plan: [RUNTIME_PROVIDER_PLAN.md](/Users/brianrackle/personal/codelima/RUNTIME_PROVIDER_PLAN.md)
-6. Project-level configuration of remote node support
+7. Project-level configuration of remote node support
    Plan: [REMOTE_NODE_CONFIGURATION_PLAN.md](/Users/brianrackle/personal/codelima/REMOTE_NODE_CONFIGURATION_PLAN.md)
 
 ## Related Draft Plans
