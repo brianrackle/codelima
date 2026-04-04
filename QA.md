@@ -427,7 +427,7 @@ rm -rf "$WORK_ROOT"
 
 ## TUI Verification
 
-This flow verifies that running `codelima` with no command renders the chosen shell-first layout, lets you manage selected projects and nodes from the tree, auto-switches the visible terminal when node selection changes, and preserves each node session while the TUI process is running. It also verifies the preferred Ghostty-backed terminal path, including scrollback, hyperlink handling, and the apt/dpkg progress case that previously froze the app.
+This flow verifies that running `codelima` with no command renders the chosen info-first split layout, lets you manage selected projects and nodes from the tree, defaults the right pane to the selected project's or node's info surface, keeps `i` as a sticky info-versus-terminal toggle in tree focus, and preserves each project or node terminal session while the TUI process is running. It also verifies the preferred Ghostty-backed terminal path, including scrollback, hyperlink handling, and the apt/dpkg progress case that previously froze the app.
 
 Prerequisites:
 
@@ -463,22 +463,25 @@ Run the TUI:
 
 Inside the TUI verify:
 
-- the left pane renders the available projects and nodes, and the right pane renders either node details, one visible terminal, or the currently active form/menu/selector view
+- the left pane renders the available projects and nodes, and the right pane defaults to the selected project's or node's info surface, or the currently active form/menu/selector view
 - no centered modal overlays appear; transient interactions replace the right pane while the tree remains visible
 - press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately in the right pane, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
 - press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm the dialog and selector both use the right pane without a long frozen pause
-- select project `qa-tui-extra`, confirm the right pane lists `qa-shared` under environment configs
-- with `qa-tui-extra` selected, confirm the right pane shows `Project bootstrap commands: none` and does not list individual bootstrap commands
-- with `qa-tui-extra` selected and the tree focused, confirm the right pane shows a `Project file:` path under the workspace path so the metadata file can be edited manually when needed
-- with `qa-tui-extra` selected and the tree focused, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text
+- select project `qa-tui-extra`, confirm the right pane border shows `[Info] Terminal`, the pane lists `qa-shared` under environment configs, shows `Project bootstrap commands: none` without listing individual bootstrap commands, shows a `Project file:` path under the workspace path so the metadata file can be edited manually when needed, and the footer shows `[i] terminal` alongside `Alt-\`` or `F6` shell focus
+- with `qa-tui-extra` still selected and `[Info] Terminal` visible, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text
+- with `qa-tui-extra` selected, press `Alt-\`` or `F6` to focus the same project terminal fullscreen, run `pwd`, confirm it prints `$WORK_ROOT/extra`, type `echo pending-project` without pressing `Enter`, then return to the tree and confirm `[Info] Terminal` is restored in the split pane
+- with `qa-tui-extra` still selected, press `i`, confirm the right pane border switches to `Info [Terminal]`, the local workspace shell is rooted at `$WORK_ROOT/extra`, and the footer changes to `[i] info`
+- with `qa-tui-extra` still selected and `Info [Terminal]` visible, press `Alt-\`` or `F6`, confirm the project terminal focuses fullscreen, press `Alt-\`` or `F6` again, and confirm `Info [Terminal]` is restored in the split pane
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
 - select project `qa-tui`, press `n`, create node `qa-tui-b` with workspace mode `mounted`, and confirm the new node appears under the project without opening a shell session
-- with `qa-tui-b` selected, confirm the right pane shows `Workspace mode: mounted`
-- with `qa-tui-b` selected, confirm the right pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides
+- with `qa-tui-b` selected, confirm the right pane border shows `[Info] Terminal`, the pane shows `Workspace mode: mounted`, the pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides, and the footer shows `[i] terminal`
+- with `qa-tui-b` selected, press `i`, confirm the right pane border switches to `Info [Terminal]`, the pane stays terminal-oriented instead of auto-switching back to info, the placeholder shows the node status plus start guidance, and the footer changes to `[i] info`
+- while `Info [Terminal]` is visible, select `qa-tui-a` and confirm the terminal mode stays sticky across selection changes and its shell session opens automatically in the split pane
+- press `i` to return to info mode, then select `qa-tui-b` and confirm the info mode stays sticky across selection changes
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - when project or node create, start, stop, clone, or delete is in progress, confirm the TUI keeps accepting non-conflicting input instead of freezing on a blank status line
 - while a long-running project or node mutation is in progress, confirm the selected entry shows a transient task state such as `starting`, `stopping`, `creating`, or `deleting` in the tree or details pane, and that the footer shows background work is still running
-- selecting `qa-tui-a` opens its shell session automatically
+- press `i`, then select `qa-tui-a` and confirm its shell session opens automatically
 - with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` or `F6` shell focus
 - `Alt-\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
 - use `Alt-\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`

@@ -135,11 +135,9 @@ The desired interaction is:
 - When a right-pane override is active, it must replace both terminal preview and info rendering.
 - When `treePaneMode = info`, the right pane must render the info screen for the current tree selection.
 - When `treePaneMode = terminal`, the right pane must render the terminal surface for the current tree selection.
-- Pane labels must explicitly identify both target kind and pane mode:
-  - `Project Terminal`
-  - `Project Info`
-  - `Node Terminal`
-  - `Node Info`
+- The right-pane top border must render the mode toggle as inline tabs without adding another row:
+  - info mode: `[Info] Terminal`
+  - terminal mode: `Info [Terminal]`
 
 ### 5.4 Project Terminal Contract
 
@@ -194,6 +192,7 @@ The desired interaction is:
 ### 6.2 Change Semantics
 
 - `treePaneMode` is initialized at TUI startup and exists only for the current process lifetime.
+- `treePaneMode` defaults to `info` for both project and node selections.
 - Opening or closing transient right-pane overrides must not mutate `treePaneMode`.
 
 ### 6.3 Preflight Validation
@@ -392,8 +391,8 @@ renderTerminalSurface(entry):
   - `treePaneMode = info` remains active while moving across multiple tree entries
   - toggling back to terminal restores the already-running session preview
 - footer and labels
-  - terminal pane mode shows `[i] info`
   - info pane mode shows `[i] terminal`
+  - terminal pane mode shows `[i] info`
   - pane titles match project-versus-node and terminal-versus-info mode
 - session close behavior
   - closing the active fullscreen session returns focus to tree
@@ -402,16 +401,16 @@ renderTerminalSurface(entry):
 ### 13.2 Manual Validation Additions
 
 - extend the existing TUI verification flow to cover:
-  - selected project shows a local workspace terminal in the right pane by default
-  - `Alt-\`` / `F6` focuses that same project terminal fullscreen
-  - `i` switches the split pane from project terminal to the existing project info view
-  - `i` remains sticky while moving between projects and nodes
+  - selected project shows its info pane in the right pane by default
+  - `Alt-\`` / `F6` still focuses that same project's terminal fullscreen from the info-first split view
+  - `i` switches the split pane from info to the existing project terminal preview
+  - `i` remains sticky while moving between projects and nodes in either direction
   - returning from fullscreen terminal focus restores the prior split-pane mode
   - project terminal input remains preserved when toggling `i` away and back
 
 ## 14. Implementation Checklist
 
-- Add `TreePaneMode` to TUI state with default `terminal`.
+- Add `TreePaneMode` to TUI state with default `info`.
 - Add a stable internal action for the info toggle and bind it to `i`.
 - Generalize terminal session management to support `project:<project-id>` and `node:<node-id>` targets.
 - Implement host-local project terminal startup in the selected workspace path.

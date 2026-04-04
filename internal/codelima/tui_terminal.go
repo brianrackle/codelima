@@ -21,11 +21,11 @@ type tuiTerminal interface {
 }
 
 type tuiTerminalClosedEvent struct {
-	NodeID string
-	Err    error
+	TargetKey string
+	Err       error
 }
 
 type tuiTerminalErrorEvent struct {
-	NodeID string
-	Err    error
+	TargetKey string
+	Err       error
 }

@@ -91,7 +91,7 @@ func withGhosttyStderrSuppressed[T any](fn func() T) T {
 	return fn()
 }
 
-func newGhosttyTUITerminal(nodeID string, postEvent func(vaxis.Event)) (tuiTerminal, error) {
+func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTerminal, error) {
 	if err := loadGhosttyVT(); err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func newGhosttyTUITerminal(nodeID string, postEvent func(vaxis.Event)) (tuiTermi
 	}
 
 	return &ghosttyTUITerminal{
-		nodeID:    nodeID,
+		targetKey: targetKey,
 		postEvent: postEvent,
 		term:      term,
 		keyEncoder: func() *ghosttyKeyEncoder {
@@ -195,7 +195,7 @@ func ghosttyVTCandidates() []string {
 }
 
 type ghosttyTUITerminal struct {
-	nodeID       string
+	targetKey    string
 	postEvent    func(vaxis.Event)
 	term         C.GhosttyBridgeTerminal
 	keyEncoder   *ghosttyKeyEncoder
@@ -1134,8 +1134,8 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	ptyWriter := newGhosttyPTYWriter(ptyFile, nil, func(err error) {
 		if t.postEvent != nil {
 			t.postEvent(tuiTerminalErrorEvent{
-				NodeID: t.nodeID,
-				Err:    fmt.Errorf("write embedded terminal pty: %w", err),
+				TargetKey: t.targetKey,
+				Err:       fmt.Errorf("write embedded terminal pty: %w", err),
 			})
 		}
 	})
@@ -1790,7 +1790,7 @@ func (t *ghosttyTUITerminal) finish(err error) {
 		mouseEncoder.Close()
 	}
 	if postEvent && t.postEvent != nil {
-		t.postEvent(tuiTerminalClosedEvent{NodeID: t.nodeID, Err: err})
+		t.postEvent(tuiTerminalClosedEvent{TargetKey: t.targetKey, Err: err})
 	}
 }
 

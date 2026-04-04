@@ -25,7 +25,7 @@ That gives you:
 - **shared environment configs** for Codex, Claude Code, and custom Linux toolchains
 - **global, project, and node Lima command overrides** when a repo or VM needs non-default `limactl` flags
 - **one control plane** for many repos and many nodes
-- **a shell-first TUI** that keeps one live terminal session per opened node while the TUI is running
+- **a shell-first TUI** that keeps reusable project-local and node terminal sessions available while the TUI is running
 - **direct Lima escape hatches** whenever you want to use `limactl` yourself
 
 ## What That Feels Like In Practice
@@ -146,7 +146,7 @@ CodeLima manages:
 - Lima-backed nodes delegated through `limactl`
 - reusable environment configs that bootstrap new nodes
 - a canonical shell surface that passes through to `limactl shell`
-- a shell-first TUI that keeps one live terminal session per opened node while the TUI process is running
+- a shell-first TUI that keeps reusable project-local and node terminal sessions while the TUI process is running
 
 ### Capabilities
 
@@ -156,8 +156,8 @@ CodeLima manages:
 - detect and clean up incomplete node metadata directories left by failed node creation attempts
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
-- browse the project tree, manage selected projects and nodes, and jump between preserved per-node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
-- keep navigating the tree or focus another preserved node terminal while long-running project or node mutations continue in the background
+- browse the project tree, manage selected projects and nodes, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
+- keep navigating the tree or focus another preserved project or node terminal while long-running project or node mutations continue in the background
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
 
@@ -195,12 +195,12 @@ Basic layout:
 
 ```text
 +---------------------------+---------------------------------------------+
-| Projects / Nodes          | Details or terminal                         |
+| Projects / Nodes          | [Info] Terminal                             |
 |                           |                                             |
-| ▼ api                     | Project: api                                |
-|   • api-copy    STOPPED   | Node: api-copy  Mode: copy                  |
-|   • api-mount   RUNNING   |                                             |
-| ▼ billing                 | Alt-`/F6 toggles tree focus <-> terminal focus |
+| ▼ api                     | Project controls                            |
+|   • api-copy    STOPPED   | Slug: api                                   |
+|   • api-mount   RUNNING   | Workspace: /Users/you/src/api               |
+| ▼ billing                 | Press i for terminal preview                |
 |   • billing-a   RUNNING   |                                             |
 +---------------------------+---------------------------------------------+
 ```
@@ -208,6 +208,7 @@ Basic layout:
 Fast key reference:
 
 - `Alt-\`` or `F6`: toggle between tree focus and terminal focus
+- `i`: toggle the right pane between info and terminal while the tree is focused
 - macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want `Alt-\`` to work
 - `q`: quit the TUI
 - `Up` / `Down`: move selection in the tree
@@ -217,6 +218,8 @@ Fast key reference:
 - on a selected project: `[n]` create node, `[u]` update project, `[x]` delete project
 - on a selected node: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
 - mouse: click tree entries to select, click links to open them, and wheel-scroll local terminal scrollback when the guest is not capturing the mouse; use your terminal emulator's host-selection bypass gesture for terminal text selection/copy while mouse-aware apps keep receiving guest mouse input
+
+In tree focus, selecting a project or node shows its info pane by default. Press `i` to switch the split pane to that project's host-local shell or the selected node's guest terminal preview without changing fullscreen terminal focus behavior; stopped nodes still show a terminal-oriented placeholder until you start them.
 
 Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish.
 
@@ -259,13 +262,14 @@ TUI view after registering several repos:
 
 ```text
 +---------------------------+---------------------------------------------+
-| Projects / Nodes          | Project: billing                            |
+| Projects / Nodes          | [Info] Terminal                             |
 |                           |                                             |
-| ▼ api                     | Workspace: /Users/you/src/billing           |
-|   • api-copy    STOPPED   | Project file: ~/.codelima/projects/...      |
-| ▼ billing                 | [n] create node                             |
-|   • billing-a   RUNNING   | [u] update project                          |
-| ▼ docs                    | [x] delete project                          |
+| ▼ api                     | Project controls                            |
+|   • api-copy    STOPPED   | Slug: api                                   |
+| ▼ billing                 | Workspace: /Users/you/src/billing           |
+|   • billing-a   RUNNING   |                                             |
+| ▼ docs                    | Press i for terminal preview                |
+|                           |                                             |
 +---------------------------+---------------------------------------------+
 ```
 
@@ -273,11 +277,11 @@ Why this helps for agentic coding:
 
 - one place to switch between many repos quickly
 - per-project default environments and agent profile metadata
-- per-node terminals that stay attached while you move around the tree
+- project and node terminals that stay attached while you move around the tree
 
 Global Lima command defaults live in `CODELIMA_HOME/_config/config.yaml`.
-Project-specific overrides live in the project metadata file shown in the TUI right pane under `CODELIMA_HOME/projects/<project-id>/project.yaml`.
-Node-specific overrides live in `CODELIMA_HOME/nodes/<node-id>/node.yaml`, and the TUI node details pane links that file directly.
+Project-specific overrides live in the project metadata file shown in the TUI project info pane under `CODELIMA_HOME/projects/<project-id>/project.yaml`.
+Node-specific overrides live in `CODELIMA_HOME/nodes/<node-id>/node.yaml`, and the TUI node info pane links that file directly.
 When a project or node has no overrides yet, its metadata file includes a commented example `lima_commands` block you can uncomment and edit.
 
 Each `lima_commands` action is an ordered command list. CodeLima executes the list in order, and higher-precedence overrides replace the whole list for that action. `lima_commands.bootstrap` runs during the first successful node start and replaces the older project-level `environment_commands` field.

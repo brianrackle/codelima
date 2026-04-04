@@ -14,22 +14,22 @@ const tuiEmbeddedTermEnv = "xterm-256color"
 // The richer xterm-kitty terminfo target is not fully emulated by the Vaxis
 // fallback widget and can provoke incompatible redraw behavior in interactive
 // programs such as apt/dpkg progress views.
-func newTUITerminal(nodeID string, postEvent func(vaxis.Event)) tuiTerminal {
-	if terminal, err := newGhosttyTUITerminal(nodeID, postEvent); err == nil {
+func newTUITerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
+	if terminal, err := newGhosttyTUITerminal(targetKey, postEvent); err == nil {
 		return terminal
 	}
-	return newTUIVaxisTerminal(nodeID, postEvent)
+	return newTUIVaxisTerminal(targetKey, postEvent)
 }
 
-func newTUIVaxisTerminal(nodeID string, postEvent func(vaxis.Event)) tuiTerminal {
+func newTUIVaxisTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
 	model := term.New()
 	model.TERM = tuiEmbeddedTermEnv
 	model.Attach(func(event vaxis.Event) {
 		switch event := event.(type) {
 		case term.EventClosed:
-			postEvent(tuiTerminalClosedEvent{NodeID: nodeID, Err: event.Error})
+			postEvent(tuiTerminalClosedEvent{TargetKey: targetKey, Err: event.Error})
 		case term.EventPanic:
-			postEvent(tuiTerminalErrorEvent{NodeID: nodeID, Err: error(event)})
+			postEvent(tuiTerminalErrorEvent{TargetKey: targetKey, Err: error(event)})
 		default:
 			postEvent(event)
 		}

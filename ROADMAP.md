@@ -6,8 +6,9 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 
 ## Priorities
 
-1. TUI right pane terminal and info toggle
+1. [partially complete] TUI right pane terminal and info toggle
    Plan: [plans/TUI_RIGHT_PANE_TERMINAL_INFO_SPEC.md](/Users/brianrackle/projects/codelima/plans/TUI_RIGHT_PANE_TERMINAL_INFO_SPEC.md)
+   Status: implementation and updated `QA.md` coverage landed; a full end-to-end manual verification pass is still pending
 2. Configurable key bindings
    Plan: [KEY_BINDINGS_PLAN.md](/Users/brianrackle/personal/codelima/KEY_BINDINGS_PLAN.md)
 3. Sub-project support

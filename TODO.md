@@ -187,13 +187,13 @@ Disadvantages:
 Problem:
 
 - This change is covered by automated tests, `make verify`, and host-side manual runs of the non-interactive `QA.md` flows: `List Verification`, `Doctor And Incomplete Node Cleanup Verification`, `Tree Verification`, `Shell Verification`, `Workspace Mode Verification`, `Environment Config Verification`, `Clone Verification`, `Workspace Rebind Verification`, and `Packaging Verification`.
-- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, right-pane dialog and selector flows, host-bypass text selection, hyperlink activation, modified-key input such as `Shift+Enter`, and embedded-terminal behavior checks.
+- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, project-terminal preview, sticky `i` info toggling, right-pane dialog and selector flows, host-bypass text selection, hyperlink activation, modified-key input such as `Shift+Enter`, and embedded-terminal behavior checks.
 - That leaves one operator-facing end-to-end verification flow incomplete even though the Lima-backed CLI flows were exercised locally.
 
 Suggested solution:
 
 - Run the `TUI Verification` section from `QA.md` in a real terminal session on a host with working Lima boot support.
-- Confirm the interactive focus toggles, preserved per-node terminal state, right-pane transient-view behavior, host-bypass text selection, hyperlink opening, modified-key input such as `Shift+Enter`, and streamed progress output.
+- Confirm the interactive focus toggles, preserved project and node terminal state, sticky `i` pane restoration, right-pane transient-view behavior, host-bypass text selection, hyperlink opening, modified-key input such as `Shift+Enter`, and streamed progress output.
 - Confirm cleanup completes afterward so no verification-only Lima instances or metadata remain.
 
 Advantages:
@@ -415,3 +415,55 @@ Disadvantages:
 - Touches a wide swath of service, CLI, TUI, and test code that currently assumes one `status` field covers both concerns.
 - May require outward-facing output changes or compatibility handling for existing automation.
 - Increases short-term implementation complexity while the codebase transitions to the split model.
+
+### 18. Make the temporary interactive-shell `INPUTRC` path resilient when `$HOME` is read-only
+
+Problem:
+
+- During local TUI verification of the project terminal preview, the host-local interactive shell surfaced `mktemp: Read-only file system` while trying to create `~/.codelima-inputrc.XXXXXX`.
+- The preview shell still launched, but the startup noise pollutes the terminal surface and breaks the expectation that sandboxed tooling should run cleanly inside the workspace.
+- The current `interactiveShellLaunchCommand()` wrapper assumes `$HOME` is writable, which is not always true in sandboxed or locked-down environments.
+
+Suggested solution:
+
+- Change the temporary `INPUTRC` setup to prefer a writable project-controlled path such as a repo-root `tmp/` location or another writable temp directory when `$HOME` is not writable.
+- Probe writability before calling `mktemp`, and skip the temporary readline file entirely when no safe writable location exists.
+- Add a focused regression test that covers the fallback path so embedded project terminals and `codelima shell` stay quiet in read-only-home environments.
+
+Advantages:
+
+- Keeps interactive shell startup clean in sandboxed environments.
+- Aligns better with the repo policy of keeping temporary artifacts under project-controlled temp paths.
+- Reduces noisy false-alarm output in project terminal previews and interactive shell sessions.
+
+Disadvantages:
+
+- Requires threading a writable temporary location into a shared shell-launch helper that currently has no project-specific context.
+- May need different fallback behavior for CLI shells versus TUI project previews.
+- Adds more environment probing to a startup path that should remain lightweight.
+
+### 19. Run the full interactive `QA.md` pass against the info-first split-pane TUI
+
+Problem:
+
+- The TUI now defaults the split pane to `[Info] Terminal` and defers terminal preview session startup until the operator toggles into terminal mode or focuses fullscreen terminal view.
+- Automated coverage now verifies the new default, the inverted tab order, sticky pane-mode behavior, and the affected mouse and node-action paths.
+- The full manual `QA.md` flows still need a human-run pass against a real terminal and Lima environment to confirm the updated startup path, fullscreen restoration, link handling, and node lifecycle interactions end to end.
+
+Suggested solution:
+
+- Run the complete `QA.md` verification set from a host terminal with Lima available, using the updated TUI flow that starts in info mode and toggles into terminal mode with `i`.
+- Confirm both project and node selections restore the expected pane mode after fullscreen terminal focus and that stopped-node terminal placeholders still behave correctly after the default change.
+- Record any discrepancies back into `TODO.md` or a follow-up ADR if the info-first behavior exposes a broader product decision.
+
+Advantages:
+
+- Closes the remaining verification gap for the new info-first default.
+- Confirms the real host-terminal and Lima interactions match the updated automated expectations.
+- Reduces the chance of a UI mismatch between the documented `QA.md` flow and the actual interactive experience.
+
+Disadvantages:
+
+- Requires an interactive terminal and Lima runtime rather than sandbox-only automation.
+- Takes longer than the automated suite because the flow exercises project, node, terminal, and link interactions manually.
+- May uncover environment-specific issues that require a second round of follow-up changes.
