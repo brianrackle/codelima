@@ -16,7 +16,7 @@ SOLID principals will be followed.
 
 Best practices will be used.
 
-Reusable will be documented in a PATTERNS.MD file and reused to reduce copy pasta.
+Reusable patterns will be documented in a PATTERNS.MD file and reused to reduce copy pasta.
 
 When work is complete the code needs to be run and verified locally.
 
