@@ -8,6 +8,83 @@ import (
 	"time"
 )
 
+func TestEnsureLayoutBackfillsUntouchedLegacyBuiltInEnvironmentConfigs(t *testing.T) {
+	t.Parallel()
+
+	home := filepath.Join(t.TempDir(), ".codelima")
+	cfg := DefaultConfig(home)
+	store := NewStore(cfg)
+	createdAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	if err := store.SaveEnvironmentConfig(EnvironmentConfig{
+		ID:   "legacy-codex",
+		Slug: "codex",
+		BootstrapCommands: []string{
+			"sudo snap install node --classic",
+			"sudo npm install -g @openai/codex",
+		},
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("SaveEnvironmentConfig(legacy codex) error = %v", err)
+	}
+
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
+	}
+
+	config, err := store.EnvironmentConfigByIDOrSlug("codex")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigByIDOrSlug(codex) error = %v", err)
+	}
+	if config.ID != "legacy-codex" {
+		t.Fatalf("expected legacy config id to be preserved, got %q", config.ID)
+	}
+
+	want := []string{
+		"sudo snap install node --classic",
+		`mkdir -p "$HOME/.local/bin"`,
+		`npm config set prefix "$HOME/.local"`,
+		`for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`,
+		`PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`,
+	}
+	if got := strings.Join(config.BootstrapCommands, "|"); got != strings.Join(want, "|") {
+		t.Fatalf("expected legacy codex config to be backfilled, got %q", got)
+	}
+}
+
+func TestEnsureLayoutDoesNotOverwriteCustomizedBuiltInEnvironmentConfigs(t *testing.T) {
+	t.Parallel()
+
+	home := filepath.Join(t.TempDir(), ".codelima")
+	cfg := DefaultConfig(home)
+	store := NewStore(cfg)
+	createdAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	customizedCommands := []string{"mise install", "npm update -g @openai/codex"}
+
+	if err := store.SaveEnvironmentConfig(EnvironmentConfig{
+		ID:                "custom-codex",
+		Slug:              "codex",
+		BootstrapCommands: customizedCommands,
+		CreatedAt:         createdAt,
+		UpdatedAt:         createdAt,
+	}); err != nil {
+		t.Fatalf("SaveEnvironmentConfig(custom codex) error = %v", err)
+	}
+
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
+	}
+
+	config, err := store.EnvironmentConfigByIDOrSlug("codex")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigByIDOrSlug(codex) error = %v", err)
+	}
+	if got := strings.Join(config.BootstrapCommands, "|"); got != strings.Join(customizedCommands, "|") {
+		t.Fatalf("expected customized codex config to persist, got %q", got)
+	}
+}
+
 func TestSaveProjectWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *testing.T) {
 	t.Parallel()
 

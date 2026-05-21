@@ -1589,11 +1589,22 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 
 	assertEnvironmentConfigCommands(t, configs, "codex",
 		"sudo snap install node --classic",
-		"sudo npm install -g @openai/codex",
+		`mkdir -p "$HOME/.local/bin"`,
+		`npm config set prefix "$HOME/.local"`,
+		`for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`,
+		`PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`,
 	)
 	assertEnvironmentConfigCommands(t, configs, "claude-code",
 		"curl -fsSL https://claude.ai/install.sh | bash",
 	)
+
+	config, err := service.EnvironmentConfigShow("codex")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
+	}
+	if containsSubstring(config.BootstrapCommands, "sudo npm") {
+		t.Fatalf("expected codex bootstrap to avoid sudo npm, got %q", strings.Join(config.BootstrapCommands, "|"))
+	}
 
 	if _, err := service.EnvironmentConfigUpdate("codex", EnvironmentConfigUpdateInput{
 		BootstrapCommands: []string{"echo customized"},
@@ -1605,7 +1616,7 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 		t.Fatalf("EnsureReady(false) error = %v", err)
 	}
 
-	config, err := service.EnvironmentConfigShow("codex")
+	config, err = service.EnvironmentConfigShow("codex")
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}

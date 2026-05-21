@@ -467,3 +467,29 @@ Disadvantages:
 - Requires an interactive terminal and Lima runtime rather than sandbox-only automation.
 - Takes longer than the automated suite because the flow exercises project, node, terminal, and link interactions manually.
 - May uncover environment-specific issues that require a second round of follow-up changes.
+
+### 20. Investigate duplicate built-in environment configs on a fresh `CODELIMA_HOME`
+
+Problem:
+
+- During the `Environment Config Verification` rerun for the built-in agent-profile change, the first `environment list` on a brand-new `tmp/qa-env-config/.codelima` home showed three `codex` rows and three `claude-code` rows before any user-created environment config existed.
+- `environment show codex` and `environment show claude-code` still worked, but repeated seeded duplicates make the list output noisy and suggest the built-in environment-config seeding path is writing multiple records for the same slug.
+- That behavior was unrelated to the launch-command change in this task, so it was observed but not debugged here.
+
+Suggested solution:
+
+- Reproduce the issue in an automated regression test that starts from an empty metadata root and asserts a single built-in `codex` and `claude-code` environment config after the first readiness pass.
+- Trace the seeding and slug-index flow for environment configs to determine why repeated built-ins are being persisted instead of recognized as already present.
+- Fix the seeding path so built-in environment configs remain singleton records while still preserving user edits and deletions.
+
+Advantages:
+
+- Restores the expected clean built-in environment list on a fresh home.
+- Prevents metadata churn and operator confusion around duplicate built-in records.
+- Tightens confidence in the durable seeded-defaults behavior that both the CLI and TUI rely on.
+
+Disadvantages:
+
+- Requires careful debugging of the metadata store and slug-index interactions rather than a narrow surface-level fix.
+- May reveal a broader store or readiness bug that touches more than just environment-config seeding.
+- Could require follow-up migration or cleanup logic for homes that already contain duplicate seeded records.

@@ -6,6 +6,8 @@ Go will be used as the primary language.
 
 The Go toolchain and Go modules will be used to manage dependencies and run the code.
 
+Use `go doc` and `gopls` to inspect Go APIs, symbols, types, references, and diagnostics while developing.
+
 Linters and formatters should be used to keep the code maintainable, using gofmt and golangci-lint.
 
 Code will be written in an idiomatic way.

@@ -24,6 +24,7 @@ Chosen option: "Seed built-in environment configs during store bootstrap", becau
 ### Positive Consequences
 
 * Fresh and existing homes automatically gain `codex` and `claude-code` reusable environment configs.
+* Untouched legacy built-in configs can be refreshed when a default bootstrap command changes.
 * Project create and update can reference the defaults immediately from both the CLI and TUI.
 * The seeded configs live in the normal metadata store, so list, show, update, delete, and selector flows need no product-specific branching.
 
@@ -37,10 +38,11 @@ Chosen option: "Seed built-in environment configs during store bootstrap", becau
 
 ### Seed built-in environment configs during store bootstrap
 
-Write `codex` and `claude-code` into the metadata store from `EnsureLayout` when those slugs do not already exist.
+Write `codex` and `claude-code` into the metadata store from `EnsureLayout` when those slugs do not already exist, and refresh records that still exactly match a known legacy built-in default.
 
 * Good, because the CLI and TUI both consume the same persisted records.
 * Good, because existing homes get the defaults without a manual migration step.
+* Good, because untouched old defaults can move forward without overwriting user-edited configs.
 * Bad, because later command changes do not propagate automatically once a config has been customized or deleted.
 
 ### Hardcode built-in environment configs only in the TUI selectors and dialogs

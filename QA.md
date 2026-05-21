@@ -376,7 +376,7 @@ Verify the built-in defaults, then create one shared environment config and two 
 Expected result:
 
 - the first `environment list` includes `codex` and `claude-code`
-- `environment show codex` includes `sudo snap install node --classic` and `sudo npm install -g @openai/codex`
+- `environment show codex` includes `sudo snap install node --classic`, `npm config set prefix "$HOME/.local"`, `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`, and no `sudo npm install -g @openai/codex`
 - `environment show claude-code` includes `curl -fsSL https://claude.ai/install.sh | bash`
 - `environment list` includes `qa-shared`
 - `environment show qa-shared` includes `bootstrap_commands` with both configured commands

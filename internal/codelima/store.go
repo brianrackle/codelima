@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -185,11 +186,27 @@ func (s *Store) ensureNodeMetadataFiles() error {
 }
 
 func (s *Store) ensureBuiltInEnvironmentConfigs(createdAt time.Time) error {
+	legacyConfigs := legacyBuiltInEnvironmentConfigs()
 	for _, spec := range builtInEnvironmentConfigs() {
 		config, err := s.EnvironmentConfigByIDOrSlug(spec.Slug)
 		if err == nil {
 			if config.DeletedAt != nil {
 				continue
+			}
+
+			if bootstrapCommandsEqual(config.BootstrapCommands, spec.BootstrapCommands) {
+				continue
+			}
+
+			legacy, ok := legacyConfigs[spec.Slug]
+			if !ok || !bootstrapCommandsEqual(config.BootstrapCommands, legacy.BootstrapCommands) {
+				continue
+			}
+
+			config.BootstrapCommands = append([]string(nil), spec.BootstrapCommands...)
+			config.UpdatedAt = createdAt
+			if err := s.SaveEnvironmentConfig(config); err != nil {
+				return err
 			}
 			continue
 		}
@@ -211,6 +228,16 @@ func (s *Store) ensureBuiltInEnvironmentConfigs(createdAt time.Time) error {
 	}
 
 	return nil
+}
+
+func bootstrapCommandsEqual(a, b []string) bool {
+	if a == nil {
+		a = []string{}
+	}
+	if b == nil {
+		b = []string{}
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func (s *Store) configPath() string {

@@ -30,7 +30,7 @@ That gives you:
 
 ## What That Feels Like In Practice
 
-- Give `codex` or `claude` full in-guest permissions without giving the same reach to your host.
+- Run `codex` or `claude` inside the VM without giving the same reach to your host.
 - Keep package installs, shell state, and experiments off your workstation.
 - Move between projects and nodes quickly from the CLI or the TUI.
 
@@ -384,7 +384,7 @@ Practical rule:
 - use `copy` when you want the strongest sandbox boundary around a coding agent
 - use `mounted` when you intentionally want the VM to act directly on your host workspace
 
-## Workflow 3: Run Codex Or Claude In A Sandboxed VM With Full In-Guest Permissions
+## Workflow 3: Run Codex Or Claude In A Sandboxed VM
 
 Fresh homes include:
 
@@ -392,7 +392,13 @@ Fresh homes include:
 - environment config `claude-code`
 - agent profiles `codex-cli` and `claude-code`
 
-The environment config installs the tool in the VM. The agent profile records which command that project or node expects to run. CodeLima itself does not add extra in-guest restrictions, so if you want a full-permission, no-restriction Codex or Claude session, start it inside the VM shell rather than on your host.
+The environment config installs the tool in the VM. The agent profile records which command that project or node expects to run. The built-in Codex and Claude profiles use the plain executable names by default.
+
+The built-in `codex` environment config installs the Codex npm package under the VM user's `~/.local` prefix instead of using `sudo npm`. After bootstrap, update Codex inside the VM with:
+
+```sh
+npm update -g @openai/codex
+```
 
 Codex example:
 
@@ -447,7 +453,7 @@ TUI view after creating the project and node:
 
 Why this is safer:
 
-- unrestricted agent actions happen inside the VM
+- agent actions happen inside the VM
 - package installs and shell state stay off the host
 - if the agent breaks the VM, you can stop, delete, and recreate the node
 - `copy` mode keeps accidental file damage out of the host workspace
@@ -465,7 +471,10 @@ codelima environment create \
   --bootstrap-command "sudo apt-get install -y ripgrep fd-find jq gh" \
   --bootstrap-command "curl -fsSL https://mise.run | sh"
 
-codelima environment update devbox --bootstrap-command "sudo npm install -g @anthropic-ai/claude-code"
+codelima environment update devbox \
+  --bootstrap-command 'mkdir -p "$HOME/.local/bin"' \
+  --bootstrap-command 'npm config set prefix "$HOME/.local"' \
+  --bootstrap-command 'PATH="$HOME/.local/bin:$PATH" npm install -g @anthropic-ai/claude-code'
 codelima environment show devbox
 
 codelima project create \

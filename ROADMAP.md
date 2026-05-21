@@ -5,6 +5,11 @@ Status: Draft
 This roadmap tracks the current prioritized plan documents for CodeLima. Every linked plan below is a draft.
 
 ## Priorities
+0.0 [complete] fix npm installation so it doesnt require sudo to run `npm install`
+0.0  running clear in TUI node terminal returns "'xterm-ghostty': unknown terminal type." and doesnt clear
+0.1. support syncing vm clipboard to host system clipboard
+0.2. Refresh project tree automatically.
+0.3. Fix issue: Pasting content with newlines removes the newlines.
 
 1. [partially complete] TUI right pane terminal and info toggle
    Plan: [plans/TUI_RIGHT_PANE_TERMINAL_INFO_SPEC.md](/Users/brianrackle/projects/codelima/plans/TUI_RIGHT_PANE_TERMINAL_INFO_SPEC.md)

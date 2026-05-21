@@ -7,6 +7,16 @@ import (
 	"strings"
 )
 
+const (
+	defaultAgentValidationCommand  = "command -v sh >/dev/null 2>&1"
+	defaultCodexNodeInstallCommand = "sudo snap install node --classic"
+	defaultCodexNPMBinCommand      = `mkdir -p "$HOME/.local/bin"`
+	defaultCodexNPMPrefixCommand   = `npm config set prefix "$HOME/.local"`
+	defaultCodexPathCommand        = `for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`
+	defaultCodexNPMInstallCommand  = `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`
+	legacyCodexNPMInstallCommand   = "sudo npm install -g @openai/codex"
+)
+
 type Config struct {
 	MetadataRoot        string               `json:"metadata_root" yaml:"metadata_root"`
 	LimaHome            string               `json:"lima_home" yaml:"lima_home"`
@@ -134,14 +144,14 @@ func builtInProfiles() map[string]AgentProfile {
 		"codex-cli": {
 			Name:              "codex-cli",
 			InstallCommands:   []string{},
-			ValidationCommand: "command -v sh >/dev/null 2>&1",
+			ValidationCommand: defaultAgentValidationCommand,
 			LaunchCommand:     "codex",
 			Environment:       map[string]string{},
 		},
 		"claude-code": {
 			Name:              "claude-code",
 			InstallCommands:   []string{},
-			ValidationCommand: "command -v sh >/dev/null 2>&1",
+			ValidationCommand: defaultAgentValidationCommand,
 			LaunchCommand:     "claude",
 			Environment:       map[string]string{},
 		},
@@ -158,11 +168,32 @@ func builtInEnvironmentConfigs() []builtInEnvironmentConfigSpec {
 		{
 			Slug: "codex",
 			BootstrapCommands: []string{
-				"sudo snap install node --classic",
-				"sudo npm install -g @openai/codex",
+				defaultCodexNodeInstallCommand,
+				defaultCodexNPMBinCommand,
+				defaultCodexNPMPrefixCommand,
+				defaultCodexPathCommand,
+				defaultCodexNPMInstallCommand,
 			},
 		},
 		{
+			Slug: "claude-code",
+			BootstrapCommands: []string{
+				"curl -fsSL https://claude.ai/install.sh | bash",
+			},
+		},
+	}
+}
+
+func legacyBuiltInEnvironmentConfigs() map[string]builtInEnvironmentConfigSpec {
+	return map[string]builtInEnvironmentConfigSpec{
+		"codex": {
+			Slug: "codex",
+			BootstrapCommands: []string{
+				defaultCodexNodeInstallCommand,
+				legacyCodexNPMInstallCommand,
+			},
+		},
+		"claude-code": {
 			Slug: "claude-code",
 			BootstrapCommands: []string{
 				"curl -fsSL https://claude.ai/install.sh | bash",

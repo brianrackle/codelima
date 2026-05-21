@@ -37,7 +37,7 @@ Later config changes do not retroactively mutate existing nodes.
 ## Built-In Metadata Seeding
 
 `EnsureLayout` seeds durable built-in metadata such as agent profiles and reusable environment configs.
-Those defaults are written into the normal store on first use, so the CLI and TUI see the same `codex` and `claude-code` environment configs without special UI logic. Existing user edits or deletions win over later startup, which keeps the seeded defaults behaving like ordinary user-managed records instead of immortal system entries.
+Those defaults are written into the normal store on first use, so the CLI and TUI see the same `codex` and `claude-code` environment configs plus the matching `codex-cli` and `claude-code` agent profiles without special UI logic. When a built-in environment config changes, `EnsureLayout` may refresh an untouched legacy config forward to the new default, but existing user edits or deletions still win over later startup so the seeded records keep behaving like ordinary user-managed metadata instead of immortal system entries.
 
 ## Workspace-Aware Shell Delegation
 
