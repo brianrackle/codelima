@@ -272,6 +272,7 @@ type vaxisTUIApp struct {
 const (
 	terminalViewToggleFooterHint = "Alt-`/F6"
 	terminalViewToggleTextHint   = "Alt-` or F6"
+	hostTerminalToggleFooterHint = "Opt-Shift-`"
 	infoViewToggleFooterHint     = "[i]"
 )
 
@@ -424,6 +425,16 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 }
 
 func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
+	if isHostTerminalToggleKey(key) {
+		if err := a.state.toggleHostTerminal(); err != nil {
+			a.status = err.Error()
+			return false, nil
+		}
+		a.status = ""
+		a.syncSessionFocus()
+		return false, nil
+	}
+
 	if isTerminalViewToggleKey(key) {
 		if err := a.state.toggleFocus(); err != nil {
 			a.status = err.Error()
@@ -1874,15 +1885,36 @@ func (a *vaxisTUIApp) draw() {
 	mutedStyle := tuiMutedStyle()
 	errorStyle := vaxis.Style{Foreground: vaxis.ColorRed, Attribute: vaxis.AttrBold}
 
+	bodyTop := 1
+	bodyHeight := height - bodyTop - 1
+	layoutFocus := a.effectiveLayoutFocus()
+	layout := layoutTUIBody(width, layoutFocus)
+	entry := a.state.selectedEntry()
+	if layoutFocus == tuiFocusTerminal {
+		entry = a.state.activeTerminalEntry()
+	}
+
 	projectSlug := "none"
-	if project, ok := a.state.activeProject(); ok {
-		projectSlug = project.Slug
+	switch entry.kind {
+	case tuiTreeEntryProject:
+		projectSlug = entry.project.Slug
+	case tuiTreeEntryNode:
+		projectSlug = entry.project.Slug
+	default:
+	}
+	if projectSlug == "" {
+		projectSlug = "none"
+	}
+	if projectSlug == "none" {
+		if project, ok := a.state.activeProject(); ok {
+			projectSlug = project.Slug
+		}
 	}
 
 	headerSegments := []vaxis.Segment{
 		{Text: "Project: " + projectSlug, Style: headerStyle},
 	}
-	if entry := a.state.selectedEntry(); entry.kind == tuiTreeEntryNode {
+	if entry.kind == tuiTreeEntryNode {
 		headerSegments = append(headerSegments,
 			vaxis.Segment{Text: "  Node: " + entry.node.Slug},
 			vaxis.Segment{Text: "  Mode: " + nodeWorkspaceMode(entry.node)},
@@ -1890,10 +1922,6 @@ func (a *vaxisTUIApp) draw() {
 	}
 	window.Println(0, headerSegments...)
 
-	bodyTop := 1
-	bodyHeight := height - bodyTop - 1
-	layoutFocus := a.effectiveLayoutFocus()
-	layout := layoutTUIBody(width, layoutFocus)
 	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
 
 	if layout.treeVisible {
@@ -1922,7 +1950,6 @@ func (a *vaxisTUIApp) draw() {
 		}
 	}
 
-	entry := a.state.selectedEntry()
 	if a.sessions != nil {
 		cols, rows := tuiEmbeddedTerminalSize(width, height, layoutFocus)
 		a.sessions.SetPreferredTerminalSize(cols, rows)
@@ -2240,7 +2267,12 @@ func drawTerminalPane(win vaxis.Window, tabs []vaxis.Segment, style vaxis.Style)
 
 func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) string {
 	if focus == tuiFocusTerminal {
-		return terminalViewToggleFooterHint + " tree focus   q quit"
+		parts := []string{terminalViewToggleFooterHint + " tree focus"}
+		if entry.kind == tuiTreeEntryNode || entry.kind == tuiTreeEntryProject {
+			parts = append(parts, hostTerminalToggleFooterHint+" host/node")
+		}
+		parts = append(parts, "q quit")
+		return strings.Join(parts, "   ")
 	}
 
 	parts := make([]string, 0, 12)
@@ -2253,6 +2285,9 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 			parts = append(parts, infoViewToggleFooterHint+" info")
 		} else {
 			parts = append(parts, infoViewToggleFooterHint+" terminal")
+		}
+		if entry.kind == tuiTreeEntryNode {
+			parts = append(parts, hostTerminalToggleFooterHint+" host terminal")
 		}
 	}
 
@@ -2288,7 +2323,21 @@ func tuiEntryLabelWithStatus(entry tuiTreeEntry, statusOverride string) string {
 }
 
 func isTerminalViewToggleKey(key vaxis.Key) bool {
+	if isHostTerminalToggleKey(key) {
+		return false
+	}
 	return key.Matches('`', vaxis.ModAlt) || key.Matches(vaxis.KeyF06)
+}
+
+func isHostTerminalToggleKey(key vaxis.Key) bool {
+	if normalizedKeyModifiers(key.Modifiers) != vaxis.ModAlt|vaxis.ModShift {
+		return false
+	}
+	return key.Keycode == '`' || key.ShiftedCode == '~' || key.BaseLayoutCode == '`' || key.Text == "~"
+}
+
+func normalizedKeyModifiers(modifiers vaxis.ModifierMask) vaxis.ModifierMask {
+	return modifiers &^ vaxis.ModCapsLock &^ vaxis.ModNumLock
 }
 
 func isQuitKey(key vaxis.Key) bool {

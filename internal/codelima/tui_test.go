@@ -749,7 +749,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "root-node", Status: NodeStatusRunning},
 	}
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeInfo, runningNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+infoViewToggleFooterHint+" terminal   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+infoViewToggleFooterHint+" terminal   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected running-node footer with shell focus and node actions, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -761,12 +761,12 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "stopped-node", Status: NodeStatusStopped},
 	}
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeInfo, stoppedNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   "+infoViewToggleFooterHint+" terminal   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   Left/Right collapse   "+infoViewToggleFooterHint+" terminal   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected stopped-node footer without shell focus, got %q", got)
 	}
 
 	got = renderFooter(tuiFocusTerminal, tuiTreePaneModeTerminal, runningNodeEntry)
-	if got != terminalViewToggleFooterHint+" tree focus   q quit" {
+	if got != terminalViewToggleFooterHint+" tree focus   "+hostTerminalToggleFooterHint+" host/node   q quit" {
 		t.Fatalf("expected terminal footer without mouse hints, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -896,6 +896,9 @@ func TestTerminalViewToggleKeyMatchesAltBacktickOrF6(t *testing.T) {
 	if !isTerminalViewToggleKey(vaxis.Key{Keycode: vaxis.KeyF06}) {
 		t.Fatalf("expected F6 to match the terminal view toggle key")
 	}
+	if isTerminalViewToggleKey(vaxis.Key{Text: "~", Keycode: '`', ShiftedCode: '~', Modifiers: vaxis.ModAlt | vaxis.ModShift}) {
+		t.Fatalf("expected Option+Shift+` to be reserved for the host terminal toggle")
+	}
 	if isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModSuper}) {
 		t.Fatalf("expected Super+` not to match the terminal view toggle key")
 	}
@@ -904,6 +907,23 @@ func TestTerminalViewToggleKeyMatchesAltBacktickOrF6(t *testing.T) {
 	}
 	if isTerminalViewToggleKey(vaxis.Key{Text: "`", Keycode: '`'}) {
 		t.Fatalf("expected bare ` not to match the terminal view toggle key")
+	}
+}
+
+func TestHostTerminalToggleKeyMatchesOptionShiftBacktick(t *testing.T) {
+	t.Parallel()
+
+	if !isHostTerminalToggleKey(vaxis.Key{Text: "~", Keycode: '`', ShiftedCode: '~', Modifiers: vaxis.ModAlt | vaxis.ModShift}) {
+		t.Fatalf("expected Option+Shift+` to match the host terminal toggle key")
+	}
+	if !isHostTerminalToggleKey(vaxis.Key{Text: "~", Keycode: '~', BaseLayoutCode: '`', Modifiers: vaxis.ModAlt | vaxis.ModShift}) {
+		t.Fatalf("expected shifted tilde form of Option+Shift+` to match the host terminal toggle key")
+	}
+	if isHostTerminalToggleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Option+` without Shift not to match the host terminal toggle key")
+	}
+	if isHostTerminalToggleKey(vaxis.Key{Text: "~", Keycode: '`', ShiftedCode: '~', Modifiers: vaxis.ModShift}) {
+		t.Fatalf("expected Shift+` without Option not to match the host terminal toggle key")
 	}
 }
 
@@ -1409,6 +1429,74 @@ func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
 	}
 	if layout := layoutTUIBody(120, app.state.focus); !layout.treeVisible {
 		t.Fatalf("expected tree focus to show the tree")
+	}
+}
+
+func TestTUIHandleKeyOptionShiftBacktickSwitchesNodeToHostTerminalAndBack(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	sessionManager := newSharedFakeTUISessionManager(sessions)
+	state, err := newTUIState(testTUITree(t), sessionManager)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: sessions,
+	}
+
+	hostKey := vaxis.Key{Text: "~", Keycode: '`', ShiftedCode: '~', Modifiers: vaxis.ModAlt | vaxis.ModShift}
+	quit, err := app.handleKey(hostKey)
+	if err != nil {
+		t.Fatalf("handleKey(Option+Shift+`) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Option+Shift+` to switch terminals, not quit")
+	}
+	if app.state.focus != tuiFocusTerminal {
+		t.Fatalf("expected Option+Shift+` to focus the terminal, got %q", app.state.focus)
+	}
+	if app.state.selectedEntry().key() != nodeTargetKey("node-root") {
+		t.Fatalf("expected host toggle to keep the node selected, got %q", app.state.selectedEntry().key())
+	}
+	if got := app.state.activeTerminalTargetKey(); got != projectTargetKey("project-root") {
+		t.Fatalf("expected active terminal to switch to host project, got %q", got)
+	}
+	if sessionManager.ensured[projectTargetKey("project-root")] != 1 {
+		t.Fatalf("expected host project session to be opened once, got %d", sessionManager.ensured[projectTargetKey("project-root")])
+	}
+
+	app.forwardTerminalEvent(vaxis.Key{Text: "x", Keycode: 'x'})
+	projectSession := sessions.sessions[projectTargetKey("project-root")]
+	if projectSession == nil {
+		t.Fatalf("expected project session to exist")
+	}
+	projectTerminal, ok := projectSession.terminal.(*fakeTUITerminal)
+	if !ok {
+		t.Fatalf("expected fake project terminal, got %T", projectSession.terminal)
+	}
+	if len(projectTerminal.events) != 1 {
+		t.Fatalf("expected focused input to be sent to host project terminal, got %d events", len(projectTerminal.events))
+	}
+
+	quit, err = app.handleKey(hostKey)
+	if err != nil {
+		t.Fatalf("handleKey(Option+Shift+`) second toggle error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected Option+Shift+` to switch back to the node terminal, not quit")
+	}
+	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
+		t.Fatalf("expected active terminal to switch back to node, got %q", got)
+	}
+	if sessionManager.ensured[nodeTargetKey("node-root")] != 1 {
+		t.Fatalf("expected node session to be opened once, got %d", sessionManager.ensured[nodeTargetKey("node-root")])
 	}
 }
 

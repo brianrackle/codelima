@@ -24,14 +24,6 @@ func newID() string {
 	return id.String()
 }
 
-func shortID(id string) string {
-	if len(id) < 8 {
-		return id
-	}
-
-	return strings.ReplaceAll(id[:8], "-", "")
-}
-
 func ensureDir(path string) error {
 	return os.MkdirAll(path, 0o755)
 }

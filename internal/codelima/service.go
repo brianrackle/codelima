@@ -717,7 +717,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
-	instanceName, err := s.generateInstanceName(project.Slug, nodeSlug, nodeID)
+	instanceName, err := s.generateInstanceName(nodeSlug)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1086,7 +1086,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	}
 
 	nodeID := newID()
-	instanceName, err := s.generateInstanceName(sourceProject.Slug, childNodeSlug, nodeID)
+	instanceName, err := s.generateInstanceName(childNodeSlug)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1653,11 +1653,14 @@ func (s *Service) resolveProjectBootstrapCommands(project Project, nodeCommands 
 	return commands, nil
 }
 
-func (s *Service) generateInstanceName(projectSlug, nodeSlug, nodeID string) (string, error) {
-	prefix := fmt.Sprintf("%s-%s-%s", projectSlug, nodeSlug, shortID(nodeID))
-	instanceName := slugify(prefix)
+func (s *Service) generateInstanceName(nodeSlug string) (string, error) {
+	instanceName := slugify(nodeSlug)
 	if len(instanceName) > 63 {
 		instanceName = instanceName[:63]
+		instanceName = strings.Trim(instanceName, "-")
+	}
+	if instanceName == "" {
+		instanceName = "node"
 	}
 
 	nodes, err := s.store.ListNodes(false)
@@ -1688,6 +1691,10 @@ func (s *Service) renderTemplate(ctx context.Context, project Project, node Node
 	delete(document, "cpus")
 	delete(document, "memory")
 	delete(document, "disk")
+	document["provision"] = appendLimaProvision(document["provision"], map[string]any{
+		"mode":   "system",
+		"script": nodeHostnameProvisionScript(node.LimaInstanceName),
+	})
 	document["mounts"] = renderWorkspaceMounts(project.WorkspacePath, workspaceMode)
 
 	templateBytes, err := yaml.Marshal(document)
@@ -1696,6 +1703,27 @@ func (s *Service) renderTemplate(ctx context.Context, project Project, node Node
 	}
 
 	return append(templateBytes, []byte(bootstrapComment(bootstrap))...), nil
+}
+
+func appendLimaProvision(existing any, provision map[string]any) []any {
+	provisions := []any{}
+	if values, ok := existing.([]any); ok {
+		provisions = append(provisions, values...)
+	}
+	return append(provisions, provision)
+}
+
+func nodeHostnameProvisionScript(hostname string) string {
+	quotedHostname := shellQuote(hostname)
+	return fmt.Sprintf(`#!/bin/sh
+set -eu
+if command -v hostnamectl >/dev/null 2>&1; then
+	hostnamectl set-hostname %[1]s
+else
+	hostname %[1]s
+	printf '%%s\n' %[1]s > /etc/hostname
+fi
+`, quotedHostname)
 }
 
 func (s *Service) runGuestCommand(ctx context.Context, node Node, command string) error {

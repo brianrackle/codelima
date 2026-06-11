@@ -31,6 +31,8 @@ Verify the default table output:
 ```sh
 ./bin/codelima --home "$CODELIMA_HOME" project list
 ./bin/codelima --home "$CODELIMA_HOME" node list
+./bin/codelima --home "$CODELIMA_HOME" node show qa-list-node
+grep "hostnamectl set-hostname 'qa-list-node'" "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ```
 
 Expected result:
@@ -39,18 +41,22 @@ Expected result:
 - the `project list` row includes `qa-list`, `$ROOT_DIR/test-project-dir`, `vm`, and `codex-cli`
 - `node list` prints a table with the columns `slug`, `uuid`, `workspace_mode`, `workspace_path`, `runtime`, `vm_status`, and `agent`
 - the `node list` row includes `qa-list-node`, `copy`, `$ROOT_DIR/test-project-dir`, `vm`, `stopped`, and `codex-cli`
+- `node show qa-list-node` includes `lima_instance_name: qa-list-node`
+- the generated Lima template includes a provisioning command that sets the guest hostname to `qa-list-node`
 
 Start the node and verify the VM status updates:
 
 ```sh
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-list-node
 ./bin/codelima --home "$CODELIMA_HOME" node list
+./bin/codelima --home "$CODELIMA_HOME" shell qa-list-node -- hostname
 ```
 
 Expected result:
 
-- both commands succeed
+- all commands succeed
 - the `node list` row for `qa-list-node` now shows `running` under `vm_status`
+- `hostname` prints `qa-list-node`
 
 Verify structured output still works:
 
@@ -482,9 +488,10 @@ Inside the TUI verify:
 - when project or node create, start, stop, clone, or delete is in progress, confirm the TUI keeps accepting non-conflicting input instead of freezing on a blank status line
 - while a long-running project or node mutation is in progress, confirm the selected entry shows a transient task state such as `starting`, `stopping`, `creating`, or `deleting` in the tree or details pane, and that the footer shows background work is still running
 - press `i`, then select `qa-tui-a` and confirm its shell session opens automatically
-- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` or `F6` shell focus
+- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` or `F6` shell focus and `Option+Shift+Backtick` host terminal
 - `Alt-\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
 - use `Alt-\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
+- press `Option+Shift+Backtick`, confirm the fullscreen terminal switches to the host-local project shell for `qa-tui-root`, run `pwd`, confirm it prints `$WORK_ROOT/root`, type `echo pending-host` without pressing `Enter`, then press `Option+Shift+Backtick` again and confirm the `qa-tui-a` node terminal is restored with `echo pending-a` still present
 - press `Alt-\`` or `F6` again to return to the tree and confirm the split layout is restored
 - select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - while `qa-tui-b` is still starting or stopping, move back to `qa-tui-a`, focus its terminal, and confirm the other node terminal remains usable while the background task completes

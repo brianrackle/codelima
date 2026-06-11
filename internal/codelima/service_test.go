@@ -387,6 +387,10 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
 
+	if node.LimaInstanceName != "root-node" {
+		t.Fatalf("expected lima instance name to match node slug, got %q", node.LimaInstanceName)
+	}
+
 	if !containsPrefix(service.lima.(*fakeLima).calls, "create:"+node.LimaInstanceName) {
 		t.Fatalf("expected limactl create delegation")
 	}
@@ -401,6 +405,12 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 
 	if strings.Contains(string(templateBytes), "location: "+workspace) {
 		t.Fatalf("expected generated template to avoid mounting host workspace, got %s", string(templateBytes))
+	}
+	if !strings.Contains(string(templateBytes), "hostnamectl set-hostname 'root-node'") {
+		t.Fatalf("expected generated template to provision the node hostname, got %s", string(templateBytes))
+	}
+	if strings.Contains(string(templateBytes), "\nhostname:") {
+		t.Fatalf("expected generated template to avoid unsupported top-level hostname field, got %s", string(templateBytes))
 	}
 	for _, unexpected := range []string{"\ncpus:", "\nmemory:", "\ndisk:"} {
 		if strings.Contains(string(templateBytes), unexpected) {
@@ -498,6 +508,12 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	}
 	if !strings.Contains(templateText, "writable: true") {
 		t.Fatalf("expected generated template to use a writable mount, got %s", templateText)
+	}
+	if !strings.Contains(templateText, "hostnamectl set-hostname 'mounted-node'") {
+		t.Fatalf("expected generated template to provision the mounted node hostname, got %s", templateText)
+	}
+	if strings.Contains(templateText, "\nhostname:") {
+		t.Fatalf("expected generated template to avoid unsupported top-level hostname field, got %s", templateText)
 	}
 
 	node, err = service.NodeStart(ctx, node.ID)
@@ -1094,6 +1110,10 @@ func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 
 	if childNode.ParentNodeID != node.ID {
 		t.Fatalf("expected child node parent id %q, got %q", node.ID, childNode.ParentNodeID)
+	}
+
+	if childNode.LimaInstanceName != "child-node" {
+		t.Fatalf("expected cloned node lima instance name to match child node slug, got %q", childNode.LimaInstanceName)
 	}
 
 	if childNode.GuestWorkspacePath != workspace {

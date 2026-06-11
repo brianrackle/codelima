@@ -157,6 +157,7 @@ CodeLima manages:
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - browse the project tree, manage selected projects and nodes, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
+- switch a focused node terminal to the host-local project terminal and back without losing the selected node context
 - keep navigating the tree or focus another preserved project or node terminal while long-running project or node mutations continue in the background
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
@@ -208,8 +209,9 @@ Basic layout:
 Fast key reference:
 
 - `Alt-\`` or `F6`: toggle between tree focus and terminal focus
+- `Option+Shift+Backtick`: switch a selected node's fullscreen terminal to its host-local project terminal and back
 - `i`: toggle the right pane between info and terminal while the tree is focused
-- macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want `Alt-\`` to work
+- macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want `Alt-\`` or `Option+Shift+Backtick` to work
 - `q`: quit the TUI
 - `Up` / `Down`: move selection in the tree
 - `Left` / `Right`: collapse or expand projects in the tree
