@@ -3,6 +3,7 @@ package codelima
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"unicode"
 
 	"git.sr.ht/~rockorager/vaxis"
@@ -11,6 +12,10 @@ import (
 // These encoders intentionally match the Vaxis terminal widget behavior so the
 // Ghostty backend can preserve the existing shell input contract.
 func encodeTUITerminalKey(key vaxis.Key, applicationKeypad bool, cursorKeysApplication bool) string {
+	if key.EventType == vaxis.EventPaste {
+		return encodeTUITerminalPasteKey(key)
+	}
+
 	xtermMods := key.Modifiers & vaxis.ModShift
 	xtermMods |= key.Modifiers & vaxis.ModAlt
 	xtermMods |= key.Modifiers & vaxis.ModCtrl
@@ -100,6 +105,50 @@ func encodeTUITerminalKey(key vaxis.Key, applicationKeypad bool, cursorKeysAppli
 
 	buf.WriteRune(key.Keycode)
 	return buf.String()
+}
+
+func encodeTUITerminalPasteKey(key vaxis.Key) string {
+	if key.Text != "" {
+		return normalizeTUITerminalPasteText(key.Text)
+	}
+
+	switch key.Keycode {
+	case vaxis.KeyEnter, vaxis.KeyKeyPadEnter:
+		return "\r"
+	case vaxis.KeyTab:
+		return "\t"
+	case vaxis.KeyEsc:
+		return "\x1b"
+	case vaxis.KeyBackspace:
+		return "\x7f"
+	}
+
+	if key.Keycode <= 0 || key.Keycode >= unicode.MaxRune {
+		return ""
+	}
+	return string(key.Keycode)
+}
+
+func normalizeTUITerminalPasteText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\r")
+	return strings.ReplaceAll(text, "\n", "\r")
+}
+
+func normalizeTUITerminalEvent(event vaxis.Event) vaxis.Event {
+	key, ok := event.(vaxis.Key)
+	if !ok || key.EventType != vaxis.EventPaste {
+		return event
+	}
+
+	if key.Text != "" {
+		key.Text = normalizeTUITerminalPasteText(key.Text)
+		key.Keycode = unicode.MaxRune
+		return key
+	}
+
+	key.Text = encodeTUITerminalPasteKey(key)
+	key.Keycode = unicode.MaxRune
+	return key
 }
 
 func encodeTUITerminalMouse(msg vaxis.Mouse, sgr bool, drag bool, motion bool) string {

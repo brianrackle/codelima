@@ -29,6 +29,19 @@ func TestEncodeTUITerminalKeyEncodesCtrlC(t *testing.T) {
 	}
 }
 
+func TestEncodeTUITerminalPasteKeyPreservesNewlinesAsCarriageReturns(t *testing.T) {
+	t.Parallel()
+
+	got := encodeTUITerminalKey(vaxis.Key{
+		Text:      "one\ntwo\r\nthree",
+		Keycode:   '\n',
+		EventType: vaxis.EventPaste,
+	}, false, false)
+	if got != "one\rtwo\rthree" {
+		t.Fatalf("expected pasted newlines to become carriage returns, got %q", got)
+	}
+}
+
 func TestEncodeTUITerminalMouseUsesSGRWhenRequested(t *testing.T) {
 	t.Parallel()
 

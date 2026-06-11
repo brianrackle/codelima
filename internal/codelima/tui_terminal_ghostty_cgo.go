@@ -121,6 +121,11 @@ func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTe
 			}
 			return encoder
 		}(),
+		clipboardScanner: newOSC52ClipboardScanner(func(text string) {
+			if postEvent != nil {
+				postEvent(tuiClipboardEvent{TargetKey: targetKey, Text: text})
+			}
+		}),
 		cols: 80,
 		rows: 24,
 	}, nil
@@ -205,6 +210,7 @@ type ghosttyTUITerminal struct {
 	cmd              *exec.Cmd
 	pty              *os.File
 	ptyWriter        *ghosttyPTYWriter
+	clipboardScanner *osc52ClipboardScanner
 	cols             int
 	rows             int
 	focused          bool
@@ -472,7 +478,7 @@ func encodeTUITerminalKeyWithGhostty(
 	cursorKeysApplication bool,
 ) string {
 	if key.EventType == vaxis.EventPaste {
-		return key.Text
+		return encodeTUITerminalPasteKey(key)
 	}
 	if encoder != nil {
 		if encoded, handled := encoder.Encode(key, term, applicationKeypad, cursorKeysApplication); handled {
@@ -514,10 +520,7 @@ func (e *ghosttyKeyEncoder) Encode(
 	}
 
 	if key.EventType == vaxis.EventPaste {
-		if key.Text != "" {
-			return key.Text, true
-		}
-		return "", true
+		return encodeTUITerminalPasteKey(key), true
 	}
 
 	physicalKey, ok := ghosttyKeyForVaxis(key)
@@ -1191,6 +1194,10 @@ func (t *ghosttyTUITerminal) readPTY(buffer []byte) (int, error) {
 }
 
 func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
+	if t.clipboardScanner != nil {
+		t.clipboardScanner.Write(data)
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

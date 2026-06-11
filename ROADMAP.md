@@ -7,12 +7,12 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 ## Priorities
 0.0 [complete]: shorten lima generated vm ids so they align with codelima node names, because the long names that show up in the terminal are too long (e.g. brianrackle@lima-happi-happi-node-019e4c5b should instead be brianrackle@happi-node)
 0.1 [complete]: keybind to switch to host terminal and back with Option+Shift+Backtick
-0.2: Refresh project tree automatically.
-0.3: Fix issue: Pasting content with newlines removes the newlines.
-0.4: Fix issue: resizing window often causes terminal contents to clear
-0.5: red line at top when in host machine
-0.6: support syncing vm clipboard to host system clipboard
-0.7: ghostty cmd + d and cmd + shift + d style support to create pane in ghostty with the current codelima terminal open
+0.2 [complete]: Refresh project tree automatically.
+0.3 [complete]: Fix issue: Pasting content with newlines removes the newlines.
+0.4 [complete]: Fix issue: resizing window often causes terminal contents to clear
+0.5 [complete]: red host-machine indicator uses the existing TUI top bar instead of adding another bar
+0.6 [complete]: support syncing vm clipboard to host system clipboard
+0.7 [superseded]: ghostty cmd + d and cmd + shift + d style TUI split support was removed; terminal tabbing stays tabbing and modified terminal keys no longer create TUI splits
 
 1. Configurable key bindings
    Plan: [KEY_BINDINGS_PLAN.md](/Users/brianrackle/personal/codelima/KEY_BINDINGS_PLAN.md)

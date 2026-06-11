@@ -524,6 +524,23 @@ func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) erro
 	if selectedKey == "" {
 		selectedKey = s.selectedEntry().key()
 	}
+	hostOverrideActive := s.hostTerminalReturnKey != "" && strings.HasPrefix(s.activeTerminalKey, "project:")
+	hostOverrideActiveKey := s.activeTerminalKey
+	hostOverrideReturnKey := s.hostTerminalReturnKey
+	restoreHostOverride := func() {
+		if !hostOverrideActive {
+			return
+		}
+		if _, ok := s.entryForKey(hostOverrideActiveKey); !ok {
+			return
+		}
+		if _, ok := s.entryForKey(hostOverrideReturnKey); !ok {
+			return
+		}
+		s.activeTerminalKey = hostOverrideActiveKey
+		s.hostTerminalReturnKey = hostOverrideReturnKey
+	}
+
 	expanded := cloneExpandedState(s.expanded)
 	s.tree = append([]ProjectTreeNode(nil), tree...)
 	s.expanded = expanded
@@ -534,13 +551,17 @@ func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) erro
 
 	if selectedKey != "" {
 		if index := s.findEntryByKey(selectedKey); index >= 0 {
-			return s.selectIndex(index)
+			err := s.selectIndex(index)
+			restoreHostOverride()
+			return err
 		}
 		if s.expandToKey(selectedKey) {
 			s.rebuildEntries()
 		}
 		if index := s.findEntryByKey(selectedKey); index >= 0 {
-			return s.selectIndex(index)
+			err := s.selectIndex(index)
+			restoreHostOverride()
+			return err
 		}
 	}
 
@@ -552,10 +573,14 @@ func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) erro
 	}
 
 	if s.selection < 0 || s.selection >= len(s.entries) {
-		return s.selectIndex(0)
+		err := s.selectIndex(0)
+		restoreHostOverride()
+		return err
 	}
 
-	return s.selectIndex(s.selection)
+	err := s.selectIndex(s.selection)
+	restoreHostOverride()
+	return err
 }
 
 func (s *tuiState) activeTerminalTargetKey() string {

@@ -56,6 +56,18 @@ type tuiOperationCompleteEvent struct {
 	Err         error
 }
 
+type tuiRefreshTickEvent struct{}
+
+type tuiRefreshCompleteEvent struct {
+	Tree []ProjectTreeNode
+	Err  error
+}
+
+type tuiClipboardEvent struct {
+	TargetKey string
+	Text      string
+}
+
 type tuiProgressWriter struct {
 	post        func(vaxis.Event)
 	operationID string

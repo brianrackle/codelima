@@ -158,7 +158,11 @@ CodeLima manages:
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
 - browse the project tree, manage selected projects and nodes, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
 - switch a focused node terminal to the host-local project terminal and back without losing the selected node context
+- turn the existing TUI top bar red while the focused node terminal is temporarily switched to the host machine
+- open, switch, and close TUI terminal tabs backed by the preserved project and node sessions
 - keep navigating the tree or focus another preserved project or node terminal while long-running project or node mutations continue in the background
+- keep the TUI project tree refreshed automatically while preserving expansion state, selection, and open terminals
+- paste multiline text, resize the host window, and sync OSC 52 guest clipboard writes to the host clipboard in the embedded terminal
 - inspect local control-plane health with `doctor` and resolved defaults with `config show`
 - view project lineage with attached project nodes via `project tree`
 
@@ -210,8 +214,11 @@ Fast key reference:
 
 - `Alt-\`` or `F6`: toggle between tree focus and terminal focus
 - `Option+Shift+Backtick`: switch a selected node's fullscreen terminal to its host-local project terminal and back
+- `Alt+t` / `Option+t`: open or focus the selected project's or node's terminal tab
+- `Alt+Left` / `Option+Left` and `Alt+Right` / `Option+Right`: switch among open terminal tabs
+- `Alt+w` / `Option+w`: close the active terminal tab
 - `i`: toggle the right pane between info and terminal while the tree is focused
-- macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want `Alt-\`` or `Option+Shift+Backtick` to work
+- macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want Option-based shortcuts to work; if `Option+t` types `†`, the terminal is sending text instead of a shortcut modifier
 - `q`: quit the TUI
 - `Up` / `Down`: move selection in the tree
 - `Left` / `Right`: collapse or expand projects in the tree
@@ -223,7 +230,11 @@ Fast key reference:
 
 In tree focus, selecting a project or node shows its info pane by default. Press `i` to switch the split pane to that project's host-local shell or the selected node's guest terminal preview without changing fullscreen terminal focus behavior; stopped nodes still show a terminal-oriented placeholder until you start them.
 
-Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish.
+Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish. The tree also refreshes periodically, so out-of-process node status or metadata changes appear without restarting the TUI.
+
+Terminal tabs are the project and node sessions CodeLima has opened during the current TUI run. `Alt+t` or `Option+t` opens or focuses the selected target, `Alt+Left`/`Alt+Right` or `Option+Left`/`Option+Right` switch among open tabs, and `Alt+w` or `Option+w` closes the active tab. Open tabs appear in the terminal pane border, with host-local project shells labeled `host:<project>` and the active tab shown in brackets. When a node terminal is switched to the host-local project shell with `Option+Shift+Backtick`, the existing TUI top bar turns red until you switch back.
+
+Guest applications that emit OSC 52 clipboard writes sync that text to the host clipboard; ordinary visible-text selection still uses your terminal emulator's host-selection bypass gesture.
 
 Create Project form in the right pane:
 

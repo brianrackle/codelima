@@ -476,6 +476,7 @@ Inside the TUI verify:
 - select project `qa-tui-extra`, confirm the right pane border shows `[Info] Terminal`, the pane lists `qa-shared` under environment configs, shows `Project bootstrap commands: none` without listing individual bootstrap commands, shows a `Project file:` path under the workspace path so the metadata file can be edited manually when needed, and the footer shows `[i] terminal` alongside `Alt-\`` or `F6` shell focus
 - with `qa-tui-extra` still selected and `[Info] Terminal` visible, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text
 - with `qa-tui-extra` selected, press `Alt-\`` or `F6` to focus the same project terminal fullscreen, run `pwd`, confirm it prints `$WORK_ROOT/extra`, type `echo pending-project` without pressing `Enter`, then return to the tree and confirm `[Info] Terminal` is restored in the split pane
+- press `Alt+t` or `Option+t` with `qa-tui-extra` selected and confirm its project terminal tab opens or focuses and appears in the terminal pane border, then return to the tree with `Alt-\`` or `F6`
 - with `qa-tui-extra` still selected, press `i`, confirm the right pane border switches to `Info [Terminal]`, the local workspace shell is rooted at `$WORK_ROOT/extra`, and the footer changes to `[i] info`
 - with `qa-tui-extra` still selected and `Info [Terminal]` visible, press `Alt-\`` or `F6`, confirm the project terminal focuses fullscreen, press `Alt-\`` or `F6` again, and confirm `Info [Terminal]` is restored in the split pane
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
@@ -485,13 +486,18 @@ Inside the TUI verify:
 - while `Info [Terminal]` is visible, select `qa-tui-a` and confirm the terminal mode stays sticky across selection changes and its shell session opens automatically in the split pane
 - press `i` to return to info mode, then select `qa-tui-b` and confirm the info mode stays sticky across selection changes
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
+- from a second host shell, run `./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui-root --slug qa-tui-refresh`, wait a few seconds, and confirm the TUI project tree refreshes automatically to show `qa-tui-refresh` without restarting the TUI
 - when project or node create, start, stop, clone, or delete is in progress, confirm the TUI keeps accepting non-conflicting input instead of freezing on a blank status line
 - while a long-running project or node mutation is in progress, confirm the selected entry shows a transient task state such as `starting`, `stopping`, `creating`, or `deleting` in the tree or details pane, and that the footer shows background work is still running
 - press `i`, then select `qa-tui-a` and confirm its shell session opens automatically
 - with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Alt-\`` or `F6` shell focus and `Option+Shift+Backtick` host terminal
 - `Alt-\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
 - use `Alt-\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
-- press `Option+Shift+Backtick`, confirm the fullscreen terminal switches to the host-local project shell for `qa-tui-root`, run `pwd`, confirm it prints `$WORK_ROOT/root`, type `echo pending-host` without pressing `Enter`, then press `Option+Shift+Backtick` again and confirm the `qa-tui-a` node terminal is restored with `echo pending-a` still present
+- paste `printf 'one\ntwo\n'` into the focused terminal, press `Enter`, and confirm both lines are preserved instead of being collapsed into one line
+- resize the host terminal window larger and smaller several times and confirm the focused terminal content repaints instead of clearing
+- press `Option+Shift+Backtick`, confirm the fullscreen terminal switches to the host-local project shell for `qa-tui-root` and the existing TUI top bar turns red without adding a second red line, run `pwd`, confirm it prints `$WORK_ROOT/root`, type `echo pending-host` without pressing `Enter`, wait a few seconds for automatic refresh and confirm it stays on the host-local shell, click inside the terminal pane and confirm it stays on the host-local shell with `echo pending-host` still present, then press `Option+Shift+Backtick` again and confirm the top bar returns to normal and the `qa-tui-a` node terminal is restored with `echo pending-a` still present
+- press `Alt+Left`/`Alt+Right` or `Option+Left`/`Option+Right` and confirm the active terminal switches among the open project and node terminal tabs, then press `Alt+w` or `Option+w` and confirm the active tab closes while another open tab becomes active
+- press `Alt+d` and `Alt+Shift+d` in a focused terminal and confirm the TUI does not create right or lower split panes
 - press `Alt-\`` or `F6` again to return to the tree and confirm the split layout is restored
 - select `qa-tui-b`, press `s`, and confirm the node starts and opens its shell session automatically
 - while `qa-tui-b` is still starting or stopping, move back to `qa-tui-a`, focus its terminal, and confirm the other node terminal remains usable while the background task completes
@@ -504,8 +510,10 @@ Inside the TUI verify:
 - with `qa-tui-b` selected, press `c`, clone it into node `qa-tui-b-clone`, then confirm the cloned node appears under project `qa-tui-root`
 - click a visible workspace path in the right pane and confirm the host opens that path or dispatches it to the default `file://` handler
 - refocus the `qa-tui-a` or `qa-tui-b` terminal, print an OSC 8 hyperlink such as `printf '\033]8;;https://example.com\033\\example\033]8;;\033\\\n'`, click the visible link text, and confirm the host opens it
+- refocus a node terminal, run `printf '\033]52;c;dm0tY2xpcGJvYXJkLXFh\007'`, and confirm the host clipboard contains `vm-clipboard-qa`
 - in a focused node terminal, run `sudo apt-get install -y sl` and confirm the embedded terminal remains responsive past the `Reading database ...` progress output and returns to a prompt
 
+- select `qa-tui-refresh`, press `d`, delete it, and confirm it disappears from project `qa-tui-root`
 - select `qa-tui-b-clone`, press `d`, delete the cloned node, and confirm it disappears from project `qa-tui-root`
 - select `qa-tui-child-a`, press `d`, delete the child node, then select project `qa-tui-child`, press `x`, and confirm the child project disappears from the tree
 - select `qa-tui-b`, press `d`, delete it, and confirm it disappears from the tree
@@ -522,6 +530,7 @@ Cleanup:
 ./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-a
 ./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b
 ./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b-clone || true
+./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-refresh || true
 ./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-child-a
 ./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-child || true
 ./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-extra || true

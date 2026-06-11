@@ -187,13 +187,13 @@ Disadvantages:
 Problem:
 
 - This change is covered by automated tests, `make verify`, and host-side manual runs of the non-interactive `QA.md` flows: `List Verification`, `Doctor And Incomplete Node Cleanup Verification`, `Tree Verification`, `Shell Verification`, `Workspace Mode Verification`, `Environment Config Verification`, `Clone Verification`, `Workspace Rebind Verification`, and `Packaging Verification`.
-- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, project-terminal preview, sticky `i` info toggling, right-pane dialog and selector flows, host-bypass text selection, hyperlink activation, modified-key input such as `Shift+Enter`, and embedded-terminal behavior checks.
+- The only remaining gap is the interactive `TUI Verification` checklist, which still needs a real terminal session for keyboard focus changes, project-terminal preview, sticky `i` info toggling, automatic tree refresh, terminal tab switching and closing, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, right-pane dialog and selector flows, multiline paste, resize repainting, host-bypass text selection, OSC 52 clipboard sync, hyperlink activation, modified-key input such as `Shift+Enter`, and embedded-terminal behavior checks.
 - That leaves one operator-facing end-to-end verification flow incomplete even though the Lima-backed CLI flows were exercised locally.
 
 Suggested solution:
 
 - Run the `TUI Verification` section from `QA.md` in a real terminal session on a host with working Lima boot support.
-- Confirm the interactive focus toggles, preserved project and node terminal state, sticky `i` pane restoration, right-pane transient-view behavior, host-bypass text selection, hyperlink opening, modified-key input such as `Shift+Enter`, and streamed progress output.
+- Confirm the interactive focus toggles, preserved project and node terminal state, sticky `i` pane restoration, automatic tree refresh, terminal tab switching and closing, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, right-pane transient-view behavior, multiline paste, resize repainting, host-bypass text selection, OSC 52 clipboard sync, hyperlink opening, modified-key input such as `Shift+Enter`, and streamed progress output.
 - Confirm cleanup completes afterward so no verification-only Lima instances or metadata remain.
 
 Advantages:
@@ -448,12 +448,16 @@ Problem:
 
 - The TUI now defaults the split pane to `[Info] Terminal` and defers terminal preview session startup until the operator toggles into terminal mode or focuses fullscreen terminal view.
 - Automated coverage now verifies the new default, the inverted tab order, sticky pane-mode behavior, and the affected mouse and node-action paths.
+- Automated coverage now verifies that clicking inside a host-local fullscreen terminal preserves the host-terminal override instead of switching back to the selected VM node.
+- Automated coverage now verifies automatic tree refresh, multiline paste normalization, resize-time active-terminal resizing, TUI terminal tab keybinds, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 clipboard event dispatch.
 - The full manual `QA.md` flows still need a human-run pass against a real terminal and Lima environment to confirm the updated startup path, fullscreen restoration, link handling, and node lifecycle interactions end to end.
 
 Suggested solution:
 
 - Run the complete `QA.md` verification set from a host terminal with Lima available, using the updated TUI flow that starts in info mode and toggles into terminal mode with `i`.
 - Confirm both project and node selections restore the expected pane mode after fullscreen terminal focus and that stopped-node terminal placeholders still behave correctly after the default change.
+- Confirm a fullscreen host-local terminal stays on the host shell after a mouse click inside the terminal pane, then toggles back to the selected VM node with `Option+Shift+Backtick`.
+- Confirm the new TUI checks from `QA.md`: automatic tree refresh, multiline paste preservation, resize repainting, `Alt+t`/`Alt+Left`/`Alt+Right`/`Alt+w` terminal tab behavior, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 guest-to-host clipboard sync.
 - Record any discrepancies back into `TODO.md` or a follow-up ADR if the info-first behavior exposes a broader product decision.
 
 Advantages:
@@ -493,3 +497,29 @@ Disadvantages:
 - Requires careful debugging of the metadata store and slug-index interactions rather than a narrow surface-level fix.
 - May reveal a broader store or readiness bug that touches more than just environment-config seeding.
 - Could require follow-up migration or cleanup logic for homes that already contain duplicate seeded records.
+
+### 21. Design independent multi-shell TUI split panes
+
+Problem:
+
+- The Ghostty-style split shortcut now creates an in-TUI split surface and places the active CodeLima terminal in the new right or lower pane.
+- The inactive pane is contextual chrome, not an independent second shell for the same project or node.
+- Supporting independent panes would require CodeLima to allow multiple simultaneous terminal sessions for one project or node target, which is a larger identity and lifecycle change than the current roadmap item required.
+
+Suggested solution:
+
+- Design a multi-session terminal identity model that distinguishes project or node targets from individual terminal instances.
+- Define close, focus, resize, tab-switching, and terminal-closed behavior for multiple panes and tabs that point at the same target.
+- Add automated tests for duplicate node/project terminal sessions before changing the session store contract.
+
+Advantages:
+
+- Would make TUI split panes behave more like full terminal-emulator panes.
+- Enables multiple independent shells for one node or project without leaving CodeLima.
+- Creates a clearer foundation for future pane persistence or rearrangement.
+
+Disadvantages:
+
+- Increases terminal lifecycle complexity substantially.
+- Requires new user-facing rules for duplicate session labels, close behavior, and active-target selection.
+- Could destabilize the existing one-session-per-target preservation model if rushed.

@@ -449,10 +449,10 @@ func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
 		{
 			name: "paste-text",
 			key: vaxis.Key{
-				Text:      "hello",
+				Text:      "hello\nthere",
 				EventType: vaxis.EventPaste,
 			},
-			want: "hello",
+			want: "hello\rthere",
 		},
 	}
 
