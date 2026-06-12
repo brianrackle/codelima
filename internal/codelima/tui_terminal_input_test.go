@@ -42,6 +42,29 @@ func TestEncodeTUITerminalPasteKeyPreservesNewlinesAsCarriageReturns(t *testing.
 	}
 }
 
+func TestEncodeTUITerminalPasteKeyRecoversCtrlDecodedNewline(t *testing.T) {
+	t.Parallel()
+
+	// Vaxis decodes a raw "\n" inside a bracketed paste as Ctrl+J with no text.
+	got := encodeTUITerminalKey(vaxis.Key{
+		Keycode:   'j',
+		Modifiers: vaxis.ModCtrl,
+		EventType: vaxis.EventPaste,
+	}, false, false)
+	if got != "\r" {
+		t.Fatalf("expected pasted Ctrl+J to encode as carriage return, got %q", got)
+	}
+
+	got = encodeTUITerminalKey(vaxis.Key{
+		Keycode:   '@',
+		Modifiers: vaxis.ModCtrl,
+		EventType: vaxis.EventPaste,
+	}, false, false)
+	if got != "\x00" {
+		t.Fatalf("expected pasted Ctrl+@ to encode as NUL, got %q", got)
+	}
+}
+
 func TestEncodeTUITerminalMouseUsesSGRWhenRequested(t *testing.T) {
 	t.Parallel()
 

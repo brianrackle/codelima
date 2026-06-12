@@ -2,6 +2,25 @@
 
 ## Open Work
 
+### 0. Manually verify the reworked per-target TUI terminal tabs in a real terminal
+
+Problem:
+
+- Terminal tabs were rebuilt to be per-target (`Option+t` opens additional tabs, `Option+Left`/`Option+Right` switch, `Option+w` closes with adjacent focus, tabs scoped to the focused tree item, and TUI startup opens one default tab for the initial project or running node; F-key and tree `t` fallbacks removed). Automated tests cover the model with fake sessions, but the real-PTY, real-Ghostty path needs a human at a terminal.
+- macOS Option delivery depends on the emulator: if Ghostty is not configured with `macos-option-as-alt = true` and the Option glyph fallbacks (`†`, `∑`) do not arrive, the tab keybindings cannot fire.
+
+Suggested solution:
+
+- Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Left`/`Option+Right`/`Option+w` adjacent-close steps, with and without `macos-option-as-alt`.
+
+Advantages:
+
+- Confirms the fix for the original manual-only failure report end to end.
+
+Disadvantages:
+
+- Needs a real Lima-capable host and an interactive terminal; cannot be automated in CI today.
+
 ### 1. Feed the host terminal background into the Ghostty backend
 
 Problem:

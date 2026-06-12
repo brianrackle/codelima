@@ -13,6 +13,7 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 0.5 [complete]: red host-machine indicator uses the existing TUI top bar instead of adding another bar
 0.6 [complete]: support syncing vm clipboard to host system clipboard
 0.7 [superseded]: ghostty cmd + d and cmd + shift + d style TUI split support was removed; terminal tabbing stays tabbing and modified terminal keys no longer create TUI splits
+0.8 [complete]: explicit per-node terminal tabs — the TUI starts with one default tab for the initial project or running node, Option+t opens fresh tabs for the focused project or node, Option+Left/Right switch and Option+w close within that item's tabs with adjacent close focus, tabs are scoped to the focused tree item, and selection/visiting never creates additional sessions (F7-F9 and tree `t` fallbacks removed)
 
 1. Configurable key bindings
    Plan: [KEY_BINDINGS_PLAN.md](/Users/brianrackle/personal/codelima/KEY_BINDINGS_PLAN.md)

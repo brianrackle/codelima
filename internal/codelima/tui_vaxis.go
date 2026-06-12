@@ -23,6 +23,7 @@ func newTUIRunner() TUIRunner {
 
 type tuiSession struct {
 	key      string
+	target   string
 	kind     tuiTreeEntryKind
 	label    string
 	project  Project
@@ -37,6 +38,7 @@ type tuiSessionStore struct {
 	sessions      map[string]*tuiSession
 	sessionErrors map[string]error
 	sessionOrder  []string
+	tabCounters   map[string]int
 
 	preferredCols int
 	preferredRows int
@@ -49,14 +51,41 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 		postEvent:     postEvent,
 		sessions:      map[string]*tuiSession{},
 		sessionErrors: map[string]error{},
+		tabCounters:   map[string]int{},
 	}
 }
 
 var newSessionTUITerminal = newTUITerminal
 
-func (s *tuiSessionStore) HasSession(targetKey string) bool {
-	_, ok := s.sessions[targetKey]
+func (s *tuiSessionStore) HasSession(sessionKey string) bool {
+	_, ok := s.sessions[sessionKey]
 	return ok
+}
+
+// nextSessionKey allocates a unique tab key for the target. Each explicit
+// open-tab command produces a fresh session keyed "<target>#<n>".
+func (s *tuiSessionStore) nextSessionKey(targetKey string) string {
+	if s.tabCounters == nil {
+		s.tabCounters = map[string]int{}
+	}
+	s.tabCounters[targetKey]++
+	return fmt.Sprintf("%s#%d", targetKey, s.tabCounters[targetKey])
+}
+
+// TargetSessionKeys lists the open terminal tabs that belong to a single
+// project or node target, in the order they were opened.
+func (s *tuiSessionStore) TargetSessionKeys(targetKey string) []string {
+	if targetKey == "" {
+		return nil
+	}
+	keys := make([]string, 0, 2)
+	for _, key := range s.sessionOrder {
+		session, ok := s.sessions[key]
+		if ok && session.target == targetKey {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
@@ -68,28 +97,25 @@ func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
 	s.preferredRows = rows
 }
 
-func (s *tuiSessionStore) EnsureProjectSession(project Project) error {
-	key := "project:" + project.ID
-	delete(s.sessionErrors, key)
-	if _, ok := s.sessions[key]; ok {
-		return nil
-	}
+func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
+	targetKey := "project:" + project.ID
+	delete(s.sessionErrors, targetKey)
 
 	if strings.TrimSpace(project.WorkspacePath) == "" {
 		err := fmt.Errorf("project workspace path is not configured")
-		s.sessionErrors[key] = err
-		return err
+		s.sessionErrors[targetKey] = err
+		return "", err
 	}
 	info, err := os.Stat(project.WorkspacePath)
 	if err != nil {
 		err = fmt.Errorf("project workspace path is unavailable: %w", err)
-		s.sessionErrors[key] = err
-		return err
+		s.sessionErrors[targetKey] = err
+		return "", err
 	}
 	if !info.IsDir() {
 		err := fmt.Errorf("project workspace path is not a directory: %s", project.WorkspacePath)
-		s.sessionErrors[key] = err
-		return err
+		s.sessionErrors[targetKey] = err
+		return "", err
 	}
 
 	args := interactiveShellLaunchCommand()
@@ -97,54 +123,60 @@ func (s *tuiSessionStore) EnsureProjectSession(project Project) error {
 	command.Env = os.Environ()
 	command.Dir = project.WorkspacePath
 
+	key := s.nextSessionKey(targetKey)
 	terminal := newSessionTUITerminal(key, s.postEvent)
 	if s.preferredCols > 0 && s.preferredRows > 0 {
 		terminal.Resize(s.preferredCols, s.preferredRows)
 	}
 	if err := terminal.Start(command); err != nil {
-		s.sessionErrors[key] = err
-		return err
+		s.sessionErrors[targetKey] = err
+		return "", err
 	}
 
 	s.putSession(&tuiSession{
 		key:      key,
+		target:   targetKey,
 		kind:     tuiTreeEntryProject,
 		label:    project.Slug,
 		project:  project,
 		terminal: terminal,
 	})
-	return nil
+	return key, nil
 }
 
-func (s *tuiSessionStore) EnsureNodeSession(node Node) error {
-	key := "node:" + node.ID
-	delete(s.sessionErrors, key)
-	if _, ok := s.sessions[key]; ok {
-		return nil
-	}
+func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
+	targetKey := "node:" + node.ID
+	delete(s.sessionErrors, targetKey)
 
 	executable, err := os.Executable()
 	if err != nil {
 		err = fmt.Errorf("resolve codelima executable: %w", err)
-		s.sessionErrors[key] = err
-		return err
+		s.sessionErrors[targetKey] = err
+		return "", err
 	}
 
 	command := exec.CommandContext(s.ctx, executable, "--home", s.service.cfg.MetadataRoot, "shell", node.ID)
 	command.Env = os.Environ()
 
+	key := s.nextSessionKey(targetKey)
 	terminal := newSessionTUITerminal(key, s.postEvent)
 	if s.preferredCols > 0 && s.preferredRows > 0 {
 		terminal.Resize(s.preferredCols, s.preferredRows)
 	}
 	if err := terminal.Start(command); err != nil {
-		s.sessionErrors[key] = err
-		return err
+		s.sessionErrors[targetKey] = err
+		return "", err
 	}
 
-	session := &tuiSession{key: key, kind: tuiTreeEntryNode, label: node.Slug, node: node, terminal: terminal}
-	s.putSession(session)
-	return nil
+	s.putSession(&tuiSession{
+		key:      key,
+		target:   targetKey,
+		kind:     tuiTreeEntryNode,
+		label:    node.Slug,
+		node:     node,
+		terminal: terminal,
+	})
+	return key, nil
 }
 
 func (s *tuiSessionStore) putSession(session *tuiSession) {
@@ -166,63 +198,46 @@ func (s *tuiSessionStore) SessionError(targetKey string) error {
 	return s.sessionErrors[targetKey]
 }
 
-func (s *tuiSessionStore) RemoveSession(targetKey string) (*tuiSession, bool) {
-	session := s.sessions[targetKey]
+func (s *tuiSessionStore) RemoveSession(sessionKey string) (*tuiSession, bool) {
+	session := s.sessions[sessionKey]
 	if session == nil {
 		return nil, false
 	}
-	delete(s.sessions, targetKey)
-	s.removeSessionOrder(targetKey)
+	delete(s.sessions, sessionKey)
+	s.removeSessionOrder(sessionKey)
 	return session, true
 }
 
 func (s *tuiSessionStore) Close() {
-	for targetKey, session := range s.sessions {
+	for sessionKey, session := range s.sessions {
 		session.terminal.Close()
-		delete(s.sessions, targetKey)
+		delete(s.sessions, sessionKey)
 	}
 	s.sessionOrder = nil
 }
 
-func (s *tuiSessionStore) CloseTarget(targetKey string) {
-	session, ok := s.sessions[targetKey]
+func (s *tuiSessionStore) CloseSession(sessionKey string) {
+	session, ok := s.sessions[sessionKey]
 	if !ok {
 		return
 	}
 
-	delete(s.sessions, targetKey)
-	s.removeSessionOrder(targetKey)
+	delete(s.sessions, sessionKey)
+	s.removeSessionOrder(sessionKey)
 	session.terminal.Close()
 }
 
-func (s *tuiSessionStore) CloseNode(nodeID string) {
-	s.CloseTarget("node:" + nodeID)
+// CloseTargetSessions closes every open terminal tab for a project or node
+// target and clears the target's recorded open error.
+func (s *tuiSessionStore) CloseTargetSessions(targetKey string) {
+	for _, sessionKey := range s.TargetSessionKeys(targetKey) {
+		s.CloseSession(sessionKey)
+	}
+	delete(s.sessionErrors, targetKey)
 }
 
-func (s *tuiSessionStore) OpenSessionKeys() []string {
-	keys := make([]string, 0, len(s.sessions))
-	seen := map[string]bool{}
-	for _, key := range s.sessionOrder {
-		if _, ok := s.sessions[key]; !ok || seen[key] {
-			continue
-		}
-		keys = append(keys, key)
-		seen[key] = true
-	}
-	if len(keys) == len(s.sessions) {
-		return keys
-	}
-
-	remaining := make([]string, 0, len(s.sessions)-len(keys))
-	for key := range s.sessions {
-		if seen[key] {
-			continue
-		}
-		remaining = append(remaining, key)
-	}
-	sort.Strings(remaining)
-	keys = append(keys, remaining...)
-	return keys
+func (s *tuiSessionStore) CloseNode(nodeID string) {
+	s.CloseTargetSessions("node:" + nodeID)
 }
 
 func (s *tuiSessionStore) removeSessionOrder(targetKey string) {
@@ -323,14 +338,14 @@ type vaxisTUIApp struct {
 }
 
 const (
-	terminalViewToggleFooterHint = "Alt-`/F6"
-	terminalViewToggleTextHint   = "Alt-` or F6"
+	terminalViewToggleFooterHint = "Opt-`/F6"
+	terminalViewToggleTextHint   = "Opt-` or F6"
 	hostTerminalToggleFooterHint = "Opt-Shift-`"
 	infoViewToggleFooterHint     = "[i]"
-	terminalTabOpenFooterHint    = "Alt+t"
-	terminalTabNextFooterHint    = "Alt+Right"
-	terminalTabPrevFooterHint    = "Alt+Left"
-	terminalTabCloseFooterHint   = "Alt+w"
+	terminalTabOpenFooterHint    = "Opt-t"
+	terminalTabNextFooterHint    = "Opt-Right"
+	terminalTabPrevFooterHint    = "Opt-Left"
+	terminalTabCloseFooterHint   = "Opt-w"
 	tuiAutoRefreshInterval       = 2 * time.Second
 )
 
@@ -366,6 +381,9 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
 	winWidth, winHeight := vx.Window().Size()
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
 	sessions.SetPreferredTerminalSize(cols, rows)
+	if err := state.openInitialTerminalTab(); err != nil {
+		app.status = err.Error()
+	}
 	app.syncSessionFocus()
 	app.draw()
 
@@ -890,20 +908,20 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 		return nil
 	}
 
-	targetKey := entry.key()
-	session, ok := a.sessions.Session(targetKey)
+	sessionKey := a.state.activeSessionKey()
+	session, ok := a.sessions.Session(sessionKey)
 	if !ok {
 		return nil
 	}
 
 	translated := a.terminalBodyRect.translateMouse(mouse)
 	if mouse.Button == vaxis.MouseWheelUp || mouse.Button == vaxis.MouseWheelDown {
-		a.forwardSessionEvent(targetKey, translated)
+		a.forwardSessionEvent(sessionKey, translated)
 		return nil
 	}
 
 	if !session.terminal.CapturesMouse() {
-		if err := a.handleTerminalMouseGesture(targetKey, mouse, translated); err != nil {
+		if err := a.handleTerminalMouseGesture(sessionKey, mouse, translated); err != nil {
 			a.status = err.Error()
 		}
 		return nil
@@ -912,7 +930,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 	a.cancelTerminalMouseGesture()
 	if mouse.EventType != vaxis.EventPress || mouse.Button != vaxis.MouseLeftButton {
 		if a.state.focus == tuiFocusTerminal {
-			a.forwardSessionEvent(targetKey, translated)
+			a.forwardSessionEvent(sessionKey, translated)
 		}
 		return nil
 	}
@@ -925,7 +943,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 		a.syncSessionFocus()
 	}
 	a.status = ""
-	a.forwardSessionEvent(targetKey, translated)
+	a.forwardSessionEvent(sessionKey, translated)
 	return nil
 }
 
@@ -946,7 +964,7 @@ func (a *vaxisTUIApp) handleResize(event vaxis.Resize) {
 	}
 	a.sessions.SetPreferredTerminalSize(cols, rows)
 
-	session, ok := a.sessions.Session(a.state.activeTerminalTargetKey())
+	session, ok := a.sessions.Session(a.state.activeSessionKey())
 	if !ok || session.terminal == nil {
 		return
 	}
@@ -996,12 +1014,24 @@ func (a *vaxisTUIApp) handleTerminalMouseGesture(targetKey string, mouse vaxis.M
 }
 
 func (a *vaxisTUIApp) handleTerminalClosed(event tuiTerminalClosedEvent) {
-	session, ok := a.sessions.RemoveSession(event.TargetKey)
+	session, ok := a.sessions.Session(event.TargetKey)
 	if !ok {
 		return
 	}
 
-	if a.state.activeTerminalTargetKey() == event.TargetKey && a.state.focus == tuiFocusTerminal {
+	targetKey := session.target
+	keys := a.sessions.TargetSessionKeys(targetKey)
+	a.sessions.RemoveSession(event.TargetKey)
+	if a.state.activeTabKeys[targetKey] == event.TargetKey {
+		if nextKey := nextActiveTerminalTabAfterClose(keys, event.TargetKey); nextKey != "" {
+			a.state.setActiveTab(targetKey, nextKey)
+		} else {
+			delete(a.state.activeTabKeys, targetKey)
+		}
+	}
+	if a.state.focus == tuiFocusTerminal &&
+		a.state.terminalTarget == targetKey &&
+		len(a.sessions.TargetSessionKeys(targetKey)) == 0 {
 		a.state.focusTree()
 	}
 
@@ -1039,11 +1069,8 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 	if entry.kind != tuiTreeEntryProject && entry.kind != tuiTreeEntryNode {
 		return "", false
 	}
-	if !a.sessions.HasSession(entry.key()) {
-		return "", false
-	}
 
-	if session, ok := a.sessions.Session(entry.key()); ok {
+	if session, ok := a.sessions.Session(a.state.activeSessionKey()); ok {
 		localMouse := a.terminalBodyRect.translateMouse(mouse)
 		if target, ok := session.terminal.HyperlinkAt(localMouse.Col, localMouse.Row); ok {
 			return target, true
@@ -1066,21 +1093,20 @@ func (a *vaxisTUIApp) applyReloadedTree(tree []ProjectTreeNode, preferredKey str
 		return err
 	}
 	var orphans []string
-	for targetKey := range a.sessions.sessions {
+	for sessionKey, session := range a.sessions.sessions {
 		switch {
-		case strings.HasPrefix(targetKey, "node:"):
-			if _, ok := a.state.nodesByID[strings.TrimPrefix(targetKey, "node:")]; !ok {
-				orphans = append(orphans, targetKey)
+		case strings.HasPrefix(session.target, "node:"):
+			if _, ok := a.state.nodesByID[strings.TrimPrefix(session.target, "node:")]; !ok {
+				orphans = append(orphans, sessionKey)
 			}
-		case strings.HasPrefix(targetKey, "project:"):
-			if _, ok := a.state.projectsByID[strings.TrimPrefix(targetKey, "project:")]; !ok {
-				orphans = append(orphans, targetKey)
+		case strings.HasPrefix(session.target, "project:"):
+			if _, ok := a.state.projectsByID[strings.TrimPrefix(session.target, "project:")]; !ok {
+				orphans = append(orphans, sessionKey)
 			}
 		}
 	}
-	for _, targetKey := range orphans {
-		a.sessions.CloseTarget(targetKey)
-		delete(a.sessions.sessionErrors, targetKey)
+	for _, sessionKey := range orphans {
+		a.sessions.CloseSession(sessionKey)
 	}
 	for targetKey := range a.sessions.sessionErrors {
 		switch {
@@ -1886,27 +1912,42 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
 	)
 }
 
-func (a *vaxisTUIApp) openTerminalTab() error {
-	entry := a.state.selectedEntry()
+// terminalContextEntry is the entry whose terminal tabs the tab keybindings
+// operate on: the fullscreen-focused entry in terminal focus, otherwise the
+// entry selected in the tree.
+func (a *vaxisTUIApp) terminalContextEntry() tuiTreeEntry {
 	if a.state.focus == tuiFocusTerminal {
-		entry = a.state.activeTerminalEntry()
+		return a.state.activeTerminalEntry()
 	}
+	return a.state.selectedEntry()
+}
+
+func (a *vaxisTUIApp) openTerminalTab() error {
+	entry := a.terminalContextEntry()
 	if entry.kind != tuiTreeEntryProject && entry.kind != tuiTreeEntryNode {
 		return fmt.Errorf("select a project or node to open a terminal tab")
 	}
-	return a.state.focusTerminalEntry(entry)
+
+	if _, err := a.state.openTerminalTabEntry(entry); err != nil {
+		return err
+	}
+	if a.state.focus != tuiFocusTerminal {
+		a.state.treePaneMode = tuiTreePaneModeTerminal
+	}
+	return nil
 }
 
 func (a *vaxisTUIApp) switchTerminalTab(delta int) error {
-	keys := a.sessions.OpenSessionKeys()
+	targetKey := a.state.activeTerminalTargetKey()
+	keys := a.sessions.TargetSessionKeys(targetKey)
 	if len(keys) == 0 {
-		return fmt.Errorf("no terminal tabs are open")
+		return fmt.Errorf("no terminal tabs are open for the focused item")
 	}
 	if delta == 0 {
 		return nil
 	}
 
-	current := a.state.activeTerminalTargetKey()
+	current := a.state.activeSessionKey()
 	index := -1
 	for i, key := range keys {
 		if key == current {
@@ -1922,67 +1963,52 @@ func (a *vaxisTUIApp) switchTerminalTab(delta int) error {
 			index += len(keys)
 		}
 	}
-	return a.focusOpenTerminalTab(keys[index])
+	a.state.setActiveTab(targetKey, keys[index])
+	return nil
 }
 
 func (a *vaxisTUIApp) closeTerminalTab() error {
 	targetKey := a.state.activeTerminalTargetKey()
-	if targetKey == "" {
-		return fmt.Errorf("no terminal tab is active")
-	}
-	if _, ok := a.sessions.Session(targetKey); !ok {
-		return fmt.Errorf("active terminal tab is not open")
+	sessionKey := a.state.activeSessionKey()
+	if targetKey == "" || sessionKey == "" {
+		return fmt.Errorf("no terminal tab is open for the focused item")
 	}
 
-	keys := a.sessions.OpenSessionKeys()
-	nextKey := ""
-	for index, key := range keys {
-		if key != targetKey {
-			continue
-		}
-		if len(keys) > 1 {
-			nextKey = keys[(index+1)%len(keys)]
-		}
-		break
-	}
+	keys := a.sessions.TargetSessionKeys(targetKey)
+	nextKey := nextActiveTerminalTabAfterClose(keys, sessionKey)
 
-	a.sessions.CloseTarget(targetKey)
+	a.sessions.CloseSession(sessionKey)
 	delete(a.sessions.sessionErrors, targetKey)
-	if a.state.hostTerminalReturnKey == targetKey {
-		a.state.hostTerminalReturnKey = ""
-	}
 
 	if nextKey != "" {
-		return a.focusOpenTerminalTab(nextKey)
+		a.state.setActiveTab(targetKey, nextKey)
+		return nil
 	}
 
-	a.state.focusTree()
-	if entry := a.state.selectedEntry(); entry.kind == tuiTreeEntryProject || entry.kind == tuiTreeEntryNode {
-		a.state.activeTerminalKey = entry.key()
-	} else {
-		a.state.activeTerminalKey = ""
+	delete(a.state.activeTabKeys, targetKey)
+	if a.state.hostTerminalReturnKey != "" && strings.HasPrefix(targetKey, "project:") {
+		a.state.hostTerminalReturnKey = ""
+	}
+	if a.state.focus == tuiFocusTerminal && a.state.terminalTarget == targetKey {
+		a.state.focusTree()
 	}
 	return nil
 }
 
-func (a *vaxisTUIApp) focusOpenTerminalTab(targetKey string) error {
-	if _, ok := a.sessions.Session(targetKey); !ok {
-		return fmt.Errorf("terminal tab is not open")
+func nextActiveTerminalTabAfterClose(keys []string, closingKey string) string {
+	for index, key := range keys {
+		if key != closingKey {
+			continue
+		}
+		if index+1 < len(keys) {
+			return keys[index+1]
+		}
+		if index > 0 {
+			return keys[index-1]
+		}
+		return ""
 	}
-	entry, ok := a.state.entryForKey(targetKey)
-	if !ok {
-		return fmt.Errorf("terminal target is no longer available")
-	}
-	if index := a.state.findEntryByKey(targetKey); index >= 0 {
-		a.state.selection = index
-	}
-	a.state.activeTerminalKey = targetKey
-	a.state.hostTerminalReturnKey = ""
-	a.state.focus = tuiFocusTerminal
-	if entry.kind == tuiTreeEntryProject || entry.kind == tuiTreeEntryNode {
-		return nil
-	}
-	return fmt.Errorf("terminal target is no longer available")
+	return ""
 }
 
 func (a *vaxisTUIApp) forwardTerminalEvent(event vaxis.Event) {
@@ -1990,11 +2016,11 @@ func (a *vaxisTUIApp) forwardTerminalEvent(event vaxis.Event) {
 		return
 	}
 
-	a.forwardSessionEvent(a.state.activeTerminalTargetKey(), event)
+	a.forwardSessionEvent(a.state.activeSessionKey(), event)
 }
 
-func (a *vaxisTUIApp) forwardSessionEvent(targetKey string, event vaxis.Event) {
-	session, ok := a.sessions.Session(targetKey)
+func (a *vaxisTUIApp) forwardSessionEvent(sessionKey string, event vaxis.Event) {
+	session, ok := a.sessions.Session(sessionKey)
 	if !ok {
 		return
 	}
@@ -2037,9 +2063,9 @@ func (a *vaxisTUIApp) cancelTerminalMouseGesture() {
 
 func (a *vaxisTUIApp) syncSessionFocus() {
 	focus := a.effectiveLayoutFocus()
-	activeTargetKey := a.state.activeTerminalTargetKey()
-	for targetKey, session := range a.sessions.sessions {
-		if targetKey == activeTargetKey && focus == tuiFocusTerminal {
+	activeSessionKey := a.state.activeSessionKey()
+	for sessionKey, session := range a.sessions.sessions {
+		if sessionKey == activeSessionKey && focus == tuiFocusTerminal {
 			session.terminal.Focus()
 			continue
 		}
@@ -2157,15 +2183,23 @@ func (a *vaxisTUIApp) currentPaneTabSegments(entry tuiTreeEntry, activeStyle, in
 	return segments
 }
 
+// terminalTabSegments renders the terminal tabs that belong to the focused
+// tree item only; tabs opened for other projects or nodes stay hidden until
+// their item is focused again.
 func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style) []vaxis.Segment {
 	if a == nil || a.sessions == nil || a.state == nil {
 		return nil
 	}
 
-	activeKey := a.state.activeTerminalTargetKey()
-	keys := a.sessions.OpenSessionKeys()
+	targetKey := a.state.activeTerminalTargetKey()
+	keys := a.sessions.TargetSessionKeys(targetKey)
+	if len(keys) == 0 {
+		return nil
+	}
+
+	activeKey := a.state.activeSessionKey()
 	segments := make([]vaxis.Segment, 0, len(keys)*2)
-	for _, key := range keys {
+	for index, key := range keys {
 		session, ok := a.sessions.Session(key)
 		if !ok {
 			continue
@@ -2173,7 +2207,7 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 		if len(segments) > 0 {
 			segments = append(segments, vaxis.Segment{Text: " ", Style: inactiveStyle})
 		}
-		label := terminalTabLabel(session)
+		label := terminalTabLabel(session, index, len(keys))
 		if key == activeKey {
 			segments = append(segments, vaxis.Segment{Text: "[" + label + "]", Style: activeStyle})
 			continue
@@ -2183,7 +2217,7 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 	return segments
 }
 
-func terminalTabLabel(session *tuiSession) string {
+func terminalTabLabel(session *tuiSession, index, total int) string {
 	if session == nil {
 		return ""
 	}
@@ -2192,7 +2226,10 @@ func terminalTabLabel(session *tuiSession) string {
 		label = strings.TrimSpace(session.key)
 	}
 	if session.kind == tuiTreeEntryProject && label != "" {
-		return "host:" + label
+		label = "host:" + label
+	}
+	if total > 1 {
+		label = fmt.Sprintf("%s %d", label, index+1)
 	}
 	return label
 }
@@ -2541,9 +2578,9 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		}
 		row++
 		if nodeAutoStartsSession(entry.node) {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to focus its terminal session.", terminalViewToggleTextHint), Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to open a terminal tab or %s to focus its terminal.", terminalTabOpenFooterHint, terminalViewToggleTextHint), Style: mutedStyle})
 		} else {
-			win.Println(row, vaxis.Segment{Text: "Start the node before focusing its terminal session, or edit the node file directly for advanced per-node Lima command overrides.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: "Start the node before opening its terminal tabs, or edit the node file directly for advanced per-node Lima command overrides.", Style: mutedStyle})
 		}
 		row++
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
@@ -2573,7 +2610,7 @@ func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTr
 }
 
 func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
-	if session, ok := a.sessions.Session(entry.key()); ok {
+	if session, ok := a.sessions.Session(a.state.activeSessionKey()); ok {
 		session.terminal.Draw(win)
 		return
 	}
@@ -2589,7 +2626,7 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 			win.Println(row, vaxis.Segment{Text: err.Error(), Style: mutedStyle})
 			row++
 		} else {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to focus the local workspace terminal.", terminalViewToggleTextHint), Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to open a workspace terminal tab.", terminalTabOpenFooterHint), Style: mutedStyle})
 			row++
 			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to show project info.", infoViewToggleFooterHint), Style: mutedStyle})
 		}
@@ -2604,10 +2641,10 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 			win.Println(row, vaxis.Segment{Text: err.Error(), Style: mutedStyle})
 			row++
 		} else if nodeAutoStartsSession(entry.node) {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Shell session is not running. Press %s to reopen.", terminalViewToggleTextHint), Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("No terminal tab is open. Press %s to open one.", terminalTabOpenFooterHint), Style: mutedStyle})
 			row++
 		} else {
-			win.Println(row, vaxis.Segment{Text: "Start the node with [s] before focusing its terminal session.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: "Start the node with [s] before opening a terminal tab.", Style: mutedStyle})
 			row++
 		}
 		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to show node info.", infoViewToggleFooterHint), Style: mutedStyle})
@@ -2654,7 +2691,7 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 	if focus == tuiFocusTerminal {
 		parts := []string{
 			terminalViewToggleFooterHint + " tree focus",
-			terminalTabOpenFooterHint + " open tab",
+			terminalTabOpenFooterHint + " new tab",
 			terminalTabPrevFooterHint + "/" + terminalTabNextFooterHint + " switch tab",
 			terminalTabCloseFooterHint + " close tab",
 		}
@@ -2670,13 +2707,15 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 		parts = append(parts, "Up/Down move", "Left/Right collapse")
 		if entry.kind == tuiTreeEntryProject || (entry.kind == tuiTreeEntryNode && nodeAutoStartsSession(entry.node)) {
 			parts = append(parts, terminalViewToggleFooterHint+" shell focus")
+			parts = append(parts, terminalTabOpenFooterHint+" new tab")
 		}
 		if paneMode == tuiTreePaneModeTerminal {
 			parts = append(parts, infoViewToggleFooterHint+" info")
+			parts = append(parts, terminalTabPrevFooterHint+"/"+terminalTabNextFooterHint+" switch tab")
+			parts = append(parts, terminalTabCloseFooterHint+" close tab")
 		} else {
 			parts = append(parts, infoViewToggleFooterHint+" terminal")
 		}
-		parts = append(parts, terminalTabOpenFooterHint+" open tab")
 		if entry.kind == tuiTreeEntryNode {
 			parts = append(parts, hostTerminalToggleFooterHint+" host terminal")
 		}
@@ -2728,19 +2767,42 @@ func isHostTerminalToggleKey(key vaxis.Key) bool {
 }
 
 func isTerminalTabOpenKey(key vaxis.Key) bool {
-	return keyMatchesTerminalModifier(key, 't')
+	return keyMatchesOptionShortcut(key, 't', "†")
 }
 
 func isTerminalTabNextKey(key vaxis.Key) bool {
-	return keyMatchesTerminalModifier(key, vaxis.KeyRight)
+	return keyMatchesTerminalModifier(key, vaxis.KeyRight) ||
+		keyMatchesTerminalModifier(key, 'f')
 }
 
 func isTerminalTabPreviousKey(key vaxis.Key) bool {
-	return keyMatchesTerminalModifier(key, vaxis.KeyLeft)
+	return keyMatchesTerminalModifier(key, vaxis.KeyLeft) ||
+		keyMatchesTerminalModifier(key, 'b')
 }
 
 func isTerminalTabCloseKey(key vaxis.Key) bool {
-	return keyMatchesTerminalModifier(key, 'w')
+	return keyMatchesOptionShortcut(key, 'w', "∑")
+}
+
+func keyMatchesOptionShortcut(key vaxis.Key, code rune, optionTexts ...string) bool {
+	if keyMatchesTerminalModifier(key, code) {
+		return true
+	}
+
+	modifiers := normalizedKeyModifiers(key.Modifiers)
+	if modifiers != 0 && !hasTerminalModifier(modifiers, 0) {
+		return false
+	}
+	for _, text := range optionTexts {
+		if key.Text == text {
+			return true
+		}
+		runes := []rune(text)
+		if len(runes) == 1 && key.Keycode == runes[0] {
+			return true
+		}
+	}
+	return false
 }
 
 func keyMatchesTerminalModifier(key vaxis.Key, code rune) bool {

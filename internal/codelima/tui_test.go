@@ -3,6 +3,7 @@ package codelima
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -109,6 +110,34 @@ func newRenderTestVaxis(t *testing.T, width, height int) *vaxis.Vaxis {
 	return vx
 }
 
+func decodedVaxisInputKey(t *testing.T, input string) vaxis.Key {
+	t.Helper()
+
+	console := newFakeVaxisConsole("\x1b[?1;2c"+input, 80, 24)
+	vx, err := vaxis.New(vaxis.Options{
+		WithConsole:  console,
+		DisableMouse: true,
+		NoSignals:    true,
+	})
+	if err != nil {
+		t.Fatalf("vaxis.New() error = %v", err)
+	}
+	defer vx.Close()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-vx.Events():
+			key, ok := event.(vaxis.Key)
+			if ok {
+				return key
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for decoded key input %q", input)
+		}
+	}
+}
+
 func renderedCellGrapheme(t *testing.T, vx *vaxis.Vaxis, col, row int) string {
 	t.Helper()
 
@@ -149,12 +178,14 @@ func renderedScreenText(t *testing.T, vx *vaxis.Vaxis, width, height int) string
 }
 
 type fakeTUISessionManager struct {
-	ensured map[string]int
+	opened      map[string]int
+	tabCounters map[string]int
+	openTabs    map[string][]string
 }
 
 type sharedFakeTUISessionManager struct {
-	store   *tuiSessionStore
-	ensured map[string]int
+	store  *tuiSessionStore
+	opened map[string]int
 }
 
 type fakeTUITerminal struct {
@@ -170,13 +201,17 @@ type fakeTUITerminal struct {
 }
 
 func newFakeTUISessionManager() *fakeTUISessionManager {
-	return &fakeTUISessionManager{ensured: map[string]int{}}
+	return &fakeTUISessionManager{
+		opened:      map[string]int{},
+		tabCounters: map[string]int{},
+		openTabs:    map[string][]string{},
+	}
 }
 
 func newSharedFakeTUISessionManager(store *tuiSessionStore) *sharedFakeTUISessionManager {
 	return &sharedFakeTUISessionManager{
-		store:   store,
-		ensured: map[string]int{},
+		store:  store,
+		opened: map[string]int{},
 	}
 }
 
@@ -234,48 +269,93 @@ func nodeTargetKey(nodeID string) string {
 	return "node:" + nodeID
 }
 
-func (f *fakeTUISessionManager) HasSession(targetKey string) bool {
-	return f.ensured[targetKey] > 0
+// putTestSession registers a terminal tab for the target in the store and
+// returns the allocated session key.
+func putTestSession(store *tuiSessionStore, targetKey string, session *tuiSession) string {
+	session.target = targetKey
+	session.key = store.nextSessionKey(targetKey)
+	store.putSession(session)
+	return session.key
 }
 
-func (f *fakeTUISessionManager) EnsureProjectSession(project Project) error {
-	f.ensured[projectTargetKey(project.ID)]++
-	return nil
+// targetTestSession returns the first open tab session for the target.
+func targetTestSession(t *testing.T, store *tuiSessionStore, targetKey string) *tuiSession {
+	t.Helper()
+
+	keys := store.TargetSessionKeys(targetKey)
+	if len(keys) == 0 {
+		t.Fatalf("expected an open terminal tab for %q", targetKey)
+	}
+	return store.sessions[keys[0]]
 }
 
-func (f *fakeTUISessionManager) EnsureNodeSession(node Node) error {
-	f.ensured[nodeTargetKey(node.ID)]++
-	return nil
+func (f *fakeTUISessionManager) HasSession(sessionKey string) bool {
+	for _, keys := range f.openTabs {
+		for _, key := range keys {
+			if key == sessionKey {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-func (f *sharedFakeTUISessionManager) HasSession(targetKey string) bool {
-	return f.store.HasSession(targetKey)
+func (f *fakeTUISessionManager) TargetSessionKeys(targetKey string) []string {
+	return append([]string(nil), f.openTabs[targetKey]...)
 }
 
-func (f *sharedFakeTUISessionManager) EnsureProjectSession(project Project) error {
-	key := projectTargetKey(project.ID)
-	f.ensured[key]++
+func (f *fakeTUISessionManager) openTab(targetKey string) (string, error) {
+	f.opened[targetKey]++
+	f.tabCounters[targetKey]++
+	key := fmt.Sprintf("%s#%d", targetKey, f.tabCounters[targetKey])
+	f.openTabs[targetKey] = append(f.openTabs[targetKey], key)
+	return key, nil
+}
+
+func (f *fakeTUISessionManager) OpenProjectTab(project Project) (string, error) {
+	return f.openTab(projectTargetKey(project.ID))
+}
+
+func (f *fakeTUISessionManager) OpenNodeTab(node Node) (string, error) {
+	return f.openTab(nodeTargetKey(node.ID))
+}
+
+func (f *sharedFakeTUISessionManager) HasSession(sessionKey string) bool {
+	return f.store.HasSession(sessionKey)
+}
+
+func (f *sharedFakeTUISessionManager) TargetSessionKeys(targetKey string) []string {
+	return f.store.TargetSessionKeys(targetKey)
+}
+
+func (f *sharedFakeTUISessionManager) OpenProjectTab(project Project) (string, error) {
+	targetKey := projectTargetKey(project.ID)
+	f.opened[targetKey]++
+	key := f.store.nextSessionKey(targetKey)
 	f.store.putSession(&tuiSession{
 		key:      key,
+		target:   targetKey,
 		kind:     tuiTreeEntryProject,
 		label:    project.Slug,
 		project:  project,
 		terminal: newFakeTUITerminal(),
 	})
-	return nil
+	return key, nil
 }
 
-func (f *sharedFakeTUISessionManager) EnsureNodeSession(node Node) error {
-	key := nodeTargetKey(node.ID)
-	f.ensured[key]++
+func (f *sharedFakeTUISessionManager) OpenNodeTab(node Node) (string, error) {
+	targetKey := nodeTargetKey(node.ID)
+	f.opened[targetKey]++
+	key := f.store.nextSessionKey(targetKey)
 	f.store.putSession(&tuiSession{
 		key:      key,
+		target:   targetKey,
 		kind:     tuiTreeEntryNode,
 		label:    node.Slug,
 		node:     node,
 		terminal: newFakeTUITerminal(),
 	})
-	return nil
+	return key, nil
 }
 
 func TestDispatchWithoutCommandRunsInjectedRunner(t *testing.T) {
@@ -510,17 +590,16 @@ func TestTUISyncSessionFocusBlursHiddenTerminalWhenDialogOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
-	state.activeTerminalKey = nodeTargetKey("node-root")
+	state.terminalTarget = nodeTargetKey("node-root")
 	state.focus = tuiFocusTerminal
 
 	terminal := newFakeTUITerminal()
-	sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
-		key:      nodeTargetKey("node-root"),
+	putTestSession(sessions, nodeTargetKey("node-root"), &tuiSession{
 		kind:     tuiTreeEntryNode,
 		label:    "root-node",
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: terminal,
-	}
+	})
 
 	app := &vaxisTUIApp{
 		ctx:      ctx,
@@ -567,8 +646,7 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 		vx:       vx,
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
-		key:   nodeTargetKey("node-root"),
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		kind:  tuiTreeEntryNode,
 		label: "root-node",
 		node:  Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
@@ -576,7 +654,7 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 			snapshot: "shell prompt",
 			termEnv:  tuiEmbeddedTermEnv,
 		},
-	}
+	})
 
 	app.draw()
 
@@ -612,8 +690,8 @@ func TestTUIDrawProjectHeaderOmitsNodeAndModeWhenProjectSelected(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -646,8 +724,8 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -660,11 +738,10 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 		ctx:      ctx,
 		service:  service,
 		state:    state,
-		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions: sessions,
 		vx:       vx,
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
-		key:   nodeTargetKey("node-root"),
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		kind:  tuiTreeEntryNode,
 		label: "root-node",
 		node:  Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
@@ -672,7 +749,7 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 			snapshot: "shell prompt",
 			termEnv:  tuiEmbeddedTermEnv,
 		},
-	}
+	})
 
 	app.draw()
 
@@ -737,7 +814,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		project: Project{Slug: "root"},
 	}
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeInfo, projectEntry)
-	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+infoViewToggleFooterHint+" terminal   "+terminalTabOpenFooterHint+" open tab   [a] add project   [g] env configs   [n] create node   [u] update project   [x] delete project   q quit" {
+	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" terminal   [a] add project   [g] env configs   [n] create node   [u] update project   [x] delete project   q quit" {
 		t.Fatalf("expected project footer with project actions, got %q", got)
 	}
 	if strings.Contains(got, "Use action hotkeys in the right pane") {
@@ -749,11 +826,16 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "root-node", Status: NodeStatusRunning},
 	}
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeInfo, runningNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+infoViewToggleFooterHint+" terminal   "+terminalTabOpenFooterHint+" open tab   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" terminal   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected running-node footer with shell focus and node actions, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
 		t.Fatalf("expected running-node footer to omit mouse hints, got %q", got)
+	}
+
+	got = renderFooter(tuiFocusTree, tuiTreePaneModeTerminal, runningNodeEntry)
+	if got != "Up/Down move   Left/Right collapse   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" info   "+terminalTabPrevFooterHint+"/"+terminalTabNextFooterHint+" switch tab   "+terminalTabCloseFooterHint+" close tab   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] stop node   [d] delete node   [c] clone node   q quit" {
+		t.Fatalf("expected running-node terminal-pane footer with tab management hints, got %q", got)
 	}
 
 	stoppedNodeEntry := tuiTreeEntry{
@@ -761,12 +843,12 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{Slug: "stopped-node", Status: NodeStatusStopped},
 	}
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeInfo, stoppedNodeEntry)
-	if got != "Up/Down move   Left/Right collapse   "+infoViewToggleFooterHint+" terminal   "+terminalTabOpenFooterHint+" open tab   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   Left/Right collapse   "+infoViewToggleFooterHint+" terminal   "+hostTerminalToggleFooterHint+" host terminal   [a] add project   [g] env configs   [s] start node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected stopped-node footer without shell focus, got %q", got)
 	}
 
 	got = renderFooter(tuiFocusTerminal, tuiTreePaneModeTerminal, runningNodeEntry)
-	if got != terminalViewToggleFooterHint+" tree focus   "+terminalTabOpenFooterHint+" open tab   "+terminalTabPrevFooterHint+"/"+terminalTabNextFooterHint+" switch tab   "+terminalTabCloseFooterHint+" close tab   "+hostTerminalToggleFooterHint+" host/node   q quit" {
+	if got != terminalViewToggleFooterHint+" tree focus   "+terminalTabOpenFooterHint+" new tab   "+terminalTabPrevFooterHint+"/"+terminalTabNextFooterHint+" switch tab   "+terminalTabCloseFooterHint+" close tab   "+hostTerminalToggleFooterHint+" host/node   q quit" {
 		t.Fatalf("expected terminal footer without mouse hints, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -870,18 +952,34 @@ func TestCurrentPaneTabSegmentsShowOpenTerminalTabs(t *testing.T) {
 	if err := app.openTerminalTab(); err != nil {
 		t.Fatalf("openTerminalTab(root) error = %v", err)
 	}
-	app.state.focusTree()
 	selectTUIEntry(t, app, nodeTargetKey("node-child"))
 	if err := app.openTerminalTab(); err != nil {
 		t.Fatalf("openTerminalTab(child) error = %v", err)
 	}
+	if err := app.openTerminalTab(); err != nil {
+		t.Fatalf("openTerminalTab(child second tab) error = %v", err)
+	}
 
+	// Tabs are scoped to the focused tree item: only the child's tabs show.
 	activeStyle := tuiSelectedStyle()
 	inactiveStyle := tuiMutedStyle()
-	got := app.currentPaneTabSegments(app.state.activeTerminalEntry(), activeStyle, inactiveStyle)
+	got := app.currentPaneTabSegments(app.state.selectedEntry(), activeStyle, inactiveStyle)
 	text := segmentsText(got)
-	if !strings.Contains(text, "root-node") || !strings.Contains(text, "[child-node]") {
-		t.Fatalf("expected open node tabs in pane border, got %q", text)
+	if !strings.Contains(text, "child-node 1") || !strings.Contains(text, "[child-node 2]") {
+		t.Fatalf("expected the focused node's tabs in pane border, got %q", text)
+	}
+	if strings.Contains(text, "root-node") {
+		t.Fatalf("expected other nodes' tabs to stay hidden, got %q", text)
+	}
+
+	selectTUIEntry(t, app, nodeTargetKey("node-root"))
+	got = app.currentPaneTabSegments(app.state.selectedEntry(), activeStyle, inactiveStyle)
+	text = segmentsText(got)
+	if !strings.Contains(text, "[root-node]") {
+		t.Fatalf("expected the root node tab when the root node is focused, got %q", text)
+	}
+	if strings.Contains(text, "child-node") {
+		t.Fatalf("expected child tabs to stay hidden while root is focused, got %q", text)
 	}
 }
 
@@ -1011,30 +1109,163 @@ func TestTUIActionHotkeysIgnoreModifiedKeys(t *testing.T) {
 	}
 }
 
-func TestTerminalTabKeysMatchAltOrMetaModifiers(t *testing.T) {
+func TestTerminalTabKeysMatchOptionShortcuts(t *testing.T) {
 	t.Parallel()
 
 	if !isTerminalTabOpenKey(vaxis.Key{Text: "t", Keycode: 't', Modifiers: vaxis.ModAlt}) {
-		t.Fatalf("expected Alt+t to open a terminal tab")
+		t.Fatalf("expected Option-as-Alt+t to open a terminal tab")
 	}
 	if !isTerminalTabOpenKey(vaxis.Key{Text: "t", Keycode: 't', Modifiers: vaxis.ModMeta}) {
-		t.Fatalf("expected Meta+t to open a terminal tab")
+		t.Fatalf("expected Option-as-Meta+t to open a terminal tab")
+	}
+	if !isTerminalTabOpenKey(vaxis.Key{Text: "†", Keycode: '†'}) {
+		t.Fatalf("expected macOS Option+t text to open a terminal tab")
 	}
 	if !isTerminalTabNextKey(vaxis.Key{Keycode: vaxis.KeyRight, Modifiers: vaxis.ModMeta}) {
 		t.Fatalf("expected Meta+Right to switch to the next terminal tab")
 	}
+	if !isTerminalTabNextKey(vaxis.Key{Text: "f", Keycode: 'f', Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Option+Right encoded as Alt+f to switch to the next terminal tab")
+	}
 	if !isTerminalTabPreviousKey(vaxis.Key{Keycode: vaxis.KeyLeft, Modifiers: vaxis.ModMeta}) {
 		t.Fatalf("expected Meta+Left to switch to the previous terminal tab")
+	}
+	if !isTerminalTabPreviousKey(vaxis.Key{Text: "b", Keycode: 'b', Modifiers: vaxis.ModAlt}) {
+		t.Fatalf("expected Option+Left encoded as Alt+b to switch to the previous terminal tab")
 	}
 	if !isTerminalTabCloseKey(vaxis.Key{Text: "w", Keycode: 'w', Modifiers: vaxis.ModMeta}) {
 		t.Fatalf("expected Meta+w to close the active terminal tab")
 	}
-	if isTerminalTabOpenKey(vaxis.Key{Text: "†", Keycode: '†'}) {
-		t.Fatalf("expected bare Option-generated text without a modifier not to match terminal tab open")
+	if !isTerminalTabCloseKey(vaxis.Key{Text: "∑", Keycode: '∑'}) {
+		t.Fatalf("expected macOS Option+w text to close the active terminal tab")
+	}
+	if isTerminalTabOpenKey(vaxis.Key{Text: "∑", Keycode: '∑'}) {
+		t.Fatalf("expected unrelated macOS Option text not to match terminal tab open")
 	}
 }
 
-func TestTUIStateAutoSwitchesAndReusesPerNodeSessions(t *testing.T) {
+func TestTerminalTabKeysRejectRemovedFallbackShortcuts(t *testing.T) {
+	t.Parallel()
+
+	if isTerminalTabOpenKey(vaxis.Key{Keycode: vaxis.KeyF07}) {
+		t.Fatalf("expected F7 not to open a terminal tab")
+	}
+	if isTerminalTabOpenKey(vaxis.Key{Text: "t", Keycode: 't'}) {
+		t.Fatalf("expected bare t not to open a terminal tab")
+	}
+	if isTerminalTabNextKey(vaxis.Key{Keycode: vaxis.KeyF08}) {
+		t.Fatalf("expected F8 not to switch terminal tabs")
+	}
+	if isTerminalTabPreviousKey(vaxis.Key{Keycode: vaxis.KeyF08, Modifiers: vaxis.ModShift}) {
+		t.Fatalf("expected Shift+F8 not to switch terminal tabs")
+	}
+	if isTerminalTabCloseKey(vaxis.Key{Keycode: vaxis.KeyF09}) {
+		t.Fatalf("expected F9 not to close terminal tabs")
+	}
+	if isTerminalTabCloseKey(vaxis.Key{Text: "w", Keycode: 'w'}) {
+		t.Fatalf("expected bare w not to close terminal tabs")
+	}
+}
+
+func TestTerminalTabKeysMatchDecodedOptionInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		match func(vaxis.Key) bool
+	}{
+		{name: "escape prefixed option t opens tab", input: "\x1bt", match: isTerminalTabOpenKey},
+		{name: "macos option t text opens tab", input: "†", match: isTerminalTabOpenKey},
+		{name: "escape prefixed option right switches next tab", input: "\x1bf", match: isTerminalTabNextKey},
+		{name: "escape prefixed option left switches previous tab", input: "\x1bb", match: isTerminalTabPreviousKey},
+		{name: "escape prefixed option w closes tab", input: "\x1bw", match: isTerminalTabCloseKey},
+		{name: "macos option w text closes tab", input: "∑", match: isTerminalTabCloseKey},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			key := decodedVaxisInputKey(t, test.input)
+			if !test.match(key) {
+				t.Fatalf("expected decoded input %q to match shortcut, got %#v", test.input, key)
+			}
+		})
+	}
+}
+
+func TestTUITerminalTabKeybindOpensTabFromDecodedOpenShortcuts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "escape prefixed option t", input: "\x1bt"},
+		{name: "macos option t text", input: "†"},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			service, _ := newTestService(t)
+			sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+			sessionManager := newSharedFakeTUISessionManager(sessions)
+			state, err := newTUIState(testTUITree(t), sessionManager)
+			if err != nil {
+				t.Fatalf("newTUIState() error = %v", err)
+			}
+			app := &vaxisTUIApp{
+				ctx:      ctx,
+				service:  service,
+				state:    state,
+				sessions: sessions,
+			}
+
+			key := decodedVaxisInputKey(t, test.input)
+			quit, err := app.handleKey(key)
+			if err != nil {
+				t.Fatalf("handleKey(decoded %s) error = %v", test.name, err)
+			}
+			if quit {
+				t.Fatalf("expected decoded %s to keep app running", test.name)
+			}
+			if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
+				t.Fatalf("expected decoded %s to target the root node, got %q", test.name, got)
+			}
+			if got := strings.Join(sessions.TargetSessionKeys(nodeTargetKey("node-root")), ","); got != nodeTargetKey("node-root")+"#1" {
+				t.Fatalf("expected decoded %s to open the root node terminal tab, got %q", test.name, got)
+			}
+			if app.state.focus != tuiFocusTree {
+				t.Fatalf("expected decoded %s to keep tree focus after opening root tab, got %q", test.name, app.state.focus)
+			}
+			if app.state.treePaneMode != tuiTreePaneModeTerminal {
+				t.Fatalf("expected decoded %s to show terminal pane after opening root tab, got %q", test.name, app.state.treePaneMode)
+			}
+
+			selectTUIEntry(t, app, nodeTargetKey("node-child"))
+			quit, err = app.handleKey(key)
+			if err != nil {
+				t.Fatalf("handleKey(decoded %s child) error = %v", test.name, err)
+			}
+			if quit {
+				t.Fatalf("expected decoded %s child to keep app running", test.name)
+			}
+			if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-child") {
+				t.Fatalf("expected decoded %s to target the child node, got %q", test.name, got)
+			}
+			if got := strings.Join(sessions.TargetSessionKeys(nodeTargetKey("node-child")), ","); got != nodeTargetKey("node-child")+"#1" {
+				t.Fatalf("expected decoded %s to open the child node terminal tab, got %q", test.name, got)
+			}
+			if app.state.focus != tuiFocusTree {
+				t.Fatalf("expected decoded %s to keep tree focus after opening child tab, got %q", test.name, app.state.focus)
+			}
+		})
+	}
+}
+
+func TestTUIStateSelectionNeverOpensTerminalTabs(t *testing.T) {
 	t.Parallel()
 
 	tree := testTUITree(t)
@@ -1047,102 +1278,83 @@ func TestTUIStateAutoSwitchesAndReusesPerNodeSessions(t *testing.T) {
 	if got := state.selectedEntry().node.Slug; got != "root-node" {
 		t.Fatalf("expected initial selection to be root-node, got %q", got)
 	}
-
-	if state.activeTerminalKey != nodeTargetKey("node-root") {
-		t.Fatalf("expected initial active target to be node-root, got %q", state.activeTerminalKey)
-	}
-
-	if sessions.ensured[nodeTargetKey("node-root")] != 0 {
-		t.Fatalf("expected info mode to avoid creating the initial root preview session, got %d", sessions.ensured[nodeTargetKey("node-root")])
-	}
-
-	if err := state.moveSelection(1); err != nil {
-		t.Fatalf("moveSelection(child project) error = %v", err)
-	}
-
-	if got := state.selectedEntry().project.Slug; got != "child" {
-		t.Fatalf("expected project selection to move to child, got %q", got)
-	}
-
-	if state.activeTerminalKey != projectTargetKey("project-child") {
-		t.Fatalf("expected project selection to switch the active terminal target to the child project, got %q", state.activeTerminalKey)
-	}
-
-	if sessions.ensured[projectTargetKey("project-child")] != 0 {
-		t.Fatalf("expected info mode to avoid creating the child project preview session, got %d", sessions.ensured[projectTargetKey("project-child")])
-	}
-
-	if err := state.moveSelection(1); err != nil {
-		t.Fatalf("moveSelection(child node) error = %v", err)
-	}
-
-	if got := state.selectedEntry().node.Slug; got != "child-node" {
-		t.Fatalf("expected node selection to move to child-node, got %q", got)
-	}
-
-	if state.activeTerminalKey != nodeTargetKey("node-child") {
-		t.Fatalf("expected active target to switch to node-child, got %q", state.activeTerminalKey)
-	}
-
-	if sessions.ensured[nodeTargetKey("node-child")] != 0 {
-		t.Fatalf("expected info mode to avoid creating the child preview session, got %d", sessions.ensured[nodeTargetKey("node-child")])
-	}
-
-	if err := state.moveSelection(-2); err != nil {
-		t.Fatalf("moveSelection(root node) error = %v", err)
-	}
-
-	if got := state.selectedEntry().node.Slug; got != "root-node" {
-		t.Fatalf("expected selection to return to root-node, got %q", got)
-	}
-
-	if sessions.ensured[nodeTargetKey("node-root")] != 0 {
-		t.Fatalf("expected info mode to keep the root preview session unopened, got %d creations", sessions.ensured[nodeTargetKey("node-root")])
+	if got := state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
+		t.Fatalf("expected initial terminal target to follow selection, got %q", got)
 	}
 
 	if err := state.toggleTreePaneMode(); err != nil {
 		t.Fatalf("toggleTreePaneMode() error = %v", err)
 	}
-
 	if state.treePaneMode != tuiTreePaneModeTerminal {
 		t.Fatalf("expected terminal pane mode after toggling from info, got %q", state.treePaneMode)
 	}
-	if sessions.ensured[nodeTargetKey("node-root")] != 1 {
-		t.Fatalf("expected toggling to terminal mode to create the root preview session, got %d", sessions.ensured[nodeTargetKey("node-root")])
+
+	// Visit every entry in both pane modes; nothing may open a session.
+	for _, delta := range []int{1, 1, -2, 1, 1, -2} {
+		if err := state.moveSelection(delta); err != nil {
+			t.Fatalf("moveSelection(%d) error = %v", delta, err)
+		}
+	}
+	if len(sessions.opened) != 0 {
+		t.Fatalf("expected visiting tree entries to open no terminal tabs, got %v", sessions.opened)
 	}
 
-	if err := state.moveSelection(1); err != nil {
-		t.Fatalf("moveSelection(child project in terminal mode) error = %v", err)
-	}
-	if sessions.ensured[projectTargetKey("project-child")] != 1 {
-		t.Fatalf("expected terminal mode to create the child project preview session, got %d", sessions.ensured[projectTargetKey("project-child")])
-	}
-
-	if err := state.moveSelection(1); err != nil {
-		t.Fatalf("moveSelection(child node in terminal mode) error = %v", err)
-	}
-	if sessions.ensured[nodeTargetKey("node-child")] != 1 {
-		t.Fatalf("expected terminal mode to create the child node preview session, got %d", sessions.ensured[nodeTargetKey("node-child")])
-	}
-
-	if err := state.moveSelection(-2); err != nil {
-		t.Fatalf("moveSelection(root node in terminal mode) error = %v", err)
-	}
-	if sessions.ensured[nodeTargetKey("node-root")] != 1 {
-		t.Fatalf("expected root session to be reused after returning in terminal mode, got %d creations", sessions.ensured[nodeTargetKey("node-root")])
-	}
-
+	// Explicitly focusing the terminal opens the first tab and reuses it.
 	if err := state.focusTerminal(); err != nil {
 		t.Fatalf("focusTerminal() error = %v", err)
 	}
-
 	if state.focus != tuiFocusTerminal {
 		t.Fatalf("expected terminal focus, got %q", state.focus)
+	}
+	if sessions.opened[nodeTargetKey("node-root")] != 1 {
+		t.Fatalf("expected focusing the terminal to open one root tab, got %d", sessions.opened[nodeTargetKey("node-root")])
 	}
 
 	state.focusTree()
 	if state.focus != tuiFocusTree {
 		t.Fatalf("expected tree focus, got %q", state.focus)
+	}
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() reuse error = %v", err)
+	}
+	if sessions.opened[nodeTargetKey("node-root")] != 1 {
+		t.Fatalf("expected refocusing to reuse the root tab, got %d opens", sessions.opened[nodeTargetKey("node-root")])
+	}
+}
+
+func TestTUIStateOpenInitialTerminalTab(t *testing.T) {
+	t.Parallel()
+
+	tree := testTUITree(t)
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(tree, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	if err := state.openInitialTerminalTab(); err != nil {
+		t.Fatalf("openInitialTerminalTab() error = %v", err)
+	}
+
+	targetKey := nodeTargetKey("node-root")
+	if got := sessions.opened[targetKey]; got != 1 {
+		t.Fatalf("expected startup to open one default root tab, got %d", got)
+	}
+	if got := state.activeSessionKey(); got != targetKey+"#1" {
+		t.Fatalf("expected startup tab to become active, got %q", got)
+	}
+	if state.focus != tuiFocusTree {
+		t.Fatalf("expected startup to keep tree focus, got %q", state.focus)
+	}
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("expected startup to keep info pane mode, got %q", state.treePaneMode)
+	}
+
+	if err := state.openInitialTerminalTab(); err != nil {
+		t.Fatalf("openInitialTerminalTab() reuse error = %v", err)
+	}
+	if got := sessions.opened[targetKey]; got != 1 {
+		t.Fatalf("expected startup default tab to be created once, got %d opens", got)
 	}
 }
 
@@ -1162,12 +1374,11 @@ func TestTUISessionStoreUsesPreferredTerminalSizeForNewSessions(t *testing.T) {
 		newSessionTUITerminal = originalFactory
 	}()
 
-	err := sessions.EnsureNodeSession(Node{ID: "node-root", Slug: "root-node"})
-	if err != nil {
-		t.Fatalf("EnsureNodeSession() error = %v", err)
+	if _, err := sessions.OpenNodeTab(Node{ID: "node-root", Slug: "root-node"}); err != nil {
+		t.Fatalf("OpenNodeTab() error = %v", err)
 	}
 	if terminal == nil {
-		t.Fatal("expected EnsureNodeSession() to allocate a terminal")
+		t.Fatal("expected OpenNodeTab() to allocate a terminal")
 	}
 	if terminal.startCols != 79 || terminal.startRows != 20 {
 		t.Fatalf("expected session terminal to start at 79x20, got %dx%d", terminal.startCols, terminal.startRows)
@@ -1193,14 +1404,14 @@ func TestTUISessionStoreStartsProjectShellInWorkspace(t *testing.T) {
 	}()
 
 	project := Project{ID: "project-root", Slug: "root", WorkspacePath: workspace}
-	if err := sessions.EnsureProjectSession(project); err != nil {
-		t.Fatalf("EnsureProjectSession() error = %v", err)
+	if _, err := sessions.OpenProjectTab(project); err != nil {
+		t.Fatalf("OpenProjectTab() error = %v", err)
 	}
 	if terminal == nil {
-		t.Fatal("expected EnsureProjectSession() to allocate a terminal")
+		t.Fatal("expected OpenProjectTab() to allocate a terminal")
 	}
 	if terminal.startCmd == nil {
-		t.Fatal("expected EnsureProjectSession() to start the terminal command")
+		t.Fatal("expected OpenProjectTab() to start the terminal command")
 	}
 	if terminal.startCmd.Dir != workspace {
 		t.Fatalf("expected project shell dir %q, got %q", workspace, terminal.startCmd.Dir)
@@ -1257,9 +1468,9 @@ func TestTUIHandleResizeResizesActiveTerminalBeforeRedraw(t *testing.T) {
 		t.Fatalf("focusTerminal() error = %v", err)
 	}
 
-	terminal, ok := sessions.sessions[nodeTargetKey("node-root")].terminal.(*fakeTUITerminal)
+	terminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
 	if !ok {
-		t.Fatalf("expected fake terminal, got %T", sessions.sessions[nodeTargetKey("node-root")].terminal)
+		t.Fatalf("expected fake terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
 	}
 
 	app := &vaxisTUIApp{
@@ -1406,12 +1617,12 @@ func TestTUIStateSelectsCreatedNodeWithoutOpeningShellSession(t *testing.T) {
 		t.Fatalf("expected selection to move to created-node, got %q", got)
 	}
 
-	if state.activeTerminalKey != nodeTargetKey("node-created") {
-		t.Fatalf("expected created node to become the selected active target, got %q", state.activeTerminalKey)
+	if got := state.activeTerminalTargetKey(); got != nodeTargetKey("node-created") {
+		t.Fatalf("expected created node to become the selected terminal target, got %q", got)
 	}
 
-	if sessions.ensured[nodeTargetKey("node-created")] != 0 {
-		t.Fatalf("expected created node not to open a shell session, got %d creations", sessions.ensured[nodeTargetKey("node-created")])
+	if sessions.opened[nodeTargetKey("node-created")] != 0 {
+		t.Fatalf("expected created node not to open a shell session, got %d creations", sessions.opened[nodeTargetKey("node-created")])
 	}
 
 	if err := state.focusTerminal(); err == nil {
@@ -1436,10 +1647,10 @@ func TestTUIHandleKeyAltBacktickTogglesFocusToTerminalAndHidesTree(t *testing.T)
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -1461,8 +1672,9 @@ func TestTUIHandleKeyAltBacktickFocusesSelectedProjectTerminal(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	sessionManager := newSharedFakeTUISessionManager(sessions)
+	state, err := newTUIState(testTUITree(t), sessionManager)
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -1472,7 +1684,7 @@ func TestTUIHandleKeyAltBacktickFocusesSelectedProjectTerminal(t *testing.T) {
 		ctx:      ctx,
 		service:  service,
 		state:    state,
-		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions: sessions,
 	}
 
 	selectTUIEntry(t, app, projectTargetKey("project-root"))
@@ -1487,11 +1699,11 @@ func TestTUIHandleKeyAltBacktickFocusesSelectedProjectTerminal(t *testing.T) {
 	if app.state.focus != tuiFocusTerminal {
 		t.Fatalf("expected Alt+` to focus the project terminal, got %q", app.state.focus)
 	}
-	if app.state.activeTerminalKey != projectTargetKey("project-root") {
-		t.Fatalf("expected project terminal target to stay active, got %q", app.state.activeTerminalKey)
+	if got := app.state.activeTerminalTargetKey(); got != projectTargetKey("project-root") {
+		t.Fatalf("expected project terminal target to stay active, got %q", got)
 	}
-	if sessions.ensured[projectTargetKey("project-root")] != 1 {
-		t.Fatalf("expected selected project session to be reused for focus, got %d creations", sessions.ensured[projectTargetKey("project-root")])
+	if sessionManager.opened[projectTargetKey("project-root")] != 1 {
+		t.Fatalf("expected focusing to open the project tab once, got %d creations", sessionManager.opened[projectTargetKey("project-root")])
 	}
 }
 
@@ -1515,10 +1727,10 @@ func TestTUIHandleKeyAltBacktickTogglesFocusBackToTreeAndShowsTree(t *testing.T)
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -1540,8 +1752,8 @@ func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -1551,12 +1763,12 @@ func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
 		ctx:      ctx,
 		service:  service,
 		state:    state,
-		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions: sessions,
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
 	if err != nil {
@@ -1593,10 +1805,10 @@ func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
 	if err != nil {
@@ -1649,12 +1861,12 @@ func TestTUIHandleKeyOptionShiftBacktickSwitchesNodeToHostTerminalAndBack(t *tes
 	if got := app.state.activeTerminalTargetKey(); got != projectTargetKey("project-root") {
 		t.Fatalf("expected active terminal to switch to host project, got %q", got)
 	}
-	if sessionManager.ensured[projectTargetKey("project-root")] != 1 {
-		t.Fatalf("expected host project session to be opened once, got %d", sessionManager.ensured[projectTargetKey("project-root")])
+	if sessionManager.opened[projectTargetKey("project-root")] != 1 {
+		t.Fatalf("expected host project session to be opened once, got %d", sessionManager.opened[projectTargetKey("project-root")])
 	}
 
 	app.forwardTerminalEvent(vaxis.Key{Text: "x", Keycode: 'x'})
-	projectSession := sessions.sessions[projectTargetKey("project-root")]
+	projectSession := targetTestSession(t, sessions, projectTargetKey("project-root"))
 	if projectSession == nil {
 		t.Fatalf("expected project session to exist")
 	}
@@ -1676,8 +1888,8 @@ func TestTUIHandleKeyOptionShiftBacktickSwitchesNodeToHostTerminalAndBack(t *tes
 	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
 		t.Fatalf("expected active terminal to switch back to node, got %q", got)
 	}
-	if sessionManager.ensured[nodeTargetKey("node-root")] != 1 {
-		t.Fatalf("expected node session to be opened once, got %d", sessionManager.ensured[nodeTargetKey("node-root")])
+	if sessionManager.opened[nodeTargetKey("node-root")] != 1 {
+		t.Fatalf("expected node session to be opened once, got %d", sessionManager.opened[nodeTargetKey("node-root")])
 	}
 }
 
@@ -1787,9 +1999,9 @@ func TestTUIForwardTerminalEventNormalizesPastedNewlines(t *testing.T) {
 		EventType: vaxis.EventPaste,
 	})
 
-	terminal, ok := sessions.sessions[nodeTargetKey("node-root")].terminal.(*fakeTUITerminal)
+	terminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
 	if !ok {
-		t.Fatalf("expected fake node terminal, got %T", sessions.sessions[nodeTargetKey("node-root")].terminal)
+		t.Fatalf("expected fake node terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
 	}
 	if len(terminal.events) != 1 {
 		t.Fatalf("expected pasted key to be forwarded once, got %d events", len(terminal.events))
@@ -1823,70 +2035,129 @@ func TestTUITerminalTabKeybindsOpenSwitchAndCloseTabs(t *testing.T) {
 	}
 
 	openKey := vaxis.Key{Text: "t", Keycode: 't', Modifiers: vaxis.ModAlt}
+	rootTarget := nodeTargetKey("node-root")
+	childTarget := nodeTargetKey("node-child")
+
 	quit, err := app.handleKey(openKey)
 	if err != nil {
-		t.Fatalf("handleKey(Alt+t root) error = %v", err)
+		t.Fatalf("handleKey(Option+t root) error = %v", err)
 	}
 	if quit {
-		t.Fatalf("expected Alt+t to keep app running")
+		t.Fatalf("expected Option+t to keep app running")
 	}
-	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
-		t.Fatalf("expected root node tab to be active, got %q", got)
+	if got := app.state.activeSessionKey(); got != rootTarget+"#1" {
+		t.Fatalf("expected first root tab to be active, got %q", got)
 	}
-	if !sessions.HasSession(nodeTargetKey("node-root")) {
-		t.Fatalf("expected root node terminal tab to be open")
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected Option+t to keep tree focus after opening root tab, got %q", app.state.focus)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("expected Option+t to show the terminal pane after opening root tab, got %q", app.state.treePaneMode)
 	}
 
-	app.state.focusTree()
-	selectTUIEntry(t, app, nodeTargetKey("node-child"))
-	quit, err = app.handleKey(openKey)
-	if err != nil {
-		t.Fatalf("handleKey(Alt+t child) error = %v", err)
+	// A second open creates a fresh tab for the same node and activates it.
+	if _, err := app.handleKey(openKey); err != nil {
+		t.Fatalf("handleKey(Option+t root second tab) error = %v", err)
 	}
-	if quit {
-		t.Fatalf("expected Alt+t child to keep app running")
+	if got := strings.Join(sessions.TargetSessionKeys(rootTarget), ","); got != rootTarget+"#1,"+rootTarget+"#2" {
+		t.Fatalf("expected two root tabs in order, got %q", got)
 	}
-	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-child") {
-		t.Fatalf("expected child node tab to be active, got %q", got)
-	}
-	if got := strings.Join(sessions.OpenSessionKeys(), ","); got != nodeTargetKey("node-root")+","+nodeTargetKey("node-child") {
-		t.Fatalf("expected stable terminal tab order, got %q", got)
+	if got := app.state.activeSessionKey(); got != rootTarget+"#2" {
+		t.Fatalf("expected second root tab to be active, got %q", got)
 	}
 
-	quit, err = app.handleKey(vaxis.Key{Keycode: vaxis.KeyLeft, Modifiers: vaxis.ModAlt})
-	if err != nil {
-		t.Fatalf("handleKey(Alt+Left) error = %v", err)
+	// Option-based switching cycles within the focused node's tabs.
+	if _, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyLeft, Modifiers: vaxis.ModAlt}); err != nil {
+		t.Fatalf("handleKey(Option+Left) error = %v", err)
 	}
-	if quit {
-		t.Fatalf("expected Alt+Left to keep app running")
+	if got := app.state.activeSessionKey(); got != rootTarget+"#1" {
+		t.Fatalf("expected Option+Left to switch to the first root tab, got %q", got)
 	}
-	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
-		t.Fatalf("expected Alt+Left to switch to root tab, got %q", got)
+	if _, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyRight, Modifiers: vaxis.ModAlt}); err != nil {
+		t.Fatalf("handleKey(Option+Right) error = %v", err)
 	}
-
-	quit, err = app.handleKey(vaxis.Key{Keycode: vaxis.KeyRight, Modifiers: vaxis.ModAlt})
-	if err != nil {
-		t.Fatalf("handleKey(Alt+Right) error = %v", err)
-	}
-	if quit {
-		t.Fatalf("expected Alt+Right to keep app running")
-	}
-	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-child") {
-		t.Fatalf("expected Alt+Right to switch to child tab, got %q", got)
+	if got := app.state.activeSessionKey(); got != rootTarget+"#2" {
+		t.Fatalf("expected Option+Right to switch back to the second root tab, got %q", got)
 	}
 
-	quit, err = app.handleKey(vaxis.Key{Text: "w", Keycode: 'w', Modifiers: vaxis.ModAlt})
-	if err != nil {
-		t.Fatalf("handleKey(Alt+w) error = %v", err)
+	// Tabs are scoped per node: the child node starts with none.
+	selectTUIEntry(t, app, childTarget)
+	if got := app.state.activeSessionKey(); got != "" {
+		t.Fatalf("expected child node to have no active tab, got %q", got)
 	}
-	if quit {
-		t.Fatalf("expected Alt+w to keep app running")
+	if _, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyRight, Modifiers: vaxis.ModAlt}); err != nil {
+		t.Fatalf("handleKey(Option+Right without tabs) error = %v", err)
 	}
-	if sessions.HasSession(nodeTargetKey("node-child")) {
-		t.Fatalf("expected Alt+w to close the active child tab")
+	if app.status == "" {
+		t.Fatalf("expected switching tabs without any open tab to report an error status")
 	}
-	if got := app.state.activeTerminalTargetKey(); got != nodeTargetKey("node-root") {
-		t.Fatalf("expected close to activate remaining root tab, got %q", got)
+
+	if _, err := app.handleKey(openKey); err != nil {
+		t.Fatalf("handleKey(Option+t child) error = %v", err)
+	}
+	if got := app.state.activeSessionKey(); got != childTarget+"#1" {
+		t.Fatalf("expected child tab to be active, got %q", got)
+	}
+
+	// Returning to the root node restores its remembered active tab.
+	selectTUIEntry(t, app, rootTarget)
+	if got := app.state.activeSessionKey(); got != rootTarget+"#2" {
+		t.Fatalf("expected root node to remember its active tab, got %q", got)
+	}
+
+	// Close walks through the focused node's tabs without touching others.
+	closeKey := vaxis.Key{Text: "w", Keycode: 'w', Modifiers: vaxis.ModAlt}
+	if _, err := app.handleKey(closeKey); err != nil {
+		t.Fatalf("handleKey(Option+w first) error = %v", err)
+	}
+	if got := app.state.activeSessionKey(); got != rootTarget+"#1" {
+		t.Fatalf("expected close to activate the remaining root tab, got %q", got)
+	}
+	if _, err := app.handleKey(closeKey); err != nil {
+		t.Fatalf("handleKey(Option+w second) error = %v", err)
+	}
+	if got := len(sessions.TargetSessionKeys(rootTarget)); got != 0 {
+		t.Fatalf("expected all root tabs to be closed, got %d", got)
+	}
+	if !sessions.HasSession(childTarget + "#1") {
+		t.Fatalf("expected closing root tabs to leave the child tab open")
+	}
+	if app.state.focus != tuiFocusTree {
+		t.Fatalf("expected tree focus after closing tabs, got %q", app.state.focus)
+	}
+}
+
+func TestNextActiveTerminalTabAfterCloseUsesAdjacentTab(t *testing.T) {
+	t.Parallel()
+
+	keys := []string{
+		nodeTargetKey("node-root") + "#1",
+		nodeTargetKey("node-root") + "#2",
+		nodeTargetKey("node-root") + "#3",
+	}
+
+	tests := []struct {
+		name       string
+		keys       []string
+		closingKey string
+		want       string
+	}{
+		{name: "first tab", keys: keys, closingKey: keys[0], want: keys[1]},
+		{name: "middle tab", keys: keys, closingKey: keys[1], want: keys[2]},
+		{name: "last tab", keys: keys, closingKey: keys[2], want: keys[1]},
+		{name: "only tab", keys: keys[:1], closingKey: keys[0], want: ""},
+		{name: "missing tab", keys: keys, closingKey: nodeTargetKey("node-root") + "#4", want: ""},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := nextActiveTerminalTabAfterClose(test.keys, test.closingKey); got != test.want {
+				t.Fatalf("nextActiveTerminalTabAfterClose() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -1911,9 +2182,9 @@ func TestTUIFocusedTerminalReceivesModifiedDKeys(t *testing.T) {
 		state:    state,
 		sessions: sessions,
 	}
-	terminal, ok := sessions.sessions[nodeTargetKey("node-root")].terminal.(*fakeTUITerminal)
+	terminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
 	if !ok {
-		t.Fatalf("expected fake node terminal, got %T", sessions.sessions[nodeTargetKey("node-root")].terminal)
+		t.Fatalf("expected fake node terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
 	}
 
 	quit, err := app.handleKey(vaxis.Key{Text: "d", Keycode: 'd', Modifiers: vaxis.ModAlt})
@@ -1934,11 +2205,20 @@ func TestTUIFocusedTerminalReceivesModifiedDKeys(t *testing.T) {
 	if quit {
 		t.Fatalf("expected Alt+Shift+d to keep app running")
 	}
-	if len(terminal.events) != 2 {
-		t.Fatalf("expected modified d keys to be forwarded to the terminal, got %d events", len(terminal.events))
+
+	quit, err = app.handleKey(vaxis.Key{Text: "t", Keycode: 't'})
+	if err != nil {
+		t.Fatalf("handleKey(t) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected t to keep app running")
+	}
+
+	if len(terminal.events) != 3 {
+		t.Fatalf("expected modified d keys and bare t to be forwarded to the terminal, got %d events", len(terminal.events))
 	}
 	if terminal.startCols != 0 || terminal.startRows != 0 {
-		t.Fatalf("expected modified d keys not to resize terminal, got %dx%d", terminal.startCols, terminal.startRows)
+		t.Fatalf("expected forwarded keys not to resize terminal, got %dx%d", terminal.startCols, terminal.startRows)
 	}
 }
 
@@ -2039,14 +2319,14 @@ func TestTUIMouseCaptureUsesHostTerminalOverride(t *testing.T) {
 		t.Fatalf("handleKey(Option+Shift+`) error = %v", err)
 	}
 
-	projectTerminal, ok := sessions.sessions[projectTargetKey("project-root")].terminal.(*fakeTUITerminal)
+	projectTerminal, ok := targetTestSession(t, sessions, projectTargetKey("project-root")).terminal.(*fakeTUITerminal)
 	if !ok {
-		t.Fatalf("expected fake project terminal, got %T", sessions.sessions[projectTargetKey("project-root")].terminal)
+		t.Fatalf("expected fake project terminal, got %T", targetTestSession(t, sessions, projectTargetKey("project-root")).terminal)
 	}
 	projectTerminal.capturesMouse = true
-	nodeTerminal, ok := sessions.sessions[nodeTargetKey("node-root")].terminal.(*fakeTUITerminal)
+	nodeTerminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
 	if !ok {
-		t.Fatalf("expected fake node terminal, got %T", sessions.sessions[nodeTargetKey("node-root")].terminal)
+		t.Fatalf("expected fake node terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
 	}
 	nodeTerminal.capturesMouse = true
 
@@ -2091,9 +2371,6 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 	if state.treePaneMode != tuiTreePaneModeInfo {
 		t.Fatalf("expected info pane mode by default, got %q", state.treePaneMode)
 	}
-	if sessions.ensured[nodeTargetKey("node-root")] != 0 {
-		t.Fatalf("expected info mode to avoid the initial node preview session, got %d", sessions.ensured[nodeTargetKey("node-root")])
-	}
 
 	quit, err := app.handleKey(vaxis.Key{Text: "i", Keycode: 'i'})
 	if err != nil {
@@ -2105,18 +2382,12 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 	if state.treePaneMode != tuiTreePaneModeTerminal {
 		t.Fatalf("expected terminal pane mode after i, got %q", state.treePaneMode)
 	}
-	if sessions.ensured[nodeTargetKey("node-root")] != 1 {
-		t.Fatalf("expected switching to terminal mode to start the initial node preview session, got %d", sessions.ensured[nodeTargetKey("node-root")])
-	}
 
 	if err := state.moveSelection(1); err != nil {
 		t.Fatalf("moveSelection(child project) error = %v", err)
 	}
 	if got := state.selectedEntry(); got.kind != tuiTreeEntryProject || got.project.ID != "project-child" {
 		t.Fatalf("expected child project selection after moving in info mode, got %#v", got)
-	}
-	if sessions.ensured[projectTargetKey("project-child")] != 1 {
-		t.Fatalf("expected terminal mode to auto-start the project preview shell, got %d creations", sessions.ensured[projectTargetKey("project-child")])
 	}
 	if state.treePaneMode != tuiTreePaneModeTerminal {
 		t.Fatalf("expected terminal pane mode to stay sticky across selection changes, got %q", state.treePaneMode)
@@ -2132,8 +2403,8 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 	if state.treePaneMode != tuiTreePaneModeInfo {
 		t.Fatalf("expected info pane mode after toggling back, got %q", state.treePaneMode)
 	}
-	if sessions.ensured[projectTargetKey("project-child")] != 1 {
-		t.Fatalf("expected returning to info mode to preserve the existing project preview shell count, got %d creations", sessions.ensured[projectTargetKey("project-child")])
+	if len(sessions.opened) != 0 {
+		t.Fatalf("expected pane mode toggling and selection moves to open no terminal tabs, got %v", sessions.opened)
 	}
 }
 
@@ -2154,10 +2425,10 @@ func TestTUIHandleKeyEnterNoLongerFocusesTerminal(t *testing.T) {
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter})
 	if err != nil {
@@ -2188,10 +2459,10 @@ func TestTUIHandleKeyAltEnterNoLongerTogglesTerminalFocus(t *testing.T) {
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -2240,8 +2511,8 @@ func TestTUIMouseMotionDoesNotFocusTerminal(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -2251,13 +2522,13 @@ func TestTUIMouseMotionDoesNotFocusTerminal(t *testing.T) {
 		ctx:              ctx,
 		service:          service,
 		state:            state,
-		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions:         sessions,
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	if err := app.handleMouse(vaxis.Mouse{
 		Col:       12,
@@ -2301,8 +2572,8 @@ func TestTUIMouseReleaseOpensTerminalHyperlinkWithoutDrag(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -2315,13 +2586,13 @@ func TestTUIMouseReleaseOpensTerminalHyperlinkWithoutDrag(t *testing.T) {
 		openLink:          func(target string) error { opened = target; return nil },
 		screenHyperlinkAt: func(col, row int) (string, bool) { return "https://auth.openai.com/example", col == 12 && row == 7 },
 		state:             state,
-		sessions:          newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions:          sessions,
 		terminalBodyRect:  tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	if err := app.handleMouse(vaxis.Mouse{
 		Col:       12,
@@ -2360,8 +2631,8 @@ func TestTUIMouseDragDoesNotOpenTerminalHyperlinkWithoutGuestCapture(t *testing.
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -2378,13 +2649,13 @@ func TestTUIMouseDragDoesNotOpenTerminalHyperlinkWithoutGuestCapture(t *testing.
 			return "https://example.com/drag", col >= 11 && col <= 14 && row == 6
 		},
 		state:            state,
-		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions:         sessions,
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: terminal,
-	}
+	})
 
 	if err := app.handleMouse(vaxis.Mouse{
 		Col:       11,
@@ -2430,8 +2701,8 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -2444,13 +2715,13 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 		ctx:              ctx,
 		service:          service,
 		state:            state,
-		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions:         sessions,
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: terminal,
-	}
+	})
 
 	for _, eventType := range []vaxis.EventType{vaxis.EventPress, vaxis.EventMotion, vaxis.EventRelease} {
 		if err := app.handleMouse(vaxis.Mouse{
@@ -2476,8 +2747,8 @@ func TestTUIShiftDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	sessions := newFakeTUISessionManager()
-	state, err := newTUIState(testTUITree(t), sessions)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
@@ -2490,13 +2761,13 @@ func TestTUIShiftDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 		ctx:              ctx,
 		service:          service,
 		state:            state,
-		sessions:         newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+		sessions:         sessions,
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
-	app.sessions.sessions[nodeTargetKey("node-root")] = &tuiSession{
+	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 		terminal: terminal,
-	}
+	})
 
 	events := []vaxis.Mouse{
 		{Col: 11, Row: 6, Button: vaxis.MouseLeftButton, EventType: vaxis.EventPress, Modifiers: vaxis.ModShift},
@@ -2639,13 +2910,13 @@ func TestTUITerminalClosedEventIsHandledWhileOperationActive(t *testing.T) {
 	state.focus = tuiFocusTerminal
 
 	node := state.selectedEntry().node
-	sessions.sessions[nodeTargetKey(node.ID)] = &tuiSession{
-		key:      nodeTargetKey(node.ID),
+	state.terminalTarget = nodeTargetKey(node.ID)
+	sessionKey := putTestSession(sessions, nodeTargetKey(node.ID), &tuiSession{
 		kind:     tuiTreeEntryNode,
 		label:    node.Slug,
 		node:     node,
 		terminal: newFakeTUITerminal(),
-	}
+	})
 
 	app := &vaxisTUIApp{
 		ctx:      ctx,
@@ -2658,14 +2929,14 @@ func TestTUITerminalClosedEventIsHandledWhileOperationActive(t *testing.T) {
 		operationOrder: []string{"op-clone"},
 	}
 
-	quit, err := app.handleEvent(tuiTerminalClosedEvent{TargetKey: nodeTargetKey(node.ID)})
+	quit, err := app.handleEvent(tuiTerminalClosedEvent{TargetKey: sessionKey})
 	if err != nil {
 		t.Fatalf("handleEvent(tuiTerminalClosedEvent) error = %v", err)
 	}
 	if quit {
 		t.Fatalf("expected terminal close during operation to stay in app")
 	}
-	if sessions.HasSession(nodeTargetKey(node.ID)) {
+	if sessions.HasSession(sessionKey) {
 		t.Fatalf("expected closed terminal session to be removed during operation")
 	}
 	if state.focus != tuiFocusTree {
@@ -2697,8 +2968,9 @@ func TestTUISourceNodeSessionIsRecreatedAfterCloneClosesIt(t *testing.T) {
 	}
 
 	rootNode := state.selectedEntry().node
-	if !sessions.HasSession(nodeTargetKey(rootNode.ID)) {
-		t.Fatalf("expected initial source-node session to exist")
+	sessionKeys := sessions.TargetSessionKeys(nodeTargetKey(rootNode.ID))
+	if len(sessionKeys) != 1 {
+		t.Fatalf("expected initial source-node session to exist, got %v", sessionKeys)
 	}
 
 	app := &vaxisTUIApp{
@@ -2712,29 +2984,29 @@ func TestTUISourceNodeSessionIsRecreatedAfterCloneClosesIt(t *testing.T) {
 		operationOrder: []string{"op-clone"},
 	}
 
-	quit, err := app.handleEvent(tuiTerminalClosedEvent{TargetKey: nodeTargetKey(rootNode.ID)})
+	quit, err := app.handleEvent(tuiTerminalClosedEvent{TargetKey: sessionKeys[0]})
 	if err != nil {
 		t.Fatalf("handleEvent(tuiTerminalClosedEvent) error = %v", err)
 	}
 	if quit {
 		t.Fatalf("expected terminal close during clone to stay in app")
 	}
-	if sessions.HasSession(nodeTargetKey(rootNode.ID)) {
-		t.Fatalf("expected source-node session to be removed after shell exit")
+	if got := sessions.TargetSessionKeys(nodeTargetKey(rootNode.ID)); len(got) != 0 {
+		t.Fatalf("expected source-node session to be removed after shell exit, got %v", got)
+	}
+	if state.focus != tuiFocusTree {
+		t.Fatalf("expected focus to return to the tree after the source-node shell exited, got %q", state.focus)
 	}
 
-	if err := state.moveSelection(1); err != nil {
-		t.Fatalf("moveSelection(to child) error = %v", err)
+	// Explicitly refocusing the source node opens a fresh tab.
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() after clone close error = %v", err)
 	}
-	if err := state.moveSelection(-1); err != nil {
-		t.Fatalf("moveSelection(back to source) error = %v", err)
+	if got := sessions.TargetSessionKeys(nodeTargetKey(rootNode.ID)); len(got) != 1 {
+		t.Fatalf("expected source-node session to be recreated after refocusing, got %v", got)
 	}
-
-	if !sessions.HasSession(nodeTargetKey(rootNode.ID)) {
-		t.Fatalf("expected source-node session to be recreated after reselection")
-	}
-	if sessionManager.ensured[nodeTargetKey(rootNode.ID)] < 2 {
-		t.Fatalf("expected source-node session to be ensured again after reselection, got %d", sessionManager.ensured[nodeTargetKey(rootNode.ID)])
+	if sessionManager.opened[nodeTargetKey(rootNode.ID)] < 2 {
+		t.Fatalf("expected source-node session to be opened again after refocusing, got %d", sessionManager.opened[nodeTargetKey(rootNode.ID)])
 	}
 }
 
@@ -2873,8 +3145,8 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != rootNode.ID {
 		t.Fatalf("expected created node to become selected, got %#v", got)
 	}
-	if sessions.ensured[nodeTargetKey(rootNode.ID)] != 0 {
-		t.Fatalf("expected created node to stay shell-free, got %d session creations", sessions.ensured[nodeTargetKey(rootNode.ID)])
+	if sessions.opened[nodeTargetKey(rootNode.ID)] != 0 {
+		t.Fatalf("expected created node to stay shell-free, got %d session creations", sessions.opened[nodeTargetKey(rootNode.ID)])
 	}
 
 	selectTUIEntry(t, app, "project:"+rootProject.ID)
@@ -3444,8 +3716,8 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	if startedNode.Status != NodeStatusRunning {
 		t.Fatalf("expected running node status, got %q", startedNode.Status)
 	}
-	if sessions.ensured[nodeTargetKey(rootNode.ID)] != 0 {
-		t.Fatalf("expected info mode to avoid opening a node shell session automatically, got %d", sessions.ensured[nodeTargetKey(rootNode.ID)])
+	if sessions.opened[nodeTargetKey(rootNode.ID)] != 0 {
+		t.Fatalf("expected info mode to avoid opening a node shell session automatically, got %d", sessions.opened[nodeTargetKey(rootNode.ID)])
 	}
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != rootNode.ID || got.node.Status != NodeStatusRunning {
 		t.Fatalf("expected running root node to remain selected, got %#v", got)
@@ -3571,8 +3843,8 @@ func TestTUINodeCloneLeavesProviderStartedCloneStoppedUntilExplicitStart(t *test
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != childNode.ID || got.node.Status != NodeStatusStopped {
 		t.Fatalf("expected stopped cloned child node to become selected, got %#v", got)
 	}
-	if sessions.ensured[nodeTargetKey(childNode.ID)] != 0 {
-		t.Fatalf("expected stopped cloned child node to avoid auto-opening a shell session, got %d session creations", sessions.ensured[nodeTargetKey(childNode.ID)])
+	if sessions.opened[nodeTargetKey(childNode.ID)] != 0 {
+		t.Fatalf("expected stopped cloned child node to avoid auto-opening a shell session, got %d session creations", sessions.opened[nodeTargetKey(childNode.ID)])
 	}
 }
 

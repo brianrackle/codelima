@@ -23,7 +23,7 @@ Chosen option: "Keep terminal tabs single-pane and forward non-command modified 
 
 ### Positive Consequences
 
-* `Alt+t`, `Alt+Left`, `Alt+Right`, and `Alt+w` remain the only TUI terminal tab management shortcuts.
+* Tree-focus `t`, `F7`, `F8`, `Shift+F8`, and `F9` remain the advertised TUI terminal tab management shortcuts.
 * Modified keys such as `Alt+d` reach the focused terminal instead of creating TUI panes.
 * Tree action hotkeys no longer match modified versions of the same key.
 
@@ -62,3 +62,4 @@ Keep one visible terminal surface and let tab commands manage opened project and
 
 * Supersedes [Add Ghostty-Style TUI Terminal Split Keys](add_ghostty_style_tui_terminal_split_keys_48.md)
 * Refines [Treat TUI Sessions as Terminal Tabs](treat_tui_sessions_as_terminal_tabs_45.md)
+* Refined by [Scope TUI Terminal Tabs To The Focused Target With Explicit Option Controls](scope_tui_terminal_tabs_to_focused_target_with_explicit_option_controls_52.md)

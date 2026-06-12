@@ -22,9 +22,9 @@ Chosen option: "Treat opened project and node sessions as the TUI terminal tabs"
 
 ### Positive Consequences
 
-* `Alt+t` opens or focuses the selected project or node terminal.
-* `Alt+Left` and `Alt+Right` switch among open terminal sessions in stable open order.
-* `Alt+w` closes the active terminal session and activates the next open one when available.
+* Tree-focus `t` or `F7` opens or activates the selected project or node terminal.
+* `F8` and `Shift+F8` switch among open terminal sessions in stable open order without forcing fullscreen terminal focus.
+* `F9` closes the active terminal session and activates the next open one when available.
 
 ### Negative Consequences
 
@@ -60,3 +60,4 @@ Keep one session per target and add keyboard management over the open-session se
 
 * Extends [TUI Session Reuse](../PATTERNS.MD)
 * Refined by [Render Visible TUI Terminal Tabs And Accept Meta Modifier](render_visible_tui_terminal_tabs_and_accept_meta_modifier_51.md)
+* Superseded by [Scope TUI Terminal Tabs To The Focused Target With Explicit Option Controls](scope_tui_terminal_tabs_to_focused_target_with_explicit_option_controls_52.md)

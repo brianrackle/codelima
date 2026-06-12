@@ -159,7 +159,7 @@ CodeLima manages:
 - browse the project tree, manage selected projects and nodes, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
 - switch a focused node terminal to the host-local project terminal and back without losing the selected node context
 - turn the existing TUI top bar red while the focused node terminal is temporarily switched to the host machine
-- open, switch, and close TUI terminal tabs backed by the preserved project and node sessions
+- start with one default TUI terminal tab, then explicitly open, switch, and close per-project and per-node tabs with Option keybindings
 - keep navigating the tree or focus another preserved project or node terminal while long-running project or node mutations continue in the background
 - keep the TUI project tree refreshed automatically while preserving expansion state, selection, and open terminals
 - paste multiline text, resize the host window, and sync OSC 52 guest clipboard writes to the host clipboard in the embedded terminal
@@ -212,13 +212,13 @@ Basic layout:
 
 Fast key reference:
 
-- `Alt-\`` or `F6`: toggle between tree focus and terminal focus
+- `Option+\`` or `F6`: toggle between tree focus and terminal focus
 - `Option+Shift+Backtick`: switch a selected node's fullscreen terminal to its host-local project terminal and back
-- `Alt+t` / `Option+t`: open or focus the selected project's or node's terminal tab
-- `Alt+Left` / `Option+Left` and `Alt+Right` / `Option+Right`: switch among open terminal tabs
-- `Alt+w` / `Option+w`: close the active terminal tab
+- `Option+t`: open a fresh terminal tab for the selected project or node without leaving tree focus
+- `Option+Left` / `Option+Right`: switch among the selected project's or node's open terminal tabs
+- `Option+w`: close the active terminal tab and focus the adjacent tab
 - `i`: toggle the right pane between info and terminal while the tree is focused
-- macOS Terminal.app note: `Option` does not act as `Alt`/Meta by default, so use `F6` there or enable Profile > Keyboard > Use Option as Meta key if you want Option-based shortcuts to work; if `Option+t` types `†`, the terminal is sending text instead of a shortcut modifier
+- macOS note: the terminal emulator must send Option as Alt/Meta for these bindings (in Ghostty set `macos-option-as-alt = true`). CodeLima also accepts the raw macOS Option text sequences (`†` for `Option+t`, `∑` for `Option+w`, and `Esc f`/`Esc b` for `Option+Right`/`Option+Left`) when Option is not remapped.
 - `q`: quit the TUI
 - `Up` / `Down`: move selection in the tree
 - `Left` / `Right`: collapse or expand projects in the tree
@@ -232,7 +232,7 @@ In tree focus, selecting a project or node shows its info pane by default. Press
 
 Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish. The tree also refreshes periodically, so out-of-process node status or metadata changes appear without restarting the TUI.
 
-Terminal tabs are the project and node sessions CodeLima has opened during the current TUI run. `Alt+t` or `Option+t` opens or focuses the selected target, `Alt+Left`/`Alt+Right` or `Option+Left`/`Option+Right` switch among open tabs, and `Alt+w` or `Option+w` closes the active tab. Open tabs appear in the terminal pane border, with host-local project shells labeled `host:<project>` and the active tab shown in brackets. When a node terminal is switched to the host-local project shell with `Option+Shift+Backtick`, the existing TUI top bar turns red until you switch back.
+On launch, CodeLima opens one initial terminal tab for the starting project or running node when that shell can be started, while keeping tree focus and the info pane visible. Additional terminal tabs are explicit and belong to a single project or node. Selecting or visiting items in the tree never opens another tab; press `Option+t` with a project or running node selected to open a fresh embedded terminal tab for it. Each press opens another tab for that same item, `Option+Left`/`Option+Right` switch among the focused item's tabs, and `Option+w` closes the active one. Closing a tab focuses the next higher-numbered adjacent tab when one exists, otherwise the previous lower-numbered tab. The terminal pane border shows only the focused item's tabs (numbered when there is more than one, with host-local project shells labeled `host:<project>` and the active tab bracketed); tabs for other projects and nodes stay hidden until their item is focused again, and each item remembers its active tab. Use `Option+\`` or `F6` when you want the active terminal fullscreen. When a node terminal is switched to the host-local project shell with `Option+Shift+Backtick`, the existing TUI top bar turns red until you switch back.
 
 Guest applications that emit OSC 52 clipboard writes sync that text to the host clipboard; ordinary visible-text selection still uses your terminal emulator's host-selection bypass gesture.
 
