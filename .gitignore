@@ -8,6 +8,7 @@
 # Local agent and application state.
 /.codex/
 /.codelima/
+/.codeboarding/
 
 # Toolchain, caches, and build artifacts.
 /.tooling/

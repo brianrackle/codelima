@@ -2,11 +2,11 @@
 set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT_DIR/bin/codelima"
+BIN="${CODELIMA_BIN:-$ROOT_DIR/bin/codelima}"
 FIXTURE="$ROOT_DIR/test-project-dir"
 
 if [ ! -x "$BIN" ]; then
-  echo "build the CLI first with make build" >&2
+  echo "build the CLI first with make build: $BIN" >&2
   exit 1
 fi
 

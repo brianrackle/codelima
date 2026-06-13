@@ -70,6 +70,10 @@ Dialogs, menus, and selectors still use the right pane directly, but long-runnin
 Release archives package the compiled `codelima` binary as `bin/codelima-real`, a small launcher script as `bin/codelima`, and the matching `libghostty-vt` shared library under `lib/`.
 The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball installs, and the generated Homebrew formula all reuse the same runtime layout instead of each inventing a different library-discovery scheme.
 
+## Platform-Scoped Development Binary
+
+Repository-local builds should write native executables under `bin/<os>-<arch>/` using the same platform tag as `.tooling/<os>-<arch>`, and may refresh a short compatibility symlink such as `bin/codelima` for manual commands. Make targets and long-lived in-process re-exec paths should use or cache the platform-scoped binary rather than relying on the compatibility symlink, because a shared host/guest checkout can repoint that symlink when the other platform rebuilds.
+
 ## Guest Workspace Seed
 
 New nodes default to `copy` workspace mode.

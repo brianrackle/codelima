@@ -20,7 +20,8 @@ What each target does:
   - installs Go, `golangci-lint`, Zig, and a locally patched upstream `libghostty-vt` build
   - downloads Go modules
 - `make build`
-  - builds `./bin/codelima`
+  - builds `./bin/<os>-<arch>/codelima`
+  - refreshes `./bin/codelima` as a compatibility symlink to the current platform's binary
 - `make verify`
   - runs `fmt`, `lint`, `test`, and `build`
 
@@ -32,6 +33,8 @@ make lint
 make fmt
 make smoke
 ```
+
+The source checkout intentionally namespaces development binaries by the same platform tag used for `.tooling`, such as `linux-aarch64` or `darwin-arm64`. This prevents a host build and a guest build in the same shared checkout from overwriting each other's executable. Use `make run` or `make tui` when possible; both invoke the platform-scoped binary directly.
 
 ## Self-Hosted Development Metadata
 
@@ -46,6 +49,7 @@ Before using that file as live metadata, update:
 ## Release Artifacts
 
 Release packaging is native per platform.
+The packaging script builds from the platform-scoped source binary, but the archive layout remains stable for end users.
 Each packaged archive contains:
 
 - `bin/codelima`

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -194,6 +195,7 @@ type fakeTUITerminal struct {
 	capturesMouse bool
 	events        []vaxis.Event
 	startCmd      *exec.Cmd
+	startErr      error
 	startCols     int
 	startRows     int
 	focusCalls    int
@@ -221,7 +223,7 @@ func newFakeTUITerminal() *fakeTUITerminal {
 
 func (f *fakeTUITerminal) Start(cmd *exec.Cmd) error {
 	f.startCmd = cmd
-	return nil
+	return f.startErr
 }
 
 func (f *fakeTUITerminal) Resize(width, height int) {
@@ -1382,6 +1384,98 @@ func TestTUISessionStoreUsesPreferredTerminalSizeForNewSessions(t *testing.T) {
 	}
 	if terminal.startCols != 79 || terminal.startRows != 20 {
 		t.Fatalf("expected session terminal to start at 79x20, got %dx%d", terminal.startCols, terminal.startRows)
+	}
+}
+
+func TestResolveCodelimaExecutablePathResolvesBuildCompatibilitySymlink(t *testing.T) {
+	root := t.TempDir()
+	platformBinDir := filepath.Join(root, "bin", "linux-aarch64")
+	if err := os.MkdirAll(platformBinDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	platformBinary := filepath.Join(platformBinDir, "codelima")
+	if err := os.WriteFile(platformBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	compatBinary := filepath.Join(root, "bin", "codelima")
+	if err := os.Symlink(filepath.Join("linux-aarch64", "codelima"), compatBinary); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if got := resolveCodelimaExecutablePath(compatBinary); got != platformBinary {
+		t.Fatalf("expected compatibility symlink to resolve to %q, got %q", platformBinary, got)
+	}
+}
+
+func TestTUISessionStoreStartsNodeShellWithStoredExecutable(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	sessions.nodeShellExecutable = filepath.Join(t.TempDir(), "bin", "linux-aarch64", "codelima")
+
+	originalFactory := newSessionTUITerminal
+	var terminal *fakeTUITerminal
+	newSessionTUITerminal = func(string, func(vaxis.Event)) tuiTerminal {
+		terminal = newFakeTUITerminal()
+		return terminal
+	}
+	defer func() {
+		newSessionTUITerminal = originalFactory
+	}()
+
+	if _, err := sessions.OpenNodeTab(Node{ID: "node-root", Slug: "root-node"}); err != nil {
+		t.Fatalf("OpenNodeTab() error = %v", err)
+	}
+	if terminal == nil {
+		t.Fatal("expected OpenNodeTab() to allocate a terminal")
+	}
+	if terminal.startCmd == nil {
+		t.Fatal("expected OpenNodeTab() to start the terminal command")
+	}
+
+	wantArgs := []string{
+		sessions.nodeShellExecutable,
+		"--home",
+		service.cfg.MetadataRoot,
+		"shell",
+		"node-root",
+	}
+	if !reflect.DeepEqual(terminal.startCmd.Args, wantArgs) {
+		t.Fatalf("expected node shell command %#v, got %#v", wantArgs, terminal.startCmd.Args)
+	}
+	if terminal.startCmd.Path != sessions.nodeShellExecutable {
+		t.Fatalf("expected node shell executable %q, got %q", sessions.nodeShellExecutable, terminal.startCmd.Path)
+	}
+}
+
+func TestTUISessionStoreExplainsNodeShellExecFormatError(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	sessions.nodeShellExecutable = filepath.Join(t.TempDir(), "bin", "linux-aarch64", "codelima")
+
+	originalFactory := newSessionTUITerminal
+	newSessionTUITerminal = func(string, func(vaxis.Event)) tuiTerminal {
+		terminal := newFakeTUITerminal()
+		terminal.startErr = &os.PathError{
+			Op:   "fork/exec",
+			Path: sessions.nodeShellExecutable,
+			Err:  syscall.ENOEXEC,
+		}
+		return terminal
+	}
+	defer func() {
+		newSessionTUITerminal = originalFactory
+	}()
+
+	_, err := sessions.OpenNodeTab(Node{ID: "node-root", Slug: "root-node"})
+	if err == nil {
+		t.Fatal("expected OpenNodeTab() error")
+	}
+	for _, want := range []string{"not compatible with this platform", "run make build on this platform", "restart codelima"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error %q to contain %q", err.Error(), want)
+		}
 	}
 }
 

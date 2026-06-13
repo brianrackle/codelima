@@ -1,6 +1,10 @@
 PLATFORM_TAG := $(shell uname -s | tr '[:upper:]' '[:lower:]')-$(shell uname -m | tr '[:upper:]' '[:lower:]')
 TOOLS_ROOT := $(CURDIR)/.tooling
 TOOLS_DIR := $(TOOLS_ROOT)/$(PLATFORM_TAG)
+BIN_ROOT := $(CURDIR)/bin
+BIN_DIR := $(BIN_ROOT)/$(PLATFORM_TAG)
+CODELIMA_BIN := $(BIN_DIR)/codelima
+CODELIMA_COMPAT_BIN := $(BIN_ROOT)/codelima
 GO_VERSION ?= 1.24.1
 GOLANGCI_LINT_VERSION ?= 1.64.8
 ZIG_VERSION ?= 0.15.2
@@ -43,20 +47,21 @@ test: init
 	$(GO) test ./...
 
 build: init
-	mkdir -p bin
-	$(GO) build -o bin/codelima ./cmd/codelima
+	mkdir -p $(BIN_DIR)
+	$(GO) build -o $(CODELIMA_BIN) ./cmd/codelima
+	ln -sfn $(PLATFORM_TAG)/codelima $(CODELIMA_COMPAT_BIN)
 
 run: build
-	./bin/codelima $(ARGS)
+	$(CODELIMA_BIN) $(ARGS)
 
 tui: build
-	./bin/codelima $(ARGS)
+	$(CODELIMA_BIN) $(ARGS)
 
 smoke: build
-	./scripts/smoke_3_layers.sh
+	CODELIMA_BIN=$(CODELIMA_BIN) ./scripts/smoke_3_layers.sh
 
 package: init
-	./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR)
+	./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG)
 
 package-formula: init
 	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)

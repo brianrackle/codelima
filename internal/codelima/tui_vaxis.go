@@ -2,12 +2,15 @@ package codelima
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
@@ -42,16 +45,25 @@ type tuiSessionStore struct {
 
 	preferredCols int
 	preferredRows int
+
+	nodeShellExecutable    string
+	nodeShellExecutableErr error
 }
 
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
+	executable, executableErr := os.Executable()
+	if executableErr == nil {
+		executable = resolveCodelimaExecutablePath(executable)
+	}
 	return &tuiSessionStore{
-		ctx:           ctx,
-		service:       service,
-		postEvent:     postEvent,
-		sessions:      map[string]*tuiSession{},
-		sessionErrors: map[string]error{},
-		tabCounters:   map[string]int{},
+		ctx:                    ctx,
+		service:                service,
+		postEvent:              postEvent,
+		sessions:               map[string]*tuiSession{},
+		sessionErrors:          map[string]error{},
+		tabCounters:            map[string]int{},
+		nodeShellExecutable:    executable,
+		nodeShellExecutableErr: executableErr,
 	}
 }
 
@@ -148,9 +160,8 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	targetKey := "node:" + node.ID
 	delete(s.sessionErrors, targetKey)
 
-	executable, err := os.Executable()
+	executable, err := s.nodeTabExecutable()
 	if err != nil {
-		err = fmt.Errorf("resolve codelima executable: %w", err)
 		s.sessionErrors[targetKey] = err
 		return "", err
 	}
@@ -164,6 +175,7 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 		terminal.Resize(s.preferredCols, s.preferredRows)
 	}
 	if err := terminal.Start(command); err != nil {
+		err = nodeTabStartError(executable, err)
 		s.sessionErrors[targetKey] = err
 		return "", err
 	}
@@ -177,6 +189,30 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 		terminal: terminal,
 	})
 	return key, nil
+}
+
+func resolveCodelimaExecutablePath(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		return resolved
+	}
+	return executable
+}
+
+func (s *tuiSessionStore) nodeTabExecutable() (string, error) {
+	if s.nodeShellExecutableErr != nil {
+		return "", fmt.Errorf("resolve codelima executable: %w", s.nodeShellExecutableErr)
+	}
+	if strings.TrimSpace(s.nodeShellExecutable) == "" {
+		return "", fmt.Errorf("resolve codelima executable: empty path")
+	}
+	return s.nodeShellExecutable, nil
+}
+
+func nodeTabStartError(executable string, err error) error {
+	if errors.Is(err, syscall.ENOEXEC) {
+		return fmt.Errorf("binary at %q is not compatible with this platform; run make build on this platform and restart codelima: %w", executable, err)
+	}
+	return fmt.Errorf("start node shell with codelima executable %q: %w", executable, err)
 }
 
 func (s *tuiSessionStore) putSession(session *tuiSession) {

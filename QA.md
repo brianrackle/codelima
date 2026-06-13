@@ -1,5 +1,7 @@
 # QA
 
+All flows that say to run `make build` can use `./bin/codelima`; that path is a compatibility symlink refreshed by the build. The real development binary is platform-scoped under `./bin/<os>-<arch>/codelima`, matching the `.tooling/<os>-<arch>` layout, so host and guest builds in one shared checkout do not overwrite each other's executable.
+
 ## List Verification
 
 This flow verifies that the default `project list` and `node list` output is a concise table with the expected columns, including live VM state for nodes, while `--json` remains available for automation.

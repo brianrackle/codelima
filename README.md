@@ -96,7 +96,7 @@ make init
 make build
 ```
 
-The binary is written to `./bin/codelima`.
+The platform-native binary is written to `./bin/<os>-<arch>/codelima`, for example `./bin/linux-aarch64/codelima` or `./bin/darwin-arm64/codelima`. `make build` also refreshes `./bin/codelima` as a compatibility symlink to the current platform's build.
 
 To build a distributable archive for the current platform:
 
@@ -109,7 +109,7 @@ That writes a Homebrew-ready tarball plus a JSON manifest under `./tmp/dist`.
 ## Quick Start
 
 The examples below assume `codelima` is installed and available on `PATH`.
-For repository-local development, use `make run ARGS="..."` or `./bin/codelima ...`.
+For repository-local development, use `make run ARGS="..."`, the platform-scoped binary under `./bin/<os>-<arch>/codelima`, or the refreshed `./bin/codelima` compatibility symlink.
 
 Create a project from a host repo:
 
@@ -616,6 +616,8 @@ make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
 make package-formula PACKAGE_VERSION=1.2.3 RELEASE_TAG=v1.2.3 RELEASE_REPO=brianrackle/codelima DIST_DIR=./tmp/dist FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
 make verify
 ```
+
+Local builds are platform-scoped under `./bin/<os>-<arch>/codelima` so a macOS host and Linux guest can share one checkout without overwriting each other's executable. The `./bin/codelima` path remains a convenience symlink to the platform that last ran `make build`.
 
 ## Releases
 
