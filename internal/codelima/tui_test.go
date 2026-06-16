@@ -1401,9 +1401,13 @@ func TestResolveCodelimaExecutablePathResolvesBuildCompatibilitySymlink(t *testi
 	if err := os.Symlink(filepath.Join("linux-aarch64", "codelima"), compatBinary); err != nil {
 		t.Fatalf("Symlink() error = %v", err)
 	}
+	expectedBinary, err := filepath.EvalSymlinks(platformBinary)
+	if err != nil {
+		t.Fatalf("EvalSymlinks() error = %v", err)
+	}
 
-	if got := resolveCodelimaExecutablePath(compatBinary); got != platformBinary {
-		t.Fatalf("expected compatibility symlink to resolve to %q, got %q", platformBinary, got)
+	if got := resolveCodelimaExecutablePath(compatBinary); got != expectedBinary {
+		t.Fatalf("expected compatibility symlink to resolve to %q, got %q", expectedBinary, got)
 	}
 }
 
