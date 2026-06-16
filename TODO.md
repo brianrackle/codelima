@@ -542,3 +542,29 @@ Disadvantages:
 - Increases terminal lifecycle complexity substantially.
 - Requires new user-facing rules for duplicate session labels, close behavior, and active-target selection.
 - Could destabilize the existing one-session-per-target preservation model if rushed.
+
+### 22. Make `make init` safe under concurrent invocations
+
+Problem:
+
+- While verifying repository-scoped `gopls` installation, two `make init` paths were run concurrently and the existing Ghostty relink step failed with `ln: Already exists`.
+- Normal sequential `make init`, `make gopls`, and `make verify` runs completed successfully, so this was not blocking the `gopls` provisioning change.
+- Concurrent init can still happen when multiple agent shells or editor tasks bootstrap the same checkout at once.
+
+Suggested solution:
+
+- Add a project-local lock around `make init` or the installer scripts that mutate shared `.tooling` compatibility links.
+- Keep the lock under `tmp/` or `.tooling/` so it remains repository-scoped.
+- Prefer atomic relink behavior for compatibility symlinks where possible, and leave stale-lock cleanup documented if a locking helper is introduced.
+
+Advantages:
+
+- Prevents unrelated parallel tooling commands from failing during environment setup.
+- Keeps the sandboxed development environment more reliable for agents and editors.
+- Localizes synchronization to generated tool state instead of relying on users to serialize commands.
+
+Disadvantages:
+
+- Adds locking complexity to otherwise simple shell installers.
+- Needs careful cleanup behavior so interrupted installs do not permanently block future setup.
+- May slightly slow concurrent commands because one setup path must wait for the other.

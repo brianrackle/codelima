@@ -17,7 +17,7 @@ make verify
 What each target does:
 
 - `make init`
-  - installs Go, `golangci-lint`, Zig, and a locally patched upstream `libghostty-vt` build
+  - installs Go, `gopls`, `golangci-lint`, Zig, and a locally patched upstream `libghostty-vt` build
   - downloads Go modules
 - `make build`
   - builds `./bin/<os>-<arch>/codelima`
@@ -32,6 +32,7 @@ make test
 make lint
 make fmt
 make smoke
+make gopls GOPLS_ARGS="check internal/codelima/tui_test.go"
 ```
 
 The source checkout intentionally namespaces development binaries by the same platform tag used for `.tooling`, such as `linux-aarch64` or `darwin-arm64`. This prevents a host build and a guest build in the same shared checkout from overwriting each other's executable. Use `make run` or `make tui` when possible; both invoke the platform-scoped binary directly.

@@ -87,7 +87,7 @@ Repository-local development and CI are exercised on macOS and Linux.
 - a working C toolchain for Go's `cgo` path (`clang` via Xcode Command Line Tools on macOS, or the equivalent build tools on Linux)
 - Lima installed and working on the host
 
-`make init` installs the Go toolchain, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling/<os>-<arch>`; system Go or Zig installs are not required. It also refreshes `.tooling/ghostty-vt/current` as a compatibility link for the cgo bridge. The per-platform layout avoids host and guest toolchain collisions when the same repository is used from both macOS and a Linux VM.
+`make init` installs the Go toolchain, `gopls`, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling/<os>-<arch>`; system Go, `gopls`, or Zig installs are not required. It also refreshes `.tooling/ghostty-vt/current` as a compatibility link for the cgo bridge. The per-platform layout avoids host and guest toolchain collisions when the same repository is used from both macOS and a Linux VM.
 
 ## Build From Source
 
@@ -97,6 +97,13 @@ make build
 ```
 
 The platform-native binary is written to `./bin/<os>-<arch>/codelima`, for example `./bin/linux-aarch64/codelima` or `./bin/darwin-arm64/codelima`. `make build` also refreshes `./bin/codelima` as a compatibility symlink to the current platform's build.
+
+Run repository-scoped `gopls` commands through make:
+
+```sh
+make gopls
+make gopls GOPLS_ARGS="check internal/codelima/tui_test.go"
+```
 
 To build a distributable archive for the current platform:
 

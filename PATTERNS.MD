@@ -74,6 +74,10 @@ The wrapper owns `CODELIMA_GHOSTTY_VT_LIB`, so local packaging, manual tarball i
 
 Repository-local builds should write native executables under `bin/<os>-<arch>/` using the same platform tag as `.tooling/<os>-<arch>`, and may refresh a short compatibility symlink such as `bin/codelima` for manual commands. Make targets and long-lived in-process re-exec paths should use or cache the platform-scoped binary rather than relying on the compatibility symlink, because a shared host/guest checkout can repoint that symlink when the other platform rebuilds.
 
+## Repository-Scoped Toolchain
+
+Development tools required by agents or CI should be pinned in `Makefile`, installed by `make init` into `.tooling/<os>-<arch>`, and exposed through make recipes when they need direct invocation. Installer scripts should use the repository `tmp/` directory for temporary work and the repository-scoped Go caches so host-global toolchains and caches are not required.
+
 ## Guest Workspace Seed
 
 New nodes default to `copy` workspace mode.
