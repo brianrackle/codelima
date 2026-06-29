@@ -509,6 +509,44 @@ func encodeTUITerminalMouseWithGhostty(
 	return encodeTUITerminalMouse(mouse, sgr, drag, motion)
 }
 
+func encodeTUITerminalFocusWithGhostty(focused bool) string {
+	event := C.GhosttyFocusEvent(C.GHOSTTY_FOCUS_LOST)
+	fallback := "\x1b[O"
+	if focused {
+		event = C.GhosttyFocusEvent(C.GHOSTTY_FOCUS_GAINED)
+		fallback = "\x1b[I"
+	}
+
+	if bool(C.ghostty_bridge_has_focus_encoder_api()) {
+		buffer := make([]byte, 16)
+		var outLen C.size_t
+		result := C.ghostty_bridge_focus_encode(
+			event,
+			(*C.char)(unsafe.Pointer(&buffer[0])),
+			C.size_t(len(buffer)),
+			&outLen,
+		)
+		if result == C.GHOSTTY_OUT_OF_SPACE {
+			buffer = make([]byte, int(outLen))
+			var bufferPtr *C.char
+			if len(buffer) > 0 {
+				bufferPtr = (*C.char)(unsafe.Pointer(&buffer[0]))
+			}
+			result = C.ghostty_bridge_focus_encode(
+				event,
+				bufferPtr,
+				C.size_t(len(buffer)),
+				&outLen,
+			)
+		}
+		if result == C.GHOSTTY_SUCCESS {
+			return string(buffer[:int(outLen)])
+		}
+	}
+
+	return fallback
+}
+
 func (e *ghosttyKeyEncoder) Encode(
 	key vaxis.Key,
 	term C.GhosttyBridgeTerminal,
@@ -1693,7 +1731,7 @@ func (t *ghosttyTUITerminal) Focus() {
 	defer t.mu.Unlock()
 	t.focused = true
 	if t.term != nil && t.getModeLocked(ghosttyModeFocusEvents, false) {
-		t.writePTYLocked("\x1b[I")
+		t.writePTYLocked(encodeTUITerminalFocusWithGhostty(true))
 	}
 	t.invalidateLocked()
 }
@@ -1703,7 +1741,7 @@ func (t *ghosttyTUITerminal) Blur() {
 	defer t.mu.Unlock()
 	t.focused = false
 	if t.term != nil && t.getModeLocked(ghosttyModeFocusEvents, false) {
-		t.writePTYLocked("\x1b[O")
+		t.writePTYLocked(encodeTUITerminalFocusWithGhostty(false))
 	}
 	t.invalidateLocked()
 }

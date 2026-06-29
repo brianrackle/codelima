@@ -469,6 +469,8 @@ Problem:
 - Automated coverage now verifies the new default, the inverted tab order, sticky pane-mode behavior, and the affected mouse and node-action paths.
 - Automated coverage now verifies that clicking inside a host-local fullscreen terminal preserves the host-terminal override instead of switching back to the selected VM node.
 - Automated coverage now verifies automatic tree refresh, multiline paste normalization, resize-time active-terminal resizing, TUI terminal tab keybinds, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 clipboard event dispatch.
+- Automated coverage now verifies DECSET 1004 focus-report gating and focus gained/lost bytes through the Ghostty focus encoder path.
+- Automated coverage now verifies path-scoped TUI launch and refresh filtering, and that TUI node creation selects the new node, switches the split pane to terminal mode, and does not start a shell for a non-running node.
 - The full manual `QA.md` flows still need a human-run pass against a real terminal and Lima environment to confirm the updated startup path, fullscreen restoration, link handling, and node lifecycle interactions end to end.
 
 Suggested solution:
@@ -477,6 +479,9 @@ Suggested solution:
 - Confirm both project and node selections restore the expected pane mode after fullscreen terminal focus and that stopped-node terminal placeholders still behave correctly after the default change.
 - Confirm a fullscreen host-local terminal stays on the host shell after a mouse click inside the terminal pane, then toggles back to the selected VM node with `Option+Shift+Backtick`.
 - Confirm the new TUI checks from `QA.md`: automatic tree refresh, multiline paste preservation, resize repainting, `Alt+t`/`Alt+Left`/`Alt+Right`/`Alt+w` terminal tab behavior, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 guest-to-host clipboard sync.
+- Confirm the new Ghostty focus-report check from `QA.md`: enable DECSET 1004 inside a focused embedded terminal, toggle terminal focus away and back, and verify `^[[O` then `^[[I` are delivered to the guest.
+- Confirm the path-scoped TUI launch from `QA.md`: `./bin/codelima --home "$CODELIMA_HOME" "$WORK_ROOT"` hides `qa-tui-outside` and keeps that scope after automatic refresh.
+- Confirm the create-node TUI flow from `QA.md`: creating `qa-tui-b` selects it, shows the terminal placeholder immediately, and still does not open a shell session before the node is started.
 - Record any discrepancies back into `TODO.md` or a follow-up ADR if the info-first behavior exposes a broader product decision.
 
 Advantages:
@@ -568,3 +573,29 @@ Disadvantages:
 - Adds locking complexity to otherwise simple shell installers.
 - Needs careful cleanup behavior so interrupted installs do not permanently block future setup.
 - May slightly slow concurrent commands because one setup path must wait for the other.
+
+### 23. Verify macOS Ghostty lib-vt install after disabling xcframework emission
+
+Problem:
+
+- After rebasing to Ghostty `ae52f97dcac558735cfa916ea3965f247e5c6e9e`, macOS `make init` reached Ghostty's optional lib-vt xcframework install path and failed inside `xcodebuild -create-xcframework`.
+- CodeLima does not consume that xcframework; it packages and runtime-loads `libghostty-vt.dylib` directly.
+- The installer now passes `-Demit-xcframework=false`, but this checkout is currently being verified from a Linux guest rather than the affected Darwin host.
+
+Suggested solution:
+
+- From macOS, rerun `make init` or `make ghostty-vt` and confirm the Ghostty installer completes without invoking the lib-vt xcframework step.
+- Confirm `.tooling/darwin-arm64/ghostty-vt/current/lib/libghostty-vt.dylib` exists and `make build` can link the cgo bridge against it.
+- If the Darwin build still fails, capture the first failing command with the updated `-Demit-xcframework=false` invocation and record the new failure separately.
+
+Advantages:
+
+- Closes the platform-specific verification gap for the Ghostling-pinned Ghostty build.
+- Confirms the packaged macOS runtime artifact still matches CodeLima's release and `dlopen` expectations.
+- Avoids debugging optional xcframework packaging that CodeLima does not use.
+
+Disadvantages:
+
+- Requires a macOS host with Xcode command-line tooling available.
+- Does not validate Ghostty's upstream xcframework packaging path, only CodeLima's direct dylib path.
+- May still expose a separate Darwin-specific shared-library build issue after the xcframework step is skipped.

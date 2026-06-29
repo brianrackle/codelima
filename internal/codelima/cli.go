@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -96,7 +98,17 @@ func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 
 func dispatch(ctx context.Context, service *Service, args []string) (any, error) {
 	if len(args) == 0 {
-		return nil, service.TUI(ctx)
+		return nil, service.TUI(ctx, "")
+	}
+
+	if len(args) == 1 && !isCommandGroup(args[0]) {
+		workspaceRoot, ok, err := tuiWorkspaceRootArgument(args[0])
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return nil, service.TUI(ctx, workspaceRoot)
+		}
 	}
 
 	switch args[0] {
@@ -115,6 +127,46 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 	default:
 		return nil, invalidArgument("unknown command group", map[string]any{"group": args[0]})
 	}
+}
+
+func isCommandGroup(value string) bool {
+	switch value {
+	case "doctor", "config", "environment", "project", "node", "shell", "tui":
+		return true
+	default:
+		return false
+	}
+}
+
+func tuiWorkspaceRootArgument(value string) (string, bool, error) {
+	candidate := expandHome(value)
+	info, err := os.Stat(candidate)
+	if err == nil {
+		if !info.IsDir() {
+			return "", true, invalidArgument("tui path must be a directory", map[string]any{"path": value})
+		}
+		workspaceRoot, err := canonicalPath(value)
+		if err != nil {
+			return "", true, invalidArgument("tui path must be resolvable", map[string]any{"path": value})
+		}
+		return workspaceRoot, true, nil
+	}
+
+	if !looksLikePathArgument(value) {
+		return "", false, nil
+	}
+
+	if os.IsNotExist(err) {
+		return "", true, invalidArgument("tui path does not exist", map[string]any{"path": value})
+	}
+	return "", true, err
+}
+
+func looksLikePathArgument(value string) bool {
+	return strings.HasPrefix(value, ".") ||
+		strings.HasPrefix(value, "~") ||
+		filepath.IsAbs(value) ||
+		strings.ContainsRune(value, os.PathSeparator)
 }
 
 func dispatchConfig(service *Service, args []string) (any, error) {
@@ -687,7 +739,7 @@ func treeConnector(prefix string, last bool) (string, string) {
 func usage() string {
 	return strings.TrimSpace(`
 Usage:
-  codelima [--home PATH] [--json] [--log-level LEVEL]
+  codelima [--home PATH] [--json] [--log-level LEVEL] [PATH]
   codelima [--home PATH] [--json] [--log-level LEVEL] <group> <command> [flags]
 
 Groups:
@@ -698,6 +750,6 @@ Groups:
   node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
   shell <node> [-- command...]
 
-Running with no command opens the TUI.
+Running with no command opens the TUI. Passing PATH opens the TUI scoped to projects under that directory.
 `) + "\n"
 }

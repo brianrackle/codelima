@@ -46,14 +46,44 @@ func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing wrapper %q", wrapperPath)
 	}
-	if !strings.Contains(string(wrapper), `CODELIMA_GHOSTTY_VT_LIB="${SCRIPT_DIR}/../lib/libghostty-vt.dylib"`) {
-		t.Fatalf("wrapper did not reference darwin ghostty library: %s", wrapper)
+	if !strings.Contains(string(wrapper.data), `CODELIMA_GHOSTTY_VT_LIB="${SCRIPT_DIR}/../lib/libghostty-vt.dylib"`) {
+		t.Fatalf("wrapper did not reference darwin ghostty library: %s", wrapper.data)
 	}
-	if string(files[binaryArchivePath]) != "binary-data" {
-		t.Fatalf("unexpected binary archive content %q", files[binaryArchivePath])
+	if string(files[binaryArchivePath].data) != "binary-data" {
+		t.Fatalf("unexpected binary archive content %q", files[binaryArchivePath].data)
 	}
-	if string(files[libArchivePath]) != "ghostty-data" {
-		t.Fatalf("unexpected library archive content %q", files[libArchivePath])
+	if string(files[libArchivePath].data) != "ghostty-data" {
+		t.Fatalf("unexpected library archive content %q", files[libArchivePath].data)
+	}
+}
+
+func TestBuildArchiveForcesPackagedExecutablesExecutable(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	binaryPath := filepath.Join(tempDir, "codelima")
+	libraryPath := filepath.Join(tempDir, "libghostty-vt.dylib")
+	outputPath := filepath.Join(tempDir, "dist", "artifact.tar.gz")
+
+	if err := os.WriteFile(binaryPath, []byte("binary-data"), 0o644); err != nil {
+		t.Fatalf("write binary: %v", err)
+	}
+	if err := os.WriteFile(libraryPath, []byte("ghostty-data"), 0o644); err != nil {
+		t.Fatalf("write ghostty library: %v", err)
+	}
+
+	if _, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, libraryPath, outputPath); err != nil {
+		t.Fatalf("BuildArchive() error = %v", err)
+	}
+
+	files := readArchiveFiles(t, outputPath)
+	for _, archivePath := range []string{
+		"codelima_1.2.3_darwin_arm64/bin/codelima",
+		"codelima_1.2.3_darwin_arm64/bin/codelima-real",
+	} {
+		if got := files[archivePath].mode; got != 0o755 {
+			t.Fatalf("expected %s to be mode 0755, got %#o", archivePath, got)
+		}
 	}
 }
 
@@ -99,6 +129,7 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 		`ghostty_lib = OS.mac? ? "libghostty-vt.dylib" : "libghostty-vt.so"`,
 		`root = Dir["codelima_*/bin/codelima-real"].empty? ? "." : Dir["codelima_*"].fetch(0)`,
 		`odie "missing packaged release root" unless File.exist?(File.join(root, "bin", "codelima-real"))`,
+		`chmod 0755, libexec/"bin/codelima-real"`,
 		`Zlib::GzipWriter.open(pkgshare/"#{ghostty_lib}.gz") do |gz|`,
 		`pkgshare.mkpath`,
 		`CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/codelima/#{version}"`,
@@ -127,7 +158,12 @@ func TestRenderHomebrewFormulaRejectsMixedVersions(t *testing.T) {
 	}
 }
 
-func readArchiveFiles(t *testing.T, archivePath string) map[string][]byte {
+type archiveFile struct {
+	data []byte
+	mode int64
+}
+
+func readArchiveFiles(t *testing.T, archivePath string) map[string]archiveFile {
 	t.Helper()
 
 	file, err := os.Open(archivePath)
@@ -147,7 +183,7 @@ func readArchiveFiles(t *testing.T, archivePath string) map[string][]byte {
 	}()
 
 	tarReader := tar.NewReader(gzipReader)
-	files := make(map[string][]byte)
+	files := make(map[string]archiveFile)
 	for {
 		header, err := tarReader.Next()
 		if err != nil {
@@ -160,6 +196,9 @@ func readArchiveFiles(t *testing.T, archivePath string) map[string][]byte {
 		if _, err := io.ReadFull(tarReader, data); err != nil {
 			t.Fatalf("read %s: %v", header.Name, err)
 		}
-		files[header.Name] = data
+		files[header.Name] = archiveFile{
+			data: data,
+			mode: header.Mode,
+		}
 	}
 }

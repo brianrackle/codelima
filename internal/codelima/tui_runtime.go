@@ -31,10 +31,11 @@ type tuiOperationState struct {
 }
 
 type tuiOperationResult struct {
-	Status       string
-	PreferredKey string
-	CloseNodeID  string
-	ReloadData   bool
+	Status           string
+	PreferredKey     string
+	CloseNodeID      string
+	ReloadData       bool
+	ShowTerminalPane bool
 }
 
 type tuiOperationRequest struct {

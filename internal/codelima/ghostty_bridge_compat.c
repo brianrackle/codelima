@@ -54,6 +54,7 @@ typedef struct {
 	GhosttyResult (*grid_ref_row)(const GhosttyGridRef*, GhosttyRow*);
 	GhosttyResult (*grid_ref_graphemes)(const GhosttyGridRef*, uint32_t*, size_t, size_t*);
 	GhosttyResult (*grid_ref_style)(const GhosttyGridRef*, GhosttyStyle*);
+	GhosttyResult (*focus_encode)(GhosttyFocusEvent, char*, size_t, size_t*);
 	GhosttyResult (*key_encoder_new)(const GhosttyAllocator*, GhosttyKeyEncoder*);
 	void (*key_encoder_free)(GhosttyKeyEncoder);
 	void (*key_encoder_setopt)(GhosttyKeyEncoder, GhosttyKeyEncoderOption, const void*);
@@ -282,6 +283,7 @@ int ghostty_bridge_load(const char* path) {
 	LOAD_GHOSTTY_SYMBOL(grid_ref_row, "ghostty_grid_ref_row", GhosttyResult (*)(const GhosttyGridRef*, GhosttyRow*));
 	LOAD_GHOSTTY_SYMBOL(grid_ref_graphemes, "ghostty_grid_ref_graphemes", GhosttyResult (*)(const GhosttyGridRef*, uint32_t*, size_t, size_t*));
 	LOAD_GHOSTTY_SYMBOL(grid_ref_style, "ghostty_grid_ref_style", GhosttyResult (*)(const GhosttyGridRef*, GhosttyStyle*));
+	LOAD_GHOSTTY_OPTIONAL_SYMBOL(focus_encode, "ghostty_focus_encode", GhosttyResult (*)(GhosttyFocusEvent, char*, size_t, size_t*));
 	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_new, "ghostty_key_encoder_new", GhosttyResult (*)(const GhosttyAllocator*, GhosttyKeyEncoder*));
 	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_free, "ghostty_key_encoder_free", void (*)(GhosttyKeyEncoder));
 	LOAD_GHOSTTY_OPTIONAL_SYMBOL(key_encoder_setopt, "ghostty_key_encoder_setopt", void (*)(GhosttyKeyEncoder, GhosttyKeyEncoderOption, const void*));
@@ -1033,6 +1035,10 @@ bool ghostty_bridge_has_key_encoder_api(void) {
 		ghostty.key_event_set_unshifted_codepoint != NULL;
 }
 
+bool ghostty_bridge_has_focus_encoder_api(void) {
+	return ghostty.focus_encode != NULL;
+}
+
 bool ghostty_bridge_has_mouse_encoder_api(void) {
 	return ghostty.mouse_encoder_new != NULL &&
 		ghostty.mouse_encoder_free != NULL &&
@@ -1065,6 +1071,13 @@ bool ghostty_bridge_has_render_row_cells_api(void) {
 		ghostty.render_state_row_cells_new != NULL &&
 		ghostty.render_state_row_cells_select != NULL &&
 		ghostty.render_state_row_cells_get != NULL;
+}
+
+GhosttyResult ghostty_bridge_focus_encode(GhosttyFocusEvent event, char* out_buffer, size_t out_buffer_size, size_t* out_len) {
+	if (!ghostty_bridge_has_focus_encoder_api()) {
+		return GHOSTTY_INVALID_VALUE;
+	}
+	return ghostty.focus_encode(event, out_buffer, out_buffer_size, out_len);
 }
 
 GhosttyResult ghostty_bridge_key_encoder_new(GhosttyKeyEncoder* encoder) {

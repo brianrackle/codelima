@@ -1,44 +1,45 @@
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
-index 0a749be..4e8c9aa 100644
+index 71b7091..a433528 100644
 --- a/src/lib_vt.zig
 +++ b/src/lib_vt.zig
-@@ -212,6 +212,8 @@ comptime {
-         @export(&c.terminal_mode_get, .{ .name = "ghostty_terminal_mode_get" });
+@@ -241,6 +241,8 @@ comptime {
          @export(&c.terminal_mode_set, .{ .name = "ghostty_terminal_mode_set" });
          @export(&c.terminal_get, .{ .name = "ghostty_terminal_get" });
+         @export(&c.terminal_get_multi, .{ .name = "ghostty_terminal_get_multi" });
 +        @export(&c.terminal_get_hyperlink_uri, .{ .name = "ghostty_terminal_get_hyperlink_uri" });
 +        @export(&c.terminal_get_scrollback_hyperlink_uri, .{ .name = "ghostty_terminal_get_scrollback_hyperlink_uri" });
-         @export(&c.terminal_grid_ref, .{ .name = "ghostty_terminal_grid_ref" });
-         @export(&c.grid_ref_cell, .{ .name = "ghostty_grid_ref_cell" });
-         @export(&c.grid_ref_row, .{ .name = "ghostty_grid_ref_row" });
+         @export(&c.terminal_select_word, .{ .name = "ghostty_terminal_select_word" });
+         @export(&c.terminal_select_word_between, .{ .name = "ghostty_terminal_select_word_between" });
+         @export(&c.terminal_select_line, .{ .name = "ghostty_terminal_select_line" });
 diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
-index d854ac6..31cd2c3 100644
+index 1d78f06..26901de 100644
 --- a/src/terminal/c/main.zig
 +++ b/src/terminal/c/main.zig
-@@ -138,6 +138,8 @@ pub const terminal_scroll_viewport = terminal.scroll_viewport;
- pub const terminal_mode_get = terminal.mode_get;
+@@ -170,6 +170,8 @@ pub const terminal_mode_get = terminal.mode_get;
  pub const terminal_mode_set = terminal.mode_set;
  pub const terminal_get = terminal.get;
+ pub const terminal_get_multi = terminal.get_multi;
 +pub const terminal_get_hyperlink_uri = terminal.get_hyperlink_uri;
 +pub const terminal_get_scrollback_hyperlink_uri = terminal.get_scrollback_hyperlink_uri;
- pub const terminal_grid_ref = terminal.grid_ref;
-
- const grid_ref = @import("grid_ref.zig");
+ pub const terminal_select_word = selection.word;
+ pub const terminal_select_word_between = selection.word_between;
+ pub const terminal_select_line = selection.line;
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
-index 113e00b..969b148 100644
+index 8deb4c9..4b8577e 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -575,6 +575,67 @@ pub fn grid_ref(
+@@ -752,6 +752,67 @@ pub fn grid_ref(
      return .success;
  }
-
+-
++
 +pub fn get_hyperlink_uri(
 +    terminal_: Terminal,
 +    row: c_int,
 +    col: c_int,
 +    out: [*]u8,
 +    buf_size: usize,
-+) callconv(.c) c_int {
++) callconv(lib.calling_conv) c_int {
 +    const t: *ZigTerminal = (terminal_ orelse return -1).terminal;
 +    if (row < 0 or col < 0) return -1;
 +
@@ -67,7 +68,7 @@ index 113e00b..969b148 100644
 +    col: c_int,
 +    out: [*]u8,
 +    buf_size: usize,
-+) callconv(.c) c_int {
++) callconv(lib.calling_conv) c_int {
 +    const t: *ZigTerminal = (terminal_ orelse return -1).terminal;
 +    if (offset < 0 or col < 0) return -1;
 +
@@ -93,14 +94,14 @@ index 113e00b..969b148 100644
 +    return @intCast(uri.len);
 +}
 +
- pub fn free(terminal_: Terminal) callconv(.c) void {
-     const wrapper = terminal_ orelse return;
-     const t = wrapper.terminal;
+ pub fn grid_ref_track(
+     terminal_: Terminal,
+     pt: point.Point.C,
 diff --git a/src/terminal/stream.zig b/src/terminal/stream.zig
-index 04410e9..10460a6 100644
+index 9771334..d5766c0 100644
 --- a/src/terminal/stream.zig
 +++ b/src/terminal/stream.zig
-@@ -90,6 +90,7 @@ pub const Action = union(Key) {
+@@ -88,6 +88,7 @@ pub const Action = union(Key) {
      save_cursor,
      restore_cursor,
      modify_key_format: ansi.ModifyKeyFormat,
@@ -108,7 +109,7 @@ index 04410e9..10460a6 100644
      mouse_shift_capture: bool,
      protected_mode_off,
      protected_mode_iso,
-@@ -187,6 +188,7 @@ pub const Action = union(Key) {
+@@ -185,6 +186,7 @@ pub const Action = union(Key) {
              "save_cursor",
              "restore_cursor",
              "modify_key_format",
@@ -116,8 +117,9 @@ index 04410e9..10460a6 100644
              "mouse_shift_capture",
              "protected_mode_off",
              "protected_mode_iso",
-@@ -1471,6 +1473,14 @@ pub fn Stream(comptime H: type) type {
-
+@@ -1469,6 +1471,14 @@ pub fn Stream(comptime H: type) type {
+-
++
                                  self.handler.vt(.modify_key_format, format);
                              },
 +                            '?' => blk: {
@@ -128,10 +130,11 @@ index 04410e9..10460a6 100644
 +
 +                                log.warn("invalid XTQMODKEYS command: {f}", .{input});
 +                            },
- 
+-
++
                              else => log.warn(
                                  "unknown CSI m with intermediate: {}",
-@@ -1792,8 +1802,10 @@ pub fn Stream(comptime H: type) type {
+@@ -1790,8 +1800,10 @@ pub fn Stream(comptime H: type) type {
                                  ),
                                  inline 22, 23 => |number| if ((input.params.len == 2 or
                                      input.params.len == 3) and
@@ -144,10 +147,10 @@ index 04410e9..10460a6 100644
                                  {
                                      // push/pop title
 diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
-index 8e0f911..d04d490 100644
+index f68f088..93f17a0 100644
 --- a/src/terminal/stream_terminal.zig
 +++ b/src/terminal/stream_terminal.zig
-@@ -220,6 +220,7 @@ pub const Handler = struct {
+@@ -226,6 +226,7 @@ pub const Handler = struct {
                      else => {},
                  }
              },
@@ -155,10 +158,11 @@ index 8e0f911..d04d490 100644
              .active_status_display => self.terminal.status_display = value,
              .decaln => try self.terminal.decaln(),
              .full_reset => self.terminal.fullReset(),
-@@ -441,6 +442,12 @@ pub const Handler = struct {
+@@ -445,6 +446,13 @@ pub const Handler = struct {
          self.writePty(buf[0..len :0]);
      }
 -
++
 +    fn queryModifyKeyFormat(self: *Handler) void {
 +        var buf: [32]u8 = undefined;
 +        const mode: u8 = if (self.terminal.flags.modify_other_keys_2) 2 else 0;
@@ -184,7 +188,8 @@ index fb3a6b3..a9388b3 100644
 @@ -609,6 +610,19 @@ pub const StreamHandler = struct {
          }
      }
- 
+-
++
 +    pub fn queryModifyKeyFormat(self: *StreamHandler) !void {
 +        var data: termio.Message.WriteReq.Small.Array = undefined;
 +        const mode: u8 = if (self.terminal.flags.modify_other_keys_2) 2 else 0;

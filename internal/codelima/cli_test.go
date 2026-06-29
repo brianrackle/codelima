@@ -136,7 +136,7 @@ func TestRunHelpPrintsUsageAndExitsSuccess(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "Usage:\n  codelima [--home PATH] [--json] [--log-level LEVEL]") {
+	if !strings.Contains(output, "Usage:\n  codelima [--home PATH] [--json] [--log-level LEVEL] [PATH]") {
 		t.Fatalf("expected help output to include usage header, got %q", output)
 	}
 	if !strings.Contains(output, "environment create|list|show|update|delete") {
@@ -148,8 +148,8 @@ func TestRunHelpPrintsUsageAndExitsSuccess(t *testing.T) {
 	if strings.Contains(output, "patch propose|list|show|approve|apply|reject") {
 		t.Fatalf("expected help output to omit patch commands, got %q", output)
 	}
-	if !strings.Contains(output, "Running with no command opens the TUI.") {
-		t.Fatalf("expected help output to describe the default TUI launch, got %q", output)
+	if !strings.Contains(output, "Running with no command opens the TUI. Passing PATH opens the TUI scoped to projects under that directory.") {
+		t.Fatalf("expected help output to describe the default and scoped TUI launch, got %q", output)
 	}
 	if strings.Contains(output, "\n  tui\n") {
 		t.Fatalf("expected help output to omit the removed tui command, got %q", output)

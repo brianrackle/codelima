@@ -67,6 +67,82 @@ func TestProjectTreeIncludesProjectNodes(t *testing.T) {
 	}
 }
 
+func TestProjectTreeByWorkspaceRootIncludesOnlyProjectsUnderDirectory(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	scopeRoot := filepath.Join(t.TempDir(), "scope")
+	rootWorkspace := filepath.Join(scopeRoot, "root")
+	writeFile(t, filepath.Join(rootWorkspace, "README.md"), "hello\n")
+
+	root, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "root",
+		WorkspacePath: rootWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(root) error = %v", err)
+	}
+	if _, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: root.ID,
+		Slug:    "root-node",
+	}); err != nil {
+		t.Fatalf("NodeCreate(root-node) error = %v", err)
+	}
+
+	child, err := service.ProjectFork(ctx, ProjectForkInput{
+		SourceProject: root.ID,
+		Slug:          "child",
+		WorkspacePath: filepath.Join(scopeRoot, "child"),
+	})
+	if err != nil {
+		t.Fatalf("ProjectFork(child) error = %v", err)
+	}
+	if _, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: child.ID,
+		Slug:    "child-node",
+	}); err != nil {
+		t.Fatalf("NodeCreate(child-node) error = %v", err)
+	}
+
+	outsideWorkspace := filepath.Join(t.TempDir(), "outside")
+	writeFile(t, filepath.Join(outsideWorkspace, "README.md"), "outside\n")
+	outside, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "outside",
+		WorkspacePath: outsideWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(outside) error = %v", err)
+	}
+	if _, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: outside.ID,
+		Slug:    "outside-node",
+	}); err != nil {
+		t.Fatalf("NodeCreate(outside-node) error = %v", err)
+	}
+
+	tree, err := service.ProjectTreeByWorkspaceRoot(scopeRoot, false)
+	if err != nil {
+		t.Fatalf("ProjectTreeByWorkspaceRoot() error = %v", err)
+	}
+
+	if len(tree) != 1 {
+		t.Fatalf("expected 1 scoped root tree node, got %d", len(tree))
+	}
+	if tree[0].Project.ID != root.ID {
+		t.Fatalf("expected scoped root project %q, got %#v", root.ID, tree[0].Project)
+	}
+	if len(tree[0].Nodes) != 1 || tree[0].Nodes[0].Slug != "root-node" {
+		t.Fatalf("expected scoped root node, got %+v", tree[0].Nodes)
+	}
+	if len(tree[0].Children) != 1 || tree[0].Children[0].Project.ID != child.ID {
+		t.Fatalf("expected scoped child project %q, got %+v", child.ID, tree[0].Children)
+	}
+	if len(tree[0].Children[0].Nodes) != 1 || tree[0].Children[0].Nodes[0].Slug != "child-node" {
+		t.Fatalf("expected scoped child node, got %+v", tree[0].Children[0].Nodes)
+	}
+}
+
 func TestRenderProjectTreeIncludesNodeLeaves(t *testing.T) {
 	t.Parallel()
 

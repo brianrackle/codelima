@@ -72,11 +72,14 @@ int ghostty_bridge_terminal_get_scrollback_hyperlink_uri(GhosttyBridgeTerminal t
 bool ghostty_bridge_terminal_has_response(GhosttyBridgeTerminal term);
 int ghostty_bridge_terminal_read_response(GhosttyBridgeTerminal term, uint8_t* out_buffer, size_t buffer_size);
 
+bool ghostty_bridge_has_focus_encoder_api(void);
 bool ghostty_bridge_has_key_encoder_api(void);
 bool ghostty_bridge_has_mouse_encoder_api(void);
 bool ghostty_bridge_has_scroll_viewport_api(void);
 bool ghostty_bridge_has_terminal_effects_api(void);
 bool ghostty_bridge_has_render_row_cells_api(void);
+
+GhosttyResult ghostty_bridge_focus_encode(GhosttyFocusEvent event, char* out_buffer, size_t out_buffer_size, size_t* out_len);
 
 GhosttyResult ghostty_bridge_key_encoder_new(GhosttyKeyEncoder* encoder);
 void ghostty_bridge_key_encoder_free(GhosttyKeyEncoder encoder);

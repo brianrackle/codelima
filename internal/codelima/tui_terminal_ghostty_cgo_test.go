@@ -752,6 +752,60 @@ func TestGhosttyTerminalAnswersModifyOtherKeysQueryWithoutWarnings(t *testing.T)
 	}
 }
 
+func TestGhosttyFocusReportsAreGatedByFocusMode(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", nil)
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	target := &ghosttyFakePTYWriteTarget{}
+	ghostty.mu.Lock()
+	ghostty.ptyWriter = newGhosttyPTYWriter(target, func(fd int) error { return nil }, nil)
+	ghostty.mu.Unlock()
+
+	ghostty.Focus()
+	ghostty.Blur()
+
+	if got := target.String(); got != "" {
+		t.Fatalf("focus reports should stay silent before DECSET 1004, got %q", got)
+	}
+}
+
+func TestGhosttyFocusReportsUseGhosttyEncodingWhenModeEnabled(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", nil)
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	target := &ghosttyFakePTYWriteTarget{}
+	ghostty.mu.Lock()
+	ghostty.ptyWriter = newGhosttyPTYWriter(target, func(fd int) error { return nil }, nil)
+	ghostty.mu.Unlock()
+
+	ghostty.ingestPTY([]byte("\x1b[?1004h"))
+	ghostty.Focus()
+	waitForCondition(t, time.Second, func() bool {
+		return target.String() == "\x1b[I"
+	}, "focus gained report to flush")
+
+	ghostty.Blur()
+	waitForCondition(t, time.Second, func() bool {
+		return target.String() == "\x1b[I\x1b[O"
+	}, "focus lost report to flush")
+}
+
 func TestGhosttyTerminalAnswersColorSchemeQueryFromStoredTheme(t *testing.T) {
 	ghosttyStderrCaptureMu.Lock()
 	defer ghosttyStderrCaptureMu.Unlock()

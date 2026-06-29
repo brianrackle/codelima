@@ -119,12 +119,12 @@ func (s *Service) withIO(stdout, stderr io.Writer) *Service {
 	return &cloned
 }
 
-func (s *Service) TUI(ctx context.Context) error {
+func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	if s.tui == nil {
 		s.tui = newTUIRunner()
 	}
 
-	return s.tui.Run(ctx, s)
+	return s.tui.Run(ctx, s, workspaceRoot)
 }
 
 func (s *Service) EnsureReady(mutating bool) error {
@@ -491,34 +491,9 @@ func (s *Service) ProjectDelete(value string) (Project, error) {
 }
 
 func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectTreeNode, error) {
-	if err := s.EnsureReady(false); err != nil {
-		return nil, err
-	}
-
-	projects, err := s.store.ListProjects(includeDeleted)
+	projects, nodes, err := s.projectTreeData(includeDeleted)
 	if err != nil {
 		return nil, err
-	}
-
-	nodes, err := s.store.ListNodes(includeDeleted)
-	if err != nil {
-		return nil, err
-	}
-	nodes, err = s.reconcileNodes(context.Background(), nodes, true)
-	if err != nil {
-		return nil, err
-	}
-
-	projectMap := map[string]Project{}
-	childrenByParent := map[string][]Project{}
-	for _, project := range projects {
-		projectMap[project.ID] = project
-		childrenByParent[project.ParentProjectID] = append(childrenByParent[project.ParentProjectID], project)
-	}
-
-	nodesByProject := map[string][]Node{}
-	for _, node := range nodes {
-		nodesByProject[node.ProjectID] = append(nodesByProject[node.ProjectID], node)
 	}
 
 	var roots []Project
@@ -529,7 +504,111 @@ func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectT
 		}
 		roots = []Project{project}
 	} else {
-		roots = childrenByParent[""]
+		roots = projectTreeTopLevelRoots(projects)
+	}
+
+	return buildProjectTree(projects, nodes, roots), nil
+}
+
+func (s *Service) ProjectTreeByWorkspaceRoot(workspaceRoot string, includeDeleted bool) ([]ProjectTreeNode, error) {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return s.ProjectTree("", includeDeleted)
+	}
+
+	rootPath, err := canonicalPath(workspaceRoot)
+	if err != nil {
+		return nil, invalidArgument("workspace root must be resolvable", map[string]any{"path": workspaceRoot})
+	}
+
+	projects, nodes, err := s.projectTreeData(includeDeleted)
+	if err != nil {
+		return nil, err
+	}
+
+	filteredProjects := make([]Project, 0, len(projects))
+	includedProjects := map[string]bool{}
+	for _, project := range projects {
+		if !pathWithinRoot(rootPath, project.WorkspacePath) {
+			continue
+		}
+		filteredProjects = append(filteredProjects, project)
+		includedProjects[project.ID] = true
+	}
+
+	filteredNodes := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if includedProjects[node.ProjectID] {
+			filteredNodes = append(filteredNodes, node)
+		}
+	}
+
+	return buildProjectTree(filteredProjects, filteredNodes, projectTreeVisibleRoots(filteredProjects)), nil
+}
+
+func (s *Service) projectTreeData(includeDeleted bool) ([]Project, []Node, error) {
+	if err := s.EnsureReady(false); err != nil {
+		return nil, nil, err
+	}
+
+	projects, err := s.store.ListProjects(includeDeleted)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	nodes, err := s.store.ListNodes(includeDeleted)
+	if err != nil {
+		return nil, nil, err
+	}
+	nodes, err = s.reconcileNodes(context.Background(), nodes, true)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return projects, nodes, nil
+}
+
+func projectTreeTopLevelRoots(projects []Project) []Project {
+	roots := make([]Project, 0)
+	for _, project := range projects {
+		if project.ParentProjectID == "" {
+			roots = append(roots, project)
+		}
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].Slug < roots[j].Slug
+	})
+
+	return roots
+}
+
+func projectTreeVisibleRoots(projects []Project) []Project {
+	projectMap := map[string]Project{}
+	for _, project := range projects {
+		projectMap[project.ID] = project
+	}
+
+	roots := make([]Project, 0)
+	for _, project := range projects {
+		if _, ok := projectMap[project.ParentProjectID]; !ok {
+			roots = append(roots, project)
+		}
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].Slug < roots[j].Slug
+	})
+
+	return roots
+}
+
+func buildProjectTree(projects []Project, nodes []Node, roots []Project) []ProjectTreeNode {
+	childrenByParent := map[string][]Project{}
+	for _, project := range projects {
+		childrenByParent[project.ParentProjectID] = append(childrenByParent[project.ParentProjectID], project)
+	}
+
+	nodesByProject := map[string][]Node{}
+	for _, node := range nodes {
+		nodesByProject[node.ProjectID] = append(nodesByProject[node.ProjectID], node)
 	}
 
 	var build func(Project) ProjectTreeNode
@@ -556,7 +635,15 @@ func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectT
 		result = append(result, build(root))
 	}
 
-	return result, nil
+	return result
+}
+
+func pathWithinRoot(rootPath, targetPath string) bool {
+	rel, err := filepath.Rel(rootPath, filepath.Clean(targetPath))
+	if err != nil {
+		return false
+	}
+	return rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
 }
 
 func (s *Service) ProjectFork(ctx context.Context, input ProjectForkInput) (Project, error) {

@@ -19,7 +19,8 @@ import (
 )
 
 type fakeTUIRunner struct {
-	calls int
+	calls         int
+	workspaceRoot string
 }
 
 type fakeVaxisConsole struct {
@@ -27,8 +28,9 @@ type fakeVaxisConsole struct {
 	size  console.WinSize
 }
 
-func (f *fakeTUIRunner) Run(_ context.Context, _ *Service) error {
+func (f *fakeTUIRunner) Run(_ context.Context, _ *Service, workspaceRoot string) error {
 	f.calls++
+	f.workspaceRoot = workspaceRoot
 	return nil
 }
 
@@ -374,6 +376,34 @@ func TestDispatchWithoutCommandRunsInjectedRunner(t *testing.T) {
 
 	if runner.calls != 1 {
 		t.Fatalf("expected runner to be called once, got %d", runner.calls)
+	}
+	if runner.workspaceRoot != "" {
+		t.Fatalf("expected default TUI launch to have no workspace root, got %q", runner.workspaceRoot)
+	}
+}
+
+func TestDispatchPathRunsInjectedRunnerWithWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	runner := &fakeTUIRunner{}
+	service.tui = runner
+	workspaceRoot := t.TempDir()
+	canonicalRoot, err := canonicalPath(workspaceRoot)
+	if err != nil {
+		t.Fatalf("canonicalPath() error = %v", err)
+	}
+
+	if _, err := dispatch(ctx, service, []string{workspaceRoot}); err != nil {
+		t.Fatalf("dispatch(path) error = %v", err)
+	}
+
+	if runner.calls != 1 {
+		t.Fatalf("expected runner to be called once, got %d", runner.calls)
+	}
+	if runner.workspaceRoot != canonicalRoot {
+		t.Fatalf("expected scoped TUI root %q, got %q", canonicalRoot, runner.workspaceRoot)
 	}
 }
 
@@ -1657,6 +1687,79 @@ func TestTUIRefreshTickReloadsProjectTree(t *testing.T) {
 	}
 	if index := app.state.findEntryByKey(nodeTargetKey(node.ID)); index < 0 {
 		t.Fatalf("expected refresh tick to add node entry to the tree")
+	}
+}
+
+func TestTUIRefreshTickPreservesWorkspaceRootScope(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	scopeRoot := filepath.Join(t.TempDir(), "scope")
+	scopedWorkspace := filepath.Join(scopeRoot, "scoped")
+	writeFile(t, filepath.Join(scopedWorkspace, "README.md"), "scoped\n")
+	scopedProject, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "scoped",
+		WorkspacePath: scopedWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(scoped) error = %v", err)
+	}
+
+	outsideWorkspace := filepath.Join(t.TempDir(), "outside")
+	writeFile(t, filepath.Join(outsideWorkspace, "README.md"), "outside\n")
+	outsideProject, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:          "outside",
+		WorkspacePath: outsideWorkspace,
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate(outside) error = %v", err)
+	}
+
+	tree, err := service.ProjectTreeByWorkspaceRoot(scopeRoot, false)
+	if err != nil {
+		t.Fatalf("ProjectTreeByWorkspaceRoot() error = %v", err)
+	}
+	sessions := newTUISessionStore(ctx, service, nil)
+	defer sessions.Close()
+	state, err := newTUIState(tree, newSharedFakeTUISessionManager(sessions))
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	app := &vaxisTUIApp{
+		ctx:               ctx,
+		service:           service,
+		treeWorkspaceRoot: scopeRoot,
+		state:             state,
+		sessions:          sessions,
+	}
+	if index := app.state.findEntryByKey(projectTargetKey(scopedProject.ID)); index < 0 {
+		t.Fatalf("expected scoped project entry")
+	}
+	if index := app.state.findEntryByKey(projectTargetKey(outsideProject.ID)); index >= 0 {
+		t.Fatalf("expected outside project to be hidden, found at %d", index)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{
+		Project: scopedProject.ID,
+		Slug:    "scoped-node",
+	})
+	if err != nil {
+		t.Fatalf("NodeCreate(scoped-node) error = %v", err)
+	}
+
+	quit, err := app.handleEvent(tuiRefreshTickEvent{})
+	if err != nil {
+		t.Fatalf("handleEvent(refresh tick) error = %v", err)
+	}
+	if quit {
+		t.Fatalf("expected refresh tick to keep app running")
+	}
+	if index := app.state.findEntryByKey(nodeTargetKey(node.ID)); index < 0 {
+		t.Fatalf("expected scoped refresh to add node entry")
+	}
+	if index := app.state.findEntryByKey(projectTargetKey(outsideProject.ID)); index >= 0 {
+		t.Fatalf("expected scoped refresh to keep outside project hidden, found at %d", index)
 	}
 }
 
@@ -3243,8 +3346,11 @@ func TestTUIProjectActionsCreateUpdateAndDelete(t *testing.T) {
 	if got := app.state.selectedEntry(); got.kind != tuiTreeEntryNode || got.node.ID != rootNode.ID {
 		t.Fatalf("expected created node to become selected, got %#v", got)
 	}
+	if app.state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("expected created node to make terminal pane available, got %q", app.state.treePaneMode)
+	}
 	if sessions.opened[nodeTargetKey(rootNode.ID)] != 0 {
-		t.Fatalf("expected created node to stay shell-free, got %d session creations", sessions.opened[nodeTargetKey(rootNode.ID)])
+		t.Fatalf("expected created node terminal pane to stay shell-free, got %d session creations", sessions.opened[nodeTargetKey(rootNode.ID)])
 	}
 
 	selectTUIEntry(t, app, "project:"+rootProject.ID)

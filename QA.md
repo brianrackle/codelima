@@ -435,7 +435,7 @@ rm -rf "$WORK_ROOT"
 
 ## TUI Verification
 
-This flow verifies that running `codelima` with no command renders the chosen info-first split layout, lets you manage selected projects and nodes from the tree, defaults the right pane to the selected project's or node's info surface, keeps `i` as a sticky info-versus-terminal toggle in tree focus, and preserves each project or node terminal session while the TUI process is running. It also verifies the preferred Ghostty-backed terminal path, including scrollback, hyperlink handling, and the apt/dpkg progress case that previously froze the app.
+This flow verifies that running `codelima` with no command or with a directory path renders the chosen info-first split layout, lets you manage selected projects and nodes from the tree, scopes the project tree to a workspace directory when one is provided, defaults the right pane to the selected project's or node's info surface, keeps `i` as a sticky info-versus-terminal toggle in tree focus, and preserves each project or node terminal session while the TUI process is running. It also verifies the preferred Ghostty-backed terminal path, including scrollback, hyperlink handling, and the apt/dpkg progress case that previously froze the app.
 
 Prerequisites:
 
@@ -447,10 +447,12 @@ Setup:
 ```sh
 ROOT_DIR="$(pwd)"
 WORK_ROOT="$ROOT_DIR/tmp/qa-tui"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT/root" "$WORK_ROOT/extra"
+OUTSIDE_WORK_ROOT="$ROOT_DIR/tmp/qa-tui-outside"
+rm -rf "$WORK_ROOT" "$OUTSIDE_WORK_ROOT"
+mkdir -p "$WORK_ROOT/root" "$WORK_ROOT/extra" "$OUTSIDE_WORK_ROOT/root"
 CODELIMA_HOME="$WORK_ROOT/.codelima"
 cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
+cp -R "$ROOT_DIR/test-project-dir/." "$OUTSIDE_WORK_ROOT/root"
 ```
 
 Create one root project, a running node, and a forked child project:
@@ -461,17 +463,18 @@ Create one root project, a running node, and a forked child project:
 ./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-a
 ./bin/codelima --home "$CODELIMA_HOME" project fork qa-tui --slug qa-tui-child --workspace "$WORK_ROOT/child"
 ./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui-child --slug qa-tui-child-a
+./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui-outside --workspace "$OUTSIDE_WORK_ROOT/root"
 ```
 
-Run the TUI:
+Run the TUI scoped to the workspace root:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME"
+./bin/codelima --home "$CODELIMA_HOME" "$WORK_ROOT"
 ```
 
 Inside the TUI verify:
 
-- the left pane renders the available projects and nodes, the right pane defaults to the selected project's or node's info surface, and the initially selected running node has exactly one terminal tab available in the pane border without taking terminal focus
+- the left pane renders only the projects and nodes under `$WORK_ROOT`, does not show `qa-tui-outside`, the right pane defaults to the selected project's or node's info surface, and the initially selected running node has exactly one terminal tab available in the pane border without taking terminal focus
 - no centered modal overlays appear; transient interactions replace the right pane while the tree remains visible
 - press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately in the right pane, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
 - press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm the dialog and selector both use the right pane without a long frozen pause
@@ -482,10 +485,10 @@ Inside the TUI verify:
 - with `qa-tui-extra` still selected, press `i`, confirm the right pane border switches to `Info [Terminal]`, the open workspace shell tab is rooted at `$WORK_ROOT/extra`, and the footer changes to `[i] info`
 - with `qa-tui-extra` still selected and `Info [Terminal]` visible, press `Option+\`` or `F6`, confirm the project terminal focuses fullscreen, press `Option+\`` or `F6` again, and confirm `Info [Terminal]` is restored in the split pane
 - with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
-- select project `qa-tui`, press `n`, create node `qa-tui-b` with workspace mode `mounted`, and confirm the new node appears under the project without opening a shell session
-- with `qa-tui-b` selected, confirm the right pane border shows `[Info] Terminal`, the pane shows `Workspace mode: mounted`, the pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides, and the footer shows `[i] terminal`
-- with `qa-tui-b` selected, press `i`, confirm the right pane border switches to `Info [Terminal]`, the pane stays terminal-oriented instead of auto-switching back to info, the placeholder shows the node status plus start guidance, and the footer changes to `[i] info`
-- while `Info [Terminal]` is visible, select `qa-tui-a` and confirm the terminal mode stays sticky across selection changes, the launch-created node tab appears in the pane border, and selecting the node does not create an additional tab
+- select project `qa-tui`, press `n`, create node `qa-tui-b` with workspace mode `mounted`, and confirm the new node appears selected under the project with the right pane switched to a terminal placeholder without opening a shell session
+- with `qa-tui-b` selected, confirm the right pane border shows `Info [Terminal]`, the placeholder shows the node status plus start guidance, and the footer shows `[i] info`
+- with `qa-tui-b` selected, press `i`, confirm the right pane border switches to `[Info] Terminal`, the pane shows `Workspace mode: mounted`, the pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides, and the footer changes to `[i] terminal`
+- press `i` again so `Info [Terminal]` is visible, select `qa-tui-a`, and confirm the terminal mode stays sticky across selection changes, the launch-created node tab appears in the pane border, and selecting the node does not create an additional tab
 - press `i` to return to info mode, then select `qa-tui-b` and confirm the info mode stays sticky across selection changes
 - with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
 - from a second host shell, run `./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui-root --slug qa-tui-refresh`, wait a few seconds, and confirm the TUI project tree refreshes automatically to show `qa-tui-refresh` without restarting the TUI
@@ -495,6 +498,7 @@ Inside the TUI verify:
 - with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Option+\`` or `F6` shell focus and `Option+Shift+Backtick` host terminal
 - `Option+\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
 - use `Option+\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
+- in a focused project or node terminal, run `printf '\033[?1004h'; cat -v`, use `Option+\`` or `F6` to leave and re-enter terminal focus, confirm `^[[O` and `^[[I` focus reports appear, press `Ctrl-C`, then run `printf '\033[?1004l'` to disable focus reporting
 - paste `printf 'one\ntwo\n'` into the focused terminal, press `Enter`, and confirm both lines are preserved instead of being collapsed into one line
 - resize the host terminal window larger and smaller several times and confirm the focused terminal content repaints instead of clearing
 - press `Option+Shift+Backtick`, confirm the fullscreen terminal switches to the host-local project shell for `qa-tui-root` and the existing TUI top bar turns red without adding a second red line, run `pwd`, confirm it prints `$WORK_ROOT/root`, type `echo pending-host` without pressing `Enter`, wait a few seconds for automatic refresh and confirm it stays on the host-local shell, click inside the terminal pane and confirm it stays on the host-local shell with `echo pending-host` still present, then press `Option+Shift+Backtick` again and confirm the top bar returns to normal and the `qa-tui-a` node terminal is restored with `echo pending-a` still present
@@ -538,8 +542,9 @@ Cleanup:
 ./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-child || true
 ./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-extra || true
 ./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-root || true
+./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-outside || true
 ./bin/codelima --home "$CODELIMA_HOME" environment delete qa-shared || true
-rm -rf "$WORK_ROOT"
+rm -rf "$WORK_ROOT" "$OUTSIDE_WORK_ROOT"
 ```
 
 ## Clone Verification

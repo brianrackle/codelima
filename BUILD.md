@@ -210,6 +210,9 @@ If relinking fails, rerun `make init`; the installer removes and recreates both 
 
 The Ghostty installer now vendors Ghostty's `uucode` package into its temporary checkout before running Zig.
 That keeps the local `libghostty-vt` build from depending on a live Zig package fetch in the middle of `make init` or `make ghostty-vt`.
+The packaged Ghostty source commit is controlled by `GHOSTTY_VT_GHOSTTY_COMMIT` in `Makefile` and is intentionally kept aligned with the Ghostling `libghostty-vt` demo API surface.
+When rebasing that commit, rebase `scripts/patches/ghostty-vt-codelima.patch` at the same time and verify it with `make ghostty-vt`.
+On macOS the installer passes `-Demit-xcframework=false` because CodeLima loads `libghostty-vt.dylib` directly and does not consume Ghostty's lib-vt xcframework output.
 
 ### Release publishes assets but does not update Homebrew
 

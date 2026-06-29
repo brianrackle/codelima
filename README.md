@@ -163,7 +163,7 @@ CodeLima manages:
 - detect and clean up incomplete node metadata directories left by failed node creation attempts
 - create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
 - open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
-- browse the project tree, manage selected projects and nodes, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal by running `codelima` with no command
+- browse the project tree, manage selected projects and nodes, scope the TUI to a workspace directory, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal
 - switch a focused node terminal to the host-local project terminal and back without losing the selected node context
 - turn the existing TUI top bar red while the focused node terminal is temporarily switched to the host machine
 - start with one default TUI terminal tab, then explicitly open, switch, and close per-project and per-node tabs with Option keybindings
@@ -178,6 +178,7 @@ CodeLima manages:
 Most commands follow this shape:
 
 ```sh
+codelima [--home PATH] [--json] [PATH]
 codelima [--home PATH] [--json] <group> <command> [flags]
 ```
 
@@ -185,6 +186,12 @@ Running `codelima` with no command opens the TUI:
 
 ```sh
 codelima [--home PATH]
+```
+
+Pass a directory path to open the TUI with only registered projects whose workspace paths are in that directory or one of its subdirectories:
+
+```sh
+codelima [--home PATH] /Users/you/src
 ```
 
 Useful global flags:
@@ -201,6 +208,12 @@ The TUI opens when you run `codelima` with no command:
 
 ```sh
 codelima
+```
+
+To focus the tree on one workspace root, pass that directory:
+
+```sh
+codelima /Users/you/src
 ```
 
 Basic layout:
@@ -238,6 +251,8 @@ Fast key reference:
 In tree focus, selecting a project or node shows its info pane by default. Press `i` to switch the split pane to that project's host-local shell or the selected node's guest terminal preview without changing fullscreen terminal focus behavior; stopped nodes still show a terminal-oriented placeholder until you start them.
 
 Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish. The tree also refreshes periodically, so out-of-process node status or metadata changes appear without restarting the TUI.
+
+Creating a node from the TUI selects the new node and switches the right pane to its terminal view immediately. If the node is not running yet, the pane shows the terminal placeholder and start guidance instead of opening a shell session.
 
 On launch, CodeLima opens one initial terminal tab for the starting project or running node when that shell can be started, while keeping tree focus and the info pane visible. Additional terminal tabs are explicit and belong to a single project or node. Selecting or visiting items in the tree never opens another tab; press `Option+t` with a project or running node selected to open a fresh embedded terminal tab for it. Each press opens another tab for that same item, `Option+Left`/`Option+Right` switch among the focused item's tabs, and `Option+w` closes the active one. Closing a tab focuses the next higher-numbered adjacent tab when one exists, otherwise the previous lower-numbered tab. The terminal pane border shows only the focused item's tabs (numbered when there is more than one, with host-local project shells labeled `host:<project>` and the active tab bracketed); tabs for other projects and nodes stay hidden until their item is focused again, and each item remembers its active tab. Use `Option+\`` or `F6` when you want the active terminal fullscreen. When a node terminal is switched to the host-local project shell with `Option+Shift+Backtick`, the existing TUI top bar turns red until you switch back.
 
@@ -539,6 +554,13 @@ limactl delete -f <instance-name>
 That makes CodeLima a higher-level workflow layer on top of Lima rather than a dead-end abstraction.
 
 ## CLI Commands At A Glance
+
+TUI:
+
+```sh
+codelima
+codelima /path/to/workspace-root
+```
 
 Health and config:
 

@@ -33,7 +33,9 @@ case "$(uname -s)" in
 esac
 
 LOCAL_PATCH_STAMP=$(cksum "$LOCAL_PATCH_FILE" | awk '{print $1 ":" $2}')
-EXPECTED_STAMP="$GHOSTTY_COMMIT|$LOCAL_PATCH_STAMP"
+INSTALLER_STAMP=$(cksum "$0" | awk '{print $1 ":" $2}')
+GHOSTTY_BUILD_ARGS="-Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseSmall"
+EXPECTED_STAMP="$GHOSTTY_COMMIT|$LOCAL_PATCH_STAMP|$INSTALLER_STAMP|$GHOSTTY_BUILD_ARGS"
 INSTALL_STAMP_FILE="$INSTALL_DIR/.build-stamp"
 
 if [ -f "$INSTALL_DIR/lib/libghostty-vt.$LIB_EXT" ] && [ -f "$INSTALL_STAMP_FILE" ] && [ "$(cat "$INSTALL_STAMP_FILE")" = "$EXPECTED_STAMP" ]; then
@@ -100,7 +102,7 @@ mv "$SRC_DIR/build.zig.zon.codelima" "$SRC_DIR/build.zig.zon"
 
 attempt=1
 while :; do
-  if (cd "$SRC_DIR" && ZIG_GLOBAL_CACHE_DIR="$ZIG_GLOBAL_CACHE_DIR" ZIG_LOCAL_CACHE_DIR="$ZIG_LOCAL_CACHE_DIR" "$ZIG" build -Demit-lib-vt=true -Doptimize=ReleaseSmall --prefix "$STAGE_DIR"); then
+  if (cd "$SRC_DIR" && ZIG_GLOBAL_CACHE_DIR="$ZIG_GLOBAL_CACHE_DIR" ZIG_LOCAL_CACHE_DIR="$ZIG_LOCAL_CACHE_DIR" "$ZIG" build -Demit-lib-vt=true -Demit-xcframework=false -Doptimize=ReleaseSmall --prefix "$STAGE_DIR"); then
     break
   fi
   if [ "$attempt" -ge 3 ]; then

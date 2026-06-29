@@ -355,6 +355,7 @@ type vaxisTUIApp struct {
 	service           *Service
 	vx                *vaxis.Vaxis
 	postEvent         func(vaxis.Event)
+	treeWorkspaceRoot string
 	openLink          func(string) error
 	screenHyperlinkAt func(int, int) (string, bool)
 	state             *tuiState
@@ -385,8 +386,8 @@ const (
 	tuiAutoRefreshInterval       = 2 * time.Second
 )
 
-func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
-	tree, err := service.ProjectTree("", false)
+func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoot string) error {
+	tree, err := loadTUIProjectTree(service, workspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -406,13 +407,14 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
 	}
 
 	app := &vaxisTUIApp{
-		ctx:        ctx,
-		service:    service,
-		vx:         vx,
-		postEvent:  vx.PostEvent,
-		state:      state,
-		sessions:   sessions,
-		operations: map[string]*tuiOperationState{},
+		ctx:               ctx,
+		service:           service,
+		vx:                vx,
+		postEvent:         vx.PostEvent,
+		treeWorkspaceRoot: workspaceRoot,
+		state:             state,
+		sessions:          sessions,
+		operations:        map[string]*tuiOperationState{},
 	}
 	winWidth, winHeight := vx.Window().Size()
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
@@ -443,6 +445,13 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service) error {
 			}
 		}
 	}
+}
+
+func loadTUIProjectTree(service *Service, workspaceRoot string) ([]ProjectTreeNode, error) {
+	if strings.TrimSpace(workspaceRoot) != "" {
+		return service.ProjectTreeByWorkspaceRoot(workspaceRoot, false)
+	}
+	return service.ProjectTree("", false)
 }
 
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
@@ -1117,7 +1126,7 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 }
 
 func (a *vaxisTUIApp) reloadData(preferredKey string) error {
-	tree, err := a.service.ProjectTree("", false)
+	tree, err := loadTUIProjectTree(a.service, a.treeWorkspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -1168,13 +1177,13 @@ func (a *vaxisTUIApp) startDataRefresh() {
 
 	a.refreshInFlight = true
 	if a.postEvent == nil {
-		tree, err := a.service.ProjectTree("", false)
+		tree, err := loadTUIProjectTree(a.service, a.treeWorkspaceRoot)
 		a.finishDataRefresh(tuiRefreshCompleteEvent{Tree: tree, Err: err})
 		return
 	}
 
 	go func() {
-		tree, err := a.service.ProjectTree("", false)
+		tree, err := loadTUIProjectTree(a.service, a.treeWorkspaceRoot)
 		a.postEvent(tuiRefreshCompleteEvent{Tree: tree, Err: err})
 	}()
 }
@@ -1264,6 +1273,9 @@ func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperati
 		if err := a.reloadData(selectedKey); err != nil {
 			return err
 		}
+	}
+	if result.ShowTerminalPane {
+		a.state.treePaneMode = tuiTreePaneModeTerminal
 	}
 	if result.Status != "" {
 		a.status = result.Status
@@ -1465,9 +1477,10 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 						return tuiOperationResult{}, err
 					}
 					return tuiOperationResult{
-						Status:       "created node " + node.Slug,
-						PreferredKey: "node:" + node.ID,
-						ReloadData:   true,
+						Status:           "created node " + node.Slug,
+						PreferredKey:     "node:" + node.ID,
+						ReloadData:       true,
+						ShowTerminalPane: true,
 					}, nil
 				},
 			})

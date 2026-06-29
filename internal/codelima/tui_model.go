@@ -8,7 +8,7 @@ import (
 )
 
 type TUIRunner interface {
-	Run(ctx context.Context, service *Service) error
+	Run(ctx context.Context, service *Service, workspaceRoot string) error
 }
 
 type tuiFocus string

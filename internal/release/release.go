@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -19,6 +20,7 @@ const (
 	FormulaDesc      = "Shell-first TUI and CLI for Lima-backed project nodes"
 	FormulaHomepage  = "https://github.com/brianrackle/codelima"
 	FormulaLicense   = "GPL-3.0-only"
+	executableMode   = 0o755
 )
 
 type Manifest struct {
@@ -93,7 +95,7 @@ func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath str
 		return Manifest{}, fmt.Errorf("output path is required")
 	}
 
-	binaryData, binaryMode, err := readArchiveFile(binaryPath)
+	binaryData, _, err := readArchiveFile(binaryPath)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read binary: %w", err)
 	}
@@ -118,10 +120,10 @@ func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath str
 	gzipWriter := gzip.NewWriter(multiWriter)
 	tarWriter := tar.NewWriter(gzipWriter)
 
-	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima", []byte(wrapperScript(goos)), 0o755); err != nil {
+	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima", []byte(wrapperScript(goos)), executableMode); err != nil {
 		return Manifest{}, err
 	}
-	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima-real", binaryData, binaryMode); err != nil {
+	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima-real", binaryData, executableMode); err != nil {
 		return Manifest{}, err
 	}
 	if err := writeArchiveEntry(tarWriter, rootName+"/lib/"+libFilename, libraryData, libraryMode); err != nil {
@@ -263,6 +265,7 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	builder.WriteString("    ghostty_lib = OS.mac? ? \"libghostty-vt.dylib\" : \"libghostty-vt.so\"\n")
 	builder.WriteString("    source_ghostty_lib = File.join(root, \"lib\", ghostty_lib)\n")
 	builder.WriteString("    (libexec/\"bin\").install \"#{root}/bin/codelima-real\"\n")
+	builder.WriteString("    chmod 0755, libexec/\"bin/codelima-real\"\n")
 	builder.WriteString("    pkgshare.mkpath\n")
 	builder.WriteString("    Zlib::GzipWriter.open(pkgshare/\"#{ghostty_lib}.gz\") do |gz|\n")
 	builder.WriteString("      gz.write File.binread(source_ghostty_lib)\n")
@@ -355,7 +358,7 @@ func rubyString(value string) string {
 }
 
 func SortedManifestPaths(paths []string) []string {
-	sorted := append([]string(nil), paths...)
+	sorted := slices.Clone(paths)
 	sort.Strings(sorted)
 	return sorted
 }
