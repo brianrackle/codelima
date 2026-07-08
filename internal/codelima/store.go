@@ -18,7 +18,21 @@ func NewStore(cfg Config) *Store {
 	return &Store{cfg: cfg}
 }
 
+// EnsureLayout fully initializes the metadata home: directory layout plus
+// seeded/repaired metadata. Read paths must not use it — they call
+// ensureDirectories only, while mutating paths run seedAndRepair under the
+// environment-configs/projects/nodes locks (see Service.EnsureReady).
 func (s *Store) EnsureLayout() error {
+	if err := s.ensureDirectories(); err != nil {
+		return err
+	}
+
+	return s.seedAndRepair(time.Now().UTC())
+}
+
+// ensureDirectories creates the directory skeleton only. It is idempotent,
+// cheap, and safe for read paths: it never writes or rewrites files.
+func (s *Store) ensureDirectories() error {
 	if err := validateConfig(s.cfg); err != nil {
 		return err
 	}
@@ -30,11 +44,9 @@ func (s *Store) EnsureLayout() error {
 		filepath.Join(s.cfg.MetadataRoot, "_index", "environment-configs", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "projects", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance"),
-		filepath.Join(s.cfg.MetadataRoot, "_index", "patches", "by-status"),
 		filepath.Join(s.cfg.MetadataRoot, "environment-configs"),
 		filepath.Join(s.cfg.MetadataRoot, "projects"),
 		filepath.Join(s.cfg.MetadataRoot, "nodes"),
-		filepath.Join(s.cfg.MetadataRoot, "patches"),
 	}
 
 	for _, directory := range directories {
@@ -43,6 +55,15 @@ func (s *Store) EnsureLayout() error {
 		}
 	}
 
+	return nil
+}
+
+// seedAndRepair writes the global config when missing or stale, seeds built-in
+// agent profiles and environment configs, and refreshes project/node metadata
+// files that predate the current schema. Callers must hold the
+// environment-configs, projects, and nodes locks (Store keeps no locking of
+// its own — lock discipline lives at the Service operation level).
+func (s *Store) seedAndRepair(now time.Time) error {
 	if err := s.ensureConfigFile(); err != nil {
 		return err
 	}
@@ -58,7 +79,7 @@ func (s *Store) EnsureLayout() error {
 		}
 	}
 
-	if err := s.ensureBuiltInEnvironmentConfigs(time.Now().UTC()); err != nil {
+	if err := s.ensureBuiltInEnvironmentConfigs(now); err != nil {
 		return err
 	}
 
@@ -66,11 +87,7 @@ func (s *Store) EnsureLayout() error {
 		return err
 	}
 
-	if err := s.ensureNodeMetadataFiles(); err != nil {
-		return err
-	}
-
-	return nil
+	return s.ensureNodeMetadataFiles()
 }
 
 func (s *Store) ensureConfigFile() error {
@@ -332,44 +349,12 @@ func (s *Store) incompleteNodeMetadata(nodeID string) (IncompleteNodeMetadata, e
 	return item, nil
 }
 
-func (s *Store) patchDir(patchID string) string {
-	return filepath.Join(s.cfg.MetadataRoot, "patches", patchID)
-}
-
-func (s *Store) patchProposalPath(patchID string) string {
-	return filepath.Join(s.patchDir(patchID), "proposal.yaml")
-}
-
-func (s *Store) patchEventsPath(patchID string) string {
-	return filepath.Join(s.patchDir(patchID), "events.jsonl")
-}
-
-func (s *Store) patchDiffPath(patchID string) string {
-	return filepath.Join(s.patchDir(patchID), "patch.diff")
-}
-
-func (s *Store) patchSummaryPath(patchID string) string {
-	return filepath.Join(s.patchDir(patchID), "summary.json")
-}
-
-func (s *Store) patchConflictsPath(patchID string) string {
-	return filepath.Join(s.patchDir(patchID), "conflicts.json")
-}
-
-func (s *Store) patchApplyResultPath(patchID string) string {
-	return filepath.Join(s.patchDir(patchID), "apply-result.json")
-}
-
 func (s *Store) projectSlugIndexPath(slug string) string {
 	return filepath.Join(s.cfg.MetadataRoot, "_index", "projects", "by-slug", slug)
 }
 
 func (s *Store) nodeInstanceIndexPath(instanceName string) string {
 	return filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance", instanceName)
-}
-
-func (s *Store) patchStatusIndexPath(status, patchID string) string {
-	return filepath.Join(s.cfg.MetadataRoot, "_index", "patches", "by-status", status, patchID+".ref")
 }
 
 func (s *Store) LoadAgentProfile(name string) (AgentProfile, error) {
@@ -855,118 +840,6 @@ func (s *Store) ProjectNodes(projectID string, includeDeleted bool) ([]Node, err
 	return projectNodes, nil
 }
 
-func (s *Store) SavePatch(proposal PatchProposal, patchText []byte) error {
-	if err := ensureDir(s.patchDir(proposal.ID)); err != nil {
-		return err
-	}
-
-	var previous *PatchProposal
-	if loaded, err := s.PatchByID(proposal.ID); err == nil {
-		previous = &loaded
-	}
-
-	if err := writeYAMLFile(s.patchProposalPath(proposal.ID), proposal); err != nil {
-		return err
-	}
-
-	if len(patchText) > 0 {
-		if err := atomicWriteFile(s.patchDiffPath(proposal.ID), patchText, 0o644); err != nil {
-			return err
-		}
-	}
-
-	if err := writeJSONFile(s.patchSummaryPath(proposal.ID), proposal.DiffSummary); err != nil {
-		return err
-	}
-
-	if proposal.ConflictSummary != nil {
-		if err := writeJSONFile(s.patchConflictsPath(proposal.ID), proposal.ConflictSummary); err != nil {
-			return err
-		}
-	}
-
-	if proposal.ApplyResult != nil {
-		if err := writeJSONFile(s.patchApplyResultPath(proposal.ID), proposal.ApplyResult); err != nil {
-			return err
-		}
-	}
-
-	if previous != nil && previous.Status != proposal.Status {
-		_ = os.Remove(s.patchStatusIndexPath(previous.Status, proposal.ID))
-	}
-
-	statusDir := filepath.Dir(s.patchStatusIndexPath(proposal.Status, proposal.ID))
-	if err := ensureDir(statusDir); err != nil {
-		return err
-	}
-
-	if err := atomicWriteFile(s.patchStatusIndexPath(proposal.Status, proposal.ID), []byte(proposal.ID+"\n"), 0o644); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *Store) PatchByID(patchID string) (PatchProposal, error) {
-	var proposal PatchProposal
-	path := s.patchProposalPath(patchID)
-	if err := readYAMLFile(path, &proposal); err != nil {
-		if os.IsNotExist(err) {
-			return PatchProposal{}, notFound("patch not found", map[string]any{"id": patchID})
-		}
-
-		return PatchProposal{}, metadataCorruption("failed to load patch proposal", err, map[string]any{"path": path})
-	}
-
-	return proposal, nil
-}
-
-func (s *Store) LoadPatchDiff(patchID string) ([]byte, error) {
-	path := s.patchDiffPath(patchID)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, notFound("patch bundle not found", map[string]any{"id": patchID})
-		}
-
-		return nil, metadataCorruption("failed to load patch bundle", err, map[string]any{"path": path})
-	}
-
-	return data, nil
-}
-
-func (s *Store) ListPatches(status string) ([]PatchProposal, error) {
-	root := filepath.Join(s.cfg.MetadataRoot, "patches")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-
-	proposals := []PatchProposal{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		proposal, err := s.PatchByID(entry.Name())
-		if err != nil {
-			return nil, err
-		}
-
-		if status != "" && proposal.Status != status {
-			continue
-		}
-
-		proposals = append(proposals, proposal)
-	}
-
-	sort.Slice(proposals, func(i, j int) bool {
-		return proposals[i].CreatedAt.Before(proposals[j].CreatedAt)
-	})
-
-	return proposals, nil
-}
-
 func (s *Store) AppendProjectEvent(projectID string, event Event) error {
 	return appendEvent(s.projectEventsPath(projectID), event)
 }
@@ -975,16 +848,8 @@ func (s *Store) AppendNodeEvent(nodeID string, event Event) error {
 	return appendEvent(s.nodeEventsPath(nodeID), event)
 }
 
-func (s *Store) AppendPatchEvent(patchID string, event Event) error {
-	return appendEvent(s.patchEventsPath(patchID), event)
-}
-
 func (s *Store) NodeEvents(nodeID string) ([]Event, error) {
 	return readEvents(s.nodeEventsPath(nodeID))
-}
-
-func (s *Store) PatchEvents(patchID string) ([]Event, error) {
-	return readEvents(s.patchEventsPath(patchID))
 }
 
 func (s *Store) ProjectEvents(projectID string) ([]Event, error) {
@@ -1040,33 +905,4 @@ func (s *Store) IncompleteNodeWarnings() ([]string, error) {
 	}
 
 	return warnings, nil
-}
-
-func (s *Store) OrphanedPatchStatusIndexes() ([]string, error) {
-	root := filepath.Join(s.cfg.MetadataRoot, "_index", "patches", "by-status")
-	statusDirectories, err := os.ReadDir(root)
-	if err != nil {
-		return nil, err
-	}
-
-	missing := []string{}
-	for _, statusDirectory := range statusDirectories {
-		if !statusDirectory.IsDir() {
-			continue
-		}
-
-		files, err := os.ReadDir(filepath.Join(root, statusDirectory.Name()))
-		if err != nil {
-			return nil, err
-		}
-
-		for _, file := range files {
-			patchID := strings.TrimSuffix(file.Name(), ".ref")
-			if !exists(s.patchProposalPath(patchID)) {
-				missing = append(missing, filepath.Join(root, statusDirectory.Name(), file.Name()))
-			}
-		}
-	}
-
-	return missing, nil
 }

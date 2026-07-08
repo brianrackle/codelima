@@ -8,6 +8,77 @@ import (
 	"time"
 )
 
+func TestEnsureDirectoriesCreatesLayoutWithoutSeeding(t *testing.T) {
+	t.Parallel()
+
+	home := filepath.Join(t.TempDir(), ".codelima")
+	cfg := DefaultConfig(home)
+	store := NewStore(cfg)
+
+	if err := store.ensureDirectories(); err != nil {
+		t.Fatalf("ensureDirectories() error = %v", err)
+	}
+
+	for _, dir := range []string{"_config", "_locks", "environment-configs", "projects", "nodes"} {
+		if !exists(filepath.Join(home, dir)) {
+			t.Fatalf("expected directory %q to exist", dir)
+		}
+	}
+
+	if exists(filepath.Join(home, "_config", "config.yaml")) {
+		t.Fatal("expected ensureDirectories to not write config.yaml")
+	}
+
+	profiles, err := os.ReadDir(cfg.AgentProfilesDir)
+	if err != nil {
+		t.Fatalf("ReadDir(agent profiles) error = %v", err)
+	}
+	if len(profiles) != 0 {
+		t.Fatalf("expected no seeded agent profiles, got %d entries", len(profiles))
+	}
+
+	configs, err := store.ListEnvironmentConfigs(true)
+	if err != nil {
+		t.Fatalf("ListEnvironmentConfigs() error = %v", err)
+	}
+	if len(configs) != 0 {
+		t.Fatalf("expected no seeded environment configs, got %#v", configs)
+	}
+
+	// The composite EnsureLayout still seeds for callers that want full setup.
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
+	}
+	configs, err = store.ListEnvironmentConfigs(true)
+	if err != nil {
+		t.Fatalf("ListEnvironmentConfigs(after EnsureLayout) error = %v", err)
+	}
+	if len(configs) == 0 {
+		t.Fatal("expected EnsureLayout to seed built-in environment configs")
+	}
+}
+
+func TestEnsureDirectoriesOmitsLegacyPatchDirs(t *testing.T) {
+	t.Parallel()
+
+	home := filepath.Join(t.TempDir(), ".codelima")
+	cfg := DefaultConfig(home)
+	store := NewStore(cfg)
+
+	if err := store.ensureDirectories(); err != nil {
+		t.Fatalf("ensureDirectories() error = %v", err)
+	}
+
+	for _, dir := range []string{
+		filepath.Join(home, "patches"),
+		filepath.Join(home, "_index", "patches"),
+	} {
+		if exists(dir) {
+			t.Fatalf("expected fresh home not to create dead patch directory %q", dir)
+		}
+	}
+}
+
 func TestEnsureLayoutBackfillsUntouchedLegacyBuiltInEnvironmentConfigs(t *testing.T) {
 	t.Parallel()
 

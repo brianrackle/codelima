@@ -4,12 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -67,6 +68,14 @@ func atomicWriteFile(path string, data []byte, mode fs.FileMode) error {
 		return err
 	}
 
+	// Flush the temp file's data to stable storage before the rename so a
+	// crash cannot leave the destination pointing at a zero-length or
+	// partially written inode.
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+
 	if err := tempFile.Close(); err != nil {
 		return err
 	}
@@ -75,8 +84,46 @@ func atomicWriteFile(path string, data []byte, mode fs.FileMode) error {
 		return err
 	}
 
+	// fsync the parent directory so the rename itself is durable. Best-effort:
+	// some platforms/filesystems reject directory fsync (macOS may) — those are
+	// non-fatal.
+	if err := fsyncDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+
 	success = true
 	return nil
+}
+
+// fsyncDir flushes a directory entry to stable storage. Directory fsync is not
+// supported everywhere; EINVAL/ENOTSUP/EBADF are tolerated as non-fatal so the
+// write still succeeds on filesystems (or platforms) that reject it.
+func fsyncDir(dir string) error {
+	handle, err := os.Open(dir)
+	if err != nil {
+		if tolerableDirSyncError(err) {
+			return nil
+		}
+		return err
+	}
+	defer func() {
+		_ = handle.Close()
+	}()
+
+	if err := handle.Sync(); err != nil {
+		if tolerableDirSyncError(err) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+func tolerableDirSyncError(err error) bool {
+	return errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.EBADF)
 }
 
 func yamlBytes(value any) ([]byte, error) {
@@ -217,24 +264,4 @@ func slugify(input string) string {
 
 func normalizeWorkspaceRelative(path string) string {
 	return strings.TrimPrefix(filepath.ToSlash(path), "./")
-}
-
-func sortPathsDesc(paths []string) {
-	sort.Slice(paths, func(i, j int) bool {
-		if strings.Count(paths[i], "/") == strings.Count(paths[j], "/") {
-			return paths[i] > paths[j]
-		}
-
-		return strings.Count(paths[i], "/") > strings.Count(paths[j], "/")
-	})
-}
-
-func sortPathsAsc(paths []string) {
-	sort.Slice(paths, func(i, j int) bool {
-		if strings.Count(paths[i], "/") == strings.Count(paths[j], "/") {
-			return paths[i] < paths[j]
-		}
-
-		return strings.Count(paths[i], "/") < strings.Count(paths[j], "/")
-	})
 }

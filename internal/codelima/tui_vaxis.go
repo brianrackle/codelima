@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/widgets/border"
 	"git.sr.ht/~rockorager/vaxis/widgets/term"
+
+	"github.com/brianrackle/test_lima/internal/codelima/terminal"
 )
 
 type vaxisTUIRunner struct{}
@@ -24,14 +27,255 @@ func newTUIRunner() TUIRunner {
 	return &vaxisTUIRunner{}
 }
 
+// tuiMessageLogDefaultCap bounds the message ring; older entries are evicted.
+const tuiMessageLogDefaultCap = 200
+
+// tuiMessage is one entry in the message surface: when it happened, its severity
+// (borrowed from slog so the view can colour it), and the human text.
+type tuiMessage struct {
+	Time  time.Time
+	Level slog.Level
+	Text  string
+}
+
+// tuiMessageLog is a bounded ring of status/notification messages. It replaces
+// the single overwritable status string as the durable record: the footer still
+// shows the newest transient status, but every notable message (including
+// completed/failed background-operation output that used to be discarded) is
+// retained here and browsable in the messages view (ADR 59).
+type tuiMessageLog struct {
+	entries []tuiMessage
+	cap     int
+	now     func() time.Time
+}
+
+func newTUIMessageLog(capacity int) *tuiMessageLog {
+	if capacity <= 0 {
+		capacity = tuiMessageLogDefaultCap
+	}
+	return &tuiMessageLog{cap: capacity, now: time.Now}
+}
+
+// Append records a non-empty, whitespace-trimmed message, evicting the oldest
+// entry once the ring is full so memory stays bounded.
+func (l *tuiMessageLog) Append(level slog.Level, text string) {
+	if l == nil {
+		return
+	}
+	text = strings.TrimRight(text, "\r\n")
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	now := time.Now
+	if l.now != nil {
+		now = l.now
+	}
+	l.entries = append(l.entries, tuiMessage{Time: now(), Level: level, Text: text})
+	if l.cap > 0 && len(l.entries) > l.cap {
+		l.entries = append([]tuiMessage(nil), l.entries[len(l.entries)-l.cap:]...)
+	}
+}
+
+// Entries returns a copy of the retained messages, oldest first.
+func (l *tuiMessageLog) Entries() []tuiMessage {
+	if l == nil {
+		return nil
+	}
+	return append([]tuiMessage(nil), l.entries...)
+}
+
+// Latest returns the newest retained message, if any.
+func (l *tuiMessageLog) Latest() (tuiMessage, bool) {
+	if l == nil || len(l.entries) == 0 {
+		return tuiMessage{}, false
+	}
+	return l.entries[len(l.entries)-1], true
+}
+
+// Len reports the number of retained messages.
+func (l *tuiMessageLog) Len() int {
+	if l == nil {
+		return 0
+	}
+	return len(l.entries)
+}
+
+// tuiMessagesView is the scrollable overlay that renders the message ring. It is
+// read-only and reuses the same border/scroll building blocks as the selector:
+// Up/Down (or j/k) and PageUp/PageDown scroll; Esc closes it (Ctrl+c/q still
+// quit the app, matching the other overlays).
+type tuiMessagesView struct {
+	messages     []tuiMessage
+	scroll       int
+	pinToBottom  bool
+	lastViewport int
+}
+
+func newTUIMessagesView(messages []tuiMessage) *tuiMessagesView {
+	return &tuiMessagesView{
+		messages:    messages,
+		pinToBottom: true,
+	}
+}
+
+// Update processes one event and reports whether the view should close.
+func (v *tuiMessagesView) Update(event vaxis.Event) (closed bool) {
+	key, ok := event.(vaxis.Key)
+	if !ok {
+		return false
+	}
+	if isOverlayCancelKey(key) {
+		return true
+	}
+	switch {
+	case key.MatchString("Up"), key.MatchString("k"):
+		v.scrollBy(-1)
+	case key.MatchString("Down"), key.MatchString("j"):
+		v.scrollBy(1)
+	case key.MatchString("Page_Up"), key.Matches('b', vaxis.ModCtrl):
+		v.scrollBy(-v.pageStep())
+	case key.MatchString("Page_Down"), key.Matches('f', vaxis.ModCtrl), key.MatchString(" "):
+		v.scrollBy(v.pageStep())
+	case key.MatchString("Home"), key.MatchString("g"):
+		v.pinToBottom = false
+		v.scroll = 0
+	case key.MatchString("End"), key.MatchString("G"):
+		v.pinToBottom = true
+	}
+	return false
+}
+
+func (v *tuiMessagesView) pageStep() int {
+	if v.lastViewport > 1 {
+		return v.lastViewport - 1
+	}
+	return 1
+}
+
+func (v *tuiMessagesView) scrollBy(delta int) {
+	v.pinToBottom = false
+	v.scroll += delta
+	v.clampScroll()
+}
+
+func (v *tuiMessagesView) clampScroll() {
+	if v.scroll < 0 {
+		v.scroll = 0
+	}
+	maxScroll := len(v.messages) - v.lastViewport
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if v.scroll > maxScroll {
+		v.scroll = maxScroll
+	}
+}
+
+func (v *tuiMessagesView) Draw(win vaxis.Window, headerStyle, mutedStyle vaxis.Style) {
+	body := border.All(win, mutedStyle)
+	body.Println(0, vaxis.Segment{Text: fmt.Sprintf("Messages (%d)", len(v.messages)), Style: headerStyle})
+
+	_, height := body.Size()
+	footerRow := height - 1
+	visibleRows := footerRow - 1
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	v.lastViewport = visibleRows
+
+	if v.pinToBottom {
+		v.scroll = len(v.messages) - visibleRows
+	}
+	v.clampScroll()
+
+	if len(v.messages) == 0 {
+		body.Println(1, vaxis.Segment{Text: "No messages yet.", Style: mutedStyle})
+	} else {
+		row := 1
+		for index := v.scroll; index < len(v.messages) && row <= visibleRows; index++ {
+			message := v.messages[index]
+			body.Println(row, vaxis.Segment{Text: tuiMessageLine(message), Style: tuiMessageLevelStyle(message.Level, mutedStyle)})
+			row++
+		}
+	}
+
+	body.Println(footerRow, vaxis.Segment{Text: "Up/Down scroll  PgUp/PgDn page  g/G top/bottom  Esc close", Style: mutedStyle})
+}
+
+func tuiMessageLine(message tuiMessage) string {
+	return fmt.Sprintf("%s %-5s %s", message.Time.Format("15:04:05"), tuiMessageLevelTag(message.Level), message.Text)
+}
+
+func tuiMessageLevelTag(level slog.Level) string {
+	switch {
+	case level >= slog.LevelError:
+		return "ERR"
+	case level >= slog.LevelWarn:
+		return "WARN"
+	case level >= slog.LevelInfo:
+		return "INFO"
+	default:
+		return "DEBUG"
+	}
+}
+
+func tuiMessageLevelStyle(level slog.Level, base vaxis.Style) vaxis.Style {
+	if level >= slog.LevelWarn {
+		return vaxis.Style{Foreground: vaxis.ColorRed}
+	}
+	return base
+}
+
+// pushMessage is the single nil-safe entry point for recording a non-status
+// message into the ring at its true level. Explicit seams (operation results in
+// retainOperationMessages, refresh failures in finishDataRefresh) route through
+// it; transient footer statuses are mirrored separately, at info level, by
+// captureStatusMessage.
+func (a *vaxisTUIApp) pushMessage(level slog.Level, text string) {
+	if a == nil || a.messages == nil {
+		return
+	}
+	a.messages.Append(level, text)
+}
+
+// captureStatusMessage mirrors transient footer status changes into the durable
+// message ring. It runs on every draw so any code path that sets a.status (there
+// are ~40) is retained without threading a setter through all of them. Clearing
+// the status to "" records nothing and re-arms capture for the next message; a
+// caller that has already recorded a message at its true level sets
+// lastCapturedStatus to suppress a duplicate info-level capture here.
+func (a *vaxisTUIApp) captureStatusMessage() {
+	if a == nil || a.messages == nil {
+		return
+	}
+	text := strings.TrimSpace(a.status)
+	if text == "" {
+		a.lastCapturedStatus = ""
+		return
+	}
+	if text == a.lastCapturedStatus {
+		return
+	}
+	a.lastCapturedStatus = text
+	a.messages.Append(slog.LevelInfo, a.status)
+}
+
+func (a *vaxisTUIApp) openMessagesView() {
+	var entries []tuiMessage
+	if a.messages != nil {
+		entries = a.messages.Entries()
+	}
+	a.messagesView = newTUIMessagesView(entries)
+}
+
 type tuiSession struct {
-	key      string
-	target   string
-	kind     tuiTreeEntryKind
-	label    string
-	project  Project
-	node     Node
-	terminal tuiTerminal
+	key        string
+	target     string
+	kind       tuiTreeEntryKind
+	label      string
+	project    Project
+	node       Node
+	terminalID terminal.TerminalID
 }
 
 type tuiSessionStore struct {
@@ -42,6 +286,7 @@ type tuiSessionStore struct {
 	sessionErrors map[string]error
 	sessionOrder  []string
 	tabCounters   map[string]int
+	registry      *terminal.TerminalRuntimeRegistry[tuiTerminal]
 
 	preferredCols int
 	preferredRows int
@@ -62,6 +307,7 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 		sessions:               map[string]*tuiSession{},
 		sessionErrors:          map[string]error{},
 		tabCounters:            map[string]int{},
+		registry:               terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
 		nodeShellExecutable:    executable,
 		nodeShellExecutableErr: executableErr,
 	}
@@ -74,6 +320,15 @@ func (s *tuiSessionStore) HasSession(sessionKey string) bool {
 	return ok
 }
 
+// formatSessionKey renders a terminal tab (session) key for a target as
+// "<targetKey>#<n>". The "#n" suffix is purely a per-target ordering/display
+// discriminator; nothing ever parses it back into a target (session→target
+// resolution uses the stored session.target field — see ADR 61). Production
+// (nextSessionKey) and the test fake share this single formatter.
+func formatSessionKey(targetKey string, counter int) string {
+	return fmt.Sprintf("%s#%d", targetKey, counter)
+}
+
 // nextSessionKey allocates a unique tab key for the target. Each explicit
 // open-tab command produces a fresh session keyed "<target>#<n>".
 func (s *tuiSessionStore) nextSessionKey(targetKey string) string {
@@ -81,7 +336,7 @@ func (s *tuiSessionStore) nextSessionKey(targetKey string) string {
 		s.tabCounters = map[string]int{}
 	}
 	s.tabCounters[targetKey]++
-	return fmt.Sprintf("%s#%d", targetKey, s.tabCounters[targetKey])
+	return formatSessionKey(targetKey, s.tabCounters[targetKey])
 }
 
 // TargetSessionKeys lists the open terminal tabs that belong to a single
@@ -110,7 +365,7 @@ func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
 }
 
 func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
-	targetKey := "project:" + project.ID
+	targetKey := terminal.ProjectTarget(project.ID).String()
 	delete(s.sessionErrors, targetKey)
 
 	if strings.TrimSpace(project.WorkspacePath) == "" {
@@ -136,28 +391,30 @@ func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
 	command.Dir = project.WorkspacePath
 
 	key := s.nextSessionKey(targetKey)
-	terminal := newSessionTUITerminal(key, s.postEvent)
+	term := newSessionTUITerminal(key, s.postEvent)
 	if s.preferredCols > 0 && s.preferredRows > 0 {
-		terminal.Resize(s.preferredCols, s.preferredRows)
+		term.Resize(s.preferredCols, s.preferredRows)
 	}
-	if err := terminal.Start(command); err != nil {
+	if err := term.Start(command); err != nil {
 		s.sessionErrors[targetKey] = err
 		return "", err
 	}
 
+	runtime := s.registry.Allocate(term)
 	s.putSession(&tuiSession{
-		key:      key,
-		target:   targetKey,
-		kind:     tuiTreeEntryProject,
-		label:    project.Slug,
-		project:  project,
-		terminal: terminal,
+		key:        key,
+		target:     targetKey,
+		kind:       tuiTreeEntryProject,
+		label:      project.Slug,
+		project:    project,
+		terminalID: runtime.ID,
 	})
+	s.service.log().Debug("terminal opened", "kind", "project", "target", targetKey, "session", key)
 	return key, nil
 }
 
 func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
-	targetKey := "node:" + node.ID
+	targetKey := terminal.NodeTarget(node.ID).String()
 	delete(s.sessionErrors, targetKey)
 
 	executable, err := s.nodeTabExecutable()
@@ -170,24 +427,26 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	command.Env = os.Environ()
 
 	key := s.nextSessionKey(targetKey)
-	terminal := newSessionTUITerminal(key, s.postEvent)
+	term := newSessionTUITerminal(key, s.postEvent)
 	if s.preferredCols > 0 && s.preferredRows > 0 {
-		terminal.Resize(s.preferredCols, s.preferredRows)
+		term.Resize(s.preferredCols, s.preferredRows)
 	}
-	if err := terminal.Start(command); err != nil {
+	if err := term.Start(command); err != nil {
 		err = nodeTabStartError(executable, err)
 		s.sessionErrors[targetKey] = err
 		return "", err
 	}
 
+	runtime := s.registry.Allocate(term)
 	s.putSession(&tuiSession{
-		key:      key,
-		target:   targetKey,
-		kind:     tuiTreeEntryNode,
-		label:    node.Slug,
-		node:     node,
-		terminal: terminal,
+		key:        key,
+		target:     targetKey,
+		kind:       tuiTreeEntryNode,
+		label:      node.Slug,
+		node:       node,
+		terminalID: runtime.ID,
 	})
+	s.service.log().Debug("terminal opened", "kind", "node", "target", targetKey, "session", key)
 	return key, nil
 }
 
@@ -234,6 +493,74 @@ func (s *tuiSessionStore) SessionError(targetKey string) error {
 	return s.sessionErrors[targetKey]
 }
 
+// ClearSessionError drops any recorded open error for a target. It is the
+// sanctioned accessor so callers do not reach into the sessionErrors map.
+func (s *tuiSessionStore) ClearSessionError(targetKey string) {
+	delete(s.sessionErrors, targetKey)
+}
+
+// terminalFor resolves a session's live terminal backend through the runtime
+// registry. It returns false when the session is nil or its runtime is gone.
+func (s *tuiSessionStore) terminalFor(session *tuiSession) (tuiTerminal, bool) {
+	if session == nil {
+		return nil, false
+	}
+	runtime, ok := s.registry.Lookup(session.terminalID)
+	if !ok {
+		return nil, false
+	}
+	return runtime.Backend, true
+}
+
+// SessionTerminal resolves the live terminal backend for a session key. It is
+// the sanctioned accessor so callers do not reach into the sessions map or the
+// session's terminal handle.
+func (s *tuiSessionStore) SessionTerminal(sessionKey string) (tuiTerminal, bool) {
+	session, ok := s.sessions[sessionKey]
+	if !ok {
+		return nil, false
+	}
+	return s.terminalFor(session)
+}
+
+// SyncFocus focuses the terminal for activeSessionKey when focusActive is set
+// and blurs every other open terminal. It owns the sessions-map iteration so
+// the app does not reach into store internals.
+func (s *tuiSessionStore) SyncFocus(activeSessionKey string, focusActive bool) {
+	for sessionKey, session := range s.sessions {
+		term, ok := s.terminalFor(session)
+		if !ok {
+			continue
+		}
+		if focusActive && sessionKey == activeSessionKey {
+			term.Focus()
+			continue
+		}
+		term.Blur()
+	}
+}
+
+// PruneStaleSessions closes every open session whose target no longer exists
+// (per keep) and drops every recorded target error whose target is likewise
+// gone. It owns the sessions/sessionErrors iteration so the app does not reach
+// into store internals.
+func (s *tuiSessionStore) PruneStaleSessions(keep func(targetKey string) bool) {
+	var orphans []string
+	for sessionKey, session := range s.sessions {
+		if !keep(session.target) {
+			orphans = append(orphans, sessionKey)
+		}
+	}
+	for _, sessionKey := range orphans {
+		s.CloseSession(sessionKey)
+	}
+	for targetKey := range s.sessionErrors {
+		if !keep(targetKey) {
+			delete(s.sessionErrors, targetKey)
+		}
+	}
+}
+
 func (s *tuiSessionStore) RemoveSession(sessionKey string) (*tuiSession, bool) {
 	session := s.sessions[sessionKey]
 	if session == nil {
@@ -241,12 +568,17 @@ func (s *tuiSessionStore) RemoveSession(sessionKey string) (*tuiSession, bool) {
 	}
 	delete(s.sessions, sessionKey)
 	s.removeSessionOrder(sessionKey)
+	// The terminal exited on its own (finish path); just forget the runtime.
+	s.registry.Remove(session.terminalID)
 	return session, true
 }
 
 func (s *tuiSessionStore) Close() {
 	for sessionKey, session := range s.sessions {
-		session.terminal.Close()
+		if runtime, ok := s.registry.Remove(session.terminalID); ok {
+			runtime.Backend.Close()
+		}
+		s.service.log().Debug("terminal closed", "target", session.target, "session", sessionKey, "reason", "shutdown")
 		delete(s.sessions, sessionKey)
 	}
 	s.sessionOrder = nil
@@ -260,7 +592,10 @@ func (s *tuiSessionStore) CloseSession(sessionKey string) {
 
 	delete(s.sessions, sessionKey)
 	s.removeSessionOrder(sessionKey)
-	session.terminal.Close()
+	if runtime, ok := s.registry.Remove(session.terminalID); ok {
+		runtime.Backend.Close()
+	}
+	s.service.log().Debug("terminal closed", "target", session.target, "session", sessionKey, "reason", "tab-close")
 }
 
 // CloseTargetSessions closes every open terminal tab for a project or node
@@ -273,7 +608,7 @@ func (s *tuiSessionStore) CloseTargetSessions(targetKey string) {
 }
 
 func (s *tuiSessionStore) CloseNode(nodeID string) {
-	s.CloseTargetSessions("node:" + nodeID)
+	s.CloseTargetSessions(terminal.NodeTarget(nodeID).String())
 }
 
 func (s *tuiSessionStore) removeSessionOrder(targetKey string) {
@@ -351,27 +686,30 @@ func layoutTUIBody(width int, focus tuiFocus) tuiBodyLayout {
 }
 
 type vaxisTUIApp struct {
-	ctx               context.Context
-	service           *Service
-	vx                *vaxis.Vaxis
-	postEvent         func(vaxis.Event)
-	treeWorkspaceRoot string
-	openLink          func(string) error
-	screenHyperlinkAt func(int, int) (string, bool)
-	state             *tuiState
-	sessions          *tuiSessionStore
-	operations        map[string]*tuiOperationState
-	operationOrder    []string
-	linkRegions       []tuiLinkRegion
-	terminalMouse     *tuiTerminalMouseGesture
-	dialog            *tuiDialog
-	menu              *tuiMenu
-	selector          *tuiSelector
-	status            string
-	refreshInFlight   bool
-	clipboardPush     func(string) error
-	treeContentRect   tuiRect
-	terminalBodyRect  tuiRect
+	ctx                context.Context
+	service            *Service
+	vx                 *vaxis.Vaxis
+	postEvent          func(vaxis.Event)
+	treeWorkspaceRoot  string
+	openLink           func(string) error
+	screenHyperlinkAt  func(int, int) (string, bool)
+	state              *tuiState
+	sessions           *tuiSessionStore
+	operations         map[string]*tuiOperationState
+	operationOrder     []string
+	linkRegions        []tuiLinkRegion
+	terminalMouse      *tuiTerminalMouseGesture
+	dialog             *tuiDialog
+	menu               *tuiMenu
+	selector           *tuiSelector
+	messagesView       *tuiMessagesView
+	messages           *tuiMessageLog
+	lastCapturedStatus string
+	status             string
+	refreshInFlight    bool
+	clipboardPush      func(string) error
+	treeContentRect    tuiRect
+	terminalBodyRect   tuiRect
 }
 
 const (
@@ -387,7 +725,16 @@ const (
 )
 
 func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoot string) error {
-	tree, err := loadTUIProjectTree(service, workspaceRoot)
+	// TUI mode logs to a file sink (CODELIMA_HOME/_logs/codelima.log) instead of
+	// stderr so structured logs never corrupt the rendered chrome. This also
+	// routes the libghostty stderr capture to the same file (ADR 59). A failure
+	// to open the file leaves the discard/CLI logger in place rather than
+	// aborting the TUI.
+	if closeLog, err := service.enableFileLogging(); err == nil {
+		defer func() { _ = closeLog() }()
+	}
+
+	tree, err := loadTUIProjectTree(ctx, service, workspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -415,6 +762,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		state:             state,
 		sessions:          sessions,
 		operations:        map[string]*tuiOperationState{},
+		messages:          newTUIMessageLog(tuiMessageLogDefaultCap),
 	}
 	winWidth, winHeight := vx.Window().Size()
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
@@ -428,15 +776,31 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	stopRefresh := startTUIAutoRefresh(ctx, vx.PostEvent, tuiAutoRefreshInterval)
 	defer stopRefresh()
 
+	return app.serve(vx.Events())
+}
+
+// serve runs the TUI event loop until the context is cancelled, the event
+// channel closes, or a handler requests quit. It owns the guaranteed teardown
+// of the live terminal sessions: draining them is deferred here so that a
+// cancelled context (e.g. Ctrl+C wired through signal.NotifyContext in main)
+// still closes every terminal — group-killing the VM shells — instead of the
+// process exiting through a happy-path-only cleanup. Run keeps its own
+// sessions.Close() defer as a backstop for failures before the loop starts
+// (Close drains the session map, so the second call is a no-op), and keeps
+// host-terminal restoration (vx.Close) and auto-refresh cancellation deferred
+// there, keyed to the resources it owns.
+func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
+	defer a.sessions.Close()
+
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case event, ok := <-vx.Events():
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		case event, ok := <-events:
 			if !ok {
 				return nil
 			}
-			quit, err := app.handleEvent(event)
+			quit, err := a.handleEvent(event)
 			if err != nil {
 				return err
 			}
@@ -447,11 +811,11 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	}
 }
 
-func loadTUIProjectTree(service *Service, workspaceRoot string) ([]ProjectTreeNode, error) {
+func loadTUIProjectTree(ctx context.Context, service *Service, workspaceRoot string) ([]ProjectTreeNode, error) {
 	if strings.TrimSpace(workspaceRoot) != "" {
-		return service.ProjectTreeByWorkspaceRoot(workspaceRoot, false)
+		return service.ProjectTreeByWorkspaceRoot(ctx, workspaceRoot, false)
 	}
-	return service.ProjectTree("", false)
+	return service.ProjectTree(ctx, "", false)
 }
 
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
@@ -489,8 +853,16 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	}
 
-	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && (a.dialog != nil || a.menu != nil || a.selector != nil) {
+	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && (a.dialog != nil || a.menu != nil || a.selector != nil || a.messagesView != nil) {
 		return true, nil
+	}
+
+	if a.messagesView != nil {
+		if a.messagesView.Update(event) {
+			a.messagesView = nil
+		}
+		a.draw()
+		return false, nil
 	}
 
 	if a.selector != nil {
@@ -635,6 +1007,11 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
 		return false, nil
 	}
 
+	if a.state.focus == tuiFocusTree && key.MatchString("m") {
+		a.openMessagesView()
+		return false, nil
+	}
+
 	if a.state.focus == tuiFocusTerminal {
 		a.forwardTerminalEvent(key)
 		return false, nil
@@ -697,13 +1074,13 @@ func (a *vaxisTUIApp) actionResourceKeys(action tuiActionSpec, entry tuiTreeEntr
 	case tuiActionProjectCreate:
 		return []string{"projects"}
 	case tuiActionProjectCreateNode:
-		return []string{"project:" + entry.project.ID}
+		return []string{terminal.ProjectTarget(entry.project.ID).String()}
 	case tuiActionProjectUpdate, tuiActionProjectDelete:
-		return []string{"project:" + entry.project.ID}
+		return []string{terminal.ProjectTarget(entry.project.ID).String()}
 	case tuiActionNodeStart, tuiActionNodeStop, tuiActionNodeDelete:
-		return []string{"node:" + entry.node.ID}
+		return []string{terminal.NodeTarget(entry.node.ID).String()}
 	case tuiActionNodeClone:
-		return []string{"node:" + entry.node.ID, "project:" + entry.project.ID}
+		return []string{terminal.NodeTarget(entry.node.ID).String(), terminal.ProjectTarget(entry.project.ID).String()}
 	default:
 		return nil
 	}
@@ -736,8 +1113,8 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 		return a.startOperation(tuiOperationRequest{
 			Title:         "Starting " + entry.node.Slug,
 			DisplayStatus: "starting",
-			ResourceKeys:  []string{"node:" + entry.node.ID},
-			EntryKeys:     []string{"node:" + entry.node.ID},
+			ResourceKeys:  []string{terminal.NodeTarget(entry.node.ID).String()},
+			EntryKeys:     []string{terminal.NodeTarget(entry.node.ID).String()},
 			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 				node, err := service.NodeStart(ctx, entry.node.ID)
 				if err != nil {
@@ -745,7 +1122,7 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 				}
 				return tuiOperationResult{
 					Status:       "started node " + node.Slug,
-					PreferredKey: "node:" + node.ID,
+					PreferredKey: terminal.NodeTarget(node.ID).String(),
 					ReloadData:   true,
 				}, nil
 			},
@@ -754,8 +1131,8 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 		return a.startOperation(tuiOperationRequest{
 			Title:         "Stopping " + entry.node.Slug,
 			DisplayStatus: "stopping",
-			ResourceKeys:  []string{"node:" + entry.node.ID},
-			EntryKeys:     []string{"node:" + entry.node.ID},
+			ResourceKeys:  []string{terminal.NodeTarget(entry.node.ID).String()},
+			EntryKeys:     []string{terminal.NodeTarget(entry.node.ID).String()},
 			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 				node, err := service.NodeStop(ctx, entry.node.ID)
 				if err != nil {
@@ -763,7 +1140,7 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 				}
 				return tuiOperationResult{
 					Status:       "stopped node " + node.Slug,
-					PreferredKey: "node:" + node.ID,
+					PreferredKey: terminal.NodeTarget(node.ID).String(),
 					CloseNodeID:  node.ID,
 					ReloadData:   true,
 				}, nil
@@ -954,7 +1331,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 	}
 
 	sessionKey := a.state.activeSessionKey()
-	session, ok := a.sessions.Session(sessionKey)
+	term, ok := a.sessions.SessionTerminal(sessionKey)
 	if !ok {
 		return nil
 	}
@@ -965,7 +1342,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 		return nil
 	}
 
-	if !session.terminal.CapturesMouse() {
+	if !term.CapturesMouse() {
 		if err := a.handleTerminalMouseGesture(sessionKey, mouse, translated); err != nil {
 			a.status = err.Error()
 		}
@@ -1009,11 +1386,11 @@ func (a *vaxisTUIApp) handleResize(event vaxis.Resize) {
 	}
 	a.sessions.SetPreferredTerminalSize(cols, rows)
 
-	session, ok := a.sessions.Session(a.state.activeSessionKey())
-	if !ok || session.terminal == nil {
+	term, ok := a.sessions.SessionTerminal(a.state.activeSessionKey())
+	if !ok || term == nil {
 		return
 	}
-	session.terminal.Resize(cols, rows)
+	term.Resize(cols, rows)
 }
 
 func (a *vaxisTUIApp) mouseTerminalEntry() tuiTreeEntry {
@@ -1115,9 +1492,9 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 		return "", false
 	}
 
-	if session, ok := a.sessions.Session(a.state.activeSessionKey()); ok {
+	if term, ok := a.sessions.SessionTerminal(a.state.activeSessionKey()); ok {
 		localMouse := a.terminalBodyRect.translateMouse(mouse)
-		if target, ok := session.terminal.HyperlinkAt(localMouse.Col, localMouse.Row); ok {
+		if target, ok := term.HyperlinkAt(localMouse.Col, localMouse.Row); ok {
 			return target, true
 		}
 	}
@@ -1126,7 +1503,7 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 }
 
 func (a *vaxisTUIApp) reloadData(preferredKey string) error {
-	tree, err := loadTUIProjectTree(a.service, a.treeWorkspaceRoot)
+	tree, err := loadTUIProjectTree(a.ctx, a.service, a.treeWorkspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -1137,37 +1514,30 @@ func (a *vaxisTUIApp) applyReloadedTree(tree []ProjectTreeNode, preferredKey str
 	if err := a.state.replaceTree(tree, preferredKey); err != nil {
 		return err
 	}
-	var orphans []string
-	for sessionKey, session := range a.sessions.sessions {
-		switch {
-		case strings.HasPrefix(session.target, "node:"):
-			if _, ok := a.state.nodesByID[strings.TrimPrefix(session.target, "node:")]; !ok {
-				orphans = append(orphans, sessionKey)
-			}
-		case strings.HasPrefix(session.target, "project:"):
-			if _, ok := a.state.projectsByID[strings.TrimPrefix(session.target, "project:")]; !ok {
-				orphans = append(orphans, sessionKey)
-			}
-		}
-	}
-	for _, sessionKey := range orphans {
-		a.sessions.CloseSession(sessionKey)
-	}
-	for targetKey := range a.sessions.sessionErrors {
-		switch {
-		case strings.HasPrefix(targetKey, "node:"):
-			if _, ok := a.state.nodesByID[strings.TrimPrefix(targetKey, "node:")]; !ok {
-				delete(a.sessions.sessionErrors, targetKey)
-			}
-		case strings.HasPrefix(targetKey, "project:"):
-			if _, ok := a.state.projectsByID[strings.TrimPrefix(targetKey, "project:")]; !ok {
-				delete(a.sessions.sessionErrors, targetKey)
-			}
-		}
-	}
+	a.sessions.PruneStaleSessions(a.targetKeyStillExists)
 
 	a.syncSessionFocus()
 	return nil
+}
+
+// targetKeyStillExists reports whether targetKey resolves to a live project or
+// node in the current tree. A key that does not parse as a target is treated as
+// still existing (left untouched), matching the prior prefix-switch default arm.
+func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
+	target, err := terminal.ParseTargetKey(targetKey)
+	if err != nil {
+		return true
+	}
+	switch target.Kind {
+	case terminal.TargetNode:
+		_, ok := a.state.nodesByID[target.ID]
+		return ok
+	case terminal.TargetProject:
+		_, ok := a.state.projectsByID[target.ID]
+		return ok
+	default:
+		return true
+	}
 }
 
 func (a *vaxisTUIApp) startDataRefresh() {
@@ -1177,13 +1547,13 @@ func (a *vaxisTUIApp) startDataRefresh() {
 
 	a.refreshInFlight = true
 	if a.postEvent == nil {
-		tree, err := loadTUIProjectTree(a.service, a.treeWorkspaceRoot)
+		tree, err := loadTUIProjectTree(a.ctx, a.service, a.treeWorkspaceRoot)
 		a.finishDataRefresh(tuiRefreshCompleteEvent{Tree: tree, Err: err})
 		return
 	}
 
 	go func() {
-		tree, err := loadTUIProjectTree(a.service, a.treeWorkspaceRoot)
+		tree, err := loadTUIProjectTree(a.ctx, a.service, a.treeWorkspaceRoot)
 		a.postEvent(tuiRefreshCompleteEvent{Tree: tree, Err: err})
 	}()
 }
@@ -1191,9 +1561,21 @@ func (a *vaxisTUIApp) startDataRefresh() {
 func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 	a.refreshInFlight = false
 	if event.Err != nil {
+		// Auto-refresh errors were previously swallowed silently; surface them at
+		// the log seam (warn, not per-tick success) without disturbing the UI,
+		// and retain them in the message ring at their true level so a failed
+		// background refresh is visible in the messages view. A persistently
+		// failing 2s auto-refresh would flood the ring with identical entries,
+		// so consecutive duplicates are collapsed.
+		a.service.log().Warn("tui refresh failed", "error", event.Err.Error())
+		message := "refresh failed: " + event.Err.Error()
+		if latest, ok := a.messages.Latest(); !ok || latest.Text != message {
+			a.pushMessage(slog.LevelWarn, message)
+		}
 		return
 	}
 	if err := a.applyReloadedTree(event.Tree, ""); err != nil && a.status == "" {
+		a.service.log().Warn("tui tree reload failed", "error", err.Error())
 		a.status = err.Error()
 	}
 }
@@ -1346,13 +1728,67 @@ func (a *vaxisTUIApp) finishOperation(event tuiOperationCompleteEvent) {
 		a.operationOrder = append(a.operationOrder[:index], a.operationOrder[index+1:]...)
 		break
 	}
+
+	// Retain the finished operation's output in the message ring at its true
+	// level before it is discarded, so failed background operations stay
+	// inspectable in the messages view (ADR 59).
+	a.retainOperationMessages(operation, event)
+
 	if event.Err != nil {
 		a.status = event.Err.Error()
-		return
-	}
-	if err := a.applyOperationResult(a.resultSelectionKey(operation, event.Result), event.Result); err != nil {
+	} else if err := a.applyOperationResult(a.resultSelectionKey(operation, event.Result), event.Result); err != nil {
 		a.status = err.Error()
 	}
+
+	// The result was already recorded at its proper level above; suppress the
+	// draw-time info-level capture of the same status string.
+	a.lastCapturedStatus = strings.TrimSpace(a.status)
+}
+
+const tuiRetainedOperationOutputLines = 40
+
+// retainOperationMessages copies a finished operation's summary and captured
+// output into the message ring. Success records at info, failure at error; the
+// per-operation output is capped to its tail so one noisy operation cannot evict
+// the entire ring.
+func (a *vaxisTUIApp) retainOperationMessages(operation *tuiOperationState, event tuiOperationCompleteEvent) {
+	if operation == nil {
+		return
+	}
+
+	title := strings.TrimSpace(operation.Title)
+	if title == "" {
+		title = "background operation"
+	}
+
+	level := slog.LevelInfo
+	summary := title + " completed"
+	if event.Err != nil {
+		level = slog.LevelError
+		summary = title + " failed: " + event.Err.Error()
+	} else if status := strings.TrimSpace(event.Result.Status); status != "" {
+		summary = title + ": " + status
+	}
+
+	a.pushMessage(level, summary)
+	for _, line := range retainedOperationOutput(operation.Lines) {
+		a.pushMessage(level, title+" | "+line)
+	}
+}
+
+func retainedOperationOutput(lines []string) []string {
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || trimmed == "waiting for command output..." {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	if len(filtered) > tuiRetainedOperationOutputLines {
+		filtered = filtered[len(filtered)-tuiRetainedOperationOutputLines:]
+	}
+	return filtered
 }
 
 func (a *vaxisTUIApp) resultSelectionKey(operation *tuiOperationState, result tuiOperationResult) string {
@@ -1418,7 +1854,7 @@ func (a *vaxisTUIApp) openCreateProjectDialog() {
 					}
 					return tuiOperationResult{
 						Status:       "created project " + project.Slug,
-						PreferredKey: "project:" + project.ID,
+						PreferredKey: terminal.ProjectTarget(project.ID).String(),
 						ReloadData:   true,
 					}, nil
 				},
@@ -1464,8 +1900,8 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Creating node " + values["slug"],
 				DisplayStatus: "creating",
-				ResourceKeys:  []string{"project:" + project.ID},
-				EntryKeys:     []string{"project:" + project.ID},
+				ResourceKeys:  []string{terminal.ProjectTarget(project.ID).String()},
+				EntryKeys:     []string{terminal.ProjectTarget(project.ID).String()},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 					node, err := service.NodeCreate(ctx, NodeCreateInput{
 						Project:       project.ID,
@@ -1478,7 +1914,7 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 					}
 					return tuiOperationResult{
 						Status:           "created node " + node.Slug,
-						PreferredKey:     "node:" + node.ID,
+						PreferredKey:     terminal.NodeTarget(node.ID).String(),
 						ReloadData:       true,
 						ShowTerminalPane: true,
 					}, nil
@@ -1547,8 +1983,8 @@ func (a *vaxisTUIApp) openUpdateProjectDialog(project Project) {
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Saving project " + project.Slug,
 				DisplayStatus: "updating",
-				ResourceKeys:  []string{"project:" + project.ID},
-				EntryKeys:     []string{"project:" + project.ID},
+				ResourceKeys:  []string{terminal.ProjectTarget(project.ID).String()},
+				EntryKeys:     []string{terminal.ProjectTarget(project.ID).String()},
 				Run: func(_ context.Context, service *Service) (tuiOperationResult, error) {
 					updated, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
 						Slug:               &slug,
@@ -1560,7 +1996,7 @@ func (a *vaxisTUIApp) openUpdateProjectDialog(project Project) {
 					}
 					return tuiOperationResult{
 						Status:       "updated project " + updated.Slug,
-						PreferredKey: "project:" + updated.ID,
+						PreferredKey: terminal.ProjectTarget(updated.ID).String(),
 						ReloadData:   true,
 					}, nil
 				},
@@ -1871,8 +2307,8 @@ func (a *vaxisTUIApp) openDeleteProjectDialog(project Project) {
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Deleting project " + project.Slug,
 				DisplayStatus: "deleting",
-				ResourceKeys:  []string{"project:" + project.ID},
-				EntryKeys:     []string{"project:" + project.ID},
+				ResourceKeys:  []string{terminal.ProjectTarget(project.ID).String()},
+				EntryKeys:     []string{terminal.ProjectTarget(project.ID).String()},
 				Run: func(_ context.Context, service *Service) (tuiOperationResult, error) {
 					deleted, err := service.ProjectDelete(project.ID)
 					if err != nil {
@@ -1901,8 +2337,8 @@ func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Deleting node " + node.Slug,
 				DisplayStatus: "deleting",
-				ResourceKeys:  []string{"node:" + node.ID},
-				EntryKeys:     []string{"node:" + node.ID},
+				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String()},
+				EntryKeys:     []string{terminal.NodeTarget(node.ID).String()},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 					deleted, err := service.NodeDelete(ctx, node.ID)
 					if err != nil {
@@ -1939,8 +2375,8 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Cloning node " + node.Slug,
 				DisplayStatus: "cloning",
-				ResourceKeys:  []string{"node:" + node.ID, "project:" + project.ID},
-				EntryKeys:     []string{"node:" + node.ID, "project:" + project.ID},
+				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String(), terminal.ProjectTarget(project.ID).String()},
+				EntryKeys:     []string{terminal.NodeTarget(node.ID).String(), terminal.ProjectTarget(project.ID).String()},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 					childNode, err := service.NodeClone(ctx, NodeCloneInput{
 						SourceNode:   node.ID,
@@ -1952,7 +2388,7 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
 					}
 					return tuiOperationResult{
 						Status:       "cloned node " + node.Slug + " to " + childNode.Slug + " in " + project.Slug,
-						PreferredKey: "node:" + childNode.ID,
+						PreferredKey: terminal.NodeTarget(childNode.ID).String(),
 						ReloadData:   true,
 					}, nil
 				},
@@ -2027,7 +2463,7 @@ func (a *vaxisTUIApp) closeTerminalTab() error {
 	nextKey := nextActiveTerminalTabAfterClose(keys, sessionKey)
 
 	a.sessions.CloseSession(sessionKey)
-	delete(a.sessions.sessionErrors, targetKey)
+	a.sessions.ClearSessionError(targetKey)
 
 	if nextKey != "" {
 		a.state.setActiveTab(targetKey, nextKey)
@@ -2035,7 +2471,7 @@ func (a *vaxisTUIApp) closeTerminalTab() error {
 	}
 
 	delete(a.state.activeTabKeys, targetKey)
-	if a.state.hostTerminalReturnKey != "" && strings.HasPrefix(targetKey, "project:") {
+	if a.state.hostTerminalReturnKey != "" && isTargetKind(targetKey, terminal.TargetProject) {
 		a.state.hostTerminalReturnKey = ""
 	}
 	if a.state.focus == tuiFocusTerminal && a.state.terminalTarget == targetKey {
@@ -2069,12 +2505,12 @@ func (a *vaxisTUIApp) forwardTerminalEvent(event vaxis.Event) {
 }
 
 func (a *vaxisTUIApp) forwardSessionEvent(sessionKey string, event vaxis.Event) {
-	session, ok := a.sessions.Session(sessionKey)
+	term, ok := a.sessions.SessionTerminal(sessionKey)
 	if !ok {
 		return
 	}
 	event = normalizeTUITerminalEvent(event)
-	session.terminal.Update(event)
+	term.Update(event)
 }
 
 func (a *vaxisTUIApp) beginTerminalMouseGesture(targetKey string, mouse vaxis.Mouse) {
@@ -2111,15 +2547,7 @@ func (a *vaxisTUIApp) cancelTerminalMouseGesture() {
 }
 
 func (a *vaxisTUIApp) syncSessionFocus() {
-	focus := a.effectiveLayoutFocus()
-	activeSessionKey := a.state.activeSessionKey()
-	for sessionKey, session := range a.sessions.sessions {
-		if sessionKey == activeSessionKey && focus == tuiFocusTerminal {
-			session.terminal.Focus()
-			continue
-		}
-		session.terminal.Blur()
-	}
+	a.sessions.SyncFocus(a.state.activeSessionKey(), a.effectiveLayoutFocus() == tuiFocusTerminal)
 }
 
 func (a *vaxisTUIApp) linkTargetAt(col, row int) (string, bool) {
@@ -2165,14 +2593,14 @@ func (a *vaxisTUIApp) printLinkifiedLine(win vaxis.Window, row int, text string,
 }
 
 func (a *vaxisTUIApp) rightPaneOverrideActive() bool {
-	return a.menu != nil || a.dialog != nil || a.selector != nil
+	return a.menu != nil || a.dialog != nil || a.selector != nil || a.messagesView != nil
 }
 
 func (a *vaxisTUIApp) hostTerminalOverrideActive() bool {
 	return a != nil &&
 		a.state != nil &&
 		a.state.hostTerminalReturnKey != "" &&
-		strings.HasPrefix(a.state.activeTerminalTargetKey(), "project:")
+		isTargetKind(a.state.activeTerminalTargetKey(), terminal.TargetProject)
 }
 
 func (a *vaxisTUIApp) effectiveLayoutFocus() tuiFocus {
@@ -2285,6 +2713,8 @@ func terminalTabLabel(session *tuiSession, index, total int) string {
 
 func (a *vaxisTUIApp) drawRightPane(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
 	switch {
+	case a.messagesView != nil:
+		a.messagesView.Draw(win, headerStyle, mutedStyle)
 	case a.selector != nil:
 		a.selector.Draw(win, headerStyle, mutedStyle)
 	case a.dialog != nil:
@@ -2302,6 +2732,8 @@ func (a *vaxisTUIApp) drawRightPane(win vaxis.Window, entry tuiTreeEntry, header
 
 func (a *vaxisTUIApp) activePaneFooter(entry tuiTreeEntry, focus tuiFocus) string {
 	switch {
+	case a.messagesView != nil:
+		return "Up/Down scroll   PgUp/PgDn page   g/G top/bottom   Esc close   Ctrl+c quit"
 	case a.selector != nil:
 		if a.selector.Multi {
 			return "Up/Down move   Space toggle   Enter confirm   Ctrl+u clear   Esc cancel   Ctrl+c quit"
@@ -2320,6 +2752,8 @@ func (a *vaxisTUIApp) draw() {
 	if a.vx == nil {
 		return
 	}
+
+	a.captureStatusMessage()
 
 	window := a.vx.Window()
 	window.Clear()
@@ -2659,8 +3093,8 @@ func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTr
 }
 
 func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
-	if session, ok := a.sessions.Session(a.state.activeSessionKey()); ok {
-		session.terminal.Draw(win)
+	if term, ok := a.sessions.SessionTerminal(a.state.activeSessionKey()); ok {
+		term.Draw(win)
 		return
 	}
 

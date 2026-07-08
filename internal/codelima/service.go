@@ -5,25 +5,38 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Service struct {
-	cfg    Config
-	store  *Store
-	lima   LimaClient
-	tui    TUIRunner
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
-	now    func() time.Time
+	cfg      Config
+	store    *Store
+	lima     LimaClient
+	tui      TUIRunner
+	stdin    io.Reader
+	stdout   io.Writer
+	stderr   io.Writer
+	now      func() time.Time
+	ready    *serviceReadiness
+	logger   *slog.Logger
+	logLevel slog.Level
+}
+
+// serviceReadiness caches the once-per-instance directory bootstrap for read
+// paths. It sits behind a pointer so withIO's shallow clone shares it and so
+// Service stays copyable without embedding a sync.Once by value.
+type serviceReadiness struct {
+	directoriesOnce sync.Once
+	directoriesErr  error
 }
 
 type ProjectCreateInput struct {
@@ -69,13 +82,6 @@ type NodeCloneInput struct {
 	LimaCommands LimaCommandTemplates
 }
 
-type PatchProposeInput struct {
-	SourceProject string
-	SourceNode    string
-	TargetProject string
-	TargetNode    string
-}
-
 func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
 	if lima == nil {
 		lima = NewExecLimaClient()
@@ -97,6 +103,84 @@ func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		ready:    &serviceReadiness{},
+		logger:   discardLogger(),
+		logLevel: slog.LevelInfo,
+	}
+}
+
+// SetLogger installs the process logger and records its level. Run wires the
+// CLI-mode text sink here; enableFileLogging later swaps in the TUI file sink at
+// the same level. The field is a plain pointer, so withIO's shallow clone shares
+// it (mirroring the ready pointer-field pattern from work item 0.3).
+func (s *Service) SetLogger(logger *slog.Logger, level slog.Level) {
+	if s == nil {
+		return
+	}
+	if logger == nil {
+		logger = discardLogger()
+	}
+	s.logger = logger
+	s.logLevel = level
+}
+
+// log returns the Service logger, falling back to a discard logger so seam log
+// calls are always safe even on a Service built without SetLogger (tests).
+func (s *Service) log() *slog.Logger {
+	if s == nil || s.logger == nil {
+		return discardLogger()
+	}
+	return s.logger
+}
+
+// enableFileLogging switches the Service logger (and the process-global
+// libghostty capture logger) to the TUI file sink at the configured level. The
+// TUI runner calls it once at startup and defers the returned closer.
+func (s *Service) enableFileLogging() (func() error, error) {
+	logger, closeLog, err := newTUIFileLogger(s.cfg.MetadataRoot, s.logLevel)
+	if err != nil {
+		return nil, err
+	}
+	s.logger = logger
+	setPackageLogger(logger)
+	return closeLog, nil
+}
+
+// logOperation is the deferred half of service-operation seam logging: it emits
+// a start record at call time (via logOperationStart) and a finish record here,
+// carrying the operation name, duration, and terminal error. Errors log at error
+// level; clean finishes at debug so default (info) CLI runs stay quiet.
+func (s *Service) logOperation(op string, start time.Time, errp *error) {
+	logger := s.log()
+	duration := s.now().Sub(start)
+	var err error
+	if errp != nil {
+		err = *errp
+	}
+	if err != nil {
+		logger.Error("operation failed", "op", op, "duration", duration.String(), "error", err.Error())
+		return
+	}
+	logger.Debug("operation finished", "op", op, "duration", duration.String())
+}
+
+// logLima records a runtime (lima) invocation at a service call site: the verb
+// only, never the full argv (argv can carry host paths). Debug level keeps it out
+// of default CLI output.
+func (s *Service) logLima(verb, nodeID string) {
+	s.log().Debug("lima invocation", "verb", verb, "node", nodeID)
+}
+
+// recordNodeStartRollback persists the failed-start rollback state and logs any
+// error from those writes at error level instead of discarding it (absorbed work
+// item 0.7.2). Behaviour is otherwise unchanged: the caller still returns the
+// original start failure.
+func (s *Service) recordNodeStartRollback(node Node, bootstrap BootstrapState, event Event) {
+	if saveErr := s.store.SaveNode(node, bootstrap, nil); saveErr != nil {
+		s.log().Error("node start rollback save failed", "node", node.ID, "error", saveErr.Error())
+	}
+	if eventErr := s.store.AppendNodeEvent(node.ID, event); eventErr != nil {
+		s.log().Error("node start rollback event append failed", "node", node.ID, "error", eventErr.Error())
 	}
 }
 
@@ -120,6 +204,17 @@ func (s *Service) withIO(stdout, stderr io.Writer) *Service {
 }
 
 func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
+	// A user-initiated app launch is a session start, not a background read:
+	// run the one-time locked seed/repair pass here so a fresh home shows the
+	// built-in agent profiles and environment configs in the TUI's pickers.
+	// This is idempotent, flock-guarded, and once per process — categorically
+	// different from the per-tick unlocked writes work item 0.3 removed (ADR
+	// 57). The 2s auto-refresh path stays a pure read, and no runtime
+	// dependencies are validated: launching the TUI must work without limactl.
+	if err := s.ensureReadyForWrite(); err != nil {
+		return err
+	}
+
 	if s.tui == nil {
 		s.tui = newTUIRunner()
 	}
@@ -127,21 +222,68 @@ func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	return s.tui.Run(ctx, s, workspaceRoot)
 }
 
+// EnsureReady prepares CODELIMA_HOME for an operation. Read surfaces call it
+// with mutating=false: that only creates missing directories (once per Service
+// instance) and never writes, seeds, or rewrites files — reads must not write.
+// mutating=true additionally seeds and repairs metadata under the
+// environment-configs/projects/nodes locks and validates runtime dependencies.
+// Stale metadata (for example an old config.yaml) is therefore upgraded only
+// by mutating commands or `codelima doctor --repair`.
 func (s *Service) EnsureReady(mutating bool) error {
-	if err := s.store.EnsureLayout(); err != nil {
+	return s.ensureReady(context.Background(), mutating)
+}
+
+func (s *Service) ensureReady(ctx context.Context, mutating bool) error {
+	if !mutating {
+		return s.ensureDirectories()
+	}
+
+	if err := s.ensureReadyForWrite(); err != nil {
 		return err
 	}
 
-	if mutating {
-		if err := s.validateDependencies(); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return s.validateDependencies(ctx)
 }
 
-func (s *Service) validateDependencies() error {
+// ensureReadyForWrite prepares the home for a metadata mutation: directory
+// skeleton plus seed/repair under locks, without the runtime-dependency
+// validation that EnsureReady(mutating=true) performs. Metadata-only mutations
+// (project and environment-config writes) call it directly so they keep
+// working without limactl present.
+func (s *Service) ensureReadyForWrite() error {
+	if err := s.ensureDirectories(); err != nil {
+		return err
+	}
+
+	return s.seedAndRepair()
+}
+
+func (s *Service) ensureDirectories() error {
+	s.ready.directoriesOnce.Do(func() {
+		s.ready.directoriesErr = s.store.ensureDirectories()
+	})
+
+	return s.ready.directoriesErr
+}
+
+// seedAndRepair seeds built-in metadata and repairs stale files while holding
+// the environment-configs, projects, and nodes flocks (acquireLocks sorts its
+// keys, so the lock order stays deadlock-free). Holding the locks is what
+// keeps concurrent seeding from duplicating built-in environment configs
+// (TODO #20).
+func (s *Service) seedAndRepair() error {
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environment-configs", "projects", "nodes")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = lockSet.Close()
+	}()
+
+	return s.store.seedAndRepair(s.now())
+}
+
+func (s *Service) validateDependencies(ctx context.Context) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return dependencyUnavailable("git is required", err, nil)
 	}
@@ -152,20 +294,31 @@ func (s *Service) validateDependencies() error {
 		}
 	}
 
-	if _, err := s.lima.List(context.Background()); err != nil {
+	if _, err := s.lima.List(ctx); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (s *Service) Doctor(ctx context.Context) (DoctorReport, error) {
-	if err := s.store.EnsureLayout(); err != nil {
+// Doctor inspects the home without modifying it. With repair=true it first
+// runs the locked seed-and-repair pass (the same one mutating commands run),
+// which is the supported way to upgrade stale metadata from a read-only
+// workflow.
+func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error) {
+	if err := s.ensureDirectories(); err != nil {
 		return DoctorReport{}, err
 	}
 
 	report := DoctorReport{
 		Checks: []DoctorCheck{},
+	}
+
+	if repair {
+		if err := s.seedAndRepair(); err != nil {
+			return DoctorReport{}, err
+		}
+		report.Checks = append(report.Checks, DoctorCheck{Name: "repair", Status: "ok", Message: "seeded built-in metadata and repaired stale files"})
 	}
 
 	if err := validateConfig(s.cfg); err != nil {
@@ -223,14 +376,6 @@ func (s *Service) Doctor(ctx context.Context) (DoctorReport, error) {
 		report.Warnings = append(report.Warnings, incomplete...)
 	}
 
-	if orphans, err := s.store.OrphanedPatchStatusIndexes(); err != nil {
-		return DoctorReport{}, err
-	} else {
-		for _, orphan := range orphans {
-			report.Warnings = append(report.Warnings, "orphaned patch status index: "+orphan)
-		}
-	}
-
 	if info, err := os.Stat(s.cfg.MetadataRoot); err == nil {
 		if info.Mode().Perm()&0o077 != 0 {
 			report.Warnings = append(report.Warnings, "CODELIMA_HOME permissions are broader than user-private")
@@ -281,7 +426,7 @@ func (s *Service) ConfigSummary() map[string]any {
 
 func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (Project, error) {
 	_ = ctx
-	if err := s.EnsureReady(false); err != nil {
+	if err := s.ensureReadyForWrite(); err != nil {
 		return Project{}, err
 	}
 
@@ -355,7 +500,7 @@ func (s *Service) ProjectShow(value string) (Project, error) {
 }
 
 func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project, error) {
-	if err := s.EnsureReady(false); err != nil {
+	if err := s.ensureReadyForWrite(); err != nil {
 		return Project{}, err
 	}
 
@@ -490,8 +635,8 @@ func (s *Service) ProjectDelete(value string) (Project, error) {
 	return project, nil
 }
 
-func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectTreeNode, error) {
-	projects, nodes, err := s.projectTreeData(includeDeleted)
+func (s *Service) ProjectTree(ctx context.Context, rootQuery string, includeDeleted bool) ([]ProjectTreeNode, error) {
+	projects, nodes, err := s.projectTreeData(ctx, includeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -510,9 +655,9 @@ func (s *Service) ProjectTree(rootQuery string, includeDeleted bool) ([]ProjectT
 	return buildProjectTree(projects, nodes, roots), nil
 }
 
-func (s *Service) ProjectTreeByWorkspaceRoot(workspaceRoot string, includeDeleted bool) ([]ProjectTreeNode, error) {
+func (s *Service) ProjectTreeByWorkspaceRoot(ctx context.Context, workspaceRoot string, includeDeleted bool) ([]ProjectTreeNode, error) {
 	if strings.TrimSpace(workspaceRoot) == "" {
-		return s.ProjectTree("", includeDeleted)
+		return s.ProjectTree(ctx, "", includeDeleted)
 	}
 
 	rootPath, err := canonicalPath(workspaceRoot)
@@ -520,7 +665,7 @@ func (s *Service) ProjectTreeByWorkspaceRoot(workspaceRoot string, includeDelete
 		return nil, invalidArgument("workspace root must be resolvable", map[string]any{"path": workspaceRoot})
 	}
 
-	projects, nodes, err := s.projectTreeData(includeDeleted)
+	projects, nodes, err := s.projectTreeData(ctx, includeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +690,7 @@ func (s *Service) ProjectTreeByWorkspaceRoot(workspaceRoot string, includeDelete
 	return buildProjectTree(filteredProjects, filteredNodes, projectTreeVisibleRoots(filteredProjects)), nil
 }
 
-func (s *Service) projectTreeData(includeDeleted bool) ([]Project, []Node, error) {
+func (s *Service) projectTreeData(ctx context.Context, includeDeleted bool) ([]Project, []Node, error) {
 	if err := s.EnsureReady(false); err != nil {
 		return nil, nil, err
 	}
@@ -559,7 +704,7 @@ func (s *Service) projectTreeData(includeDeleted bool) ([]Project, []Node, error
 	if err != nil {
 		return nil, nil, err
 	}
-	nodes, err = s.reconcileNodes(context.Background(), nodes, true)
+	nodes, err = s.reconcileNodes(ctx, nodes, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -647,7 +792,7 @@ func pathWithinRoot(rootPath, targetPath string) bool {
 }
 
 func (s *Service) ProjectFork(ctx context.Context, input ProjectForkInput) (Project, error) {
-	if err := s.EnsureReady(true); err != nil {
+	if err := s.ensureReady(ctx, true); err != nil {
 		return Project{}, err
 	}
 
@@ -751,7 +896,10 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 }
 
 func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
-	if err := s.EnsureReady(true); err != nil {
+	s.log().Debug("operation started", "op", "node.create", "project", input.Project)
+	defer s.logOperation("node.create", s.now(), &err)
+
+	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
 
@@ -871,6 +1019,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
+	s.logLima("create", node.ID)
 	if err := s.lima.Create(ctx, project, node, s.store.nodeTemplatePath(nodeID)); err != nil {
 		return Node{}, err
 	}
@@ -889,7 +1038,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	return node, nil
 }
 
-func (s *Service) NodeList(includeDeleted bool) ([]Node, error) {
+func (s *Service) NodeList(ctx context.Context, includeDeleted bool) ([]Node, error) {
 	if err := s.EnsureReady(false); err != nil {
 		return nil, err
 	}
@@ -899,11 +1048,19 @@ func (s *Service) NodeList(includeDeleted bool) ([]Node, error) {
 		return nil, err
 	}
 
-	return s.reconcileNodes(context.Background(), nodes, true)
+	return s.reconcileNodes(ctx, nodes, false)
 }
 
 func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult, error) {
-	if err := s.EnsureReady(false); err != nil {
+	// A dry run only inspects the home, so it stays on the read tier and never
+	// requires a runtime backend. Applying can tear down live runtime instances,
+	// so it takes the full write-readiness path (seed/repair under locks plus
+	// runtime-dependency validation, which requires limactl).
+	if apply {
+		if err := s.EnsureReady(true); err != nil {
+			return IncompleteNodeCleanupResult{}, err
+		}
+	} else if err := s.EnsureReady(false); err != nil {
 		return IncompleteNodeCleanupResult{}, err
 	}
 
@@ -920,16 +1077,49 @@ func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult
 		return IncompleteNodeCleanupResult{}, err
 	}
 
-	if apply && len(items) > 0 {
-		if err := s.store.RemoveIncompleteNodeMetadata(items); err != nil {
+	result := IncompleteNodeCleanupResult{DryRun: !apply, Items: items}
+	if !apply || len(items) == 0 {
+		return result, nil
+	}
+
+	// Consult the runtime before deleting any metadata. An incomplete node dir
+	// still carries its lima-instance.ref, so os.RemoveAll'ing it while the
+	// instance is live orphans a running VM and loses the only pointer back to
+	// it (TODO #10). Tear the instance down first; only then is removing the
+	// metadata that references it safe. Dirs with no matching live instance keep
+	// the historical behavior of a straight metadata removal.
+	observations, err := s.lima.List(context.Background())
+	if err != nil {
+		return IncompleteNodeCleanupResult{}, err
+	}
+
+	var teardownFailures []string
+	for _, item := range items {
+		if instanceName := strings.TrimSpace(item.InstanceName); instanceName != "" {
+			if _, live := findObservation(observations, instanceName); live {
+				if delErr := s.lima.Delete(context.Background(), Project{}, Node{LimaInstanceName: instanceName}); delErr != nil {
+					// Leave the dir (and its ref) in place so a retry or a
+					// manual limactl delete can still find the instance.
+					teardownFailures = append(teardownFailures, instanceName)
+					continue
+				}
+			}
+		}
+
+		if err := s.store.RemoveIncompleteNodeMetadata([]IncompleteNodeMetadata{item}); err != nil {
 			return IncompleteNodeCleanupResult{}, err
 		}
 	}
 
-	return IncompleteNodeCleanupResult{
-		DryRun: !apply,
-		Items:  items,
-	}, nil
+	if len(teardownFailures) > 0 {
+		return result, externalCommandFailed(
+			"failed to tear down runtime instances for incomplete nodes; their metadata was kept",
+			fmt.Errorf("instances still present: %s", strings.Join(teardownFailures, ", ")),
+			map[string]any{"instances": teardownFailures},
+		)
+	}
+
+	return result, nil
 }
 
 func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {
@@ -942,11 +1132,15 @@ func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {
 		return Node{}, err
 	}
 
-	return s.reconcileNode(ctx, node, true)
+	// Showing a node is a read: merge the live observation in memory only.
+	return s.reconcileNode(ctx, node, false)
 }
 
-func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
-	if err := s.EnsureReady(true); err != nil {
+func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err error) {
+	s.log().Debug("operation started", "op", "node.start", "node", value)
+	defer s.logOperation("node.start", s.now(), &err)
+
+	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
 
@@ -979,6 +1173,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 	}
 
 	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != "running" {
+		s.logLima("start", node.ID)
 		if err := s.lima.Start(ctx, project, node); err != nil {
 			return Node{}, err
 		}
@@ -1000,8 +1195,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 			if err := s.prepareGuestWorkspace(ctx, project, node); err != nil {
 				node.Status = NodeStatusFailed
 				node.UpdatedAt = s.now()
-				_ = s.store.SaveNode(node, bootstrap, nil)
-				_ = s.store.AppendNodeEvent(node.ID, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"workspace_path": project.WorkspacePath, "error": err.Error()}})
+				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"workspace_path": project.WorkspacePath, "error": err.Error()}})
 				return Node{}, err
 			}
 
@@ -1016,8 +1210,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 			if err := s.runGuestCommand(ctx, node, command); err != nil {
 				node.Status = NodeStatusFailed
 				node.UpdatedAt = s.now()
-				_ = s.store.SaveNode(node, bootstrap, nil)
-				_ = s.store.AppendNodeEvent(node.ID, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"command": command, "error": err.Error()}})
+				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"command": command, "error": err.Error()}})
 				return Node{}, err
 			}
 		}
@@ -1032,8 +1225,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 	if err := s.runGuestCommand(ctx, node, bootstrap.ValidationCommand); err != nil {
 		node.Status = NodeStatusFailed
 		node.UpdatedAt = s.now()
-		_ = s.store.SaveNode(node, bootstrap, nil)
-		_ = s.store.AppendNodeEvent(node.ID, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"validation_command": bootstrap.ValidationCommand, "error": err.Error()}})
+		s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"validation_command": bootstrap.ValidationCommand, "error": err.Error()}})
 		return Node{}, err
 	}
 
@@ -1050,8 +1242,11 @@ func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
 	return s.reconcileNode(ctx, node, true)
 }
 
-func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
-	if err := s.EnsureReady(true); err != nil {
+func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error) {
+	s.log().Debug("operation started", "op", "node.stop", "node", value)
+	defer s.logOperation("node.stop", s.now(), &err)
+
+	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
 
@@ -1092,6 +1287,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
 		return node, nil
 	}
 
+	s.logLima("stop", node.ID)
 	if err := s.lima.Stop(ctx, project, node); err != nil {
 		return Node{}, err
 	}
@@ -1110,7 +1306,10 @@ func (s *Service) NodeStop(ctx context.Context, value string) (Node, error) {
 }
 
 func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
-	if err := s.EnsureReady(true); err != nil {
+	s.log().Debug("operation started", "op", "node.clone", "source", input.SourceNode)
+	defer s.logOperation("node.clone", s.now(), &err)
+
+	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
 
@@ -1206,6 +1405,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		UpdatedAt:             s.now(),
 	}
 
+	s.logLima("clone", childNode.ID)
 	if err := s.lima.Clone(ctx, sourceProject, sourceNode, childNode); err != nil {
 		return Node{}, err
 	}
@@ -1242,7 +1442,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 }
 
 func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
-	if err := s.EnsureReady(true); err != nil {
+	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
 
@@ -1338,308 +1538,6 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 		Stdout: s.stdout,
 		Stderr: s.stderr,
 	})
-}
-
-func (s *Service) PatchPropose(ctx context.Context, input PatchProposeInput) (PatchProposal, error) {
-	if err := s.EnsureReady(true); err != nil {
-		return PatchProposal{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "patches")
-	if err != nil {
-		return PatchProposal{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	source, err := s.store.ProjectByIDOrSlug(input.SourceProject)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	target, err := s.store.ProjectByIDOrSlug(input.TargetProject)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	direction, baseProject, baseSnapshotID, err := resolveLineageEdge(source, target)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	baseSnapshot, err := s.store.LoadSnapshot(baseProject.ID, baseSnapshotID)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	now := s.now()
-	sourceSnapshotID := newID()
-	sourceSnapshot, err := captureSnapshot(source, sourceSnapshotID, "patch_source", s.store.snapshotTreePath(source.ID, sourceSnapshotID), s.cfg.Snapshot.Excludes, now)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	targetSnapshotID := newID()
-	targetSnapshot, err := captureSnapshot(target, targetSnapshotID, "patch_target", s.store.snapshotTreePath(target.ID, targetSnapshotID), s.cfg.Snapshot.Excludes, now)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.SaveSnapshot(source.ID, sourceSnapshot); err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.SaveSnapshot(target.ID, targetSnapshot); err != nil {
-		return PatchProposal{}, err
-	}
-
-	patchBytes, summary, err := buildPatch(ctx, baseSnapshot.TreeRoot, sourceSnapshot.TreeRoot)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	proposal := PatchProposal{
-		ID:               newID(),
-		Direction:        direction,
-		SourceProjectID:  source.ID,
-		TargetProjectID:  target.ID,
-		BaseSnapshotID:   baseSnapshot.ID,
-		SourceSnapshotID: sourceSnapshot.ID,
-		TargetSnapshotID: targetSnapshot.ID,
-		Status:           PatchStatusSubmitted,
-		PatchPath:        s.store.patchDiffPath(newID()),
-		DiffSummary:      summary,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-
-	if input.SourceNode != "" {
-		sourceNode, err := s.store.NodeByIDOrSlug(input.SourceNode)
-		if err != nil {
-			return PatchProposal{}, err
-		}
-		proposal.SourceNodeID = sourceNode.ID
-	}
-
-	if input.TargetNode != "" {
-		targetNode, err := s.store.NodeByIDOrSlug(input.TargetNode)
-		if err != nil {
-			return PatchProposal{}, err
-		}
-		proposal.TargetNodeID = targetNode.ID
-	}
-
-	proposal.PatchPath = s.store.patchDiffPath(proposal.ID)
-	if err := s.store.SavePatch(proposal, patchBytes); err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.AppendPatchEvent(proposal.ID, Event{Timestamp: now, Type: "patch.proposed"}); err != nil {
-		return PatchProposal{}, err
-	}
-
-	return proposal, nil
-}
-
-func (s *Service) PatchList(status string) ([]PatchProposal, error) {
-	if err := s.EnsureReady(false); err != nil {
-		return nil, err
-	}
-
-	return s.store.ListPatches(status)
-}
-
-func (s *Service) PatchShow(value string) (PatchProposal, []Event, error) {
-	if err := s.EnsureReady(false); err != nil {
-		return PatchProposal{}, nil, err
-	}
-
-	proposal, err := s.store.PatchByID(value)
-	if err != nil {
-		return PatchProposal{}, nil, err
-	}
-
-	events, err := s.store.PatchEvents(proposal.ID)
-	if err != nil {
-		return PatchProposal{}, nil, err
-	}
-
-	return proposal, events, nil
-}
-
-func (s *Service) PatchApprove(value, actor, note string) (PatchProposal, error) {
-	if err := s.EnsureReady(true); err != nil {
-		return PatchProposal{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "patches")
-	if err != nil {
-		return PatchProposal{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	proposal, err := s.store.PatchByID(value)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	if proposal.Status != PatchStatusSubmitted {
-		return PatchProposal{}, preconditionFailed("patch must be submitted before approval", map[string]any{"status": proposal.Status})
-	}
-
-	now := s.now()
-	proposal.Status = PatchStatusApproved
-	proposal.UpdatedAt = now
-	proposal.Approval = &ApprovalMetadata{
-		Actor:     actor,
-		Timestamp: now,
-		Note:      note,
-	}
-
-	if err := s.store.SavePatch(proposal, nil); err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.AppendPatchEvent(proposal.ID, Event{Timestamp: now, Type: "patch.approved", Fields: map[string]any{"actor": actor}}); err != nil {
-		return PatchProposal{}, err
-	}
-
-	return proposal, nil
-}
-
-func (s *Service) PatchReject(value, actor, note string) (PatchProposal, error) {
-	if err := s.EnsureReady(true); err != nil {
-		return PatchProposal{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "patches")
-	if err != nil {
-		return PatchProposal{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	proposal, err := s.store.PatchByID(value)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	if proposal.Status != PatchStatusSubmitted && proposal.Status != PatchStatusApproved {
-		return PatchProposal{}, preconditionFailed("patch can only be rejected from submitted or approved", map[string]any{"status": proposal.Status})
-	}
-
-	proposal.Status = PatchStatusRejected
-	proposal.UpdatedAt = s.now()
-	if note != "" || actor != "" {
-		proposal.Approval = &ApprovalMetadata{Actor: actor, Timestamp: s.now(), Note: note}
-	}
-
-	if err := s.store.SavePatch(proposal, nil); err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.AppendPatchEvent(proposal.ID, Event{Timestamp: s.now(), Type: "patch.rejected", Fields: map[string]any{"actor": actor}}); err != nil {
-		return PatchProposal{}, err
-	}
-
-	return proposal, nil
-}
-
-func (s *Service) PatchApply(ctx context.Context, value string) (PatchProposal, error) {
-	if err := s.EnsureReady(true); err != nil {
-		return PatchProposal{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "patches")
-	if err != nil {
-		return PatchProposal{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	proposal, err := s.store.PatchByID(value)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	if proposal.Status != PatchStatusApproved {
-		return PatchProposal{}, preconditionFailed("patch must be approved before apply", map[string]any{"status": proposal.Status})
-	}
-
-	targetProject, err := s.store.ProjectByID(proposal.TargetProjectID)
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	targetSnapshotID := newID()
-	currentTarget, err := captureSnapshot(targetProject, targetSnapshotID, "patch_target", s.store.snapshotTreePath(targetProject.ID, targetSnapshotID), s.cfg.Snapshot.Excludes, s.now())
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.SaveSnapshot(targetProject.ID, currentTarget); err != nil {
-		return PatchProposal{}, err
-	}
-
-	stageDir, err := applyPatchChecked(ctx, s.store.patchDiffPath(proposal.ID), currentTarget)
-	if err != nil {
-		proposal.Status = PatchStatusFailed
-		proposal.UpdatedAt = s.now()
-		proposal.ConflictSummary = &ConflictSummary{Message: "patch apply preflight failed", Details: err.Error()}
-		if saveErr := s.store.SavePatch(proposal, nil); saveErr != nil {
-			return PatchProposal{}, saveErr
-		}
-		_ = s.store.AppendPatchEvent(proposal.ID, Event{Timestamp: proposal.UpdatedAt, Type: "patch.apply.failed", Fields: map[string]any{"error": err.Error()}})
-		return proposal, err
-	}
-	defer func() {
-		_ = os.RemoveAll(stageDir)
-	}()
-
-	if err := syncWorkspaceFromTree(currentTarget, stageDir, targetProject.WorkspacePath); err != nil {
-		_ = restoreWorkspace(currentTarget, targetProject.WorkspacePath)
-		proposal.Status = PatchStatusFailed
-		proposal.UpdatedAt = s.now()
-		proposal.ApplyResult = &ApplyResult{
-			AppliedAt:    proposal.UpdatedAt,
-			RecoveryNote: "workspace was restored from pre-apply snapshot after promotion failure",
-		}
-		if saveErr := s.store.SavePatch(proposal, nil); saveErr != nil {
-			return PatchProposal{}, saveErr
-		}
-		return PatchProposal{}, err
-	}
-
-	postSnapshotID := newID()
-	postSnapshot, err := captureSnapshot(targetProject, postSnapshotID, "post_apply", s.store.snapshotTreePath(targetProject.ID, postSnapshotID), s.cfg.Snapshot.Excludes, s.now())
-	if err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.SaveSnapshot(targetProject.ID, postSnapshot); err != nil {
-		return PatchProposal{}, err
-	}
-
-	proposal.Status = PatchStatusApplied
-	proposal.UpdatedAt = s.now()
-	proposal.ApplyResult = &ApplyResult{
-		AppliedAt:      proposal.UpdatedAt,
-		PostSnapshotID: postSnapshot.ID,
-	}
-	if err := s.store.SavePatch(proposal, nil); err != nil {
-		return PatchProposal{}, err
-	}
-
-	if err := s.store.AppendPatchEvent(proposal.ID, Event{Timestamp: proposal.UpdatedAt, Type: "patch.applied", Fields: map[string]any{"post_snapshot_id": postSnapshot.ID}}); err != nil {
-		return PatchProposal{}, err
-	}
-
-	return proposal, nil
 }
 
 func (s *Service) ensureUniqueNodeSlug(slug string) error {
@@ -2078,17 +1976,6 @@ func findObservation(observations []RuntimeObservation, instanceName string) (Ru
 	}
 
 	return RuntimeObservation{}, false
-}
-
-func resolveLineageEdge(source, target Project) (direction string, baseProject Project, baseSnapshotID string, err error) {
-	switch {
-	case source.ParentProjectID == target.ID:
-		return PatchDirectionChildToParent, target, source.ForkBaseSnapshotID, nil
-	case target.ParentProjectID == source.ID:
-		return PatchDirectionParentToChild, source, target.ForkBaseSnapshotID, nil
-	default:
-		return "", Project{}, "", preconditionFailed("projects are not direct lineage neighbors", map[string]any{"source_project_id": source.ID, "target_project_id": target.ID})
-	}
 }
 
 func cloneMap(source map[string]string) map[string]string {

@@ -83,6 +83,8 @@ rm -rf "$WORK_ROOT"
 
 This flow verifies that `doctor` reports incomplete node metadata directories left by failed node creation attempts, and that `node cleanup-incomplete` supports both dry-run inspection and explicit removal.
 
+Note: `codelima doctor` is read-only — it reports without modifying the home. Run `codelima doctor --repair` to seed built-in metadata and upgrade stale config/project/node files (the same locked pass every mutating command runs). On a fresh home, expect `environment list` to be empty until the first mutating command, `doctor --repair`, or the first TUI launch (TUI startup runs the locked seed pass once as a session start; ADR 57).
+
 Prerequisites:
 
 - run `make build`
@@ -129,6 +131,19 @@ Expected result:
 - the dry-run leaves the directory on disk
 - the apply output includes `partial-node` and `removed`
 - the apply removes the incomplete node directory
+
+Live-instance teardown-first cleanup (requires `limactl`; work item 0.4, ADR 58). The steps above cover an incomplete dir with no live runtime instance; this sub-flow covers one whose `lima-instance.ref` still names a running instance:
+
+- create a real instance so `limactl list` shows it, then write an incomplete node dir (no `node.yaml`) whose `lima-instance.ref` names that instance
+- run `node cleanup-incomplete` (dry-run) and confirm it does not touch the runtime — `limactl list` still shows the instance
+- run `node cleanup-incomplete --apply`
+
+Expected result (live-instance sub-flow):
+
+- the apply output includes the node id and `removed`, and the incomplete dir is gone
+- `limactl list` no longer shows the instance — it was torn down before its metadata was removed
+- negative case: if teardown fails, the command exits non-zero with `failed to tear down runtime instances for incomplete nodes` naming the instance, and the incomplete dir is left in place for retry
+- note: `--apply` now requires `limactl`; the plain dry-run (`node cleanup-incomplete`) does not
 
 Cleanup:
 
@@ -519,6 +534,8 @@ Inside the TUI verify:
 - refocus the `qa-tui-a` or `qa-tui-b` terminal, print an OSC 8 hyperlink such as `printf '\033]8;;https://example.com\033\\example\033]8;;\033\\\n'`, click the visible link text, and confirm the host opens it
 - refocus a node terminal, run `printf '\033]52;c;dm0tY2xpcGJvYXJkLXFh\007'`, and confirm the host clipboard contains `vm-clipboard-qa`
 - in a focused node terminal, run `sudo apt-get install -y sl` and confirm the embedded terminal remains responsive past the `Reading database ...` progress output and returns to a prompt
+- **Messages view** (work item 0.5): from the tree, press `m` to open the scrollable messages surface. Confirm it shows recent status messages newest-last, that Up/Down and PgUp/PgDn scroll, `g`/`G` jump to top/bottom, and Esc returns to the tree. Trigger a background operation that fails (e.g. `Start Node` on a node whose bootstrap command fails); after it completes, reopen the messages view and confirm the failed operation's summary and output are still listed (they are no longer discarded), and that a background refresh failure appears at warn level.
+- **Ctrl+C cleanup**: with the TUI running and at least one node terminal tab open (a `codelima shell <node>` session visible), press Ctrl+C in the host terminal (or `kill -TERM <tui-pid>` from another shell). Expected: the TUI exits promptly; the host terminal is restored to cooked mode (typed input echoes, no raw-mode artifacts, cursor visible); `ps aux | grep -E 'limactl shell|ssh'` shows no leftover VM shell processes from the closed tabs. Relaunch the TUI afterwards to continue the remaining steps.
 
 - select `qa-tui-refresh`, press `d`, delete it, and confirm it disappears from project `qa-tui-root`
 - select `qa-tui-b-clone`, press `d`, delete the cloned node, and confirm it disappears from project `qa-tui-root`

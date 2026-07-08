@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/brianrackle/test_lima/internal/codelima/terminal"
 )
 
 type TUIRunner interface {
@@ -90,12 +92,20 @@ type tuiTreeEntry struct {
 func (e tuiTreeEntry) key() string {
 	switch e.kind {
 	case tuiTreeEntryProject:
-		return "project:" + e.project.ID
+		return terminal.ProjectTarget(e.project.ID).String()
 	case tuiTreeEntryNode:
-		return "node:" + e.node.ID
+		return terminal.NodeTarget(e.node.ID).String()
 	default:
 		return ""
 	}
+}
+
+// isTargetKind reports whether key parses (via the sole ParseTargetKey
+// chokepoint) as a target of the given kind. It replaces the scattered
+// strings.HasPrefix(key, "project:"/"node:") boolean checks.
+func isTargetKind(key string, kind terminal.TargetKind) bool {
+	target, err := terminal.ParseTargetKey(key)
+	return err == nil && target.Kind == kind
 }
 
 type tuiState struct {
@@ -249,7 +259,7 @@ func (s *tuiState) findEntryByKey(key string) int {
 }
 
 func (s *tuiState) findProjectEntry(projectID string) int {
-	return s.findEntryByKey("project:" + projectID)
+	return s.findEntryByKey(terminal.ProjectTarget(projectID).String())
 }
 
 func (s *tuiState) selectIndex(index int) error {
@@ -442,7 +452,7 @@ func (s *tuiState) toggleFocus() error {
 }
 
 func (s *tuiState) toggleHostTerminal() error {
-	if s.hostTerminalReturnKey != "" && strings.HasPrefix(s.activeTerminalTargetKey(), "project:") {
+	if s.hostTerminalReturnKey != "" && isTargetKind(s.activeTerminalTargetKey(), terminal.TargetProject) {
 		returnEntry, ok := s.entryForKey(s.hostTerminalReturnKey)
 		s.hostTerminalReturnKey = ""
 		if !ok {
@@ -548,12 +558,12 @@ func (s *tuiState) activeNode() (Node, bool) {
 		return entry.node, true
 	}
 
-	targetKey := s.activeTerminalTargetKey()
-	if !strings.HasPrefix(targetKey, "node:") {
+	target, err := terminal.ParseTargetKey(s.activeTerminalTargetKey())
+	if err != nil || target.Kind != terminal.TargetNode {
 		return Node{}, false
 	}
 
-	node, ok := s.nodesByID[strings.TrimPrefix(targetKey, "node:")]
+	node, ok := s.nodesByID[target.ID]
 	return node, ok
 }
 
@@ -566,8 +576,8 @@ func (s *tuiState) activeProject() (Project, bool) {
 		return entry.project, true
 	}
 
-	if targetKey := s.activeTerminalTargetKey(); strings.HasPrefix(targetKey, "project:") {
-		project, ok := s.projectsByID[strings.TrimPrefix(targetKey, "project:")]
+	if target, err := terminal.ParseTargetKey(s.activeTerminalTargetKey()); err == nil && target.Kind == terminal.TargetProject {
+		project, ok := s.projectsByID[target.ID]
 		return project, ok
 	}
 	if node, ok := s.activeNode(); ok {
@@ -583,7 +593,7 @@ func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) erro
 	if selectedKey == "" {
 		selectedKey = s.selectedEntry().key()
 	}
-	hostOverrideActive := s.hostTerminalReturnKey != "" && strings.HasPrefix(s.terminalTarget, "project:")
+	hostOverrideActive := s.hostTerminalReturnKey != "" && isTargetKind(s.terminalTarget, terminal.TargetProject)
 	hostOverrideActiveKey := s.terminalTarget
 	hostOverrideReturnKey := s.hostTerminalReturnKey
 	restoreHostOverride := func() {
@@ -666,22 +676,27 @@ func (s *tuiState) entryForKey(key string) (tuiTreeEntry, bool) {
 	if index := s.findEntryByKey(key); index >= 0 {
 		return s.entries[index], true
 	}
-	if strings.HasPrefix(key, "project:") {
-		project, ok := s.projectsByID[strings.TrimPrefix(key, "project:")]
+	target, err := terminal.ParseTargetKey(key)
+	if err != nil {
+		return tuiTreeEntry{}, false
+	}
+	switch target.Kind {
+	case terminal.TargetProject:
+		project, ok := s.projectsByID[target.ID]
 		if !ok {
 			return tuiTreeEntry{}, false
 		}
 		return tuiTreeEntry{kind: tuiTreeEntryProject, project: project}, true
-	}
-	if strings.HasPrefix(key, "node:") {
-		node, ok := s.nodesByID[strings.TrimPrefix(key, "node:")]
+	case terminal.TargetNode:
+		node, ok := s.nodesByID[target.ID]
 		if !ok {
 			return tuiTreeEntry{}, false
 		}
 		project := s.projectsByID[node.ProjectID]
 		return tuiTreeEntry{kind: tuiTreeEntryNode, project: project, node: node, parentProjectID: node.ProjectID}, true
+	default:
+		return tuiTreeEntry{}, false
 	}
-	return tuiTreeEntry{}, false
 }
 
 func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
@@ -745,11 +760,11 @@ func (s *tuiState) expandToKey(key string) bool {
 func projectLineageForKey(nodes []ProjectTreeNode, key string, path []string) ([]string, bool) {
 	for _, projectNode := range nodes {
 		nextPath := append(append([]string(nil), path...), projectNode.Project.ID)
-		if key == "project:"+projectNode.Project.ID {
+		if key == terminal.ProjectTarget(projectNode.Project.ID).String() {
 			return nextPath, true
 		}
 		for _, childNode := range projectNode.Nodes {
-			if key == "node:"+childNode.ID {
+			if key == terminal.NodeTarget(childNode.ID).String() {
 				return nextPath, true
 			}
 		}

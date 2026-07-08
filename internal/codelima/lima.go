@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -408,7 +407,7 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 
 	if interactive {
 		for _, preCommand := range resolvedCommands[:len(resolvedCommands)-1] {
-			_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, preCommand, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
+			_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, preCommand, c.shellStdout(streams), c.shellStderr(streams))
 			if runErr != nil {
 				return externalCommandFailed(
 					"limactl shell failed",
@@ -433,7 +432,7 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 	}
 
 	for _, resolvedCommand := range resolvedCommands {
-		_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, resolvedCommand, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
+		_, stderr, runErr := c.runCommandString(ctx, 10*time.Minute, resolvedCommand, c.shellStdout(streams), c.shellStderr(streams))
 		if runErr != nil {
 			return externalCommandFailed(
 				"limactl shell failed",
@@ -444,6 +443,26 @@ func (c *ExecLimaClient) Shell(ctx context.Context, project Project, node Node, 
 	}
 
 	return nil
+}
+
+// shellStdout resolves the writer for shell command stdout. When the caller
+// supplies ShellStreams.Stdout it wins outright; the client's own Stdout is
+// only a fallback for callers that pass no stream. Layering both on top of one
+// another (as an earlier version did) doubled every byte whenever the two
+// writers were equivalent-but-not-pointer-identical — the TODO #6 bug.
+func (c *ExecLimaClient) shellStdout(streams ShellStreams) io.Writer {
+	if streams.Stdout != nil {
+		return streams.Stdout
+	}
+	return c.Stdout
+}
+
+// shellStderr mirrors shellStdout for the stderr stream.
+func (c *ExecLimaClient) shellStderr(streams ShellStreams) io.Writer {
+	if streams.Stderr != nil {
+		return streams.Stderr
+	}
+	return c.Stderr
 }
 
 func (c *ExecLimaClient) runCommandString(ctx context.Context, timeout time.Duration, command string, stdoutWriter, stderrWriter io.Writer) ([]byte, []byte, error) {
@@ -482,20 +501,14 @@ func (c *ExecLimaClient) runWithOutputs(ctx context.Context, timeout time.Durati
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
+// multiWriter fans out to every non-nil writer. Callers pair a capture buffer
+// with an optional caller-provided writer, so nil-filtering is all that is
+// required — the writers are never the same destination by construction, which
+// is why no pointer/type de-dup is needed here anymore.
 func multiWriter(writers ...io.Writer) io.Writer {
 	filtered := make([]io.Writer, 0, len(writers))
 	for _, writer := range writers {
 		if writer == nil {
-			continue
-		}
-		duplicate := false
-		for _, existing := range filtered {
-			if sameWriter(existing, writer) {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
 			continue
 		}
 		filtered = append(filtered, writer)
@@ -509,18 +522,4 @@ func multiWriter(writers ...io.Writer) io.Writer {
 	default:
 		return io.MultiWriter(filtered...)
 	}
-}
-
-func sameWriter(a, b io.Writer) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-
-	leftType := reflect.TypeOf(a)
-	rightType := reflect.TypeOf(b)
-	if leftType != rightType || !leftType.Comparable() {
-		return false
-	}
-
-	return a == b
 }

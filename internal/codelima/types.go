@@ -26,16 +26,6 @@ const (
 	NodeStatusFailed       = "failed"
 	NodeStatusTerminating  = "terminating"
 	NodeStatusTerminated   = "terminated"
-
-	PatchDirectionChildToParent = "child_to_parent"
-	PatchDirectionParentToChild = "parent_to_child"
-
-	PatchStatusDraft     = "draft"
-	PatchStatusSubmitted = "submitted"
-	PatchStatusApproved  = "approved"
-	PatchStatusApplied   = "applied"
-	PatchStatusRejected  = "rejected"
-	PatchStatusFailed    = "failed"
 )
 
 type LimaCommandTemplates struct {
@@ -288,51 +278,6 @@ type SnapshotEntry struct {
 	Size       int64  `json:"size,omitempty" yaml:"size,omitempty"`
 	SHA256     string `json:"sha256,omitempty" yaml:"sha256,omitempty"`
 	LinkTarget string `json:"link_target,omitempty" yaml:"link_target,omitempty"`
-}
-
-type ApprovalMetadata struct {
-	Actor     string    `json:"actor" yaml:"actor"`
-	Timestamp time.Time `json:"timestamp" yaml:"timestamp"`
-	Note      string    `json:"note,omitempty" yaml:"note,omitempty"`
-}
-
-type DiffSummary struct {
-	FilesChanged  int      `json:"files_changed" yaml:"files_changed"`
-	AddedFiles    int      `json:"added_files" yaml:"added_files"`
-	ModifiedFiles int      `json:"modified_files" yaml:"modified_files"`
-	DeletedFiles  int      `json:"deleted_files" yaml:"deleted_files"`
-	Paths         []string `json:"paths" yaml:"paths"`
-}
-
-type ConflictSummary struct {
-	Message string `json:"message" yaml:"message"`
-	Details string `json:"details,omitempty" yaml:"details,omitempty"`
-}
-
-type ApplyResult struct {
-	AppliedAt      time.Time `json:"applied_at" yaml:"applied_at"`
-	PostSnapshotID string    `json:"post_snapshot_id" yaml:"post_snapshot_id"`
-	RecoveryNote   string    `json:"recovery_note,omitempty" yaml:"recovery_note,omitempty"`
-}
-
-type PatchProposal struct {
-	ID               string            `json:"id" yaml:"id"`
-	Direction        string            `json:"direction" yaml:"direction"`
-	SourceProjectID  string            `json:"source_project_id" yaml:"source_project_id"`
-	SourceNodeID     string            `json:"source_node_id,omitempty" yaml:"source_node_id,omitempty"`
-	TargetProjectID  string            `json:"target_project_id" yaml:"target_project_id"`
-	TargetNodeID     string            `json:"target_node_id,omitempty" yaml:"target_node_id,omitempty"`
-	BaseSnapshotID   string            `json:"base_snapshot_id" yaml:"base_snapshot_id"`
-	SourceSnapshotID string            `json:"source_snapshot_id" yaml:"source_snapshot_id"`
-	TargetSnapshotID string            `json:"target_snapshot_id" yaml:"target_snapshot_id"`
-	Status           string            `json:"status" yaml:"status"`
-	PatchPath        string            `json:"patch_path" yaml:"patch_path"`
-	DiffSummary      DiffSummary       `json:"diff_summary" yaml:"diff_summary"`
-	ConflictSummary  *ConflictSummary  `json:"conflict_summary,omitempty" yaml:"conflict_summary,omitempty"`
-	Approval         *ApprovalMetadata `json:"approval,omitempty" yaml:"approval,omitempty"`
-	ApplyResult      *ApplyResult      `json:"apply_result,omitempty" yaml:"apply_result,omitempty"`
-	CreatedAt        time.Time         `json:"created_at" yaml:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at" yaml:"updated_at"`
 }
 
 type DoctorReport struct {

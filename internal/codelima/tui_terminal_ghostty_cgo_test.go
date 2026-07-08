@@ -4,15 +4,19 @@ package codelima
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -21,6 +25,116 @@ import (
 )
 
 var ghosttyStderrCaptureMu sync.Mutex
+
+var ghosttyGrandchildPIDPattern = regexp.MustCompile(`GRANDCHILD=(\d+)`)
+
+func waitForProcessGone(t *testing.T, pid int, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("process %d is still alive %v after Close", pid, timeout)
+}
+
+func TestCloseKillsGrandchildProcesses(t *testing.T) {
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{
+			// The grandchild dies from the SIGHUP delivered when the PTY
+			// master closes; Close must not need to escalate.
+			name:   "sighup-default",
+			script: `sleep 300 & echo "GRANDCHILD=$!"; exec sleep 300`,
+		},
+		{
+			// Mirrors real node-tab chains (limactl/ssh descendants that
+			// survive hangup): Close must escalate to a process-group kill.
+			name:   "sighup-ignored",
+			script: `trap '' HUP; sleep 300 & echo "GRANDCHILD=$!"; exec sleep 300`,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+			if err != nil {
+				t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+			}
+			defer terminal.Close()
+
+			ghostty, ok := terminal.(*ghosttyTUITerminal)
+			if !ok {
+				t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+			}
+
+			cmd := exec.Command("/bin/sh", "-c", tc.script)
+			if err := ghostty.Start(cmd); err != nil {
+				t.Fatalf("ghostty.Start() error = %v", err)
+			}
+
+			vx := newRenderTestVaxis(t, 80, 24)
+			defer vx.Close()
+
+			grandchildPID := 0
+			waitForCondition(t, 5*time.Second, func() bool {
+				win := vx.Window()
+				win.Clear()
+				ghostty.Draw(win)
+				match := ghosttyGrandchildPIDPattern.FindStringSubmatch(renderedScreenText(t, vx, 80, 24))
+				if match == nil {
+					return false
+				}
+				pid, err := strconv.Atoi(match[1])
+				if err != nil || pid <= 0 {
+					return false
+				}
+				grandchildPID = pid
+				return true
+			}, "grandchild pid to appear in the rendered terminal")
+			t.Cleanup(func() {
+				_ = syscall.Kill(grandchildPID, syscall.SIGKILL)
+			})
+
+			terminal.Close()
+
+			waitForProcessGone(t, grandchildPID, 3*time.Second)
+		})
+	}
+}
+
+func TestCloseReapsDirectChildWithoutZombie(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", "exec sleep 300")
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+
+	terminal.Close()
+
+	if cmd.ProcessState == nil {
+		t.Fatal("direct child was not reaped when Close returned")
+	}
+	if err := syscall.Kill(cmd.Process.Pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("direct child pid %d still signalable after Close, kill(pid, 0) = %v", cmd.Process.Pid, err)
+	}
+}
 
 type ghosttyFakePTYWriteStep struct {
 	n   int
@@ -1187,5 +1301,48 @@ func runGhosttySttyRawPrompt(t *testing.T, cmd *exec.Cmd, readyPath string, resu
 
 	if got := strings.TrimSpace(string(output)); !strings.HasPrefix(got, "ok:") {
 		t.Fatalf("expected stty restore to succeed, got %q", got)
+	}
+}
+
+// TestGhosttyStderrCaptureDoesNotDeadlock exercises the work-item-0.5 change
+// that replaced the /dev/null stderr sink in withGhosttyStderrSuppressed with a
+// pipe drained by a logging goroutine. It feeds enough warning-triggering bridge
+// calls to overflow a pipe buffer if nothing drained it, and asserts the calls
+// complete: a stalled reader would block libghostty's writes to fd 2 and hang.
+// Exact log content is not assertable (libghostty may print nothing), so this
+// asserts the plumbing, not the output.
+func TestGhosttyStderrCaptureDoesNotDeadlock(t *testing.T) {
+	ghosttyStderrCaptureMu.Lock()
+	defer ghosttyStderrCaptureMu.Unlock()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	// Point the libghostty capture at a debug-enabled sink so the drain
+	// goroutine actually formats each captured line; restore afterwards.
+	original := packageLog()
+	setPackageLogger(newTextLogger(io.Discard, parseLogLevel("debug")))
+	t.Cleanup(func() { setPackageLogger(original) })
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 2000; i++ {
+			ghostty.ingestPTY([]byte("\x1b[?5m"))
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("ghostty stderr capture deadlocked: warning-generating bridge calls did not complete")
 	}
 }

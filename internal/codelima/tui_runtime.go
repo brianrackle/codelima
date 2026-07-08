@@ -192,6 +192,7 @@ func screenBufferHyperlinkAt(buffer [][]vaxis.Cell, col, row int) (string, bool)
 	return target, true
 }
 
+// Reflects into unexported vaxis internals (screenNext.buf[row][col].Style.Hyperlink); guarded by TestVaxisHyperlinkReflectionStillValid (tui_reflection_canary_test.go) until the upstream accessor proposed in plan §0.8 exists.
 func renderedHyperlinkAt(vx *vaxis.Vaxis, col, row int) (string, bool) {
 	if vx == nil {
 		return "", false

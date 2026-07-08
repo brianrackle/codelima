@@ -175,6 +175,8 @@ Disadvantages:
 - May involve subtle changes in PTY versus non-PTY execution behavior.
 - Could expose additional assumptions in current shell tests and verification scripts.
 
+Resolution: resolved by work item 0.7. Root cause: `ExecLimaClient.Shell` layered the client's own `Stdout`/`Stderr` on top of the caller-supplied `ShellStreams` via `multiWriter`, relying on `sameWriter`'s pointer/type-identity de-dup to prevent doubling. That de-dup only collapses pointer-identical writers, so any two equivalent-but-distinct writers (same fd via different `*os.File`, or a wrapper such as the `withIO` clone) doubled every byte. Note the doubling was latent through the current `main.go`/`NewService` wiring, where both writers are the identical `os.Stdout` object. Fix: `ShellStreams` writers now win outright, with the client's writers used only as a fallback when a stream is nil, so the two are never both applied; `sameWriter` and `multiWriter`'s de-dup were removed as dead code. Regression test: `TestExecLimaClientShellDoesNotDuplicateOutputWhenStreamsAndClientWriteToSameSink`.
+
 ### 8. Design and implement a replacement for the removed patch-based file return flow
 
 Problem:
@@ -199,7 +201,8 @@ Disadvantages:
 
 - Users in copy mode temporarily lose any built-in way to push guest-side changes back to the host.
 - The final solution may require larger storage and workflow changes than the removed patch surface.
-- Deferring the replacement leaves unused internal patch code in the codebase for now.
+
+Update: the internal patch implementation has been removed entirely (work item 0.6, ADR 60), so this is now a clean-slate design — build the new export/sync transfer model from scratch rather than adapting the old lineage-patch code. The `syncWorkspaceFromTree`/`restoreWorkspace` snapshot helpers the patch flow relied on were also removed; `captureSnapshot`/`materializeSnapshot` remain (used by `ProjectFork`) and are the reusable primitives for the replacement.
 
 ### 9. Complete the interactive `TUI Verification` flow from `QA.md` on a real terminal session
 
@@ -522,6 +525,8 @@ Disadvantages:
 - May reveal a broader store or readiness bug that touches more than just environment-config seeding.
 - Could require follow-up migration or cleanup logic for homes that already contain duplicate seeded records.
 
+Resolution: resolved by work item 0.3 (ADR 57). Root cause: `EnsureReady(mutating=false)` ran the full `EnsureLayout` seeding pass on every read with no locks; concurrent readers each missed the slug lookup and persisted built-ins with fresh IDs. Seeding now runs only from mutating readiness checks, TUI startup, and `doctor --repair`, always under the `environment-configs`/`projects`/`nodes` flocks. Regression tests: `TestFreshHomeSeedsSingleBuiltInEnvironmentConfigs`, `TestConcurrentSeedingDoesNotDuplicate` (under `-race`).
+
 ### 21. Design independent multi-shell TUI split panes
 
 Problem:
@@ -599,3 +604,62 @@ Disadvantages:
 - Requires a macOS host with Xcode command-line tooling available.
 - Does not validate Ghostty's upstream xcframework packaging path, only CodeLima's direct dylib path.
 - May still expose a separate Darwin-specific shared-library build issue after the xcframework step is skipped.
+
+### 24. Group kill misses job-control process groups inside the terminal session
+
+Problem:
+
+- `shutdownTerminalProcess` kills the embedded-terminal child's process group (`kill(-pid, …)`). The child is a session leader, so this covers every descendant that stays in its group — all launch chains CodeLima builds today.
+- A shell running interactive job control inside a tab places each job in its own process group within the session; those groups survive a group kill of the leader's group.
+
+Suggested solution:
+
+- After killing the leader's group, enumerate remaining session members and signal their groups — `/proc/<pid>/stat` session ids on Linux, `ps -o sess=,pgid=,pid=` on macOS — behind a small platform seam, reusing the same TERM→KILL escalation.
+
+Advantages:
+
+- Closing a tab reclaims every process even under interactive job control; removes the one known leak class left in terminal teardown.
+
+Disadvantages:
+
+- Platform-divergent enumeration code; enumeration races process creation/exit so it can never be fully exhaustive; more time spent in Close.
+
+### 25. `CapturesMouse` reflection races the vaxis term parser goroutine
+
+Problem:
+
+- `CapturesMouse` (`tui_terminal_vaxis.go`) reflects into `term.Model`'s unexported `mode` bool fields without taking the model's mutex, while the widget's parser goroutine mutates those fields on guest DECSET sequences.
+- With a live guest toggling mouse reporting while the UI loop polls `CapturesMouse` (Vaxis fallback backend only), the race detector can trip; reads may also observe torn/stale mode state.
+- Discovered during work item 0.8; the canary tests sequence their reads after terminal close, so they never race — the hazard is production-only.
+
+Suggested solution:
+
+- Adopt the proposed upstream vaxis accessor (`Model.CapturesMouse()` reading under `vt.mu` — issue draft in work item 0.8's report), pin it once released, and delete the reflection plus its canary; until then, treat occasional stale reads as tolerable (worst case: one misrouted mouse event) since the fallback backend is already de-emphasized.
+
+Advantages:
+
+- Removes a real data race and the last reflection into vaxis widget internals; upstream lock also fixes torn reads.
+
+Disadvantages:
+
+- Depends on upstream acceptance timing; interim status quo knowingly carries a benign-but-real race in the fallback path.
+
+### 26. Vaxis fallback terminal double-`cmd.Wait()` data race
+
+Problem:
+
+- `TestVaxisTUITerminalPreservesInitialOutputWhenStartedAtPaneSize` intermittently trips `go test -race`. The race is entirely inside the vendored `git.sr.ht/~rockorager/vaxis` `widgets/term.Model` (v0.15.0): its `StartWithSize` monitor goroutine and `Close()` both call `cmd.Wait()` on the same `*exec.Cmd` when the child exits as `Close` runs (`term.go` ~:175 vs ~:545). Independently observed by work items 0.8 and Track 1 PR2; no CodeLima code is on either racing stack. It fires rarely (not reproduced across 13 quiet runs; the reporting agent saw ~1/8 under concurrent load), and only in the Vaxis fallback path, not the Ghostty backend. `make verify` does not run `-race`, so it does not gate CI today.
+- Note: Track 0.1's group-kill in `vaxisTUITerminal.Close()` signals the child during `Close`, which may widen the timing window in which the upstream double-`Wait` fires, but the defect is vaxis's, not ours.
+
+Suggested solution:
+
+- File an upstream vaxis issue for the double-`Wait` (the monitor goroutine should own `cmd.Wait` exclusively; `Close` should await it, not call `Wait` again). Pin the fix once released.
+- Interim: the Vaxis fallback is de-emphasized once the Ghostty path is daemon-owned (Track 3); if the flake becomes disruptive before then, serialize the test or guard the vendored `Close`/monitor with a `sync.Once` around `cmd.Wait` via the patch flow.
+
+Advantages:
+
+- Removes an intermittent `-race` flake and a real (if rare) double-reap in the fallback backend.
+
+Disadvantages:
+
+- Root fix depends on upstream; a local vendor patch adds to the `ghostty-vt`/vaxis patch-maintenance surface.

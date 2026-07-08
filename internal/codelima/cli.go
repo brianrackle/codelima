@@ -51,7 +51,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return exitCodeForError(err)
 	}
 
+	// Wire the previously-parsed-but-ignored --log-level flag into a live
+	// logger. CLI commands log structured text to stderr at the chosen level;
+	// TUI mode swaps this for a file sink via enableFileLogging (ADR 59).
+	level := parseLogLevel(options.LogLevel)
 	service := NewService(cfg, nil, stdin, stdout, stderr)
+	service.SetLogger(newTextLogger(stderr, level), level)
 	result, err := dispatch(ctx, service, rest)
 	if err != nil {
 		writeError(stdout, stderr, options.JSON, err)
@@ -113,7 +118,13 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 
 	switch args[0] {
 	case "doctor":
-		return service.Doctor(ctx)
+		flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		repair := flags.Bool("repair", false, "")
+		if err := flags.Parse(args[1:]); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		return service.Doctor(ctx, *repair)
 	case "config":
 		return dispatchConfig(service, args[1:])
 	case "environment":
@@ -370,7 +381,7 @@ func dispatchProject(ctx context.Context, service *Service, args []string) (any,
 		if flags.NArg() > 0 {
 			root = flags.Arg(0)
 		}
-		return service.ProjectTree(root, *includeDeleted)
+		return service.ProjectTree(ctx, root, *includeDeleted)
 	case "fork":
 		flags := flag.NewFlagSet("project fork", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
@@ -442,7 +453,7 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		if err := flags.Parse(args[1:]); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
-		return service.NodeList(*includeDeleted)
+		return service.NodeList(ctx, *includeDeleted)
 	case "cleanup-incomplete":
 		flags := flag.NewFlagSet("node cleanup-incomplete", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
@@ -743,7 +754,7 @@ Usage:
   codelima [--home PATH] [--json] [--log-level LEVEL] <group> <command> [flags]
 
 Groups:
-  doctor
+  doctor [--repair]
   config show
   environment create|list|show|update|delete
   project create|list|show|update|delete|tree|fork

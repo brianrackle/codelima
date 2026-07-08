@@ -3,11 +3,24 @@ package codelima
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// mirrorWriter forwards writes to an underlying sink. Two distinct
+// *mirrorWriter values that share a sink are equivalent (they land in the
+// same place) but are NOT pointer-identical, which is exactly the case the
+// old sameWriter pointer/type de-dup failed to collapse.
+type mirrorWriter struct {
+	sink io.Writer
+}
+
+func (w *mirrorWriter) Write(p []byte) (int, error) {
+	return w.sink.Write(p)
+}
 
 func TestExecLimaClientCreateStreamsConfiguredOutput(t *testing.T) {
 	t.Parallel()
@@ -230,6 +243,50 @@ func TestExecLimaClientShellDoesNotDuplicateOutputWhenStreamsReuseClientWriter(t
 
 	if got := strings.TrimSpace(stdout.String()); got != "workspace-path" {
 		t.Fatalf("expected one shell output line, got %q", got)
+	}
+}
+
+func TestExecLimaClientShellDoesNotDuplicateOutputWhenStreamsAndClientWriteToSameSink(t *testing.T) {
+	t.Parallel()
+
+	// Mirror Service.Shell's real wiring: streams.Stdout and the client's
+	// Stdout both ultimately land on the same process stdout, but they are
+	// not the same pointer. This is the scenario that doubled `codelima
+	// shell <node> -- <cmd>` output (TODO #6).
+	sink := &bytes.Buffer{}
+	client := &ExecLimaClient{
+		Binary: "unused-binary",
+		LimaCommands: LimaCommandTemplates{
+			Shell: []string{
+				"printf 'PRECOMMAND_LINE\\n'",
+				"printf 'MAIN_LINE\\n'",
+			},
+		},
+		Stdout: &mirrorWriter{sink: sink},
+		Stderr: &mirrorWriter{sink: sink},
+	}
+
+	err := client.Shell(
+		context.Background(),
+		Project{},
+		Node{LimaInstanceName: "demo-node"},
+		[]string{"pwd"},
+		"/workspace",
+		false,
+		ShellStreams{
+			Stdout: &mirrorWriter{sink: sink},
+			Stderr: &mirrorWriter{sink: sink},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Shell() error = %v", err)
+	}
+
+	if got := strings.Count(sink.String(), "PRECOMMAND_LINE"); got != 1 {
+		t.Fatalf("expected pre-command line exactly once, got %d in %q", got, sink.String())
+	}
+	if got := strings.Count(sink.String(), "MAIN_LINE"); got != 1 {
+		t.Fatalf("expected main command line exactly once, got %d in %q", got, sink.String())
 	}
 }
 

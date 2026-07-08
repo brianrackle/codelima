@@ -11,6 +11,7 @@ package codelima
 import "C"
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -55,20 +56,38 @@ var ghosttyAPI ghosttyAPILoadState
 type ghosttyStderrState struct {
 	once sync.Once
 	mu   sync.Mutex
-	file *os.File
+	file *os.File // write end of the capture pipe, dup2'd over fd 2 around bridge calls
 	err  error
 }
 
 var ghosttyStderr ghosttyStderrState
 
-// Ghostty currently logs parser warnings to process stderr, so contain them
-// around backend calls instead of letting them spill into the TUI chrome.
+// withGhosttyStderrSuppressed redirects process stderr to an internal pipe for
+// the duration of fn so libghostty's parser warnings never spill into the TUI
+// chrome. A background reader drains the pipe and forwards each non-empty line to
+// the package logger at debug level, tagged source=libghostty, so the warnings
+// stay inspectable in _logs/codelima.log while staying invisible on screen
+// (work item 0.5, ADR 59). This replaces the former /dev/null sink, which threw
+// the warnings away entirely.
+//
+// CAVEAT: the dup2 over fd 2 is process-global and not concurrency-safe. The
+// mutex serializes every bridge call, so two terminals initializing at once can
+// no longer interleave the redirect (which also closes that prior data race).
+// The pipe and its reader goroutine are created once via sync.Once and live for
+// the life of the process; the reader must keep draining or a full pipe buffer
+// would block libghostty's writes to fd 2 and hang the bridge call.
 func withGhosttyStderrSuppressed[T any](fn func() T) T {
 	ghosttyStderr.mu.Lock()
 	defer ghosttyStderr.mu.Unlock()
 
 	ghosttyStderr.once.Do(func() {
-		ghosttyStderr.file, ghosttyStderr.err = os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			ghosttyStderr.err = err
+			return
+		}
+		ghosttyStderr.file = writer
+		go drainGhosttyStderr(reader)
 	})
 	if ghosttyStderr.err != nil || ghosttyStderr.file == nil {
 		return fn()
@@ -89,6 +108,21 @@ func withGhosttyStderrSuppressed[T any](fn func() T) T {
 	}()
 
 	return fn()
+}
+
+// drainGhosttyStderr forwards captured libghostty stderr lines to the package
+// logger. It runs for the process lifetime; the pipe's write end stays open
+// (dup2 keeps targeting it), so the scanner only returns at process teardown.
+func drainGhosttyStderr(reader *os.File) {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), "\r\n")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		packageLog().Debug(line, "source", "libghostty")
+	}
 }
 
 func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTerminal, error) {
@@ -221,6 +255,7 @@ type ghosttyTUITerminal struct {
 	redrawPending    bool
 	waitOnce         sync.Once
 	waitErr          error
+	waitDone         chan struct{}
 	closeOnce        sync.Once
 }
 
@@ -1181,13 +1216,22 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 		}
 	})
 
+	waitDone := make(chan struct{})
 	t.mu.Lock()
 	t.cmd = cmd
 	t.pty = ptyFile
 	t.ptyWriter = ptyWriter
+	t.waitDone = waitDone
 	t.mu.Unlock()
 
 	go t.readLoop()
+	// Single reaper: cmd.Wait may only be called once, so it runs solely
+	// inside the waitOnce-guarded wait(); waitDone lets teardown observe the
+	// reap without racing a second Wait.
+	go func() {
+		_ = t.wait()
+		close(waitDone)
+	}()
 	return nil
 }
 
@@ -1685,44 +1729,7 @@ func (t *ghosttyTUITerminal) graphemeLocked(row int, col int, cell C.GhosttyReso
 
 func (t *ghosttyTUITerminal) Close() {
 	t.closeOnce.Do(func() {
-		t.mu.Lock()
-		t.suppressEvent = true
-		t.closed = true
-		ptyFile := t.pty
-		ptyWriter := t.ptyWriter
-		cmd := t.cmd
-		term := t.term
-		keyEncoder := t.keyEncoder
-		mouseEncoder := t.mouseEncoder
-		t.pty = nil
-		t.ptyWriter = nil
-		t.term = nil
-		t.keyEncoder = nil
-		t.mouseEncoder = nil
-		t.mu.Unlock()
-
-		if ptyWriter != nil {
-			ptyWriter.Close()
-		}
-		if ptyFile != nil {
-			_ = ptyFile.Close()
-		}
-		if cmd != nil && cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_ = t.wait()
-		if term != nil {
-			withGhosttyStderrSuppressed(func() struct{} {
-				C.ghostty_bridge_terminal_free(term)
-				return struct{}{}
-			})
-		}
-		if keyEncoder != nil {
-			keyEncoder.Close()
-		}
-		if mouseEncoder != nil {
-			mouseEncoder.Close()
-		}
+		t.teardown(true, false, nil)
 	})
 }
 
@@ -1797,30 +1804,62 @@ func (t *ghosttyTUITerminal) hyperlinkAtLocked(row int, col int) (string, bool) 
 }
 
 func (t *ghosttyTUITerminal) finish(err error) {
+	t.teardown(false, true, err)
+}
+
+// teardown is the single resource-release path shared by Close (kill=true:
+// the user closed the tab, so the child's whole process group is terminated
+// and reaped before returning) and finish (kill=false: the child already
+// exited on its own and a closed event may be posted). Resources are captured
+// and nil'd under the mutex, so the cgo handles are freed exactly once no
+// matter how Close and finish interleave.
+func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 	t.mu.Lock()
-	if t.closed {
+	if !post {
+		t.suppressEvent = true
+	}
+	if t.closed && post {
 		t.mu.Unlock()
 		return
 	}
 	t.closed = true
-	term := t.term
+	cmd := t.cmd
 	ptyFile := t.pty
 	ptyWriter := t.ptyWriter
+	term := t.term
 	keyEncoder := t.keyEncoder
 	mouseEncoder := t.mouseEncoder
-	postEvent := !t.suppressEvent
-	t.term = nil
+	waitDone := t.waitDone
+	postEvent := post && !t.suppressEvent
 	t.pty = nil
 	t.ptyWriter = nil
+	t.term = nil
 	t.keyEncoder = nil
 	t.mouseEncoder = nil
 	t.mu.Unlock()
 
-	if ptyWriter != nil {
-		ptyWriter.Close()
+	closeIO := func() {
+		// Writer first (it drains and closes its PTY target), then the PTY
+		// master: closing the master hangs up the line, delivering SIGHUP to
+		// the child's foreground process group.
+		if ptyWriter != nil {
+			ptyWriter.Close()
+		}
+		if ptyFile != nil {
+			_ = ptyFile.Close()
+		}
 	}
-	if ptyFile != nil {
-		_ = ptyFile.Close()
+	if kill && cmd != nil && cmd.Process != nil {
+		// The child is a session leader (Setsid in Start), so its process
+		// group id equals its pid and the helper can group-kill descendants.
+		_ = shutdownTerminalProcess(cmd.Process.Pid, closeIO, waitDone)
+	} else {
+		closeIO()
+	}
+	if kill {
+		// Block until the waitOnce reaper has collected the direct child so
+		// Close never returns while a zombie remains.
+		_ = t.wait()
 	}
 	if term != nil {
 		withGhosttyStderrSuppressed(func() struct{} {

@@ -39,6 +39,7 @@ func newTUIVaxisTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTermi
 
 type vaxisTUITerminal struct {
 	model       *term.Model
+	cmd         *exec.Cmd
 	started     bool
 	pendingCols int
 	pendingRows int
@@ -54,6 +55,7 @@ func (t *vaxisTUITerminal) Start(cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
+	t.cmd = cmd
 	t.started = true
 	return nil
 }
@@ -79,7 +81,15 @@ func (t *vaxisTUITerminal) Draw(win vaxis.Window) {
 }
 
 func (t *vaxisTUITerminal) Close() {
+	// The widget kills and reaps the direct child and closes the PTY (the
+	// close delivers SIGHUP to the foreground process group).
 	t.model.Close()
+	if t.cmd != nil && t.cmd.Process != nil {
+		// The widget starts the child with Setsid, so it is a session leader
+		// (pgid == pid); sweep any descendants left in its process group.
+		// done is nil because the widget owns cmd.Wait, not us.
+		_ = shutdownTerminalProcess(t.cmd.Process.Pid, nil, nil)
+	}
 }
 
 func (t *vaxisTUITerminal) Focus() {

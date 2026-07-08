@@ -3,7 +3,6 @@ package codelima
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -202,6 +201,7 @@ type fakeTUITerminal struct {
 	startRows     int
 	focusCalls    int
 	blurCalls     int
+	closeCalls    int
 }
 
 func newFakeTUISessionManager() *fakeTUISessionManager {
@@ -243,7 +243,7 @@ func (f *fakeTUITerminal) Draw(win vaxis.Window) {
 	}
 }
 
-func (f *fakeTUITerminal) Close() {}
+func (f *fakeTUITerminal) Close() { f.closeCalls++ }
 
 func (f *fakeTUITerminal) Focus() { f.focusCalls++ }
 
@@ -275,9 +275,12 @@ func nodeTargetKey(nodeID string) string {
 
 // putTestSession registers a terminal tab for the target in the store and
 // returns the allocated session key.
-func putTestSession(store *tuiSessionStore, targetKey string, session *tuiSession) string {
+func putTestSession(store *tuiSessionStore, targetKey string, session *tuiSession, term tuiTerminal) string {
 	session.target = targetKey
 	session.key = store.nextSessionKey(targetKey)
+	if term != nil {
+		session.terminalID = store.registry.Allocate(term).ID
+	}
 	store.putSession(session)
 	return session.key
 }
@@ -291,6 +294,24 @@ func targetTestSession(t *testing.T, store *tuiSessionStore, targetKey string) *
 		t.Fatalf("expected an open terminal tab for %q", targetKey)
 	}
 	return store.sessions[keys[0]]
+}
+
+// targetTestTerminal resolves the live terminal backend for the target's first
+// open tab through the runtime registry, asserting it is the *fakeTUITerminal
+// tests inject.
+func targetTestTerminal(t *testing.T, store *tuiSessionStore, targetKey string) *fakeTUITerminal {
+	t.Helper()
+
+	session := targetTestSession(t, store, targetKey)
+	term, ok := store.terminalFor(session)
+	if !ok {
+		t.Fatalf("expected a live terminal for %q", targetKey)
+	}
+	fake, ok := term.(*fakeTUITerminal)
+	if !ok {
+		t.Fatalf("expected fake terminal for %q, got %T", targetKey, term)
+	}
+	return fake
 }
 
 func (f *fakeTUISessionManager) HasSession(sessionKey string) bool {
@@ -311,7 +332,7 @@ func (f *fakeTUISessionManager) TargetSessionKeys(targetKey string) []string {
 func (f *fakeTUISessionManager) openTab(targetKey string) (string, error) {
 	f.opened[targetKey]++
 	f.tabCounters[targetKey]++
-	key := fmt.Sprintf("%s#%d", targetKey, f.tabCounters[targetKey])
+	key := formatSessionKey(targetKey, f.tabCounters[targetKey])
 	f.openTabs[targetKey] = append(f.openTabs[targetKey], key)
 	return key, nil
 }
@@ -337,12 +358,12 @@ func (f *sharedFakeTUISessionManager) OpenProjectTab(project Project) (string, e
 	f.opened[targetKey]++
 	key := f.store.nextSessionKey(targetKey)
 	f.store.putSession(&tuiSession{
-		key:      key,
-		target:   targetKey,
-		kind:     tuiTreeEntryProject,
-		label:    project.Slug,
-		project:  project,
-		terminal: newFakeTUITerminal(),
+		key:        key,
+		target:     targetKey,
+		kind:       tuiTreeEntryProject,
+		label:      project.Slug,
+		project:    project,
+		terminalID: f.store.registry.Allocate(newFakeTUITerminal()).ID,
 	})
 	return key, nil
 }
@@ -352,12 +373,12 @@ func (f *sharedFakeTUISessionManager) OpenNodeTab(node Node) (string, error) {
 	f.opened[targetKey]++
 	key := f.store.nextSessionKey(targetKey)
 	f.store.putSession(&tuiSession{
-		key:      key,
-		target:   targetKey,
-		kind:     tuiTreeEntryNode,
-		label:    node.Slug,
-		node:     node,
-		terminal: newFakeTUITerminal(),
+		key:        key,
+		target:     targetKey,
+		kind:       tuiTreeEntryNode,
+		label:      node.Slug,
+		node:       node,
+		terminalID: f.store.registry.Allocate(newFakeTUITerminal()).ID,
 	})
 	return key, nil
 }
@@ -627,11 +648,10 @@ func TestTUISyncSessionFocusBlursHiddenTerminalWhenDialogOpen(t *testing.T) {
 
 	terminal := newFakeTUITerminal()
 	putTestSession(sessions, nodeTargetKey("node-root"), &tuiSession{
-		kind:     tuiTreeEntryNode,
-		label:    "root-node",
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: terminal,
-	})
+		kind:  tuiTreeEntryNode,
+		label: "root-node",
+		node:  Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, terminal)
 
 	app := &vaxisTUIApp{
 		ctx:      ctx,
@@ -682,10 +702,9 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 		kind:  tuiTreeEntryNode,
 		label: "root-node",
 		node:  Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: &fakeTUITerminal{
-			snapshot: "shell prompt",
-			termEnv:  tuiEmbeddedTermEnv,
-		},
+	}, &fakeTUITerminal{
+		snapshot: "shell prompt",
+		termEnv:  tuiEmbeddedTermEnv,
 	})
 
 	app.draw()
@@ -777,10 +796,9 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 		kind:  tuiTreeEntryNode,
 		label: "root-node",
 		node:  Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: &fakeTUITerminal{
-			snapshot: "shell prompt",
-			termEnv:  tuiEmbeddedTermEnv,
-		},
+	}, &fakeTUITerminal{
+		snapshot: "shell prompt",
+		termEnv:  tuiEmbeddedTermEnv,
 	})
 
 	app.draw()
@@ -1596,10 +1614,7 @@ func TestTUIHandleResizeResizesActiveTerminalBeforeRedraw(t *testing.T) {
 		t.Fatalf("focusTerminal() error = %v", err)
 	}
 
-	terminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
-	if !ok {
-		t.Fatalf("expected fake terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
-	}
+	terminal := targetTestTerminal(t, sessions, nodeTargetKey("node-root"))
 
 	app := &vaxisTUIApp{
 		ctx:      ctx,
@@ -1716,7 +1731,7 @@ func TestTUIRefreshTickPreservesWorkspaceRootScope(t *testing.T) {
 		t.Fatalf("ProjectCreate(outside) error = %v", err)
 	}
 
-	tree, err := service.ProjectTreeByWorkspaceRoot(scopeRoot, false)
+	tree, err := service.ProjectTreeByWorkspaceRoot(ctx, scopeRoot, false)
 	if err != nil {
 		t.Fatalf("ProjectTreeByWorkspaceRoot() error = %v", err)
 	}
@@ -1849,9 +1864,8 @@ func TestTUIHandleKeyAltBacktickTogglesFocusToTerminalAndHidesTree(t *testing.T)
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -1929,9 +1943,8 @@ func TestTUIHandleKeyAltBacktickTogglesFocusBackToTreeAndShowsTree(t *testing.T)
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	quit, err := app.handleKey(vaxis.Key{Text: "`", Keycode: '`', Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -1967,9 +1980,8 @@ func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
 		sessions: sessions,
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
 	if err != nil {
@@ -2007,9 +2019,8 @@ func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
 	if err != nil {
@@ -2067,14 +2078,7 @@ func TestTUIHandleKeyOptionShiftBacktickSwitchesNodeToHostTerminalAndBack(t *tes
 	}
 
 	app.forwardTerminalEvent(vaxis.Key{Text: "x", Keycode: 'x'})
-	projectSession := targetTestSession(t, sessions, projectTargetKey("project-root"))
-	if projectSession == nil {
-		t.Fatalf("expected project session to exist")
-	}
-	projectTerminal, ok := projectSession.terminal.(*fakeTUITerminal)
-	if !ok {
-		t.Fatalf("expected fake project terminal, got %T", projectSession.terminal)
-	}
+	projectTerminal := targetTestTerminal(t, sessions, projectTargetKey("project-root"))
 	if len(projectTerminal.events) != 1 {
 		t.Fatalf("expected focused input to be sent to host project terminal, got %d events", len(projectTerminal.events))
 	}
@@ -2200,10 +2204,7 @@ func TestTUIForwardTerminalEventNormalizesPastedNewlines(t *testing.T) {
 		EventType: vaxis.EventPaste,
 	})
 
-	terminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
-	if !ok {
-		t.Fatalf("expected fake node terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
-	}
+	terminal := targetTestTerminal(t, sessions, nodeTargetKey("node-root"))
 	if len(terminal.events) != 1 {
 		t.Fatalf("expected pasted key to be forwarded once, got %d events", len(terminal.events))
 	}
@@ -2383,10 +2384,7 @@ func TestTUIFocusedTerminalReceivesModifiedDKeys(t *testing.T) {
 		state:    state,
 		sessions: sessions,
 	}
-	terminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
-	if !ok {
-		t.Fatalf("expected fake node terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
-	}
+	terminal := targetTestTerminal(t, sessions, nodeTargetKey("node-root"))
 
 	quit, err := app.handleKey(vaxis.Key{Text: "d", Keycode: 'd', Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -2520,15 +2518,9 @@ func TestTUIMouseCaptureUsesHostTerminalOverride(t *testing.T) {
 		t.Fatalf("handleKey(Option+Shift+`) error = %v", err)
 	}
 
-	projectTerminal, ok := targetTestSession(t, sessions, projectTargetKey("project-root")).terminal.(*fakeTUITerminal)
-	if !ok {
-		t.Fatalf("expected fake project terminal, got %T", targetTestSession(t, sessions, projectTargetKey("project-root")).terminal)
-	}
+	projectTerminal := targetTestTerminal(t, sessions, projectTargetKey("project-root"))
 	projectTerminal.capturesMouse = true
-	nodeTerminal, ok := targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal.(*fakeTUITerminal)
-	if !ok {
-		t.Fatalf("expected fake node terminal, got %T", targetTestSession(t, sessions, nodeTargetKey("node-root")).terminal)
-	}
+	nodeTerminal := targetTestTerminal(t, sessions, nodeTargetKey("node-root"))
 	nodeTerminal.capturesMouse = true
 
 	if err := app.handleMouse(vaxis.Mouse{
@@ -2627,9 +2619,8 @@ func TestTUIHandleKeyEnterNoLongerFocusesTerminal(t *testing.T) {
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter})
 	if err != nil {
@@ -2661,9 +2652,8 @@ func TestTUIHandleKeyAltEnterNoLongerTogglesTerminalFocus(t *testing.T) {
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	quit, err := app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter, Modifiers: vaxis.ModAlt})
 	if err != nil {
@@ -2727,9 +2717,8 @@ func TestTUIMouseMotionDoesNotFocusTerminal(t *testing.T) {
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	if err := app.handleMouse(vaxis.Mouse{
 		Col:       12,
@@ -2791,9 +2780,8 @@ func TestTUIMouseReleaseOpensTerminalHyperlinkWithoutDrag(t *testing.T) {
 		terminalBodyRect:  tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: newFakeTUITerminal(),
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, newFakeTUITerminal())
 
 	if err := app.handleMouse(vaxis.Mouse{
 		Col:       12,
@@ -2854,9 +2842,8 @@ func TestTUIMouseDragDoesNotOpenTerminalHyperlinkWithoutGuestCapture(t *testing.
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: terminal,
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, terminal)
 
 	if err := app.handleMouse(vaxis.Mouse{
 		Col:       11,
@@ -2920,9 +2907,8 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: terminal,
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, terminal)
 
 	for _, eventType := range []vaxis.EventType{vaxis.EventPress, vaxis.EventMotion, vaxis.EventRelease} {
 		if err := app.handleMouse(vaxis.Mouse{
@@ -2966,9 +2952,8 @@ func TestTUIShiftDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 		terminalBodyRect: tuiRect{col: 10, row: 5, width: 40, height: 10},
 	}
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
-		node:     Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
-		terminal: terminal,
-	})
+		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
+	}, terminal)
 
 	events := []vaxis.Mouse{
 		{Col: 11, Row: 6, Button: vaxis.MouseLeftButton, EventType: vaxis.EventPress, Modifiers: vaxis.ModShift},
@@ -3113,11 +3098,10 @@ func TestTUITerminalClosedEventIsHandledWhileOperationActive(t *testing.T) {
 	node := state.selectedEntry().node
 	state.terminalTarget = nodeTargetKey(node.ID)
 	sessionKey := putTestSession(sessions, nodeTargetKey(node.ID), &tuiSession{
-		kind:     tuiTreeEntryNode,
-		label:    node.Slug,
-		node:     node,
-		terminal: newFakeTUITerminal(),
-	})
+		kind:  tuiTreeEntryNode,
+		label: node.Slug,
+		node:  node,
+	}, newFakeTUITerminal())
 
 	app := &vaxisTUIApp{
 		ctx:      ctx,
@@ -3414,7 +3398,7 @@ func TestTUIDrawProjectDetailsShowProjectFilePathAndManualEditGuidance(t *testin
 		t.Fatalf("ProjectCreate(root) error = %v", err)
 	}
 
-	tree, err := service.ProjectTree("", false)
+	tree, err := service.ProjectTree(ctx, "", false)
 	if err != nil {
 		t.Fatalf("ProjectTree() error = %v", err)
 	}
@@ -3474,7 +3458,7 @@ func TestTUIDrawProjectDetailsSummarizeBootstrapCommandsAndEnvironmentConfigs(t 
 		t.Fatalf("ProjectCreate(root) error = %v", err)
 	}
 
-	tree, err := service.ProjectTree("", false)
+	tree, err := service.ProjectTree(ctx, "", false)
 	if err != nil {
 		t.Fatalf("ProjectTree() error = %v", err)
 	}
@@ -4307,7 +4291,7 @@ func actionIDs(actions []tuiActionSpec) string {
 func newTestTUIApp(t *testing.T, ctx context.Context, service *Service, sessions tuiSessionManager) *vaxisTUIApp {
 	t.Helper()
 
-	tree, err := service.ProjectTree("", false)
+	tree, err := service.ProjectTree(ctx, "", false)
 	if err != nil {
 		t.Fatalf("ProjectTree() error = %v", err)
 	}
@@ -4335,7 +4319,7 @@ func newAsyncTestTUIApp(t *testing.T, ctx context.Context, service *Service) (*v
 		events <- event
 	}
 	sessions := newTUISessionStore(ctx, service, postEvent)
-	tree, err := service.ProjectTree("", false)
+	tree, err := service.ProjectTree(ctx, "", false)
 	if err != nil {
 		t.Fatalf("ProjectTree() error = %v", err)
 	}
@@ -4507,4 +4491,55 @@ func chooseTUISelector(t *testing.T, app *vaxisTUIApp, values ...string) {
 		t.Fatalf("expected selector to complete, completed=%v cancelled=%v", completed, cancelled)
 	}
 	app.selector = nil
+}
+
+// TestRunClosesSessionsOnContextCancel pins down the Ctrl+C / SIGTERM cleanup
+// contract: when the context wired into the TUI event loop is cancelled, the
+// loop returns and every open terminal session is drained via Close() (which,
+// per Track 0.1, group-kills the VM shells). The guarantee must live in the
+// loop seam (serve) as a defer, not in happy-path code, so an abrupt cancel
+// cannot skip it.
+func TestRunClosesSessionsOnContextCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	service, _ := newTestService(t)
+	app, events := newAsyncTestTUIApp(t, ctx, service)
+
+	nodeTerminal := newFakeTUITerminal()
+	putTestSession(app.sessions, nodeTargetKey("node-1"), &tuiSession{
+		kind: tuiTreeEntryNode,
+	}, nodeTerminal)
+	projectTerminal := newFakeTUITerminal()
+	putTestSession(app.sessions, projectTargetKey("project-1"), &tuiSession{
+		kind: tuiTreeEntryProject,
+	}, projectTerminal)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- app.serve(events)
+	}()
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("serve() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("serve() did not return after context cancellation")
+	}
+
+	if nodeTerminal.closeCalls != 1 {
+		t.Fatalf("node terminal Close() calls = %d, want 1", nodeTerminal.closeCalls)
+	}
+	if projectTerminal.closeCalls != 1 {
+		t.Fatalf("project terminal Close() calls = %d, want 1", projectTerminal.closeCalls)
+	}
+	if len(app.sessions.sessions) != 0 {
+		t.Fatalf("expected all sessions drained, got %d", len(app.sessions.sessions))
+	}
 }

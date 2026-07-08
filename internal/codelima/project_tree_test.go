@@ -45,7 +45,7 @@ func TestProjectTreeIncludesProjectNodes(t *testing.T) {
 		t.Fatalf("NodeCreate(child-node) error = %v", err)
 	}
 
-	tree, err := service.ProjectTree("", false)
+	tree, err := service.ProjectTree(ctx, "", false)
 	if err != nil {
 		t.Fatalf("ProjectTree() error = %v", err)
 	}
@@ -121,7 +121,7 @@ func TestProjectTreeByWorkspaceRootIncludesOnlyProjectsUnderDirectory(t *testing
 		t.Fatalf("NodeCreate(outside-node) error = %v", err)
 	}
 
-	tree, err := service.ProjectTreeByWorkspaceRoot(scopeRoot, false)
+	tree, err := service.ProjectTreeByWorkspaceRoot(ctx, scopeRoot, false)
 	if err != nil {
 		t.Fatalf("ProjectTreeByWorkspaceRoot() error = %v", err)
 	}

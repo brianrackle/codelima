@@ -74,10 +74,6 @@ func externalCommandFailed(message string, err error, fields map[string]any) err
 	return newAppError("ExternalCommandFailed", message, ExitExternalFailure, err, fields)
 }
 
-func patchConflict(message string, fields map[string]any) error {
-	return newAppError("PatchConflict", message, ExitPreconditionFailed, nil, fields)
-}
-
 func metadataCorruption(message string, err error, fields map[string]any) error {
 	return newAppError("MetadataCorruption", message, ExitInternalFailure, err, fields)
 }
