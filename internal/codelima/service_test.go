@@ -1746,8 +1746,11 @@ func TestInteractiveShellLaunchCommandRepairsGNUSttyBeforeExec(t *testing.T) {
 	if !strings.Contains(got, `"${SHELL:-/bin/bash}" -l`) {
 		t.Fatalf("expected interactive shell command to run the user's login shell, got %q", got)
 	}
-	if !strings.Contains(got, `mktemp "${HOME}/.codelima-inputrc.XXXXXX"`) {
-		t.Fatalf("expected interactive shell command to create a temporary inputrc, got %q", got)
+	if !strings.Contains(got, `mktemp "${shell_inputrc_dir}/.codelima-inputrc.XXXXXX" 2>/dev/null`) {
+		t.Fatalf("expected interactive shell command to create a temporary inputrc in a writable dir, got %q", got)
+	}
+	if !strings.Contains(got, `for shell_inputrc_dir in "${HOME:-}" "${PWD:-}/tmp" "${TMPDIR:-/tmp}"`) {
+		t.Fatalf("expected interactive shell command to probe writable inputrc dirs before HOME fails (TODO #18), got %q", got)
 	}
 	if !strings.Contains(got, `"\e[27;2;13~": "\C-v\C-j"`) {
 		t.Fatalf("expected interactive shell command to bind modifyOtherKeys shift-enter, got %q", got)

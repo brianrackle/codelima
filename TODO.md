@@ -440,6 +440,8 @@ Disadvantages:
 
 ### 18. Make the temporary interactive-shell `INPUTRC` path resilient when `$HOME` is read-only
 
+Resolution: resolved by Track 2.2 (ADR 62). `interactiveShellLaunchCommand()` now probes `${HOME}`, then `${PWD}/tmp`, then `${TMPDIR:-/tmp}`, creating the temp INPUTRC in the first writable directory (each `mktemp` suppresses its own stderr); if none is writable it skips the INPUTRC customization rather than failing or polluting the shell. Regression tests: `TestInteractiveShellLaunchCommandToleratesReadOnlyHome`, `TestInteractiveShellLaunchCommandSkipsInputrcWhenNowhereWritable`.
+
 Problem:
 
 - During local TUI verification of the project terminal preview, the host-local interactive shell surfaced `mktemp: Read-only file system` while trying to create `~/.codelima-inputrc.XXXXXX`.

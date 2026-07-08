@@ -1459,11 +1459,18 @@ func TestResolveCodelimaExecutablePathResolvesBuildCompatibilitySymlink(t *testi
 	}
 }
 
-func TestTUISessionStoreStartsNodeShellWithStoredExecutable(t *testing.T) {
+func TestTUISessionStoreStartsNodeShellWithServiceResolvedExecutable(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
-	sessions.nodeShellExecutable = filepath.Join(t.TempDir(), "bin", "linux-aarch64", "codelima")
+
+	// The codelima executable for a node shell is now resolved by the Service
+	// (os.Executable + resolveCodelimaExecutablePath), not cached on the store.
+	selfExe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+	wantExe := resolveCodelimaExecutablePath(selfExe)
 
 	originalFactory := newSessionTUITerminal
 	var terminal *fakeTUITerminal
@@ -1486,7 +1493,7 @@ func TestTUISessionStoreStartsNodeShellWithStoredExecutable(t *testing.T) {
 	}
 
 	wantArgs := []string{
-		sessions.nodeShellExecutable,
+		wantExe,
 		"--home",
 		service.cfg.MetadataRoot,
 		"shell",
@@ -1495,8 +1502,8 @@ func TestTUISessionStoreStartsNodeShellWithStoredExecutable(t *testing.T) {
 	if !reflect.DeepEqual(terminal.startCmd.Args, wantArgs) {
 		t.Fatalf("expected node shell command %#v, got %#v", wantArgs, terminal.startCmd.Args)
 	}
-	if terminal.startCmd.Path != sessions.nodeShellExecutable {
-		t.Fatalf("expected node shell executable %q, got %q", sessions.nodeShellExecutable, terminal.startCmd.Path)
+	if terminal.startCmd.Path != wantExe {
+		t.Fatalf("expected node shell executable %q, got %q", wantExe, terminal.startCmd.Path)
 	}
 }
 
@@ -1504,14 +1511,13 @@ func TestTUISessionStoreExplainsNodeShellExecFormatError(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
-	sessions.nodeShellExecutable = filepath.Join(t.TempDir(), "bin", "linux-aarch64", "codelima")
 
 	originalFactory := newSessionTUITerminal
 	newSessionTUITerminal = func(string, func(vaxis.Event)) tuiTerminal {
 		terminal := newFakeTUITerminal()
 		terminal.startErr = &os.PathError{
 			Op:   "fork/exec",
-			Path: sessions.nodeShellExecutable,
+			Path: filepath.Join(t.TempDir(), "bin", "linux-aarch64", "codelima"),
 			Err:  syscall.ENOEXEC,
 		}
 		return terminal

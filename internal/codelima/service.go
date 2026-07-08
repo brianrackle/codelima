@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brianrackle/test_lima/internal/codelima/terminal"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1540,6 +1541,84 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 	})
 }
 
+// LaunchSpec is the single description of how to spawn a managed terminal: the
+// argv to exec, the working directory to root it in (empty means inherit), and
+// the environment to run it with. It is the one shell-launch contract every
+// front end (the TUI today, the daemon and any tmux sidebar tomorrow) asks the
+// Service for, then hands to the runtime registry to spawn — no caller builds a
+// terminal command itself (IMPROVEMENT_PLAN Part F §2.2).
+type LaunchSpec struct {
+	Argv []string
+	Dir  string
+	Env  []string
+}
+
+// TerminalLaunchSpec builds the LaunchSpec for a target terminal. It is the
+// sole place a managed-terminal command is assembled; front ends spawn only
+// what it returns (IMPROVEMENT_PLAN Part F §2.2).
+//
+//   - NodeShell re-enters the codelima binary as `codelima shell <nodeID>`,
+//     where nodeID is target.ID, so the child re-enters the VM through CodeLima
+//     rather than a raw runtime shell. The codelima executable is resolved here
+//     in the Service (os.Executable + resolveCodelimaExecutablePath), not taken
+//     from any caller-cached copy.
+//   - ProjectHostShell is an interactive login shell rooted at the project's
+//     host workspace. The workspace path is validated here (non-empty, exists,
+//     is a directory); a failure is returned as a typed InvalidArgument error
+//     that the caller records against the target.
+//
+// The caller supplies the already-resolved project workspace path (node shells
+// pass ""); resolution of the project/node from the store stays with the caller
+// — the TUI store today, the daemon with its own lock discipline tomorrow —
+// which keeps this a pure, store-free spec builder.
+func (s *Service) TerminalLaunchSpec(target terminal.TargetKey, kind terminal.TerminalKind, workspacePath string) (LaunchSpec, error) {
+	switch kind {
+	case terminal.NodeShell:
+		nodeID := strings.TrimSpace(target.ID)
+		if nodeID == "" {
+			return LaunchSpec{}, invalidArgument("node id is required to launch a node shell", nil)
+		}
+		executable, err := resolveCodelimaSelfExecutable()
+		if err != nil {
+			return LaunchSpec{}, dependencyUnavailable("could not resolve the codelima executable to launch a node shell", err, nil)
+		}
+		return LaunchSpec{
+			Argv: []string{executable, "--home", s.cfg.MetadataRoot, "shell", nodeID},
+			Env:  os.Environ(),
+		}, nil
+	case terminal.ProjectHostShell:
+		if strings.TrimSpace(workspacePath) == "" {
+			return LaunchSpec{}, invalidArgument("project workspace path is not configured", map[string]any{"target": target.String()})
+		}
+		info, err := os.Stat(workspacePath)
+		if err != nil {
+			return LaunchSpec{}, invalidArgument("project workspace path is unavailable", map[string]any{"target": target.String(), "workspace_path": workspacePath, "error": err.Error()})
+		}
+		if !info.IsDir() {
+			return LaunchSpec{}, invalidArgument("project workspace path is not a directory", map[string]any{"target": target.String(), "workspace_path": workspacePath})
+		}
+		return LaunchSpec{
+			Argv: interactiveShellLaunchCommand(),
+			Dir:  workspacePath,
+			Env:  os.Environ(),
+		}, nil
+	default:
+		return LaunchSpec{}, invalidArgument("unsupported terminal kind", map[string]any{"kind": kind.String()})
+	}
+}
+
+// resolveCodelimaSelfExecutable resolves the path to the running codelima
+// binary (following the platform-dir compatibility symlink). It is a package
+// var so the Service resolves the executable itself rather than depending on any
+// caller's cached copy.
+var resolveCodelimaSelfExecutable = func() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return resolveCodelimaExecutablePath(executable), nil
+}
+
 func (s *Service) ensureUniqueNodeSlug(slug string) error {
 	nodes, err := s.store.ListNodes(false)
 	if err != nil {
@@ -1787,15 +1866,28 @@ func interactiveShellLaunchCommand() []string {
 		shellInputRCArgs = append(shellInputRCArgs, shellQuote(line))
 	}
 
+	// The INPUTRC customization needs a writable directory for its temp file.
+	// A read-only $HOME (mktemp: Read-only file system) must not fail the shell
+	// (TODO #18): probe $HOME first, fall back to the working-directory-rooted
+	// ./tmp and then $TMPDIR (defaulting to /tmp), and if nothing is writable,
+	// skip the customization entirely rather than aborting. All probes suppress
+	// their own stderr so a non-writable candidate never leaks an error.
 	script := strings.Join([]string{
 		`if [ -x /usr/bin/gnustty ] && /bin/stty --version 2>/dev/null | grep -qi 'uutils coreutils'; then`,
 		`  sudo -n ln -sf /usr/bin/gnustty /bin/stty >/dev/null 2>&1 || true`,
 		`  sudo -n ln -sf /usr/bin/gnustty /usr/bin/stty >/dev/null 2>&1 || true`,
 		`fi`,
 		`shell_inputrc=""`,
-		`if [ -n "${HOME:-}" ] && command -v mktemp >/dev/null 2>&1; then`,
-		`  shell_inputrc="$(mktemp "${HOME}/.codelima-inputrc.XXXXXX")"`,
-		`  if [ -f "${HOME}/.inputrc" ]; then`,
+		`if command -v mktemp >/dev/null 2>&1; then`,
+		`  for shell_inputrc_dir in "${HOME:-}" "${PWD:-}/tmp" "${TMPDIR:-/tmp}"; do`,
+		`    [ -n "${shell_inputrc_dir}" ] || continue`,
+		`    [ -d "${shell_inputrc_dir}" ] || continue`,
+		`    shell_inputrc="$(mktemp "${shell_inputrc_dir}/.codelima-inputrc.XXXXXX" 2>/dev/null)" || shell_inputrc=""`,
+		`    [ -n "${shell_inputrc}" ] && break`,
+		`  done`,
+		`fi`,
+		`if [ -n "${shell_inputrc}" ]; then`,
+		`  if [ -n "${HOME:-}" ] && [ -f "${HOME}/.inputrc" ]; then`,
 		`    cat "${HOME}/.inputrc" > "${shell_inputrc}"`,
 		`    printf '\n' >> "${shell_inputrc}"`,
 		`  fi`,

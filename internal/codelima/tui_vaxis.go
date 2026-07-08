@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -291,25 +290,16 @@ type tuiSessionStore struct {
 
 	preferredCols int
 	preferredRows int
-
-	nodeShellExecutable    string
-	nodeShellExecutableErr error
 }
 
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
-	executable, executableErr := os.Executable()
-	if executableErr == nil {
-		executable = resolveCodelimaExecutablePath(executable)
-	}
 	return &tuiSessionStore{
-		ctx:                    ctx,
-		service:                service,
-		postEvent:              postEvent,
-		sessions:               map[string]*tuiSession{},
-		targets:                map[terminal.TargetKey]*terminal.TargetTerminalState{},
-		registry:               terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
-		nodeShellExecutable:    executable,
-		nodeShellExecutableErr: executableErr,
+		ctx:       ctx,
+		service:   service,
+		postEvent: postEvent,
+		sessions:  map[string]*tuiSession{},
+		targets:   map[terminal.TargetKey]*terminal.TargetTerminalState{},
+		registry:  terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
 	}
 }
 
@@ -391,66 +381,66 @@ func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
 }
 
 func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
-	targetKey := terminal.ProjectTarget(project.ID).String()
+	target := terminal.ProjectTarget(project.ID)
+	targetKey := target.String()
 	s.ClearSessionError(targetKey)
 
-	if strings.TrimSpace(project.WorkspacePath) == "" {
-		err := fmt.Errorf("project workspace path is not configured")
-		s.setSessionError(targetKey, err)
-		return "", err
-	}
-	info, err := os.Stat(project.WorkspacePath)
+	spec, err := s.service.TerminalLaunchSpec(target, terminal.ProjectHostShell, project.WorkspacePath)
 	if err != nil {
-		err = fmt.Errorf("project workspace path is unavailable: %w", err)
-		s.setSessionError(targetKey, err)
-		return "", err
-	}
-	if !info.IsDir() {
-		err := fmt.Errorf("project workspace path is not a directory: %s", project.WorkspacePath)
 		s.setSessionError(targetKey, err)
 		return "", err
 	}
 
-	args := interactiveShellLaunchCommand()
-	command := exec.CommandContext(s.ctx, args[0], args[1:]...)
-	command.Env = os.Environ()
-	command.Dir = project.WorkspacePath
-
-	key := s.nextSessionKey(targetKey)
-	term := newSessionTUITerminal(key, s.postEvent)
-	if s.preferredCols > 0 && s.preferredRows > 0 {
-		term.Resize(s.preferredCols, s.preferredRows)
-	}
-	if err := term.Start(command); err != nil {
+	key, err := s.launchTabFromSpec(targetKey, spec, &tuiSession{
+		kind:    tuiTreeEntryProject,
+		label:   project.Slug,
+		project: project,
+	}, nil)
+	if err != nil {
 		s.setSessionError(targetKey, err)
 		return "", err
 	}
-
-	runtime := s.registry.Allocate(term)
-	s.putSession(&tuiSession{
-		key:        key,
-		target:     targetKey,
-		kind:       tuiTreeEntryProject,
-		label:      project.Slug,
-		project:    project,
-		terminalID: runtime.ID,
-	})
 	s.service.log().Debug("terminal opened", "kind", "project", "target", targetKey, "session", key)
 	return key, nil
 }
 
 func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
-	targetKey := terminal.NodeTarget(node.ID).String()
+	target := terminal.NodeTarget(node.ID)
+	targetKey := target.String()
 	s.ClearSessionError(targetKey)
 
-	executable, err := s.nodeTabExecutable()
+	spec, err := s.service.TerminalLaunchSpec(target, terminal.NodeShell, "")
 	if err != nil {
 		s.setSessionError(targetKey, err)
 		return "", err
 	}
 
-	command := exec.CommandContext(s.ctx, executable, "--home", s.service.cfg.MetadataRoot, "shell", node.ID)
-	command.Env = os.Environ()
+	key, err := s.launchTabFromSpec(targetKey, spec, &tuiSession{
+		kind:  tuiTreeEntryNode,
+		label: node.Slug,
+		node:  node,
+	}, func(startErr error) error {
+		return nodeTabStartError(spec.Argv[0], startErr)
+	})
+	if err != nil {
+		s.setSessionError(targetKey, err)
+		return "", err
+	}
+	s.service.log().Debug("terminal opened", "kind", "node", "target", targetKey, "session", key)
+	return key, nil
+}
+
+// launchTabFromSpec spawns a terminal for an already-built LaunchSpec, registers
+// its runtime, and records the session. It is the single spawn path shared by
+// both open flows: the LaunchSpec is the one shell-launch contract (built by
+// Service.TerminalLaunchSpec) and this method only turns it into a running
+// child. It does not touch the target error record — callers own that
+// (ClearSessionError/setSessionError) so both flows keep identical bookkeeping.
+// wrapStartErr, when non-nil, decorates a Start failure before it is returned.
+func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, session *tuiSession, wrapStartErr func(error) error) (string, error) {
+	command := exec.CommandContext(s.ctx, spec.Argv[0], spec.Argv[1:]...)
+	command.Env = spec.Env
+	command.Dir = spec.Dir
 
 	key := s.nextSessionKey(targetKey)
 	term := newSessionTUITerminal(key, s.postEvent)
@@ -458,21 +448,17 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 		term.Resize(s.preferredCols, s.preferredRows)
 	}
 	if err := term.Start(command); err != nil {
-		err = nodeTabStartError(executable, err)
-		s.setSessionError(targetKey, err)
+		if wrapStartErr != nil {
+			err = wrapStartErr(err)
+		}
 		return "", err
 	}
 
 	runtime := s.registry.Allocate(term)
-	s.putSession(&tuiSession{
-		key:        key,
-		target:     targetKey,
-		kind:       tuiTreeEntryNode,
-		label:      node.Slug,
-		node:       node,
-		terminalID: runtime.ID,
-	})
-	s.service.log().Debug("terminal opened", "kind", "node", "target", targetKey, "session", key)
+	session.key = key
+	session.target = targetKey
+	session.terminalID = runtime.ID
+	s.putSession(session)
 	return key, nil
 }
 
@@ -481,16 +467,6 @@ func resolveCodelimaExecutablePath(executable string) string {
 		return resolved
 	}
 	return executable
-}
-
-func (s *tuiSessionStore) nodeTabExecutable() (string, error) {
-	if s.nodeShellExecutableErr != nil {
-		return "", fmt.Errorf("resolve codelima executable: %w", s.nodeShellExecutableErr)
-	}
-	if strings.TrimSpace(s.nodeShellExecutable) == "" {
-		return "", fmt.Errorf("resolve codelima executable: empty path")
-	}
-	return s.nodeShellExecutable, nil
 }
 
 func nodeTabStartError(executable string, err error) error {
