@@ -279,14 +279,15 @@ type tuiSession struct {
 }
 
 type tuiSessionStore struct {
-	ctx           context.Context
-	service       *Service
-	postEvent     func(vaxis.Event)
-	sessions      map[string]*tuiSession
-	sessionErrors map[string]error
-	sessionOrder  []string
-	tabCounters   map[string]int
-	registry      *terminal.TerminalRuntimeRegistry[tuiTerminal]
+	ctx       context.Context
+	service   *Service
+	postEvent func(vaxis.Event)
+	sessions  map[string]*tuiSession
+	// targets holds per-target tab bookkeeping (ordered tabs, monotonic tab
+	// counter, and the last open error). It replaces the former parallel
+	// tabCounters/sessionOrder/sessionErrors maps (see ADR 61, Track 1 PR3).
+	targets  map[terminal.TargetKey]*terminal.TargetTerminalState
+	registry *terminal.TerminalRuntimeRegistry[tuiTerminal]
 
 	preferredCols int
 	preferredRows int
@@ -305,8 +306,7 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 		service:                service,
 		postEvent:              postEvent,
 		sessions:               map[string]*tuiSession{},
-		sessionErrors:          map[string]error{},
-		tabCounters:            map[string]int{},
+		targets:                map[terminal.TargetKey]*terminal.TargetTerminalState{},
 		registry:               terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
 		nodeShellExecutable:    executable,
 		nodeShellExecutableErr: executableErr,
@@ -329,14 +329,39 @@ func formatSessionKey(targetKey string, counter int) string {
 	return fmt.Sprintf("%s#%d", targetKey, counter)
 }
 
-// nextSessionKey allocates a unique tab key for the target. Each explicit
-// open-tab command produces a fresh session keyed "<target>#<n>".
-func (s *tuiSessionStore) nextSessionKey(targetKey string) string {
-	if s.tabCounters == nil {
-		s.tabCounters = map[string]int{}
+// targetState returns the per-target bookkeeping for targetKey, creating it on
+// first use. targetKey is always a valid "project:"/"node:" string at call
+// sites (built via TargetKey.String()); an unparseable key yields a throwaway
+// state so callers still get a usable value rather than a nil.
+func (s *tuiSessionStore) targetState(targetKey string) *terminal.TargetTerminalState {
+	tk, err := terminal.ParseTargetKey(targetKey)
+	if err != nil {
+		return &terminal.TargetTerminalState{}
 	}
-	s.tabCounters[targetKey]++
-	return formatSessionKey(targetKey, s.tabCounters[targetKey])
+	st, ok := s.targets[tk]
+	if !ok {
+		st = &terminal.TargetTerminalState{Target: tk}
+		s.targets[tk] = st
+	}
+	return st
+}
+
+// lookupTargetState returns the existing per-target bookkeeping for targetKey
+// without creating it.
+func (s *tuiSessionStore) lookupTargetState(targetKey string) (*terminal.TargetTerminalState, bool) {
+	tk, err := terminal.ParseTargetKey(targetKey)
+	if err != nil {
+		return nil, false
+	}
+	st, ok := s.targets[tk]
+	return st, ok
+}
+
+// nextSessionKey allocates a unique tab key for the target. Each explicit
+// open-tab command produces a fresh session keyed "<target>#<n>" from the
+// target's monotonic tab counter.
+func (s *tuiSessionStore) nextSessionKey(targetKey string) string {
+	return formatSessionKey(targetKey, s.targetState(targetKey).AllocateTabIndex())
 }
 
 // TargetSessionKeys lists the open terminal tabs that belong to a single
@@ -345,12 +370,13 @@ func (s *tuiSessionStore) TargetSessionKeys(targetKey string) []string {
 	if targetKey == "" {
 		return nil
 	}
-	keys := make([]string, 0, 2)
-	for _, key := range s.sessionOrder {
-		session, ok := s.sessions[key]
-		if ok && session.target == targetKey {
-			keys = append(keys, key)
-		}
+	st, ok := s.lookupTargetState(targetKey)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(st.Tabs))
+	for _, id := range st.TabIDs() {
+		keys = append(keys, string(id))
 	}
 	return keys
 }
@@ -366,22 +392,22 @@ func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
 
 func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
 	targetKey := terminal.ProjectTarget(project.ID).String()
-	delete(s.sessionErrors, targetKey)
+	s.ClearSessionError(targetKey)
 
 	if strings.TrimSpace(project.WorkspacePath) == "" {
 		err := fmt.Errorf("project workspace path is not configured")
-		s.sessionErrors[targetKey] = err
+		s.setSessionError(targetKey, err)
 		return "", err
 	}
 	info, err := os.Stat(project.WorkspacePath)
 	if err != nil {
 		err = fmt.Errorf("project workspace path is unavailable: %w", err)
-		s.sessionErrors[targetKey] = err
+		s.setSessionError(targetKey, err)
 		return "", err
 	}
 	if !info.IsDir() {
 		err := fmt.Errorf("project workspace path is not a directory: %s", project.WorkspacePath)
-		s.sessionErrors[targetKey] = err
+		s.setSessionError(targetKey, err)
 		return "", err
 	}
 
@@ -396,7 +422,7 @@ func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
 		term.Resize(s.preferredCols, s.preferredRows)
 	}
 	if err := term.Start(command); err != nil {
-		s.sessionErrors[targetKey] = err
+		s.setSessionError(targetKey, err)
 		return "", err
 	}
 
@@ -415,11 +441,11 @@ func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
 
 func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	targetKey := terminal.NodeTarget(node.ID).String()
-	delete(s.sessionErrors, targetKey)
+	s.ClearSessionError(targetKey)
 
 	executable, err := s.nodeTabExecutable()
 	if err != nil {
-		s.sessionErrors[targetKey] = err
+		s.setSessionError(targetKey, err)
 		return "", err
 	}
 
@@ -433,7 +459,7 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	}
 	if err := term.Start(command); err != nil {
 		err = nodeTabStartError(executable, err)
-		s.sessionErrors[targetKey] = err
+		s.setSessionError(targetKey, err)
 		return "", err
 	}
 
@@ -478,9 +504,11 @@ func (s *tuiSessionStore) putSession(session *tuiSession) {
 	if session == nil || session.key == "" {
 		return
 	}
-	if _, ok := s.sessions[session.key]; !ok {
-		s.sessionOrder = append(s.sessionOrder, session.key)
-	}
+	s.targetState(session.target).AppendTab(terminal.TerminalTabState{
+		ID:         terminal.TabID(session.key),
+		Label:      session.label,
+		TerminalID: session.terminalID,
+	})
 	s.sessions[session.key] = session
 }
 
@@ -490,13 +518,23 @@ func (s *tuiSessionStore) Session(targetKey string) (*tuiSession, bool) {
 }
 
 func (s *tuiSessionStore) SessionError(targetKey string) error {
-	return s.sessionErrors[targetKey]
+	if st, ok := s.lookupTargetState(targetKey); ok {
+		return st.OpenError
+	}
+	return nil
+}
+
+// setSessionError records the last open failure for a target.
+func (s *tuiSessionStore) setSessionError(targetKey string, err error) {
+	s.targetState(targetKey).OpenError = err
 }
 
 // ClearSessionError drops any recorded open error for a target. It is the
-// sanctioned accessor so callers do not reach into the sessionErrors map.
+// sanctioned accessor so callers do not reach into the per-target state.
 func (s *tuiSessionStore) ClearSessionError(targetKey string) {
-	delete(s.sessionErrors, targetKey)
+	if st, ok := s.lookupTargetState(targetKey); ok {
+		st.OpenError = nil
+	}
 }
 
 // terminalFor resolves a session's live terminal backend through the runtime
@@ -542,8 +580,8 @@ func (s *tuiSessionStore) SyncFocus(activeSessionKey string, focusActive bool) {
 
 // PruneStaleSessions closes every open session whose target no longer exists
 // (per keep) and drops every recorded target error whose target is likewise
-// gone. It owns the sessions/sessionErrors iteration so the app does not reach
-// into store internals.
+// gone. It owns the per-target iteration so the app does not reach into store
+// internals.
 func (s *tuiSessionStore) PruneStaleSessions(keep func(targetKey string) bool) {
 	var orphans []string
 	for sessionKey, session := range s.sessions {
@@ -554,9 +592,9 @@ func (s *tuiSessionStore) PruneStaleSessions(keep func(targetKey string) bool) {
 	for _, sessionKey := range orphans {
 		s.CloseSession(sessionKey)
 	}
-	for targetKey := range s.sessionErrors {
-		if !keep(targetKey) {
-			delete(s.sessionErrors, targetKey)
+	for tk, st := range s.targets {
+		if st.OpenError != nil && !keep(tk.String()) {
+			st.OpenError = nil
 		}
 	}
 }
@@ -567,7 +605,7 @@ func (s *tuiSessionStore) RemoveSession(sessionKey string) (*tuiSession, bool) {
 		return nil, false
 	}
 	delete(s.sessions, sessionKey)
-	s.removeSessionOrder(sessionKey)
+	s.removeTab(session)
 	// The terminal exited on its own (finish path); just forget the runtime.
 	s.registry.Remove(session.terminalID)
 	return session, true
@@ -581,7 +619,9 @@ func (s *tuiSessionStore) Close() {
 		s.service.log().Debug("terminal closed", "target", session.target, "session", sessionKey, "reason", "shutdown")
 		delete(s.sessions, sessionKey)
 	}
-	s.sessionOrder = nil
+	for _, st := range s.targets {
+		st.Tabs = nil
+	}
 }
 
 func (s *tuiSessionStore) CloseSession(sessionKey string) {
@@ -591,7 +631,7 @@ func (s *tuiSessionStore) CloseSession(sessionKey string) {
 	}
 
 	delete(s.sessions, sessionKey)
-	s.removeSessionOrder(sessionKey)
+	s.removeTab(session)
 	if runtime, ok := s.registry.Remove(session.terminalID); ok {
 		runtime.Backend.Close()
 	}
@@ -604,20 +644,17 @@ func (s *tuiSessionStore) CloseTargetSessions(targetKey string) {
 	for _, sessionKey := range s.TargetSessionKeys(targetKey) {
 		s.CloseSession(sessionKey)
 	}
-	delete(s.sessionErrors, targetKey)
+	s.ClearSessionError(targetKey)
 }
 
 func (s *tuiSessionStore) CloseNode(nodeID string) {
 	s.CloseTargetSessions(terminal.NodeTarget(nodeID).String())
 }
 
-func (s *tuiSessionStore) removeSessionOrder(targetKey string) {
-	for index, key := range s.sessionOrder {
-		if key != targetKey {
-			continue
-		}
-		s.sessionOrder = append(s.sessionOrder[:index], s.sessionOrder[index+1:]...)
-		return
+// removeTab drops a session's tab from its target's ordered tab list.
+func (s *tuiSessionStore) removeTab(session *tuiSession) {
+	if st, ok := s.lookupTargetState(session.target); ok {
+		st.RemoveTab(terminal.TabID(session.key))
 	}
 }
 
@@ -1444,11 +1481,11 @@ func (a *vaxisTUIApp) handleTerminalClosed(event tuiTerminalClosedEvent) {
 	targetKey := session.target
 	keys := a.sessions.TargetSessionKeys(targetKey)
 	a.sessions.RemoveSession(event.TargetKey)
-	if a.state.activeTabKeys[targetKey] == event.TargetKey {
+	if a.state.activeTab(targetKey) == event.TargetKey {
 		if nextKey := nextActiveTerminalTabAfterClose(keys, event.TargetKey); nextKey != "" {
 			a.state.setActiveTab(targetKey, nextKey)
 		} else {
-			delete(a.state.activeTabKeys, targetKey)
+			a.state.clearActiveTab(targetKey)
 		}
 	}
 	if a.state.focus == tuiFocusTerminal &&
@@ -2470,7 +2507,7 @@ func (a *vaxisTUIApp) closeTerminalTab() error {
 		return nil
 	}
 
-	delete(a.state.activeTabKeys, targetKey)
+	a.state.clearActiveTab(targetKey)
 	if a.state.hostTerminalReturnKey != "" && isTargetKind(targetKey, terminal.TargetProject) {
 		a.state.hostTerminalReturnKey = ""
 	}

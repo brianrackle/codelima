@@ -120,7 +120,7 @@ type tuiState struct {
 	treePaneMode          tuiTreePaneMode
 	terminalTarget        string
 	hostTerminalReturnKey string
-	activeTabKeys         map[string]string
+	activeTabKeys         map[terminal.TargetKey]terminal.TabID
 	sessions              tuiSessionManager
 }
 
@@ -137,7 +137,7 @@ func newTUIState(tree []ProjectTreeNode, sessions tuiSessionManager) (*tuiState,
 		selection:     -1,
 		focus:         tuiFocusTree,
 		treePaneMode:  tuiTreePaneModeInfo,
-		activeTabKeys: map[string]string{},
+		activeTabKeys: map[terminal.TargetKey]terminal.TabID{},
 		sessions:      sessions,
 	}
 
@@ -412,7 +412,31 @@ func (s *tuiState) setActiveTab(targetKey, sessionKey string) {
 	if targetKey == "" || sessionKey == "" {
 		return
 	}
-	s.activeTabKeys[targetKey] = sessionKey
+	tk, err := terminal.ParseTargetKey(targetKey)
+	if err != nil {
+		return
+	}
+	s.activeTabKeys[tk] = terminal.TabID(sessionKey)
+}
+
+// activeTab returns the session key of the target's recorded active tab, or ""
+// when none is recorded. It is the single reader of the activeTabKeys map so
+// the target-key parsing stays in one place.
+func (s *tuiState) activeTab(targetKey string) string {
+	tk, err := terminal.ParseTargetKey(targetKey)
+	if err != nil {
+		return ""
+	}
+	return string(s.activeTabKeys[tk])
+}
+
+// clearActiveTab forgets the target's recorded active tab.
+func (s *tuiState) clearActiveTab(targetKey string) {
+	tk, err := terminal.ParseTargetKey(targetKey)
+	if err != nil {
+		return
+	}
+	delete(s.activeTabKeys, tk)
 }
 
 // targetActiveSessionKey resolves the active tab for a target, falling back
@@ -425,7 +449,7 @@ func (s *tuiState) targetActiveSessionKey(targetKey string) string {
 	if len(keys) == 0 {
 		return ""
 	}
-	if active := s.activeTabKeys[targetKey]; active != "" && containsString(keys, active) {
+	if active := s.activeTab(targetKey); active != "" && containsString(keys, active) {
 		return active
 	}
 	return keys[0]
