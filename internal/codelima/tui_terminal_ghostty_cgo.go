@@ -137,7 +137,7 @@ func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTe
 		return nil, fmt.Errorf("create ghostty terminal: %s", C.GoString(C.ghostty_bridge_last_error()))
 	}
 
-	return &ghosttyTUITerminal{
+	impl := &ghosttyTUITerminal{
 		targetKey: targetKey,
 		postEvent: postEvent,
 		term:      term,
@@ -160,9 +160,22 @@ func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTe
 				postEvent(tuiClipboardEvent{TargetKey: targetKey, Text: text})
 			}
 		}),
-		cols: 80,
-		rows: 24,
-	}, nil
+		cols:      80,
+		rows:      24,
+		state:     runtimeStateRunning,
+		commands:  make(chan actorEnvelope),
+		readCh:    make(chan []byte),
+		readErrCh: make(chan error, 1),
+		quit:      make(chan struct{}),
+		actorDone: make(chan struct{}),
+	}
+
+	// The actor runs from construction (not from Start) so the synchronous
+	// interface methods work even before a child is spawned — several tests
+	// Resize/Focus/Blur a terminal that never calls Start.
+	go impl.runActor()
+
+	return impl, nil
 }
 
 func loadGhosttyVT() error {
@@ -253,10 +266,23 @@ type ghosttyTUITerminal struct {
 	closed           bool
 	suppressEvent    bool
 	redrawPending    bool
+	generation       uint64
 	waitOnce         sync.Once
 	waitErr          error
 	waitDone         chan struct{}
 	closeOnce        sync.Once
+
+	// Runtime-actor plumbing (work item 2.1, ADR 63). The actor goroutine
+	// (runActor) is the sole live mutator of pty+emulator; interface methods
+	// enqueue onto commands, the read pump feeds readCh/readErrCh, quit stops
+	// the pump during teardown, and actorDone closes when the actor exits.
+	state     runtimeState
+	commands  chan actorEnvelope
+	readCh    chan []byte
+	readErrCh chan error
+	quit      chan struct{}
+	quitOnce  sync.Once
+	actorDone chan struct{}
 }
 
 type ghosttyKeyEncoder struct {
@@ -1207,7 +1233,11 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 		return err
 	}
 
-	ptyWriter := newGhosttyPTYWriter(ptyFile, nil, func(err error) {
+	// Wire the real POLLOUT waiter so an EAGAIN on the PTY master parks on
+	// poll() instead of busy-spinning (work item 2.1 busy-spin fix, ADR 63).
+	// Production previously passed waitWritable=nil, which spun hot on a
+	// would-block write.
+	ptyWriter := newGhosttyPTYWriter(ptyFile, waitGhosttyPTYWritable, func(err error) {
 		if t.postEvent != nil {
 			t.postEvent(tuiTerminalErrorEvent{
 				TargetKey: t.targetKey,
@@ -1224,7 +1254,10 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	t.waitDone = waitDone
 	t.mu.Unlock()
 
-	go t.readLoop()
+	// The read pump only reads the fd and forwards bytes to the actor, which
+	// owns ingest; keeping it a dumb reader (not an emulator mutator) preserves
+	// the single-owner invariant while blocking reads stay simple.
+	go t.readPump()
 	// Single reaper: cmd.Wait may only be called once, so it runs solely
 	// inside the waitOnce-guarded wait(); waitDone lets teardown observe the
 	// reap without racing a second Wait.
@@ -1235,7 +1268,14 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	return nil
 }
 
+// Resize enqueues a resize command and waits for the actor to apply it, so the
+// emulator/PTY are resized before the call returns (ordering the daemon and the
+// render loop rely on).
 func (t *ghosttyTUITerminal) Resize(width, height int) {
+	t.sendSync(cmdResize{Cols: width, Rows: height})
+}
+
+func (t *ghosttyTUITerminal) applyResize(width, height int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1243,26 +1283,36 @@ func (t *ghosttyTUITerminal) Resize(width, height int) {
 	t.invalidateLocked()
 }
 
-func (t *ghosttyTUITerminal) readLoop() {
+// readPump does blocking reads on the PTY master and forwards raw bytes to the
+// actor (which owns ingest). On any read error it reports once and exits; the
+// quit channel unblocks it if the actor tore the terminal down first.
+func (t *ghosttyTUITerminal) readPump() {
 	buffer := make([]byte, 32*1024)
 	for {
 		n, err := t.readPTY(buffer)
 		if n > 0 {
-			t.ingestPTY(buffer[:n])
+			data := append([]byte(nil), buffer[:n]...)
+			select {
+			case t.readCh <- data:
+			case <-t.quit:
+				return
+			}
 		}
 		if err != nil {
-			if errors.Is(err, os.ErrClosed) {
-				t.finish(nil)
-				return
+			select {
+			case t.readErrCh <- err:
+			case <-t.quit:
 			}
-			if errors.Is(err, io.EOF) {
-				t.finish(t.wait())
-				return
-			}
-			t.finish(t.wait())
 			return
 		}
 	}
+}
+
+// isGhosttyPTYClosedReadError reports whether a read error means the PTY was
+// closed under us (no exit status to report), matching the pre-actor readLoop's
+// os.ErrClosed branch.
+func isGhosttyPTYClosedReadError(err error) bool {
+	return errors.Is(err, os.ErrClosed)
 }
 
 func (t *ghosttyTUITerminal) readPTY(buffer []byte) (int, error) {
@@ -1296,6 +1346,9 @@ func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
 		t.drainResponsesLockedRaw()
 		return struct{}{}
 	})
+	// Advance the output generation so cmdSnapshot/cmdRead consumers can detect
+	// new child output and discard stale pulls (ADR 63).
+	t.generation++
 	t.invalidateLocked()
 }
 
@@ -1355,7 +1408,345 @@ func (t *ghosttyTUITerminal) readPendingResponsesLockedRaw() string {
 	return output.String()
 }
 
+// serveRead answers a cmdRead query on the actor goroutine. It renders the
+// viewport (and, for ReadRecent, recent scrollback) on demand — reusing the same
+// bridge queries Draw uses — so terminal content is readable with no TUI
+// attached. This is the daemon (Track 3) / agent-detection (Track 5) seam.
+func (t *ghosttyTUITerminal) serveRead(source ReadSource, format ReadFormat) ReadResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed || t.term == nil {
+		return ReadResult{Err: errTerminalClosed}
+	}
+	return withGhosttyStderrSuppressed(func() ReadResult {
+		var text string
+		switch source {
+		case ReadRecent:
+			text = t.recentTextLockedRaw(format)
+		default:
+			text = t.visibleTextLockedRaw(format)
+		}
+		return ReadResult{Text: text, Generation: t.generation}
+	})
+}
+
+// serveSnapshot answers a cmdSnapshot query: the whole cell grid + cursor +
+// output generation, assembled under t.mu so it is internally consistent even
+// while child output streams.
+func (t *ghosttyTUITerminal) serveSnapshot() SnapshotResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed || t.term == nil {
+		return SnapshotResult{Err: errTerminalClosed}
+	}
+	return withGhosttyStderrSuppressed(func() SnapshotResult {
+		return t.snapshotLockedRaw()
+	})
+}
+
+func (t *ghosttyTUITerminal) snapshotLockedRaw() SnapshotResult {
+	cols, rows := t.cols, t.rows
+	if cols <= 0 || rows <= 0 {
+		return SnapshotResult{Err: errSnapshotFailed}
+	}
+
+	C.ghostty_bridge_render_state_update(t.term)
+
+	viewport := make([]C.GhosttyResolvedCell, cols*rows)
+	count := int(C.ghostty_bridge_render_state_get_viewport(
+		t.term,
+		(*C.GhosttyResolvedCell)(unsafe.Pointer(&viewport[0])),
+		C.size_t(len(viewport)),
+	))
+	if count < 0 {
+		return SnapshotResult{Err: errSnapshotFailed}
+	}
+
+	snap := TerminalSnapshot{
+		Cols:       cols,
+		Rows:       rows,
+		Generation: t.generation,
+		Cells:      make([]SnapshotCell, 0, cols*rows),
+	}
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			cell := viewport[row*cols+col]
+			snap.Cells = append(snap.Cells, t.snapshotCellLocked(row, col, cell))
+		}
+	}
+	snap.CursorVisible = bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term))
+	snap.CursorX = int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
+	snap.CursorY = int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
+	return SnapshotResult{Snapshot: snap}
+}
+
+func (t *ghosttyTUITerminal) snapshotCellLocked(row, col int, cell C.GhosttyResolvedCell) SnapshotCell {
+	grapheme := t.graphemeLocked(row, col, cell)
+	if grapheme == "" {
+		grapheme = " "
+	}
+	return SnapshotCell{
+		Grapheme:      grapheme,
+		Width:         int(cell.width),
+		FG:            ghosttyRGB(uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)),
+		BG:            ghosttyRGB(uint8(cell.bg_r), uint8(cell.bg_g), uint8(cell.bg_b)),
+		FGDefault:     cell.color_flags&C.GHOSTTY_CELL_FG_DEFAULT != 0,
+		BGDefault:     cell.color_flags&C.GHOSTTY_CELL_BG_DEFAULT != 0,
+		Bold:          cell.flags&C.GHOSTTY_CELL_BOLD != 0,
+		Faint:         cell.flags&C.GHOSTTY_CELL_FAINT != 0,
+		Italic:        cell.flags&C.GHOSTTY_CELL_ITALIC != 0,
+		Underline:     cell.flags&C.GHOSTTY_CELL_UNDERLINE != 0,
+		Strikethrough: cell.flags&C.GHOSTTY_CELL_STRIKETHROUGH != 0,
+		Inverse:       cell.flags&C.GHOSTTY_CELL_INVERSE != 0,
+		Invisible:     cell.flags&C.GHOSTTY_CELL_INVISIBLE != 0,
+		Blink:         cell.flags&C.GHOSTTY_CELL_BLINK != 0,
+	}
+}
+
+func (t *ghosttyTUITerminal) visibleTextLockedRaw(format ReadFormat) string {
+	cols, rows := t.cols, t.rows
+	if cols <= 0 || rows <= 0 {
+		return ""
+	}
+
+	C.ghostty_bridge_render_state_update(t.term)
+
+	viewport := make([]C.GhosttyResolvedCell, cols*rows)
+	count := int(C.ghostty_bridge_render_state_get_viewport(
+		t.term,
+		(*C.GhosttyResolvedCell)(unsafe.Pointer(&viewport[0])),
+		C.size_t(len(viewport)),
+	))
+	if count < 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, rows)
+	for row := 0; row < rows; row++ {
+		cells := viewport[row*cols : row*cols+cols]
+		if format == ReadANSI {
+			lines = append(lines, t.viewportRowANSILocked(row, cells))
+		} else {
+			lines = append(lines, t.viewportRowTextLocked(row, cells))
+		}
+	}
+
+	if format == ReadANSI {
+		return strings.Join(lines, "\n")
+	}
+	return joinTrimmedTerminalLines(lines)
+}
+
+func (t *ghosttyTUITerminal) recentTextLockedRaw(format ReadFormat) string {
+	visible := t.visibleTextLockedRaw(format)
+
+	cols := t.cols
+	length := int(C.ghostty_bridge_terminal_get_scrollback_length(t.term))
+	if length <= 0 || cols <= 0 {
+		return visible
+	}
+
+	const maxRecentRows = 2000
+	start := 0
+	if length > maxRecentRows {
+		start = length - maxRecentRows
+	}
+
+	cellBuf := make([]C.GhosttyResolvedCell, cols)
+	lines := make([]string, 0, length-start)
+	for offset := start; offset < length; offset++ {
+		n := int(C.ghostty_bridge_terminal_get_scrollback_line(
+			t.term,
+			C.int(offset),
+			(*C.GhosttyResolvedCell)(unsafe.Pointer(&cellBuf[0])),
+			C.size_t(len(cellBuf)),
+		))
+		if n < 0 {
+			continue
+		}
+		if n > cols {
+			n = cols
+		}
+		lines = append(lines, t.scrollbackRowTextLocked(offset, cellBuf[:n]))
+	}
+
+	recent := joinTrimmedTerminalLines(lines)
+	switch {
+	case recent == "":
+		return visible
+	case visible == "":
+		return recent
+	default:
+		return recent + "\n" + visible
+	}
+}
+
+func (t *ghosttyTUITerminal) viewportRowTextLocked(row int, cells []C.GhosttyResolvedCell) string {
+	var b strings.Builder
+	for col := 0; col < len(cells); col++ {
+		cell := cells[col]
+		if cell.width == 0 {
+			// Zero-width cell: a wide-glyph spacer or an empty continuation;
+			// the preceding wide grapheme already carries the full width.
+			continue
+		}
+		grapheme := t.graphemeLocked(row, col, cell)
+		if grapheme == "" {
+			grapheme = " "
+		}
+		b.WriteString(grapheme)
+	}
+	return b.String()
+}
+
+func (t *ghosttyTUITerminal) viewportRowANSILocked(row int, cells []C.GhosttyResolvedCell) string {
+	var b strings.Builder
+	current := ""
+	for col := 0; col < len(cells); col++ {
+		cell := cells[col]
+		if cell.width == 0 {
+			continue
+		}
+		sgr := ghosttyANSISGRForCell(cell)
+		if sgr != current {
+			b.WriteString("\x1b[0m")
+			b.WriteString(sgr)
+			current = sgr
+		}
+		grapheme := t.graphemeLocked(row, col, cell)
+		if grapheme == "" {
+			grapheme = " "
+		}
+		b.WriteString(grapheme)
+	}
+	if current != "" {
+		b.WriteString("\x1b[0m")
+	}
+	return b.String()
+}
+
+func (t *ghosttyTUITerminal) scrollbackRowTextLocked(offset int, cells []C.GhosttyResolvedCell) string {
+	var b strings.Builder
+	for col := 0; col < len(cells); col++ {
+		cell := cells[col]
+		if cell.width == 0 {
+			continue
+		}
+		grapheme := t.scrollbackGraphemeLocked(offset, col, cell)
+		if grapheme == "" {
+			grapheme = " "
+		}
+		b.WriteString(grapheme)
+	}
+	return b.String()
+}
+
+func (t *ghosttyTUITerminal) scrollbackGraphemeLocked(offset int, col int, cell C.GhosttyResolvedCell) string {
+	if cell.grapheme_len == 0 {
+		if cell.codepoint == 0 {
+			return " "
+		}
+		return string(rune(cell.codepoint))
+	}
+
+	codepoints := make([]C.uint32_t, int(cell.grapheme_len)+1)
+	count := int(C.ghostty_bridge_terminal_get_scrollback_grapheme(
+		t.term,
+		C.int(offset),
+		C.int(col),
+		(*C.uint32_t)(unsafe.Pointer(&codepoints[0])),
+		C.size_t(len(codepoints)),
+	))
+	if count <= 0 {
+		if cell.codepoint == 0 {
+			return " "
+		}
+		return string(rune(cell.codepoint))
+	}
+
+	runes := make([]rune, 0, count)
+	for index := 0; index < count; index++ {
+		runes = append(runes, rune(codepoints[index]))
+	}
+	return string(runes)
+}
+
+func ghosttyANSISGRForCell(cell C.GhosttyResolvedCell) string {
+	codes := make([]string, 0, 8)
+	if cell.flags&C.GHOSTTY_CELL_BOLD != 0 {
+		codes = append(codes, "1")
+	}
+	if cell.flags&C.GHOSTTY_CELL_FAINT != 0 {
+		codes = append(codes, "2")
+	}
+	if cell.flags&C.GHOSTTY_CELL_ITALIC != 0 {
+		codes = append(codes, "3")
+	}
+	if cell.flags&C.GHOSTTY_CELL_UNDERLINE != 0 {
+		codes = append(codes, "4")
+	}
+	if cell.flags&C.GHOSTTY_CELL_BLINK != 0 {
+		codes = append(codes, "5")
+	}
+	if cell.flags&C.GHOSTTY_CELL_INVERSE != 0 {
+		codes = append(codes, "7")
+	}
+	if cell.flags&C.GHOSTTY_CELL_INVISIBLE != 0 {
+		codes = append(codes, "8")
+	}
+	if cell.flags&C.GHOSTTY_CELL_STRIKETHROUGH != 0 {
+		codes = append(codes, "9")
+	}
+	if cell.color_flags&C.GHOSTTY_CELL_FG_DEFAULT == 0 {
+		codes = append(codes, fmt.Sprintf("38;2;%d;%d;%d", uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)))
+	}
+	if cell.color_flags&C.GHOSTTY_CELL_BG_DEFAULT == 0 {
+		codes = append(codes, fmt.Sprintf("48;2;%d;%d;%d", uint8(cell.bg_r), uint8(cell.bg_g), uint8(cell.bg_b)))
+	}
+	if len(codes) == 0 {
+		return ""
+	}
+	return "\x1b[" + strings.Join(codes, ";") + "m"
+}
+
+// joinTrimmedTerminalLines joins rendered rows with newlines, trimming trailing
+// spaces from each row and dropping trailing blank rows, so plain-text reads are
+// stable enough to assert against.
+func joinTrimmedTerminalLines(lines []string) string {
+	trimmed := make([]string, len(lines))
+	for i, line := range lines {
+		trimmed[i] = strings.TrimRight(line, " ")
+	}
+	end := len(trimmed)
+	for end > 0 && trimmed[end-1] == "" {
+		end--
+	}
+	return strings.Join(trimmed[:end], "\n")
+}
+
+// Update enqueues a TUI input event and waits for the actor to apply it. The
+// wait preserves the pre-actor synchronous contract: e.g. a color-theme update
+// must have queued its VT response by the time Update returns.
 func (t *ghosttyTUITerminal) Update(event vaxis.Event) {
+	t.sendSync(cmdUpdate{Event: event})
+}
+
+// applyInput writes raw daemon-supplied bytes to the child (cmdInput). Like a
+// keystroke it snaps the viewport to the bottom first.
+func (t *ghosttyTUITerminal) applyInput(data []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed || t.term == nil || t.ptyWriter == nil || len(data) == 0 {
+		return
+	}
+	t.scrollViewportBottomLocked()
+	t.writePTYBytesLocked(data)
+}
+
+func (t *ghosttyTUITerminal) applyUpdate(event vaxis.Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1727,29 +2118,51 @@ func (t *ghosttyTUITerminal) graphemeLocked(row int, col int, cell C.GhosttyReso
 	return string(runes)
 }
 
+// Close asks the actor to tear the terminal down (group-killing the child via
+// the Track 0.1 helper) and blocks until teardown + reap complete, so callers
+// can observe a reaped child immediately. If the actor already exited (the
+// child ended on its own and the read-error path tore down), Close still runs
+// the kill=true teardown directly: resources are already nil'd, so it only
+// escalates on the child's process group — preserving the pre-actor guarantee
+// that Close after self-exit still reaps surviving grandchildren. teardown was
+// built for exactly this Close-vs-finish interleave. Repeat Closes just wait on
+// actorDone.
 func (t *ghosttyTUITerminal) Close() {
 	t.closeOnce.Do(func() {
-		t.teardown(true, false, nil)
+		select {
+		case t.commands <- actorEnvelope{cmd: cmdClose{}}:
+		case <-t.actorDone:
+			t.teardown(true, false, nil)
+		}
 	})
+	<-t.actorDone
 }
 
 func (t *ghosttyTUITerminal) Focus() {
+	t.sendSync(cmdFocus{Focused: true})
+}
+
+func (t *ghosttyTUITerminal) Blur() {
+	t.sendSync(cmdFocus{Focused: false})
+}
+
+func (t *ghosttyTUITerminal) applyFocus(focused bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.focused = true
+	t.focused = focused
 	if t.term != nil && t.getModeLocked(ghosttyModeFocusEvents, false) {
-		t.writePTYLocked(encodeTUITerminalFocusWithGhostty(true))
+		t.writePTYLocked(encodeTUITerminalFocusWithGhostty(focused))
 	}
 	t.invalidateLocked()
 }
 
-func (t *ghosttyTUITerminal) Blur() {
+func (t *ghosttyTUITerminal) applyScroll(delta int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.focused = false
-	if t.term != nil && t.getModeLocked(ghosttyModeFocusEvents, false) {
-		t.writePTYLocked(encodeTUITerminalFocusWithGhostty(false))
+	if t.closed || t.term == nil || delta == 0 {
+		return
 	}
+	t.scrollViewportDeltaLocked(delta)
 	t.invalidateLocked()
 }
 
@@ -1803,10 +2216,6 @@ func (t *ghosttyTUITerminal) hyperlinkAtLocked(row int, col int) (string, bool) 
 	return string(buffer[:n]), true
 }
 
-func (t *ghosttyTUITerminal) finish(err error) {
-	t.teardown(false, true, err)
-}
-
 // teardown is the single resource-release path shared by Close (kill=true:
 // the user closed the tab, so the child's whole process group is terminated
 // and reaped before returning) and finish (kill=false: the child already
@@ -1814,6 +2223,10 @@ func (t *ghosttyTUITerminal) finish(err error) {
 // and nil'd under the mutex, so the cgo handles are freed exactly once no
 // matter how Close and finish interleave.
 func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
+	// Stop the read pump before closing the PTY so it never blocks trying to
+	// hand bytes to an actor that is exiting.
+	t.quitOnce.Do(func() { close(t.quit) })
+
 	t.mu.Lock()
 	if !post {
 		t.suppressEvent = true

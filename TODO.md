@@ -665,3 +665,22 @@ Advantages:
 Disadvantages:
 
 - Root fix depends on upstream; a local vendor patch adds to the `ghostty-vt`/vaxis patch-maintenance surface.
+
+### 27. Bounded POLLOUT wait in `waitGhosttyPTYWritable`
+
+Problem:
+
+- The PTY write backpressure waiter polls POLLOUT with an infinite timeout. If a future caller uses a genuinely non-blocking PTY fd (e.g. the daemon's FD handoff in Track 4), a writer parked in poll while the fd is closed elsewhere may not wake — Linux close-during-poll behavior is unspecified.
+- Today this is unreachable in production: `pty.StartWithAttrs` → `Setsize` → `os.File.Fd()` flips the master to blocking mode at spawn (verified against Go 1.24.1 and creack/pty v1.1.18), so production writes block in `write(2)` and never surface EAGAIN. The waiter fires only in tests and any future non-blocking-fd context.
+
+Suggested solution:
+
+- Bounded poll (~100ms) with a re-check of the writer's closed state between waits, so teardown can never hang on a parked poller.
+
+Advantages:
+
+- Teardown can never hang on a parked POLLOUT poller once non-blocking fds enter the picture (daemon handoff).
+
+Disadvantages:
+
+- 10Hz retry while genuinely backpressured; touches a tested helper.

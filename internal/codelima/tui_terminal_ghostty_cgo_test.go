@@ -41,6 +41,322 @@ func waitForProcessGone(t *testing.T, pid int, timeout time.Duration) {
 	t.Fatalf("process %d is still alive %v after Close", pid, timeout)
 }
 
+// newActorTerminal spawns a real child through a runtime-actor terminal with NO
+// TUI attached, the way the daemon (Track 3) will. It returns the concrete
+// terminal so tests can exercise the actor's cmdRead/cmdSnapshot seam directly.
+func newActorTerminal(t *testing.T, cmd *exec.Cmd) *ghosttyTUITerminal {
+	t.Helper()
+
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	t.Cleanup(terminal.Close)
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+	return ghostty
+}
+
+func visibleLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+// TestActorReadReturnsVisibleText is the headline DoD test for 2.1: a real
+// /bin/sh driven only through the actor's input + read commands — no vaxis
+// window, no Draw — and cmdRead returns the on-screen text.
+func TestActorReadReturnsVisibleText(t *testing.T) {
+	// Empty PS1 removes the shell prompt so the command output lands on its own
+	// line regardless of prompt/echo interleaving; tty echo still shows the typed
+	// command line separately.
+	cmd := exec.Command("/bin/sh")
+	cmd.Env = append(os.Environ(), "PS1=")
+	ghostty := newActorTerminal(t, cmd)
+
+	ghostty.SendInput([]byte("echo hello-actor\n"))
+
+	var visible string
+	waitForCondition(t, 5*time.Second, func() bool {
+		result := ghostty.ReadVisible(ReadText)
+		if result.Err != nil {
+			return false
+		}
+		visible = result.Text
+		return strings.Contains(visible, "hello-actor")
+	}, "echoed command output to reach the actor-read visible text")
+
+	// The echoed input line ("echo hello-actor", possibly prompt-prefixed) and
+	// the command output line ("hello-actor") both appear; assert the output
+	// line exactly, which does not depend on the shell's prompt string.
+	foundExact := false
+	for _, line := range visibleLines(visible) {
+		if line == "hello-actor" {
+			foundExact = true
+			break
+		}
+	}
+	if !foundExact {
+		t.Fatalf("expected an exact visible line %q, got visible text:\n%s", "hello-actor", visible)
+	}
+}
+
+// TestActorSnapshotIsConsistentAndAdvancesGeneration proves cmdSnapshot returns
+// a full, internally consistent cell grid whose generation advances as the child
+// streams output, and that snapshots taken mid-stream stay consistent.
+func TestActorSnapshotIsConsistentAndAdvancesGeneration(t *testing.T) {
+	ghostty := newActorTerminal(t, exec.Command("/bin/sh", "-c",
+		`i=0; while true; do echo "tick $i"; i=$((i+1)); sleep 0.02; done`))
+
+	assertConsistent := func(snap TerminalSnapshot) {
+		t.Helper()
+		if snap.Cols <= 0 || snap.Rows <= 0 {
+			t.Fatalf("snapshot has non-positive dimensions: %dx%d", snap.Cols, snap.Rows)
+		}
+		if got, want := len(snap.Cells), snap.Cols*snap.Rows; got != want {
+			t.Fatalf("snapshot cell count = %d, want Cols*Rows = %d", got, want)
+		}
+		if snap.CursorX < 0 || snap.CursorX > snap.Cols || snap.CursorY < 0 || snap.CursorY >= snap.Rows {
+			t.Fatalf("snapshot cursor out of bounds: (%d,%d) grid %dx%d",
+				snap.CursorX, snap.CursorY, snap.Cols, snap.Rows)
+		}
+	}
+
+	first := ghostty.Snapshot()
+	if first.Err != nil {
+		t.Fatalf("initial Snapshot() error = %v", first.Err)
+	}
+	assertConsistent(first.Snapshot)
+	baseGen := first.Snapshot.Generation
+
+	// Generation must advance as new output streams in.
+	var lastGen uint64 = baseGen
+	waitForCondition(t, 5*time.Second, func() bool {
+		result := ghostty.Snapshot()
+		if result.Err != nil {
+			return false
+		}
+		assertConsistent(result.Snapshot)
+		lastGen = result.Snapshot.Generation
+		return result.Snapshot.Generation > baseGen
+	}, "snapshot generation to advance on new child output")
+
+	// Repeated snapshots while output streams stay internally consistent and the
+	// generation never goes backwards.
+	for i := 0; i < 25; i++ {
+		result := ghostty.Snapshot()
+		if result.Err != nil {
+			t.Fatalf("streaming Snapshot() error = %v", result.Err)
+		}
+		assertConsistent(result.Snapshot)
+		if result.Snapshot.Generation < lastGen {
+			t.Fatalf("snapshot generation went backwards: %d < %d", result.Snapshot.Generation, lastGen)
+		}
+		lastGen = result.Snapshot.Generation
+	}
+}
+
+// TestActorResizeIsOrderedBeforeInput proves a cmdResize is fully applied
+// (including the PTY winsize) before a subsequently-sent cmdInput runs in the
+// child: `stty size` reports the resized geometry.
+func TestActorResizeIsOrderedBeforeInput(t *testing.T) {
+	ghostty := newActorTerminal(t, exec.Command("/bin/sh"))
+
+	// Shrink from the default 80x24 to 40 cols x 10 rows, then ask the child for
+	// its window size. stty prints "rows cols".
+	ghostty.Resize(40, 10)
+	ghostty.SendInput([]byte("stty size\n"))
+
+	waitForCondition(t, 5*time.Second, func() bool {
+		result := ghostty.ReadRecent(ReadText)
+		if result.Err != nil {
+			return false
+		}
+		return strings.Contains(result.Text, "10 40")
+	}, "resized winsize (10 40) to be visible to the child before its input ran")
+}
+
+// TestActorCloseIsIdempotentAndGroupKills exercises cmdClose through the actor:
+// it group-kills the child's descendants (Track 0.1 helper, now actor-owned),
+// reaps the direct child, and a second Close is a no-op that returns promptly.
+func TestActorCloseIsIdempotentAndGroupKills(t *testing.T) {
+	ghostty := newActorTerminal(t, exec.Command("/bin/sh", "-c",
+		`trap '' HUP; sleep 300 & echo "GRANDCHILD=$!"; exec sleep 300`))
+
+	grandchildPID := 0
+	waitForCondition(t, 5*time.Second, func() bool {
+		match := ghosttyGrandchildPIDPattern.FindStringSubmatch(ghostty.ReadVisible(ReadText).Text)
+		if match == nil {
+			return false
+		}
+		pid, err := strconv.Atoi(match[1])
+		if err != nil || pid <= 0 {
+			return false
+		}
+		grandchildPID = pid
+		return true
+	}, "grandchild pid to appear in the actor-read visible text")
+	t.Cleanup(func() { _ = syscall.Kill(grandchildPID, syscall.SIGKILL) })
+
+	directPID := ghostty.cmd.Process.Pid
+
+	ghostty.Close()
+
+	// Second Close must be idempotent and return promptly, not hang.
+	secondDone := make(chan struct{})
+	go func() {
+		ghostty.Close()
+		close(secondDone)
+	}()
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Close() did not return: cmdClose is not idempotent")
+	}
+
+	if ghostty.cmd.ProcessState == nil {
+		t.Fatal("direct child was not reaped when Close returned")
+	}
+	if err := syscall.Kill(directPID, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("direct child pid %d still signalable after Close, kill(pid,0) = %v", directPID, err)
+	}
+	waitForProcessGone(t, grandchildPID, 3*time.Second)
+}
+
+// TestCloseAfterChildSelfExitStillGroupKillsSurvivors pins the pre-actor
+// guarantee that Close after the child exited on its own (actor already torn
+// down via the read-error path) still escalates on the child's process group,
+// reaping HUP-immune grandchildren that survived the self-exit.
+func TestCloseAfterChildSelfExitStillGroupKillsSurvivors(t *testing.T) {
+	// The grandchild ignores HUP and detaches from the tty (so the PTY master
+	// sees EOF when the direct child exits); the child lingers briefly so the
+	// test can read the grandchild pid, then exits on its own.
+	ghostty := newActorTerminal(t, exec.Command("/bin/sh", "-c",
+		`trap '' HUP; sleep 300 >/dev/null 2>&1 </dev/null & echo "GRANDCHILD=$!"; sleep 2; exit 0`))
+
+	grandchildPID := 0
+	waitForCondition(t, 5*time.Second, func() bool {
+		match := ghosttyGrandchildPIDPattern.FindStringSubmatch(ghostty.ReadVisible(ReadText).Text)
+		if match == nil {
+			return false
+		}
+		pid, err := strconv.Atoi(match[1])
+		if err != nil || pid <= 0 {
+			return false
+		}
+		grandchildPID = pid
+		return true
+	}, "grandchild pid to appear in the actor-read visible text")
+	t.Cleanup(func() { _ = syscall.Kill(grandchildPID, syscall.SIGKILL) })
+
+	// Wait for the child to exit on its own and the actor to tear down.
+	select {
+	case <-ghostty.actorDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("actor did not exit after the child self-exited")
+	}
+
+	// The grandchild survived the self-exit (it ignores HUP)...
+	if err := syscall.Kill(grandchildPID, 0); err != nil {
+		t.Fatalf("grandchild pid %d should survive the child's self-exit, kill(pid,0) = %v", grandchildPID, err)
+	}
+
+	// ...and Close must still group-kill it.
+	ghostty.Close()
+	waitForProcessGone(t, grandchildPID, 3*time.Second)
+}
+
+// rawNonblockPipeTarget adapts a raw non-blocking fd to ghosttyPTYWriteTarget so
+// a real EAGAIN + POLLOUT round-trip can be exercised without a PTY.
+type rawNonblockPipeTarget struct{ fd int }
+
+func (r *rawNonblockPipeTarget) Write(p []byte) (int, error) {
+	n, err := unix.Write(r.fd, p)
+	if n < 0 {
+		n = 0
+	}
+	return n, err
+}
+func (r *rawNonblockPipeTarget) Close() error { return unix.Close(r.fd) }
+func (r *rawNonblockPipeTarget) Fd() uintptr  { return uintptr(r.fd) }
+
+// TestStartWiresPolloutWaiterForBackpressure is the busy-spin regression guard:
+// production Start must construct the PTY writer with a real POLLOUT waiter, not
+// nil (which made an EAGAIN spin hot). It asserts both the wiring and that the
+// real waitGhosttyPTYWritable actually parks on POLLOUT and resumes on a real fd.
+func TestStartWiresPolloutWaiterForBackpressure(t *testing.T) {
+	ghostty := newActorTerminal(t, exec.Command("/bin/sh", "-c", "exec sleep 300"))
+
+	ghostty.mu.Lock()
+	waiter := ghostty.ptyWriter.waitWritable
+	ghostty.mu.Unlock()
+	if waiter == nil {
+		t.Fatal("Start wired a nil PTY-writable waiter: an EAGAIN would busy-spin (busy-spin fix regressed)")
+	}
+
+	// Prove the real waiter parks on POLLOUT and resumes: fill a non-blocking
+	// pipe until EAGAIN, then drain it from a goroutine so the write completes.
+	var fds [2]int
+	if err := unix.Pipe(fds[:]); err != nil {
+		t.Fatalf("unix.Pipe() error = %v", err)
+	}
+	readFD, writeFD := fds[0], fds[1]
+	defer func() { _ = unix.Close(readFD) }()
+	if err := unix.SetNonblock(writeFD, true); err != nil {
+		_ = unix.Close(writeFD)
+		t.Fatalf("SetNonblock() error = %v", err)
+	}
+
+	// Fill the pipe buffer so the next write blocks (returns EAGAIN).
+	filler := make([]byte, 64*1024)
+	for {
+		n, err := unix.Write(writeFD, filler)
+		if err != nil {
+			if isGhosttyPTYWouldBlockError(err) {
+				break
+			}
+			_ = unix.Close(writeFD)
+			t.Fatalf("filling pipe: unexpected error = %v", err)
+		}
+		if n == 0 {
+			break
+		}
+	}
+
+	// Drain in the background after a short delay so POLLOUT eventually fires.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		buf := make([]byte, 64*1024)
+		for {
+			n, err := unix.Read(readFD, buf)
+			if n <= 0 || err != nil {
+				return
+			}
+		}
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- ghosttyWriteAllToPTY(&rawNonblockPipeTarget{fd: writeFD}, []byte("resume-after-pollout"), waitGhosttyPTYWritable)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ghosttyWriteAllToPTY() with real POLLOUT waiter error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ghosttyWriteAllToPTY() with real POLLOUT waiter did not complete: EAGAIN wait did not resume")
+	}
+}
+
 func TestCloseKillsGrandchildProcesses(t *testing.T) {
 	cases := []struct {
 		name   string
