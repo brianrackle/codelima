@@ -1,6 +1,6 @@
 # Runtime Provider Plan
 
-Status: Draft
+Status: Superseded — Lima is being replaced outright by microsandbox as the sole backend (ADR 55, `plans/MICROSANDBOX_MIGRATION_PLAN.md`); no multi-provider abstraction will be built. Kept for its inventory of Lima-shaped fields, which the migration plan's Phase 2 removes.
 
 ## Goal
 
