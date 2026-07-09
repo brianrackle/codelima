@@ -34,6 +34,20 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 6. Project-level configuration of remote node support
    Plan: [REMOTE_NODE_CONFIGURATION_PLAN.md](/Users/brianrackle/personal/codelima/REMOTE_NODE_CONFIGURATION_PLAN.md)
 
+## Improvement Plan Tracks
+
+The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEMENT_PLAN.md); per-item status with commits and ADRs: [plans/PROGRESS.md](plans/PROGRESS.md); backend swap: [plans/MICROSANDBOX_MIGRATION_PLAN.md](plans/MICROSANDBOX_MIGRATION_PLAN.md).
+
+- Track 0 [complete]: stabilize — group-kill process trees, signal handling, read/write split, cleanup orphan fix, observability, dead patch subsystem deletion, correctness backlog, reflection canaries (ADRs 56–60)
+- Track 1 [complete]: terminal identity + runtime registry — opaque TerminalID, TargetKey, tab bookkeeping in `internal/codelima/terminal` (ADR 61)
+- Track 2 [complete]: runtime actors + one shell-launch contract + TUI decomposition — cmdRead/cmdSnapshot seam, Service.TerminalLaunchSpec, tui_vaxis.go split by responsibility (ADRs 62–63)
+- Backend swap [blocked on msb install]: replace Lima with microsandbox as the sole runtime (ADR 55); Phase 0 embeddability spike E1 is the go/no-go gate
+- Track 3: daemon — terminal runtimes survive TUI exit; JSON-lines API, `codelima terminal list/read/send`, session persistence (3.0 version embedding is backend-independent and can run before the swap)
+- Track 4: live update — daemon replaces itself via SCM_RIGHTS PTY handoff without killing terminals (after Track 3 soaks)
+- Track 5: agent awareness — screen-snapshot detection engine, tree badges, wait primitives, agent SKILL.md (5.1 prototypable against Track 2's read seam)
+- Track 6: experience — keybindings/prefix mode, terminal-default node view (0.15), goto picker, theme fidelity, kitty graphics (0.10), split panes, first-run polish
+- Track 7 [in progress via practice]: engineering system — characterization-test policy, integration test tier, visual verification harness, self-update, vendor patch discipline, docs versioning
+
 ## Related Draft Plans
 
 - Agent monitoring: [AGENT_MONITORING_PLAN.md](/Users/brianrackle/personal/codelima/AGENT_MONITORING_PLAN.md)
