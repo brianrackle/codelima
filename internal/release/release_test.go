@@ -118,7 +118,6 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 		`require "zlib"`,
 		`class Codelima < Formula`,
 		`depends_on "git"`,
-		`depends_on "lima"`,
 		`version "1.2.3"`,
 		`on_macos do`,
 		`on_arm do`,
@@ -155,6 +154,22 @@ func TestRenderHomebrewFormulaRejectsMixedVersions(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "same version") {
 		t.Fatalf("expected mixed version error, got %v", err)
+	}
+}
+
+func TestReleaseRejectsDarwinAMD64WithoutSDKFallback(t *testing.T) {
+	t.Parallel()
+	if err := ValidateTarget("darwin", "amd64"); err == nil || !strings.Contains(err.Error(), "unsupported Microsandbox SDK target") {
+		t.Fatalf("ValidateTarget(darwin/amd64) error = %v", err)
+	}
+	if err := ValidateTarget("darwin", "arm64"); err != nil {
+		t.Fatalf("ValidateTarget(darwin/arm64) error = %v", err)
+	}
+	if err := ValidateTarget("linux", "amd64"); err != nil {
+		t.Fatalf("ValidateTarget(linux/amd64) error = %v", err)
+	}
+	if err := ValidateTarget("linux", "arm64"); err != nil {
+		t.Fatalf("ValidateTarget(linux/arm64) error = %v", err)
 	}
 }
 

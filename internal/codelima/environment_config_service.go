@@ -15,7 +15,7 @@ func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (E
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environment-configs")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments")
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
@@ -24,7 +24,7 @@ func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (E
 	}()
 
 	if input.Slug == "" {
-		return EnvironmentConfig{}, invalidArgument("environment config slug is required", nil)
+		return EnvironmentConfig{}, invalidArgument("environment slug is required", nil)
 	}
 
 	if err := s.ensureUniqueEnvironmentConfigSlug(input.Slug, ""); err != nil {
@@ -68,7 +68,7 @@ func (s *Service) EnvironmentConfigUpdate(value string, input EnvironmentConfigU
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environment-configs")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments")
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
@@ -100,7 +100,7 @@ func (s *Service) EnvironmentConfigDelete(value string) (EnvironmentConfig, erro
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environment-configs", "projects")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments", "configurations")
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
@@ -113,15 +113,28 @@ func (s *Service) EnvironmentConfigDelete(value string) (EnvironmentConfig, erro
 		return EnvironmentConfig{}, err
 	}
 
-	projects, err := s.store.ListProjects(false)
+	configurations, err := s.store.ListConfigurations(false)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
 
+	for _, configuration := range configurations {
+		for _, slug := range configuration.Environments {
+			if slug == config.Slug {
+				return EnvironmentConfig{}, preconditionFailed("environment is assigned to a configuration", map[string]any{"environment": config.Slug, "configuration_id": configuration.ID, "configuration_slug": configuration.Slug})
+			}
+		}
+	}
+	// Pre-v3 source compatibility for tests and in-process callers. Schema-v3
+	// homes never create project metadata and the public project command is gone.
+	projects, err := s.store.ListProjects(false)
+	if err != nil {
+		return EnvironmentConfig{}, err
+	}
 	for _, project := range projects {
 		for _, slug := range project.EnvironmentConfigs {
 			if slug == config.Slug {
-				return EnvironmentConfig{}, preconditionFailed("environment config is assigned to a project", map[string]any{"environment_config": config.Slug, "project_id": project.ID, "project_slug": project.Slug})
+				return EnvironmentConfig{}, preconditionFailed("environment is assigned to a legacy project", map[string]any{"environment": config.Slug, "project_id": project.ID})
 			}
 		}
 	}

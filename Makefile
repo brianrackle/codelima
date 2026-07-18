@@ -20,13 +20,15 @@ export GOMODCACHE := $(TOOLS_DIR)/gopath/pkg/mod
 export GOCACHE := $(TOOLS_DIR)/gocache
 export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 
-.PHONY: init ghostty-vt gopls fmt lint test build run tui smoke package package-formula verify clean
+.PHONY: init ghostty-vt gopls fmt lint test test-race test-integration build run tui smoke package package-formula verify clean
 
 PACKAGE_VERSION ?= 0.0.0-dev
+VERSION_LDFLAGS := -X github.com/brianrackle/test_lima/internal/codelima.Version=$(PACKAGE_VERSION)
 RELEASE_TAG ?= v$(PACKAGE_VERSION)
 RELEASE_REPO ?= brianrackle/codelima
 DIST_DIR ?= $(CURDIR)/dist
 FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
+INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
 
 init:
@@ -53,9 +55,17 @@ lint: init
 test: init
 	$(GO) test ./...
 
+test-race: init
+	$(GO) test -race ./...
+
+test-integration: build
+	mkdir -p $(INTEGRATION_TMP)
+	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -tags=integration ./tests
+	rm -rf $(INTEGRATION_TMP)
+
 build: init
 	mkdir -p $(BIN_DIR)
-	$(GO) build -o $(CODELIMA_BIN) ./cmd/codelima
+	$(GO) build -ldflags "$(VERSION_LDFLAGS)" -o $(CODELIMA_BIN) ./cmd/codelima
 	ln -sfn $(PLATFORM_TAG)/codelima $(CODELIMA_COMPAT_BIN)
 
 run: build

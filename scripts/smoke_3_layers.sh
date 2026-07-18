@@ -3,7 +3,7 @@ set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${CODELIMA_BIN:-$ROOT_DIR/bin/codelima}"
-FIXTURE="$ROOT_DIR/test-project-dir"
+FIXTURE="$ROOT_DIR/test-node-dir"
 
 if [ ! -x "$BIN" ]; then
   echo "build the CLI first with make build: $BIN" >&2
@@ -27,29 +27,28 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"$BIN" --home "$CODELIMA_HOME" project create \
-  --slug root \
-  --workspace "$ROOT_WORKSPACE" \
-  --setup-command "./script/setup" >/dev/null
+"$BIN" --home "$CODELIMA_HOME" configuration create \
+  --slug smoke \
+  --bootstrap-command "sh ./script/setup" >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node create \
-  --project root \
-  --slug root-node >/dev/null
+  --slug root-node \
+  --configuration smoke \
+  --directory "$ROOT_WORKSPACE" >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node start root-node >/dev/null
 "$BIN" --home "$CODELIMA_HOME" node stop root-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node clone root-node \
-  --node-slug child-node >/dev/null
+  --slug child-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node start child-node >/dev/null
 "$BIN" --home "$CODELIMA_HOME" node stop child-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node clone child-node \
-  --node-slug grandchild-node >/dev/null
+  --slug grandchild-node >/dev/null
 
 "$BIN" --home "$CODELIMA_HOME" node start grandchild-node >/dev/null
 "$BIN" --home "$CODELIMA_HOME" node stop grandchild-node >/dev/null
 
-"$BIN" --home "$CODELIMA_HOME" project tree
-"$BIN" --home "$CODELIMA_HOME" node list
+"$BIN" --home "$CODELIMA_HOME" node list "$ROOT_WORKSPACE"

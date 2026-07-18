@@ -13,6 +13,14 @@ ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 
 GOOS=$("$GO_BIN" env GOOS)
 GOARCH=$("$GO_BIN" env GOARCH)
+case "$GOOS/$GOARCH" in
+  darwin/arm64|linux/amd64|linux/arm64)
+    ;;
+  *)
+    echo "unsupported Microsandbox SDK target: $GOOS/$GOARCH" >&2
+    exit 1
+    ;;
+esac
 if [ -z "$PLATFORM_TAG" ]; then
   PLATFORM_TAG="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | tr '[:upper:]' '[:lower:]')"
 fi
@@ -48,7 +56,7 @@ fi
 mkdir -p "$(dirname "$BUILD_BIN")" "$ROOT_DIR/bin" "$DIST_DIR"
 
 cd "$ROOT_DIR"
-"$GO_BIN" build -o "$BUILD_BIN" ./cmd/codelima
+"$GO_BIN" build -ldflags "-X github.com/brianrackle/test_lima/internal/codelima.Version=$VERSION" -o "$BUILD_BIN" ./cmd/codelima
 ln -sfn "$COMPAT_TARGET" "$COMPAT_BIN"
 "$GO_BIN" run ./cmd/codelima-release archive \
   --version "$VERSION" \

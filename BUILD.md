@@ -12,6 +12,8 @@ Use the make targets from the repository root:
 make init
 make build
 make verify
+make test-race
+make test-integration
 ```
 
 What each target does:
@@ -24,11 +26,18 @@ What each target does:
   - refreshes `./bin/codelima` as a compatibility symlink to the current platform's binary
 - `make verify`
   - runs `fmt`, `lint`, `test`, and `build`
+- `make test-race`
+  - runs every Go package with the race detector
+- `make test-integration`
+  - builds the real CLI and exercises daemon lifecycle, stale recovery, PTY continuity across live update, and rollback after an injected import failure
+  - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path
 
 Useful supporting targets:
 
 ```sh
 make test
+make test-race
+make test-integration
 make lint
 make fmt
 make smoke
@@ -37,15 +46,15 @@ make gopls GOPLS_ARGS="check internal/codelima/tui_test.go"
 
 The source checkout intentionally namespaces development binaries by the same platform tag used for `.tooling`, such as `linux-aarch64` or `darwin-arm64`. This prevents a host build and a guest build in the same shared checkout from overwriting each other's executable. Use `make run` or `make tui` when possible; both invoke the platform-scoped binary directly.
 
+Runtime-backed manual checks require a Microsandbox-capable host. CodeLima embeds the official Go SDK at `v0.6.6`; the SDK's `EnsureInstalled` path installs its matching `msb` and `libkrunfw` support files under `~/.microsandbox` when absent. CodeLima never shells out to that binary, and there is no CLI fallback. Release qualification must start from both a warm install and an empty SDK runtime cache. Keep `MSB_HOME` short enough for platform Unix-socket path limits.
+
+Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module over a hidden CodeLima helper process. The helper connects with the Go SDK, prepares a per-sandbox SDK SSH server, and serves it on stdin/stdout; it invokes neither `msb` nor host OpenSSH. Release qualification must verify `{node}.localhost` HTTP and Upgrade traffic on both native platforms, including two nodes sharing one guest port and a guest-loopback-only service.
+
 ## Self-Hosted Development Metadata
 
-The repository includes a sanitized self-host project metadata example at `examples/self-host/project.yaml`.
-It mirrors the CodeLima project configuration used to develop this repository, but replaces host-specific values such as the local checkout path and hard-coded username assumptions.
+The repository includes a sanitized reusable configuration example at `examples/self-host/configuration.yaml`. Configurations are directory-independent in schema v3. Import or reproduce its fields in a live configuration, then create a node with that configuration while the node directory points at the local checkout.
 
-Before using that file as live metadata, update:
-
-- `workspace_path` to the absolute path of your local `codelima` checkout
-- any bootstrap commands that need host- or distro-specific adjustments for your environment
+Review the bootstrap commands before use; they intentionally install development tools and may need distro-specific adjustments.
 
 ## Release Artifacts
 
@@ -61,6 +70,11 @@ Each packaged archive contains:
 - `<asset>.json`
   - manifest with version, target platform, asset name, and SHA-256
 
+The Go SDK embeds one platform-specific FFI library. As a reference point, the
+unstripped local `linux/arm64` development binary measured 32,649,456 bytes
+after the SDK migration; artifact size varies by target and Go toolchain and
+must be recorded during release qualification.
+
 Build a release archive for the current platform:
 
 ```sh
@@ -72,6 +86,8 @@ That target uses:
 - `scripts/package_release.sh`
 - `cmd/codelima-release`
 - `internal/release`
+
+`make package` rebuilds the platform-scoped source binary with `PACKAGE_VERSION` before archiving it. Stop or live-update any daemon running from that path first: the daemon protocol requires an exact binary version, so a newly packaged CLI correctly rejects an older development daemon. Run `make build` afterward to restore the normal development version.
 
 ## Homebrew Formula Generation
 
@@ -90,7 +106,7 @@ make package-formula \
 
 The generated formula:
 
-- installs `git` and `lima` as runtime dependencies
+- installs `git` as a runtime dependency; microsandbox remains an explicit host prerequisite
 - installs the packaged binary and Ghostty library into `libexec`
 - writes a wrapper `bin/codelima` that points `CODELIMA_GHOSTTY_VT_LIB` at the packaged library
 
@@ -119,7 +135,6 @@ The release workflow does this:
 2. Builds release archives on:
    - `linux-amd64`
    - `linux-arm64`
-   - `darwin-amd64`
    - `darwin-arm64`
 3. Uploads the `.tar.gz` archives and `.json` manifests to the GitHub release.
 4. Generates `Formula/codelima.rb`.
@@ -151,8 +166,11 @@ The token does not need write access to `brianrackle/codelima`.
 Standard release flow:
 
 1. Ensure `make verify` passes locally.
-2. Ensure the tap repo settings and token are configured.
-3. Create and push the release tag:
+2. Ensure `make test-race` and `make test-integration` pass locally.
+3. Complete every flow in `QA.md`, including the native macOS and Linux microsandbox qualification and interactive TUI checks.
+4. Verify `daemon update` with the candidate packaged binary while a long-running terminal command is active.
+5. Ensure the tap repo settings and token are configured.
+6. Create and push the release tag:
 
 ```sh
 git tag v1.2.3
@@ -177,6 +195,8 @@ Before the first real release, do a local dry run:
 
 ```sh
 make verify
+make test-race
+make test-integration
 make package PACKAGE_VERSION=0.0.0-qa DIST_DIR=./tmp/dist
 make package-formula \
   PACKAGE_VERSION=0.0.0-qa \

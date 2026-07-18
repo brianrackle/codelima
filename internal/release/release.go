@@ -17,7 +17,7 @@ import (
 
 const (
 	FormulaClassName = "Codelima"
-	FormulaDesc      = "Shell-first TUI and CLI for Lima-backed project nodes"
+	FormulaDesc      = "Shell-first TUI and CLI for microsandbox-backed project nodes"
 	FormulaHomepage  = "https://github.com/brianrackle/codelima"
 	FormulaLicense   = "GPL-3.0-only"
 	executableMode   = 0o755
@@ -72,7 +72,25 @@ func LibraryFilename(goos string) (string, error) {
 	}
 }
 
+// ValidateTarget enforces the platforms for which Microsandbox SDK 0.6.6
+// bundles an FFI runtime. There is deliberately no CLI fallback.
+func ValidateTarget(goos, goarch string) error {
+	goos = strings.TrimSpace(goos)
+	goarch = strings.TrimSpace(goarch)
+	switch {
+	case goos == "darwin" && goarch == "arm64":
+		return nil
+	case goos == "linux" && (goarch == "amd64" || goarch == "arm64"):
+		return nil
+	default:
+		return fmt.Errorf("unsupported Microsandbox SDK target %s/%s", goos, goarch)
+	}
+}
+
 func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath string) (Manifest, error) {
+	if err := ValidateTarget(goos, goarch); err != nil {
+		return Manifest{}, err
+	}
 	assetName, err := ArchiveName(version, goos, goarch)
 	if err != nil {
 		return Manifest{}, err
@@ -187,11 +205,11 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	for _, manifest := range spec.Manifests {
 		goos := strings.TrimSpace(manifest.GOOS)
 		goarch := strings.TrimSpace(manifest.GOARCH)
-		if _, err := LibraryFilename(goos); err != nil {
+		if err := ValidateTarget(goos, goarch); err != nil {
 			return "", err
 		}
-		if goarch != "amd64" && goarch != "arm64" {
-			return "", fmt.Errorf("unsupported goarch %q", goarch)
+		if _, err := LibraryFilename(goos); err != nil {
+			return "", err
 		}
 		if _, ok := assetsByTarget[goos]; !ok {
 			assetsByTarget[goos] = map[string]Manifest{}
@@ -256,9 +274,7 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	builder.WriteString("  depends_on ")
 	builder.WriteString(rubyString("git"))
 	builder.WriteString("\n")
-	builder.WriteString("  depends_on ")
-	builder.WriteString(rubyString("lima"))
-	builder.WriteString("\n\n")
+	builder.WriteString("\n")
 	builder.WriteString("  def install\n")
 	builder.WriteString("    root = Dir[\"codelima_*/bin/codelima-real\"].empty? ? \".\" : Dir[\"codelima_*\"].fetch(0)\n")
 	builder.WriteString("    odie \"missing packaged release root\" unless File.exist?(File.join(root, \"bin\", \"codelima-real\"))\n")

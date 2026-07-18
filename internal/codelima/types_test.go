@@ -16,10 +16,10 @@ func TestProjectMarshalsBootstrapCommandsAndReadsLegacySetupCommands(t *testing.
 		Slug:               "root",
 		WorkspacePath:      "/workspace/root",
 		EnvironmentConfigs: []string{"shared-dev", "lang-go"},
-		LimaCommands: LimaCommandTemplates{
+		RuntimeCommands: RuntimeCommandTemplates{
 			Bootstrap: []string{"./script/setup", "direnv allow"},
-			Start:     []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
-			Shell:     []string{"{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"},
+			Start:     []string{"{{binary}} start {{sandbox_name}} --vm-type=vz"},
+			ShellExec: []string{"{{binary}} shell{{workdir_flag}} {{sandbox_name}}{{command_args}}"},
 		},
 	}
 
@@ -40,15 +40,15 @@ func TestProjectMarshalsBootstrapCommandsAndReadsLegacySetupCommands(t *testing.
 		t.Fatalf("expected yaml output to include environment_configs, got %s", string(yamlPayload))
 	}
 
-	if !strings.Contains(string(yamlPayload), "lima_commands:") {
-		t.Fatalf("expected yaml output to include lima_commands, got %s", string(yamlPayload))
+	if !strings.Contains(string(yamlPayload), "runtime_commands:") {
+		t.Fatalf("expected yaml output to include runtime_commands, got %s", string(yamlPayload))
 	}
 
 	if !strings.Contains(string(yamlPayload), "bootstrap:") || !strings.Contains(string(yamlPayload), "./script/setup") {
 		t.Fatalf("expected yaml output to include bootstrap commands, got %s", string(yamlPayload))
 	}
 
-	if !strings.Contains(string(yamlPayload), "start:") || !strings.Contains(string(yamlPayload), "{{binary}} start {{instance_name}} --vm-type=vz") {
+	if !strings.Contains(string(yamlPayload), "start:") || !strings.Contains(string(yamlPayload), "{{binary}} start {{sandbox_name}} --vm-type=vz") {
 		t.Fatalf("expected yaml output to include custom start command, got %s", string(yamlPayload))
 	}
 
@@ -73,8 +73,8 @@ func TestProjectMarshalsBootstrapCommandsAndReadsLegacySetupCommands(t *testing.
 		t.Fatalf("expected json output to include environment_configs, got %s", string(jsonPayload))
 	}
 
-	if !strings.Contains(string(jsonPayload), "lima_commands") {
-		t.Fatalf("expected json output to include lima_commands, got %s", string(jsonPayload))
+	if !strings.Contains(string(jsonPayload), "runtime_commands") {
+		t.Fatalf("expected json output to include runtime_commands, got %s", string(jsonPayload))
 	}
 
 	var fromLegacyYAML Project
@@ -88,16 +88,16 @@ environment_configs:
 setup_commands:
   - ./script/setup
   - direnv allow
-lima_commands:
+runtime_commands:
   start:
-    - "{{binary}} start {{instance_name}} --vm-type=vz"
-  shell:
-    - "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"
+    - "{{binary}} start {{sandbox_name}} --vm-type=vz"
+  shell_exec:
+    - "{{binary}} shell{{workdir_flag}} {{sandbox_name}}{{command_args}}"
 `), &fromLegacyYAML); err != nil {
 		t.Fatalf("yaml.Unmarshal(legacy) error = %v", err)
 	}
 
-	if got := strings.Join(fromLegacyYAML.LimaCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
+	if got := strings.Join(fromLegacyYAML.RuntimeCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
 		t.Fatalf("expected legacy yaml setup commands to load into bootstrap, got %q", got)
 	}
 
@@ -105,8 +105,8 @@ lima_commands:
 		t.Fatalf("expected environment config refs to load from yaml, got %q", got)
 	}
 
-	if got := strings.Join(fromLegacyYAML.LimaCommands.Start, "|"); got != "{{binary}} start {{instance_name}} --vm-type=vz" {
-		t.Fatalf("expected lima start command to load from yaml, got %q", got)
+	if got := strings.Join(fromLegacyYAML.RuntimeCommands.Start, "|"); got != "{{binary}} start {{sandbox_name}} --vm-type=vz" {
+		t.Fatalf("expected sandbox start command to load from yaml, got %q", got)
 	}
 
 	var fromLegacyJSON Project
@@ -116,15 +116,15 @@ lima_commands:
   "workspace_path": "/workspace/root",
   "environment_configs": ["shared-dev", "lang-go"],
   "setup_commands": ["./script/setup", "direnv allow"],
-  "lima_commands": {
-    "start": ["{{binary}} start {{instance_name}} --vm-type=vz"],
-    "shell": ["{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}"]
+  "runtime_commands": {
+    "start": ["{{binary}} start {{sandbox_name}} --vm-type=vz"],
+    "shell_exec": ["{{binary}} exec{{workdir_flag}} {{sandbox_name}}{{command_args}}"]
   }
 }`), &fromLegacyJSON); err != nil {
 		t.Fatalf("json.Unmarshal(legacy) error = %v", err)
 	}
 
-	if got := strings.Join(fromLegacyJSON.LimaCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
+	if got := strings.Join(fromLegacyJSON.RuntimeCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
 		t.Fatalf("expected legacy json setup commands to load into bootstrap, got %q", got)
 	}
 
@@ -132,12 +132,12 @@ lima_commands:
 		t.Fatalf("expected environment config refs to load from json, got %q", got)
 	}
 
-	if got := strings.Join(fromLegacyJSON.LimaCommands.Shell, "|"); got != "{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}}" {
-		t.Fatalf("expected lima shell command to load from json, got %q", got)
+	if got := len(fromLegacyJSON.RuntimeCommands.ShellExec); got != 0 {
+		t.Fatalf("expected exact legacy shell command to migrate away, got %v", fromLegacyJSON.RuntimeCommands.ShellExec)
 	}
 }
 
-func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
+func TestNodeMarshalsRuntimeCommandsWhenConfigured(t *testing.T) {
 	t.Parallel()
 
 	node := Node{
@@ -145,12 +145,12 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 		Slug:             "root-node",
 		ProjectID:        "project-1",
 		Runtime:          RuntimeVM,
-		Provider:         ProviderLima,
-		LimaInstanceName: "root-root-node-12345678",
+		Provider:         ProviderMicrosandbox,
+		SandboxName:      "root-root-node-12345678",
 		Status:           NodeStatusCreated,
 		AgentProfileName: "codex-cli",
-		LimaCommands: LimaCommandTemplates{
-			Start: []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
+		RuntimeCommands: RuntimeCommandTemplates{
+			Start: []string{"{{binary}} start {{sandbox_name}} --vm-type=vz"},
 			Copy:  []string{"{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"},
 		},
 	}
@@ -161,23 +161,23 @@ func TestNodeMarshalsLimaCommandsWhenConfigured(t *testing.T) {
 	}
 
 	output := string(yamlPayload)
-	if !strings.Contains(output, "lima_commands:") {
-		t.Fatalf("expected yaml output to include lima_commands, got %s", output)
+	if !strings.Contains(output, "runtime_commands:") {
+		t.Fatalf("expected yaml output to include runtime_commands, got %s", output)
 	}
-	if !strings.Contains(output, "start:") || !strings.Contains(output, "{{binary}} start {{instance_name}} --vm-type=vz") {
+	if !strings.Contains(output, "start:") || !strings.Contains(output, "{{binary}} start {{sandbox_name}} --vm-type=vz") {
 		t.Fatalf("expected yaml output to include start override, got %s", output)
 	}
 	if !strings.Contains(output, "copy:") || !strings.Contains(output, "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}") {
 		t.Fatalf("expected yaml output to include copy override, got %s", output)
 	}
 
-	node.LimaCommands = LimaCommandTemplates{}
+	node.RuntimeCommands = RuntimeCommandTemplates{}
 	yamlPayload, err = yaml.Marshal(node)
 	if err != nil {
 		t.Fatalf("yaml.Marshal(node no overrides) error = %v", err)
 	}
-	if strings.Contains(string(yamlPayload), "lima_commands:") {
-		t.Fatalf("expected yaml output to omit zero-value lima_commands, got %s", string(yamlPayload))
+	if strings.Contains(string(yamlPayload), "runtime_commands:") {
+		t.Fatalf("expected yaml output to omit zero-value runtime_commands, got %s", string(yamlPayload))
 	}
 }
 

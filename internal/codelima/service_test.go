@@ -15,9 +15,8 @@ import (
 	"time"
 )
 
-type fakeLima struct {
+type fakeSandbox struct {
 	mu           sync.Mutex
-	baseTemplate []byte
 	observations map[string]RuntimeObservation
 	calls        []string
 	invocations  []string
@@ -28,14 +27,14 @@ type fakeLima struct {
 	cloneStatus  string
 	listCalls    int
 	listErr      error
-	createGate   *fakeLimaGate
-	startGate    *fakeLimaGate
-	stopGate     *fakeLimaGate
-	deleteGate   *fakeLimaGate
-	cloneGate    *fakeLimaGate
+	createGate   *fakeSandboxGate
+	startGate    *fakeSandboxGate
+	stopGate     *fakeSandboxGate
+	deleteGate   *fakeSandboxGate
+	cloneGate    *fakeSandboxGate
 }
 
-type fakeLimaGate struct {
+type fakeSandboxGate struct {
 	entered chan string
 	release chan struct{}
 }
@@ -54,9 +53,8 @@ type fakeCopyCall struct {
 	recursive    bool
 }
 
-func newFakeLima() *fakeLima {
-	return &fakeLima{
-		baseTemplate: []byte("arch: aarch64\nimages: []\ncpus: 1\nmemory: 1GiB\ndisk: 10GiB\nmounts: []\n"),
+func newFakeSandbox() *fakeSandbox {
+	return &fakeSandbox{
 		observations: map[string]RuntimeObservation{},
 		calls:        []string{},
 		invocations:  []string{},
@@ -66,14 +64,14 @@ func newFakeLima() *fakeLima {
 	}
 }
 
-func newFakeLimaGate() *fakeLimaGate {
-	return &fakeLimaGate{
+func newFakeSandboxGate() *fakeSandboxGate {
+	return &fakeSandboxGate{
 		entered: make(chan string, 8),
 		release: make(chan struct{}),
 	}
 }
 
-func (g *fakeLimaGate) block(call string) {
+func (g *fakeSandboxGate) block(call string) {
 	if g == nil {
 		return
 	}
@@ -87,7 +85,7 @@ func (g *fakeLimaGate) block(call string) {
 
 // recordCall appends bookkeeping entries under the fake's mutex so tests may
 // exercise Service reads and mutations concurrently under -race.
-func (f *fakeLima) recordCall(call string, invocationPrefix string, invocations []string) {
+func (f *fakeSandbox) recordCall(call string, invocationPrefix string, invocations []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, call)
@@ -96,18 +94,15 @@ func (f *fakeLima) recordCall(call string, invocationPrefix string, invocations 
 	}
 }
 
-func (f *fakeLima) BaseTemplate(_ context.Context, project Project, nodeCommands LimaCommandTemplates, locator string) ([]byte, error) {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, nodeCommands, limaCommandTemplateCopy, map[string]string{
-		"locator": shellQuote(locator),
-	})
-	f.recordCall("template", "template:", commands)
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte(nil), f.baseTemplate...), nil
+func (f *fakeSandbox) Version(context.Context) (string, error) {
+	return requiredMicrosandboxVersion, nil
 }
 
-func (f *fakeLima) List(_ context.Context) ([]RuntimeObservation, error) {
+func (f *fakeSandbox) ResolveCommands(project Project, node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
+	return resolveConfiguredRuntimeCommands("msb", legacyMSBCommandTemplates(), project, node.RuntimeCommands, kind, values)
+}
+
+func (f *fakeSandbox) List(_ context.Context) ([]RuntimeObservation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.listCalls++
@@ -121,114 +116,117 @@ func (f *fakeLima) List(_ context.Context) ([]RuntimeObservation, error) {
 	return observations, nil
 }
 
-func (f *fakeLima) Create(_ context.Context, project Project, node Node, templatePath string) error {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCreate, map[string]string{
-		"instance_name": shellQuote(node.LimaInstanceName),
-		"template_path": shellQuote(templatePath),
-	})
-	f.recordCall("create:"+node.LimaInstanceName, "create:", commands)
+func (f *fakeSandbox) Create(_ context.Context, project Project, node Node) error {
+	values, err := runtimeNodeValues(project, node)
+	if err != nil {
+		return err
+	}
+	commands, err := f.ResolveCommands(project, node, runtimeCommandCreate, values)
+	f.recordCall("create:"+node.SandboxName, "create:", commands)
 	if err != nil {
 		return err
 	}
 	if f.createErr != nil {
 		return f.createErr
 	}
-	f.createGate.block(node.LimaInstanceName)
+	f.createGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.observations[node.LimaInstanceName] = RuntimeObservation{Name: node.LimaInstanceName, Exists: true, Status: "stopped", Dir: "/fake/" + node.LimaInstanceName}
+	f.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: "stopped", Dir: "/fake/" + node.SandboxName}
 	return nil
 }
 
-func (f *fakeLima) Start(_ context.Context, project Project, node Node) error {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStart, map[string]string{
-		"instance_name": shellQuote(node.LimaInstanceName),
+func (f *fakeSandbox) Start(_ context.Context, project Project, node Node) error {
+	commands, err := f.ResolveCommands(project, node, runtimeCommandStart, map[string]string{
+		"sandbox_name": shellQuote(node.SandboxName),
 	})
-	f.recordCall("start:"+node.LimaInstanceName, "start:", commands)
+	f.recordCall("start:"+node.SandboxName, "start:", commands)
 	if err != nil {
 		return err
 	}
-	f.startGate.block(node.LimaInstanceName)
+	f.startGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	observation := f.observations[node.LimaInstanceName]
+	observation := f.observations[node.SandboxName]
 	observation.Status = "running"
 	observation.Exists = true
-	observation.Name = node.LimaInstanceName
-	f.observations[node.LimaInstanceName] = observation
+	observation.Name = node.SandboxName
+	f.observations[node.SandboxName] = observation
 	return nil
 }
 
-func (f *fakeLima) Stop(_ context.Context, project Project, node Node) error {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandStop, map[string]string{
-		"instance_name": shellQuote(node.LimaInstanceName),
+func (f *fakeSandbox) Stop(_ context.Context, project Project, node Node) error {
+	commands, err := f.ResolveCommands(project, node, runtimeCommandStop, map[string]string{
+		"sandbox_name": shellQuote(node.SandboxName),
 	})
-	f.recordCall("stop:"+node.LimaInstanceName, "stop:", commands)
+	f.recordCall("stop:"+node.SandboxName, "stop:", commands)
 	if err != nil {
 		return err
 	}
-	f.stopGate.block(node.LimaInstanceName)
+	f.stopGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	observation := f.observations[node.LimaInstanceName]
+	observation := f.observations[node.SandboxName]
 	observation.Status = "stopped"
 	observation.Exists = true
-	observation.Name = node.LimaInstanceName
-	f.observations[node.LimaInstanceName] = observation
+	observation.Name = node.SandboxName
+	f.observations[node.SandboxName] = observation
 	return nil
 }
 
-func (f *fakeLima) Delete(_ context.Context, project Project, node Node) error {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandDelete, map[string]string{
-		"instance_name": shellQuote(node.LimaInstanceName),
+func (f *fakeSandbox) Delete(_ context.Context, project Project, node Node) error {
+	commands, err := f.ResolveCommands(project, node, runtimeCommandDelete, map[string]string{
+		"sandbox_name": shellQuote(node.SandboxName),
 	})
-	f.recordCall("delete:"+node.LimaInstanceName, "delete:", commands)
+	f.recordCall("delete:"+node.SandboxName, "delete:", commands)
 	if err != nil {
 		return err
 	}
-	f.deleteGate.block(node.LimaInstanceName)
+	f.deleteGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	delete(f.observations, node.LimaInstanceName)
+	delete(f.observations, node.SandboxName)
 	return nil
 }
 
-func (f *fakeLima) Clone(_ context.Context, project Project, sourceNode, targetNode Node) error {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, targetNode.LimaCommands, limaCommandClone, map[string]string{
-		"source_instance": shellQuote(sourceNode.LimaInstanceName),
-		"target_instance": shellQuote(targetNode.LimaInstanceName),
-	})
-	f.recordCall("clone:"+sourceNode.LimaInstanceName+"->"+targetNode.LimaInstanceName, "clone:", commands)
+func (f *fakeSandbox) Clone(_ context.Context, project Project, sourceNode, targetNode Node) error {
+	values, err := runtimeNodeValues(project, targetNode)
 	if err != nil {
 		return err
 	}
-	f.cloneGate.block(targetNode.LimaInstanceName)
+	values["source_sandbox"] = shellQuote(sourceNode.SandboxName)
+	values["snapshot_name"] = shellQuote(cloneSnapshotName(targetNode.SandboxName))
+	commands, err := f.ResolveCommands(project, targetNode, runtimeCommandClone, values)
+	f.recordCall("clone:"+sourceNode.SandboxName+"->"+targetNode.SandboxName, "clone:", commands)
+	if err != nil {
+		return err
+	}
+	f.cloneGate.block(targetNode.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	status := f.cloneStatus
 	if strings.TrimSpace(status) == "" {
 		status = "stopped"
 	}
-	f.observations[targetNode.LimaInstanceName] = RuntimeObservation{Name: targetNode.LimaInstanceName, Exists: true, Status: status, Dir: "/fake/" + targetNode.LimaInstanceName}
+	f.observations[targetNode.SandboxName] = RuntimeObservation{Name: targetNode.SandboxName, Exists: true, Status: status, Dir: "/fake/" + targetNode.SandboxName}
 	return nil
 }
 
-func (f *fakeLima) CopyToGuest(_ context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
-	commands, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandCopy, map[string]string{
-		"source_path":    shellQuote(sourcePath),
-		"target_path":    shellQuote(targetPath),
-		"instance_name":  shellQuote(node.LimaInstanceName),
-		"copy_target":    shellQuote(node.LimaInstanceName + ":" + targetPath),
-		"recursive_flag": shellFlagFragment("-r", recursive),
+func (f *fakeSandbox) CopyToGuest(_ context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
+	commands, err := f.ResolveCommands(project, node, runtimeCommandCopy, map[string]string{
+		"source_path":  shellQuote(sourcePath),
+		"target_path":  shellQuote(targetPath),
+		"sandbox_name": shellQuote(node.SandboxName),
+		"copy_target":  shellQuote(node.SandboxName + ":" + targetPath),
 	})
-	f.recordCall("copy:"+node.LimaInstanceName+":"+sourcePath+"->"+targetPath, "copy:", commands)
+	f.recordCall("copy:"+node.SandboxName+":"+sourcePath+"->"+targetPath, "copy:", commands)
 	if err != nil {
 		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.copyCalls = append(f.copyCalls, fakeCopyCall{
-		instanceName: node.LimaInstanceName,
+		instanceName: node.SandboxName,
 		sourcePath:   sourcePath,
 		targetPath:   targetPath,
 		recursive:    recursive,
@@ -236,24 +234,33 @@ func (f *fakeLima) CopyToGuest(_ context.Context, project Project, node Node, so
 	return nil
 }
 
-func (f *fakeLima) Shell(_ context.Context, project Project, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
+func (f *fakeSandbox) Shell(_ context.Context, project Project, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
 	workdirFlag := ""
 	if workdir != "" {
 		workdirFlag = prefixedShellFragment("--workdir", shellQuote(workdir))
 	}
-	resolved, err := resolveConfiguredLimaCommands("limactl", defaultLimaCommandTemplates(), project, node.LimaCommands, limaCommandShell, map[string]string{
-		"instance_name": shellQuote(node.LimaInstanceName),
-		"workdir":       shellQuote(workdir),
-		"workdir_flag":  workdirFlag,
-		"command_args":  shellCommandArgsFragment(command),
-	})
-	f.recordCall("shell:"+node.LimaInstanceName+":"+strings.Join(command, " "), "shell:", resolved)
+	kind := runtimeCommandShellExec
+	values := map[string]string{
+		"sandbox_name": shellQuote(node.SandboxName),
+		"workdir":      shellQuote(workdir),
+		"workdir_flag": workdirFlag,
+		"command_args": shellCommandArgsFragment(command),
+	}
+	if interactive {
+		kind = runtimeCommandShellLogin
+		if len(command) == 0 {
+			command = []string{"/bin/bash"}
+		}
+		values["login_command"] = shellArgsFragment(command)
+	}
+	resolved, err := f.ResolveCommands(project, node, kind, values)
+	f.recordCall("shell:"+node.SandboxName+":"+strings.Join(command, " "), "shell:", resolved)
 	if err != nil {
 		return err
 	}
 	f.mu.Lock()
 	f.shellCalls = append(f.shellCalls, fakeShellCall{
-		instanceName: node.LimaInstanceName,
+		instanceName: node.SandboxName,
 		command:      append([]string(nil), command...),
 		workdir:      workdir,
 		interactive:  interactive,
@@ -321,15 +328,15 @@ func TestProjectCreateSkipsInitialSnapshotAndForkCapturesBaseSnapshot(t *testing
 	}
 }
 
-func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireLima(t *testing.T) {
+func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireMicrosandbox(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	fake := service.lima.(*fakeLima)
-	fake.listErr = errors.New("lima should not be queried for metadata-only mutations")
+	fake := service.sandbox.(*fakeSandbox)
+	fake.listErr = errors.New("sandbox should not be queried for metadata-only mutations")
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
 		Slug:          "root",
@@ -369,11 +376,11 @@ func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireLima(t *testing
 	}
 
 	if fake.listCalls != 0 {
-		t.Fatalf("expected metadata-only mutations to avoid lima.List, got %d calls", fake.listCalls)
+		t.Fatalf("expected metadata-only mutations to avoid sandbox.List, got %d calls", fake.listCalls)
 	}
 }
 
-func TestNodeLifecycleDelegatesToLima(t *testing.T) {
+func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -391,42 +398,26 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Project:       project.ID,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
 
-	if node.LimaInstanceName != "root-node" {
-		t.Fatalf("expected lima instance name to match node slug, got %q", node.LimaInstanceName)
+	if node.SandboxName != "root-node" {
+		t.Fatalf("expected sandbox instance name to match node slug, got %q", node.SandboxName)
 	}
 
-	if !containsPrefix(service.lima.(*fakeLima).calls, "create:"+node.LimaInstanceName) {
-		t.Fatalf("expected limactl create delegation")
+	if !containsPrefix(service.sandbox.(*fakeSandbox).calls, "create:"+node.SandboxName) {
+		t.Fatalf("expected msb create delegation")
 	}
-	if !containsSubstring(service.lima.(*fakeLima).invocations, "create:'limactl' create -y --name '"+node.LimaInstanceName+"' --cpus=2 --memory=4 --disk=20 ") {
-		t.Fatalf("expected create invocation to include resource flags, invocations = %v", service.lima.(*fakeLima).invocations)
+	if !containsSubstring(service.sandbox.(*fakeSandbox).invocations, "create:'msb' create --name '"+node.SandboxName+"' --cpus 2 --memory 4G --init auto --shell /bin/bash") {
+		t.Fatalf("expected create invocation to include resource flags, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
 	}
-
-	templateBytes, err := os.ReadFile(node.GeneratedTemplatePath)
-	if err != nil {
-		t.Fatalf("ReadFile(template) error = %v", err)
-	}
-
-	if strings.Contains(string(templateBytes), "location: "+workspace) {
-		t.Fatalf("expected generated template to avoid mounting host workspace, got %s", string(templateBytes))
-	}
-	if !strings.Contains(string(templateBytes), "hostnamectl set-hostname 'root-node'") {
-		t.Fatalf("expected generated template to provision the node hostname, got %s", string(templateBytes))
-	}
-	if strings.Contains(string(templateBytes), "\nhostname:") {
-		t.Fatalf("expected generated template to avoid unsupported top-level hostname field, got %s", string(templateBytes))
-	}
-	for _, unexpected := range []string{"\ncpus:", "\nmemory:", "\ndisk:"} {
-		if strings.Contains(string(templateBytes), unexpected) {
-			t.Fatalf("expected generated template to omit VM resource keys, got %s", string(templateBytes))
-		}
+	if containsSubstring(service.sandbox.(*fakeSandbox).invocations, "--mount-dir") {
+		t.Fatalf("expected copy-mode create to omit mount flags, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
 	}
 
 	node, err = service.NodeStart(ctx, node.ID)
@@ -438,16 +429,16 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 		t.Fatalf("expected running status, got %q", node.Status)
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "shell:"+node.LimaInstanceName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
-		t.Fatalf("expected setup command delegation, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell:"+node.SandboxName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
+		t.Fatalf("expected setup command delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "copy:"+node.LimaInstanceName+":"+workspace+"->"+workspace) {
-		t.Fatalf("expected workspace copy delegation, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "copy:"+node.SandboxName+":"+workspace+"->"+workspace) {
+		t.Fatalf("expected workspace copy delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsSubstring(service.lima.(*fakeLima).calls, "command -v sh") {
-		t.Fatalf("expected validation command to run, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsSubstring(service.sandbox.(*fakeSandbox).calls, "command -v sh") {
+		t.Fatalf("expected validation command to run, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
 	node, err = service.NodeStop(ctx, node.ID)
@@ -469,7 +460,7 @@ func TestNodeLifecycleDelegatesToLima(t *testing.T) {
 	}
 }
 
-func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T) {
+func TestNodeLifecycleDefaultsToMountedWorkspaceAndSkipsCopy(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -487,9 +478,8 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project:       project.ID,
-		Slug:          "mounted-node",
-		WorkspaceMode: WorkspaceModeMounted,
+		Project: project.ID,
+		Slug:    "mounted-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -501,30 +491,11 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	if node.WorkspaceMountPath != workspace {
 		t.Fatalf("expected workspace mount path %q, got %q", workspace, node.WorkspaceMountPath)
 	}
-	if node.GuestWorkspacePath != "" {
-		t.Fatalf("expected mounted node guest workspace path to be empty, got %q", node.GuestWorkspacePath)
+	if node.GuestWorkspacePath != workspace {
+		t.Fatalf("expected mounted node guest workspace path %q, got %q", workspace, node.GuestWorkspacePath)
 	}
-
-	templateBytes, err := os.ReadFile(node.GeneratedTemplatePath)
-	if err != nil {
-		t.Fatalf("ReadFile(template) error = %v", err)
-	}
-
-	templateText := string(templateBytes)
-	if !strings.Contains(templateText, "location: "+workspace) {
-		t.Fatalf("expected generated template to mount host workspace, got %s", templateText)
-	}
-	if !strings.Contains(templateText, "mountPoint: "+workspace) {
-		t.Fatalf("expected generated template to mount at the host path, got %s", templateText)
-	}
-	if !strings.Contains(templateText, "writable: true") {
-		t.Fatalf("expected generated template to use a writable mount, got %s", templateText)
-	}
-	if !strings.Contains(templateText, "hostnamectl set-hostname 'mounted-node'") {
-		t.Fatalf("expected generated template to provision the mounted node hostname, got %s", templateText)
-	}
-	if strings.Contains(templateText, "\nhostname:") {
-		t.Fatalf("expected generated template to avoid unsupported top-level hostname field, got %s", templateText)
+	if !containsSubstring(service.sandbox.(*fakeSandbox).invocations, "--mount-dir '"+workspace+":"+workspace+"'") {
+		t.Fatalf("expected mounted create to pass a writable directory mount, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
 	}
 
 	node, err = service.NodeStart(ctx, node.ID)
@@ -535,8 +506,8 @@ func TestNodeLifecycleMountedWorkspaceSkipsCopyAndAddsWritableMount(t *testing.T
 	if !node.WorkspaceSeeded {
 		t.Fatalf("expected mounted node start to mark workspace prepared")
 	}
-	if containsSubstring(service.lima.(*fakeLima).calls, "copy:"+node.LimaInstanceName+":") {
-		t.Fatalf("expected mounted node to skip workspace copy, calls = %v", service.lima.(*fakeLima).calls)
+	if containsSubstring(service.sandbox.(*fakeSandbox).calls, "copy:"+node.SandboxName+":") {
+		t.Fatalf("expected mounted node to skip workspace copy, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
 
@@ -601,14 +572,15 @@ func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
 		t.Fatalf("ProjectCreate() error = %v", err)
 	}
 
-	project.LimaCommands.WorkspaceSeedPrepare = []string{"echo preparing {{instance_name}} {{target_path}} {{target_parent}}"}
+	project.RuntimeCommands.WorkspaceSeedPrepare = []string{"echo preparing {{sandbox_name}} {{target_path}} {{target_parent}}"}
 	if err := service.store.SaveProject(project); err != nil {
 		t.Fatalf("SaveProject(custom workspace seed prepare command) error = %v", err)
 	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Project:       project.ID,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -618,27 +590,27 @@ func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
 		t.Fatalf("NodeStart() error = %v", err)
 	}
 
-	if len(service.lima.(*fakeLima).shellCalls) == 0 {
+	if len(service.sandbox.(*fakeSandbox).shellCalls) == 0 {
 		t.Fatalf("expected workspace seed prepare command to run")
 	}
 
-	firstCall := service.lima.(*fakeLima).shellCalls[0]
-	if firstCall.instanceName != node.LimaInstanceName {
-		t.Fatalf("expected workspace seed prepare to target %q, got %q", node.LimaInstanceName, firstCall.instanceName)
+	firstCall := service.sandbox.(*fakeSandbox).shellCalls[0]
+	if firstCall.instanceName != node.SandboxName {
+		t.Fatalf("expected workspace seed prepare to target %q, got %q", node.SandboxName, firstCall.instanceName)
 	}
 
-	expected := "echo preparing " + shellQuote(node.LimaInstanceName) + " " + shellQuote(workspace) + " " + shellQuote(filepath.Dir(workspace))
+	expected := "echo preparing " + shellQuote(node.SandboxName) + " " + shellQuote(workspace) + " " + shellQuote(filepath.Dir(workspace))
 	if got := strings.Join(firstCall.command, " "); got != "sh -lc "+expected {
 		t.Fatalf("expected workspace seed prepare command %q, got %q", "sh -lc "+expected, got)
 	}
 }
 
-func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
+func TestNodeCreateCleansUpPartialMetadataWhenSandboxCreateFails(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
-	service.lima.(*fakeLima).createErr = errors.New("forced create failure")
+	service.sandbox.(*fakeSandbox).createErr = errors.New("forced create failure")
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
@@ -653,7 +625,7 @@ func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
 		Project: project.ID,
 		Slug:    "broken-node",
 	}); err == nil {
-		t.Fatalf("expected NodeCreate() to fail when Lima create fails")
+		t.Fatalf("expected NodeCreate() to fail when sandbox create fails")
 	}
 
 	entries, err := os.ReadDir(filepath.Join(service.cfg.MetadataRoot, "nodes"))
@@ -665,7 +637,7 @@ func TestNodeCreateCleansUpPartialMetadataWhenLimaCreateFails(t *testing.T) {
 	}
 }
 
-func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
+func TestProjectScopedRuntimeCommandsApplyToNodeLifecycle(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -680,23 +652,23 @@ func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
 		t.Fatalf("ProjectCreate() error = %v", err)
 	}
 
-	project.LimaCommands = LimaCommandTemplates{
-		Create:       []string{"{{binary}} create --name {{instance_name}} --cpus=8 --memory=16 --disk=100 {{template_path}} --vm-type=vz"},
-		Start:        []string{"{{binary}} start {{instance_name}} --set '.nestedVirtualization=true'"},
-		Stop:         []string{"{{binary}} stop {{instance_name}} --preserve-state"},
-		Delete:       []string{"{{binary}} delete {{instance_name}} --archive"},
-		Clone:        []string{"{{binary}} clone {{source_instance}} {{target_instance}} --vm-type=vz"},
-		Copy:         []string{"{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"},
-		Shell:        []string{"{{binary}} shell{{workdir_flag}} {{instance_name}}{{command_args}} --debug"},
-		TemplateCopy: []string{"{{binary}} template copy --fill {{locator}} -"},
+	project.RuntimeCommands = RuntimeCommandTemplates{
+		Create:    []string{"{{binary}} create --name {{sandbox_name}} --cpus 8 --memory 16G --init auto --shell /bin/bash{{mount_flags}}{{port_flags}}{{net_flags}} {{image}}"},
+		Start:     []string{"{{binary}} start {{sandbox_name}} --debug"},
+		Stop:      []string{"{{binary}} stop {{sandbox_name}} --timeout 30"},
+		Delete:    []string{"{{binary}} rm -f {{sandbox_name}}"},
+		Clone:     []string{"{{binary}} snapshot create custom-{{sandbox_name}} --from {{source_sandbox}} --force"},
+		Copy:      []string{"{{binary}} copy {{source_path}} {{copy_target}} --quiet"},
+		ShellExec: []string{"{{binary}} exec{{workdir_flag}} {{sandbox_name}}{{command_args}} --debug"},
 	}
 	if err := service.store.SaveProject(project); err != nil {
 		t.Fatalf("SaveProject(custom commands) error = %v", err)
 	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Project:       project.ID,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -718,20 +690,18 @@ func TestProjectScopedLimaCommandsApplyToNodeLifecycle(t *testing.T) {
 		t.Fatalf("NodeDelete() error = %v", err)
 	}
 
-	invocations := service.lima.(*fakeLima).invocations
+	invocations := service.sandbox.(*fakeSandbox).invocations
 	for _, expected := range []string{
-		"template:'limactl' template copy --fill 'template:default' -",
-		"create:'limactl' create --name ",
-		"--cpus=8 --memory=16 --disk=100",
-		"--vm-type=vz",
-		"start:'limactl' start '" + node.LimaInstanceName + "' --set '.nestedVirtualization=true'",
-		"stop:'limactl' stop '" + node.LimaInstanceName + "' --preserve-state",
-		"clone:'limactl' clone '" + node.LimaInstanceName + "' '" + childNode.LimaInstanceName + "'",
-		"copy:'limactl' copy -r ",
-		"--checksum",
-		"shell:'limactl' shell --workdir ",
+		"create:'msb' create --name ",
+		"--cpus 8 --memory 16G --init auto",
+		"start:'msb' start '" + node.SandboxName + "' --debug",
+		"stop:'msb' stop '" + node.SandboxName + "' --timeout 30",
+		"clone:'msb' snapshot create custom-'" + childNode.SandboxName + "' --from '" + node.SandboxName + "' --force",
+		"copy:'msb' copy ",
+		"--quiet",
+		"shell:'msb' exec --workdir ",
 		"--debug",
-		"delete:'limactl' delete '" + childNode.LimaInstanceName + "' --archive",
+		"delete:'msb' rm -f '" + childNode.SandboxName + "'",
 	} {
 		if !containsSubstring(invocations, expected) {
 			t.Fatalf("expected invocation containing %q, got %v", expected, invocations)
@@ -749,7 +719,7 @@ func TestPartialNodeDirectoriesDoNotBlockHealthyNodeOperations(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node", "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node", "instance.sandbox.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(partial template) error = %v", err)
 	}
 
@@ -830,12 +800,12 @@ func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
 	}
 	firstNode.Status = NodeStatusStopped
 	firstNode.LastRuntimeObservation = &RuntimeObservation{
-		Name:   firstNode.LimaInstanceName,
+		Name:   firstNode.SandboxName,
 		Exists: true,
 		Status: "stopped",
 	}
 	firstNode.UpdatedAt = service.now()
-	if err := service.store.SaveNode(firstNode, bootstrap, nil); err != nil {
+	if err := service.store.SaveNode(firstNode, bootstrap); err != nil {
 		t.Fatalf("SaveNode(first) error = %v", err)
 	}
 
@@ -845,27 +815,27 @@ func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
 	}
 	secondNode.Status = NodeStatusStopped
 	secondNode.LastRuntimeObservation = &RuntimeObservation{
-		Name:   secondNode.LimaInstanceName,
+		Name:   secondNode.SandboxName,
 		Exists: true,
 		Status: "stopped",
 	}
 	secondNode.UpdatedAt = service.now()
-	if err := service.store.SaveNode(secondNode, bootstrap, nil); err != nil {
+	if err := service.store.SaveNode(secondNode, bootstrap); err != nil {
 		t.Fatalf("SaveNode(second) error = %v", err)
 	}
 
-	fake := service.lima.(*fakeLima)
-	fake.observations[firstNode.LimaInstanceName] = RuntimeObservation{
-		Name:   firstNode.LimaInstanceName,
+	fake := service.sandbox.(*fakeSandbox)
+	fake.observations[firstNode.SandboxName] = RuntimeObservation{
+		Name:   firstNode.SandboxName,
 		Exists: true,
 		Status: "running",
-		Dir:    "/fake/" + firstNode.LimaInstanceName,
+		Dir:    "/fake/" + firstNode.SandboxName,
 	}
-	fake.observations[secondNode.LimaInstanceName] = RuntimeObservation{
-		Name:   secondNode.LimaInstanceName,
+	fake.observations[secondNode.SandboxName] = RuntimeObservation{
+		Name:   secondNode.SandboxName,
 		Exists: true,
 		Status: "stopped",
-		Dir:    "/fake/" + secondNode.LimaInstanceName,
+		Dir:    "/fake/" + secondNode.SandboxName,
 	}
 	fake.listCalls = 0
 
@@ -874,7 +844,7 @@ func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
 		t.Fatalf("NodeList() error = %v", err)
 	}
 	if fake.listCalls != 1 {
-		t.Fatalf("expected NodeList to reconcile with one lima.List call, got %d", fake.listCalls)
+		t.Fatalf("expected NodeList to reconcile with one sandbox.List call, got %d", fake.listCalls)
 	}
 	if len(nodes) != 2 {
 		t.Fatalf("expected two nodes, got %#v", nodes)
@@ -936,21 +906,21 @@ func TestProjectTreeReconcilesRuntimeStatusInBatch(t *testing.T) {
 	}
 	node.Status = NodeStatusStopped
 	node.LastRuntimeObservation = &RuntimeObservation{
-		Name:   node.LimaInstanceName,
+		Name:   node.SandboxName,
 		Exists: true,
 		Status: "stopped",
 	}
 	node.UpdatedAt = service.now()
-	if err := service.store.SaveNode(node, bootstrap, nil); err != nil {
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
 		t.Fatalf("SaveNode() error = %v", err)
 	}
 
-	fake := service.lima.(*fakeLima)
-	fake.observations[node.LimaInstanceName] = RuntimeObservation{
-		Name:   node.LimaInstanceName,
+	fake := service.sandbox.(*fakeSandbox)
+	fake.observations[node.SandboxName] = RuntimeObservation{
+		Name:   node.SandboxName,
 		Exists: true,
 		Status: "running",
-		Dir:    "/fake/" + node.LimaInstanceName,
+		Dir:    "/fake/" + node.SandboxName,
 	}
 	fake.listCalls = 0
 
@@ -959,7 +929,7 @@ func TestProjectTreeReconcilesRuntimeStatusInBatch(t *testing.T) {
 		t.Fatalf("ProjectTree() error = %v", err)
 	}
 	if fake.listCalls != 1 {
-		t.Fatalf("expected ProjectTree to reconcile with one lima.List call, got %d", fake.listCalls)
+		t.Fatalf("expected ProjectTree to reconcile with one sandbox.List call, got %d", fake.listCalls)
 	}
 	if len(tree) != 1 || len(tree[0].Nodes) != 1 {
 		t.Fatalf("expected one root project with one node, got %#v", tree)
@@ -982,10 +952,10 @@ func TestDoctorReportsIncompleteNodeMetadataDirectories(t *testing.T) {
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(partialDir, "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(partialDir, "instance.sandbox.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(template) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(partialDir, "lima-instance.ref"), []byte("project-node-12345678\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(partialDir, "sandbox.ref"), []byte("project-node-12345678\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(instance ref) error = %v", err)
 	}
 
@@ -1033,11 +1003,11 @@ func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(partialDir, "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(partialDir, "instance.sandbox.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(template) error = %v", err)
 	}
 	instanceName := "partial-project-partial-node-12345678"
-	if err := os.WriteFile(filepath.Join(partialDir, "lima-instance.ref"), []byte(instanceName+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(partialDir, "sandbox.ref"), []byte(instanceName+"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(instance ref) error = %v", err)
 	}
 	if err := os.WriteFile(service.store.nodeInstanceIndexPath(instanceName), []byte("partial-node\n"), 0o644); err != nil {
@@ -1123,8 +1093,8 @@ func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 		t.Fatalf("expected child node parent id %q, got %q", node.ID, childNode.ParentNodeID)
 	}
 
-	if childNode.LimaInstanceName != "child-node" {
-		t.Fatalf("expected cloned node lima instance name to match child node slug, got %q", childNode.LimaInstanceName)
+	if childNode.SandboxName != "child-node" {
+		t.Fatalf("expected cloned node sandbox instance name to match child node slug, got %q", childNode.SandboxName)
 	}
 
 	if childNode.GuestWorkspacePath != workspace {
@@ -1135,8 +1105,8 @@ func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 		t.Fatalf("expected unstarted source clone to remain unseeded")
 	}
 
-	if !containsPrefix(service.lima.(*fakeLima).calls, "clone:"+node.LimaInstanceName+"->"+childNode.LimaInstanceName) {
-		t.Fatalf("expected limactl clone delegation, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsPrefix(service.sandbox.(*fakeSandbox).calls, "clone:"+node.SandboxName+"->"+childNode.SandboxName) {
+		t.Fatalf("expected msb clone delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
 	projects, err := service.ProjectList(false)
@@ -1186,8 +1156,8 @@ func TestNodeClonePreservesMountedWorkspaceMode(t *testing.T) {
 	if childNode.WorkspaceMountPath != workspace {
 		t.Fatalf("expected child node mount path %q, got %q", workspace, childNode.WorkspaceMountPath)
 	}
-	if childNode.GuestWorkspacePath != "" {
-		t.Fatalf("expected cloned mounted node to keep empty guest workspace path, got %q", childNode.GuestWorkspacePath)
+	if childNode.GuestWorkspacePath != workspace {
+		t.Fatalf("expected cloned mounted node to keep guest workspace path %q, got %q", workspace, childNode.GuestWorkspacePath)
 	}
 }
 
@@ -1287,11 +1257,11 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 		t.Fatalf("dispatch(shell) error = %v", err)
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "shell:"+node.LimaInstanceName+":uname -a") {
-		t.Fatalf("expected shell alias delegation, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell:"+node.SandboxName+":uname -a") {
+		t.Fatalf("expected shell alias delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	shellCalls := service.lima.(*fakeLima).shellCalls
+	shellCalls := service.sandbox.(*fakeSandbox).shellCalls
 	if len(shellCalls) == 0 {
 		t.Fatalf("expected shell call to be recorded")
 	}
@@ -1310,64 +1280,7 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 	}
 }
 
-func TestDispatchProjectCreateAndUpdateEnvironmentCommandFlags(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	if _, err := dispatch(ctx, service, []string{
-		"project", "create",
-		"--slug", "root",
-		"--workspace", workspace,
-		"--env-command", "./script/setup",
-		"--env-command", "direnv allow",
-	}); err != nil {
-		t.Fatalf("dispatch(project create --env-command) error = %v", err)
-	}
-
-	project, err := service.ProjectShow("root")
-	if err != nil {
-		t.Fatalf("ProjectShow(root) error = %v", err)
-	}
-	if got := strings.Join(project.LimaCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
-		t.Fatalf("expected bootstrap commands from create, got %v", project.LimaCommands.Bootstrap)
-	}
-
-	if _, err := dispatch(ctx, service, []string{
-		"project", "update", "root",
-		"--env-command", "mise install",
-		"--env-command", "make init",
-	}); err != nil {
-		t.Fatalf("dispatch(project update --env-command) error = %v", err)
-	}
-
-	project, err = service.ProjectShow("root")
-	if err != nil {
-		t.Fatalf("ProjectShow(updated root) error = %v", err)
-	}
-	if got := strings.Join(project.LimaCommands.Bootstrap, "|"); got != "mise install|make init" {
-		t.Fatalf("expected bootstrap commands from update, got %v", project.LimaCommands.Bootstrap)
-	}
-
-	if _, err := dispatch(ctx, service, []string{
-		"project", "update", "root",
-		"--clear-env-commands",
-	}); err != nil {
-		t.Fatalf("dispatch(project update --clear-env-commands) error = %v", err)
-	}
-
-	project, err = service.ProjectShow("root")
-	if err != nil {
-		t.Fatalf("ProjectShow(cleared root) error = %v", err)
-	}
-	if len(project.LimaCommands.Bootstrap) != 0 {
-		t.Fatalf("expected cleared bootstrap commands, got %v", project.LimaCommands.Bootstrap)
-	}
-}
-
-func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
+func TestNodeCloneInheritsSourceNodeRuntimeCommandsByDefault(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1385,9 +1298,9 @@ func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
 		Project: project.ID,
 		Slug:    "root-node",
-		LimaCommands: LimaCommandTemplates{
-			Clone: []string{"{{binary}} clone {{source_instance}} {{target_instance}} --set '.nestedVirtualization=true'"},
-			Start: []string{"{{binary}} start {{instance_name}} --vm-type=vz"},
+		RuntimeCommands: RuntimeCommandTemplates{
+			Clone: []string{"{{binary}} snapshot create inherited-{{sandbox_name}} --from {{source_sandbox}} --force"},
+			Start: []string{"{{binary}} start {{sandbox_name}} --vm-type=vz"},
 		},
 	})
 	if err != nil {
@@ -1402,14 +1315,14 @@ func TestNodeCloneInheritsSourceNodeLimaCommandsByDefault(t *testing.T) {
 		t.Fatalf("NodeClone() error = %v", err)
 	}
 
-	if strings.Join(childNode.LimaCommands.Clone, "|") != strings.Join(node.LimaCommands.Clone, "|") {
-		t.Fatalf("expected cloned node to inherit clone command override %q, got %q", node.LimaCommands.Clone, childNode.LimaCommands.Clone)
+	if strings.Join(childNode.RuntimeCommands.Clone, "|") != strings.Join(node.RuntimeCommands.Clone, "|") {
+		t.Fatalf("expected cloned node to inherit clone command override %q, got %q", node.RuntimeCommands.Clone, childNode.RuntimeCommands.Clone)
 	}
-	if strings.Join(childNode.LimaCommands.Start, "|") != strings.Join(node.LimaCommands.Start, "|") {
-		t.Fatalf("expected cloned node to inherit start command override %q, got %q", node.LimaCommands.Start, childNode.LimaCommands.Start)
+	if strings.Join(childNode.RuntimeCommands.Start, "|") != strings.Join(node.RuntimeCommands.Start, "|") {
+		t.Fatalf("expected cloned node to inherit start command override %q, got %q", node.RuntimeCommands.Start, childNode.RuntimeCommands.Start)
 	}
-	if !containsSubstring(service.lima.(*fakeLima).invocations, "--set '.nestedVirtualization=true'") {
-		t.Fatalf("expected clone invocation to use inherited node-specific clone command override, invocations = %v", service.lima.(*fakeLima).invocations)
+	if !containsSubstring(service.sandbox.(*fakeSandbox).invocations, "snapshot create inherited-") {
+		t.Fatalf("expected clone invocation to use inherited node-specific clone command override, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
 	}
 }
 
@@ -1542,11 +1455,9 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	}
 
 	assertEnvironmentConfigCommands(t, configs, "codex",
-		"sudo snap install node --classic",
-		`mkdir -p "$HOME/.local/bin"`,
-		`npm config set prefix "$HOME/.local"`,
-		`for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`,
-		`PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`,
+		"apt-get update && apt-get install -y ca-certificates curl git",
+		`curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`,
+		`command -v codex >/dev/null 2>&1`,
 	)
 	assertEnvironmentConfigCommands(t, configs, "claude-code",
 		"curl -fsSL https://claude.ai/install.sh | bash",
@@ -1556,8 +1467,8 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}
-	if containsSubstring(config.BootstrapCommands, "sudo npm") {
-		t.Fatalf("expected codex bootstrap to avoid sudo npm, got %q", strings.Join(config.BootstrapCommands, "|"))
+	if containsSubstring(config.BootstrapCommands, "npm") {
+		t.Fatalf("expected codex bootstrap to use the official standalone installer instead of npm, got %q", strings.Join(config.BootstrapCommands, "|"))
 	}
 
 	if _, err := service.EnvironmentConfigUpdate("codex", EnvironmentConfigUpdateInput{
@@ -1579,10 +1490,60 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	}
 }
 
+func TestCodexEnvironmentBootstrapCannotCompleteWithoutCodexExecutable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
+		Slug:               "codex-project",
+		WorkspacePath:      workspace,
+		EnvironmentConfigs: []string{"codex"},
+	})
+	if err != nil {
+		t.Fatalf("ProjectCreate() error = %v", err)
+	}
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "codex-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	service.sandbox.(*fakeSandbox).failCommand = "command -v codex"
+	if _, err := service.NodeStart(ctx, node.ID); err == nil {
+		t.Fatal("NodeStart() succeeded without the selected codex executable")
+	}
+
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	if bootstrap.Completed {
+		t.Fatal("codex bootstrap was marked complete after executable validation failed")
+	}
+	stored, err := service.store.NodeByID(node.ID)
+	if err != nil {
+		t.Fatalf("NodeByID() error = %v", err)
+	}
+	if stored.Status != NodeStatusFailed || stored.BootstrapCompleted {
+		t.Fatalf("failed codex bootstrap node = %#v", stored)
+	}
+}
+
 func TestDeletedBuiltInEnvironmentConfigIsNotRecreated(t *testing.T) {
 	t.Parallel()
 
 	service, _ := newTestService(t)
+	if err := service.EnsureReady(true); err != nil {
+		t.Fatalf("EnsureReady(true) error = %v", err)
+	}
+	defaultConfiguration, err := service.ConfigurationShow(DefaultConfigurationSlug)
+	if err != nil {
+		t.Fatalf("ConfigurationShow(default) error = %v", err)
+	}
+	if _, err := service.ConfigurationUpdate(defaultConfiguration.ID, ConfigurationUpdateInput{Environments: []string{}}); err != nil {
+		t.Fatalf("ConfigurationUpdate(clear default environments) error = %v", err)
+	}
 
 	if _, err := service.EnvironmentConfigDelete("codex"); err != nil {
 		t.Fatalf("EnvironmentConfigDelete(codex) error = %v", err)
@@ -1598,92 +1559,6 @@ func TestDeletedBuiltInEnvironmentConfigIsNotRecreated(t *testing.T) {
 	}
 	if containsEnvironmentConfigSlug(configs, "codex") {
 		t.Fatalf("expected deleted built-in environment config to stay deleted, got %#v", configs)
-	}
-}
-
-func TestDispatchEnvironmentConfigCommandsAndProjectEnvConfigFlags(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	if _, err := dispatch(ctx, service, []string{
-		"environment", "create",
-		"--slug", "shared-dev",
-		"--env-command", "./script/setup",
-		"--env-command", "direnv allow",
-	}); err != nil {
-		t.Fatalf("dispatch(environment create) error = %v", err)
-	}
-
-	config, err := service.EnvironmentConfigShow("shared-dev")
-	if err != nil {
-		t.Fatalf("EnvironmentConfigShow(shared-dev) error = %v", err)
-	}
-	if got := strings.Join(config.BootstrapCommands, "|"); got != "./script/setup|direnv allow" {
-		t.Fatalf("expected created environment config commands, got %q", got)
-	}
-
-	if _, err := dispatch(ctx, service, []string{
-		"project", "create",
-		"--slug", "root",
-		"--workspace", workspace,
-		"--env-config", "shared-dev",
-	}); err != nil {
-		t.Fatalf("dispatch(project create --env-config) error = %v", err)
-	}
-
-	project, err := service.ProjectShow("root")
-	if err != nil {
-		t.Fatalf("ProjectShow(root) error = %v", err)
-	}
-	if got := strings.Join(project.EnvironmentConfigs, "|"); got != "shared-dev" {
-		t.Fatalf("expected assigned environment config refs, got %q", got)
-	}
-
-	if _, err := dispatch(ctx, service, []string{
-		"environment", "update", "shared-dev",
-		"--env-command", "mise install",
-	}); err != nil {
-		t.Fatalf("dispatch(environment update) error = %v", err)
-	}
-
-	config, err = service.EnvironmentConfigShow("shared-dev")
-	if err != nil {
-		t.Fatalf("EnvironmentConfigShow(updated shared-dev) error = %v", err)
-	}
-	if got := strings.Join(config.BootstrapCommands, "|"); got != "mise install" {
-		t.Fatalf("expected updated environment config commands, got %q", got)
-	}
-
-	if _, err := dispatch(ctx, service, []string{
-		"project", "update", "root",
-		"--clear-env-configs",
-	}); err != nil {
-		t.Fatalf("dispatch(project update --clear-env-configs) error = %v", err)
-	}
-
-	project, err = service.ProjectShow("root")
-	if err != nil {
-		t.Fatalf("ProjectShow(cleared root) error = %v", err)
-	}
-	if len(project.EnvironmentConfigs) != 0 {
-		t.Fatalf("expected cleared environment config refs, got %v", project.EnvironmentConfigs)
-	}
-
-	if _, err := dispatch(ctx, service, []string{
-		"environment", "delete", "shared-dev",
-	}); err != nil {
-		t.Fatalf("dispatch(environment delete) error = %v", err)
-	}
-
-	configs, err := service.EnvironmentConfigList(false)
-	if err != nil {
-		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
-	}
-	if containsEnvironmentConfigSlug(configs, "shared-dev") {
-		t.Fatalf("expected deleted environment config to disappear from list, got %#v", configs)
 	}
 }
 
@@ -1714,7 +1589,7 @@ func TestShellUsesGuestWorkspacePathForInteractiveEntry(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
-	shellCalls := service.lima.(*fakeLima).shellCalls
+	shellCalls := service.sandbox.(*fakeSandbox).shellCalls
 	if len(shellCalls) == 0 {
 		t.Fatalf("expected shell call to be recorded")
 	}
@@ -1857,7 +1732,7 @@ func TestNodeStartFailsWhenProjectWorkspacePathIsMissingBeforeSeed(t *testing.T)
 		t.Fatalf("expected NodeStart() to fail when the registered workspace path is missing before the guest copy is seeded")
 	}
 
-	if len(service.lima.(*fakeLima).shellCalls) != 0 {
+	if len(service.sandbox.(*fakeSandbox).shellCalls) != 0 {
 		t.Fatalf("expected guest workspace preparation to be skipped when workspace is missing")
 	}
 }
@@ -1902,7 +1777,7 @@ func TestShellAllowsSeededNodeWhenProjectWorkspacePathIsMissing(t *testing.T) {
 		t.Fatalf("Shell() error = %v", err)
 	}
 
-	lastCall := service.lima.(*fakeLima).shellCalls[len(service.lima.(*fakeLima).shellCalls)-1]
+	lastCall := service.sandbox.(*fakeSandbox).shellCalls[len(service.sandbox.(*fakeSandbox).shellCalls)-1]
 	if lastCall.workdir != workspace {
 		t.Fatalf("expected shell workdir %q, got %q", workspace, lastCall.workdir)
 	}
@@ -1965,30 +1840,30 @@ func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
 		t.Fatalf("expected cloned bootstrap state to remain completed")
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "stop:"+parentNode.LimaInstanceName) {
-		t.Fatalf("expected running source node to be stopped before clone, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "stop:"+parentNode.SandboxName) {
+		t.Fatalf("expected running source node to be stopped before clone, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "clone:"+parentNode.LimaInstanceName+"->"+childNode.LimaInstanceName) {
-		t.Fatalf("expected limactl clone delegation, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "clone:"+parentNode.SandboxName+"->"+childNode.SandboxName) {
+		t.Fatalf("expected msb clone delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "start:"+parentNode.LimaInstanceName) {
-		t.Fatalf("expected running source node to be restarted after clone, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "start:"+parentNode.SandboxName) {
+		t.Fatalf("expected running source node to be restarted after clone, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	callsBeforeChildStart := len(service.lima.(*fakeLima).calls)
+	callsBeforeChildStart := len(service.sandbox.(*fakeSandbox).calls)
 	childNode, err = service.NodeStart(ctx, childNode.ID)
 	if err != nil {
 		t.Fatalf("NodeStart(child) error = %v", err)
 	}
 
-	newCalls := append([]string(nil), service.lima.(*fakeLima).calls[callsBeforeChildStart:]...)
-	if containsCall(newCalls, "copy:"+childNode.LimaInstanceName+":"+workspace+"->"+workspace) {
+	newCalls := append([]string(nil), service.sandbox.(*fakeSandbox).calls[callsBeforeChildStart:]...)
+	if containsCall(newCalls, "copy:"+childNode.SandboxName+":"+workspace+"->"+workspace) {
 		t.Fatalf("expected cloned node start to avoid reseeding the guest workspace, calls = %v", newCalls)
 	}
 
-	if containsCall(newCalls, "shell:"+childNode.LimaInstanceName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
+	if containsCall(newCalls, "shell:"+childNode.SandboxName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
 		t.Fatalf("expected cloned node start to avoid rerunning setup, calls = %v", newCalls)
 	}
 }
@@ -1998,7 +1873,7 @@ func TestNodeCloneStopsCloneWhenProviderLeavesItRunning(t *testing.T) {
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
-	service.lima.(*fakeLima).cloneStatus = "running"
+	service.sandbox.(*fakeSandbox).cloneStatus = "running"
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
@@ -2034,8 +1909,8 @@ func TestNodeCloneStopsCloneWhenProviderLeavesItRunning(t *testing.T) {
 		t.Fatalf("expected cloned node to be normalized to stopped, got %q", childNode.Status)
 	}
 
-	if !containsCall(service.lima.(*fakeLima).calls, "stop:"+childNode.LimaInstanceName) {
-		t.Fatalf("expected running clone instance to be stopped, calls = %v", service.lima.(*fakeLima).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "stop:"+childNode.SandboxName) {
+		t.Fatalf("expected running clone instance to be stopped, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
 
@@ -2143,8 +2018,49 @@ func newTestService(t *testing.T) (*Service, string) {
 	cfg := DefaultConfig(home)
 	cfg.MetadataRoot = home
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
-	service := NewService(cfg, newFakeLima(), strings.NewReader(""), ioDiscard{}, ioDiscard{})
+	service := NewService(cfg, newFakeSandbox(), strings.NewReader(""), ioDiscard{}, ioDiscard{})
+	service.localTerminals = true
+	if err := service.ensureDirectories(); err != nil {
+		t.Fatalf("ensureDirectories() error = %v", err)
+	}
 	return service, workspace
+}
+
+func TestReclaimMountedNodeFilesystemCachesTargetsOnlyRunningMountedNodes(t *testing.T) {
+	t.Parallel()
+	service, workspace := newTestService(t)
+	fake := service.sandbox.(*fakeSandbox)
+	now := time.Now().UTC()
+	nodes := []Node{
+		{ID: newID(), Slug: "mounted-running", SandboxName: "mounted-running", DirectoryPath: workspace, WorkspaceMode: WorkspaceModeMounted, CreatedAt: now, UpdatedAt: now},
+		{ID: newID(), Slug: "copy-running", SandboxName: "copy-running", DirectoryPath: workspace, WorkspaceMode: WorkspaceModeCopy, CreatedAt: now, UpdatedAt: now.Add(time.Second)},
+		{ID: newID(), Slug: "mounted-stopped", SandboxName: "mounted-stopped", DirectoryPath: workspace, WorkspaceMode: WorkspaceModeMounted, CreatedAt: now, UpdatedAt: now.Add(2 * time.Second)},
+	}
+	for _, node := range nodes {
+		if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
+			t.Fatalf("SaveNode(%s) error = %v", node.Slug, err)
+		}
+	}
+	fake.observations[nodes[0].SandboxName] = RuntimeObservation{Name: nodes[0].SandboxName, Exists: true, Status: "running"}
+	fake.observations[nodes[1].SandboxName] = RuntimeObservation{Name: nodes[1].SandboxName, Exists: true, Status: "running"}
+	fake.observations[nodes[2].SandboxName] = RuntimeObservation{Name: nodes[2].SandboxName, Exists: true, Status: "stopped"}
+
+	reclaimed, err := service.reclaimMountedNodeFilesystemCaches(context.Background())
+	if err != nil {
+		t.Fatalf("reclaimMountedNodeFilesystemCaches() error = %v", err)
+	}
+	if reclaimed != 1 {
+		t.Fatalf("reclaimed nodes = %d, want 1", reclaimed)
+	}
+	fake.mu.Lock()
+	calls := append([]fakeShellCall(nil), fake.shellCalls...)
+	fake.mu.Unlock()
+	if len(calls) != 1 {
+		t.Fatalf("shell calls = %#v, want one", calls)
+	}
+	if calls[0].instanceName != "mounted-running" || strings.Join(calls[0].command, " ") != "sh -c echo 2 > /proc/sys/vm/drop_caches" {
+		t.Fatalf("reclaim shell call = %#v", calls[0])
+	}
 }
 
 type ioDiscard struct{}
@@ -2412,8 +2328,8 @@ func TestReadSurfacesDoNotWrite(t *testing.T) {
 
 	// Simulate an external runtime transition: reads must report it live
 	// (ADR 37 in-memory merge) without persisting anything.
-	fake := service.lima.(*fakeLima)
-	fake.observations[node.LimaInstanceName] = RuntimeObservation{Name: node.LimaInstanceName, Exists: true, Status: "stopped", Dir: "/fake/" + node.LimaInstanceName}
+	fake := service.sandbox.(*fakeSandbox)
+	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: "stopped", Dir: "/fake/" + node.SandboxName}
 
 	if _, err := service.ProjectTree(ctx, "", false); err != nil {
 		t.Fatalf("ProjectTree() error = %v", err)
@@ -2484,9 +2400,9 @@ func TestRefreshDoesNotRaceMutation(t *testing.T) {
 		t.Fatalf("NodeStart() error = %v", err)
 	}
 
-	fake := service.lima.(*fakeLima)
-	stopGate := newFakeLimaGate()
-	startGate := newFakeLimaGate()
+	fake := service.sandbox.(*fakeSandbox)
+	stopGate := newFakeSandboxGate()
+	startGate := newFakeSandboxGate()
 	fake.stopGate = stopGate
 	fake.startGate = startGate
 
@@ -2512,7 +2428,7 @@ func TestRefreshDoesNotRaceMutation(t *testing.T) {
 		_, err := service.NodeStop(ctx, node.ID)
 		stopResult <- err
 	}()
-	awaitFakeLimaGate(t, stopGate, node.LimaInstanceName)
+	awaitFakeSandboxGate(t, stopGate, node.SandboxName)
 	for i := 0; i < 5; i++ {
 		if _, err := service.NodeList(ctx, false); err != nil {
 			t.Fatalf("NodeList(during stop) error = %v", err)
@@ -2528,7 +2444,7 @@ func TestRefreshDoesNotRaceMutation(t *testing.T) {
 		_, err := service.NodeStart(ctx, node.ID)
 		startResult <- err
 	}()
-	awaitFakeLimaGate(t, startGate, node.LimaInstanceName)
+	awaitFakeSandboxGate(t, startGate, node.SandboxName)
 	for i := 0; i < 5; i++ {
 		if _, err := service.NodeList(ctx, false); err != nil {
 			t.Fatalf("NodeList(during start) error = %v", err)
@@ -2551,27 +2467,27 @@ func TestRefreshDoesNotRaceMutation(t *testing.T) {
 	}
 }
 
-// deleteFailingLima wraps *fakeLima and forces Delete to fail for the named
+// deleteFailingSandbox wraps *fakeSandbox and forces Delete to fail for the named
 // instances so tests can exercise teardown-failure paths. Every other call is
 // delegated to the embedded fake, so its observations and call bookkeeping stay
 // authoritative.
-type deleteFailingLima struct {
-	*fakeLima
+type deleteFailingSandbox struct {
+	*fakeSandbox
 	failInstances map[string]bool
 }
 
-func (f *deleteFailingLima) Delete(ctx context.Context, project Project, node Node) error {
-	if f.failInstances[node.LimaInstanceName] {
+func (f *deleteFailingSandbox) Delete(ctx context.Context, project Project, node Node) error {
+	if f.failInstances[node.SandboxName] {
 		return externalCommandFailed(
 			"forced delete failure",
 			errors.New("teardown boom"),
-			map[string]any{"instance_name": node.LimaInstanceName},
+			map[string]any{"sandbox_name": node.SandboxName},
 		)
 	}
-	return f.fakeLima.Delete(ctx, project, node)
+	return f.fakeSandbox.Delete(ctx, project, node)
 }
 
-func seedObservation(fl *fakeLima, observation RuntimeObservation) {
+func seedObservation(fl *fakeSandbox, observation RuntimeObservation) {
 	fl.mu.Lock()
 	defer fl.mu.Unlock()
 	fl.observations[observation.Name] = observation
@@ -2582,15 +2498,15 @@ func TestNodeCleanupIncompleteTearsDownLiveInstanceBeforeRemovingMetadata(t *tes
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	fl := service.lima.(*fakeLima)
+	fl := service.sandbox.(*fakeSandbox)
 
 	const instanceName = "orphan-project-orphan-node-abcd1234"
 	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "orphan-node")
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
 	}
-	writeFile(t, filepath.Join(partialDir, "instance.lima.yaml"), "arch: aarch64\n")
-	writeFile(t, filepath.Join(partialDir, "lima-instance.ref"), instanceName+"\n")
+	writeFile(t, filepath.Join(partialDir, "instance.sandbox.yaml"), "arch: aarch64\n")
+	writeFile(t, filepath.Join(partialDir, "sandbox.ref"), instanceName+"\n")
 	writeFile(t, service.store.nodeInstanceIndexPath(instanceName), "orphan-node\n")
 
 	// The runtime instance named by the incomplete dir is still live.
@@ -2612,7 +2528,7 @@ func TestNodeCleanupIncompleteTearsDownLiveInstanceBeforeRemovingMetadata(t *tes
 		t.Fatalf("orphan bug: cleanup removed metadata but left runtime instance %q running", instanceName)
 	}
 	if !containsCall(fl.calls, "delete:"+instanceName) {
-		t.Fatalf("expected cleanup to tear down the live instance via lima.Delete, calls = %v", fl.calls)
+		t.Fatalf("expected cleanup to tear down the live instance via sandbox.Delete, calls = %v", fl.calls)
 	}
 
 	if exists(partialDir) {
@@ -2628,15 +2544,15 @@ func TestNodeCleanupIncompleteKeepsDirectoryWhenTeardownFails(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	fl := service.lima.(*fakeLima)
+	fl := service.sandbox.(*fakeSandbox)
 	const instanceName = "stuck-project-stuck-node-99887766"
-	service.lima = &deleteFailingLima{fakeLima: fl, failInstances: map[string]bool{instanceName: true}}
+	service.sandbox = &deleteFailingSandbox{fakeSandbox: fl, failInstances: map[string]bool{instanceName: true}}
 
 	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "stuck-node")
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
 	}
-	writeFile(t, filepath.Join(partialDir, "lima-instance.ref"), instanceName+"\n")
+	writeFile(t, filepath.Join(partialDir, "sandbox.ref"), instanceName+"\n")
 	writeFile(t, service.store.nodeInstanceIndexPath(instanceName), "stuck-node\n")
 	seedObservation(fl, RuntimeObservation{Name: instanceName, Exists: true, Status: "running"})
 
@@ -2653,7 +2569,7 @@ func TestNodeCleanupIncompleteKeepsDirectoryWhenTeardownFails(t *testing.T) {
 	if !exists(service.store.nodeInstanceIndexPath(instanceName)) {
 		t.Fatalf("expected cleanup to keep the instance index when teardown fails")
 	}
-	observations, listErr := service.lima.List(ctx)
+	observations, listErr := service.sandbox.List(ctx)
 	if listErr != nil {
 		t.Fatalf("List() error = %v", listErr)
 	}
@@ -2667,14 +2583,14 @@ func TestNodeCleanupIncompleteDryRunDoesNotTearDownLiveInstance(t *testing.T) {
 
 	ctx := context.Background()
 	service, _ := newTestService(t)
-	fl := service.lima.(*fakeLima)
+	fl := service.sandbox.(*fakeSandbox)
 	const instanceName = "dry-project-dry-node-1a2b3c4d"
 
 	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "dry-node")
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
 	}
-	writeFile(t, filepath.Join(partialDir, "lima-instance.ref"), instanceName+"\n")
+	writeFile(t, filepath.Join(partialDir, "sandbox.ref"), instanceName+"\n")
 	seedObservation(fl, RuntimeObservation{Name: instanceName, Exists: true, Status: "running"})
 
 	result, err := service.NodeCleanupIncomplete(false)
@@ -2707,7 +2623,7 @@ func TestNodeDeleteTearsDownRunningInstance(t *testing.T) {
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
-	fl := service.lima.(*fakeLima)
+	fl := service.sandbox.(*fakeSandbox)
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
 	if err != nil {
@@ -2724,7 +2640,7 @@ func TestNodeDeleteTearsDownRunningInstance(t *testing.T) {
 	if node.Status != NodeStatusRunning {
 		t.Fatalf("expected running node before delete, got %q", node.Status)
 	}
-	instanceName := node.LimaInstanceName
+	instanceName := node.SandboxName
 
 	deleted, err := service.NodeDelete(ctx, node.ID)
 	if err != nil {
@@ -2734,7 +2650,7 @@ func TestNodeDeleteTearsDownRunningInstance(t *testing.T) {
 		t.Fatalf("expected terminated status, got %q", deleted.Status)
 	}
 	if !containsCall(fl.calls, "delete:"+instanceName) {
-		t.Fatalf("expected NodeDelete to delegate teardown to lima.Delete, calls = %v", fl.calls)
+		t.Fatalf("expected NodeDelete to delegate teardown to sandbox.Delete, calls = %v", fl.calls)
 	}
 	observations, err := fl.List(ctx)
 	if err != nil {
@@ -2753,7 +2669,7 @@ func TestNodeDeleteLeavesNodeListableWhenTeardownFails(t *testing.T) {
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
-	fl := service.lima.(*fakeLima)
+	fl := service.sandbox.(*fakeSandbox)
 
 	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
 	if err != nil {
@@ -2767,10 +2683,10 @@ func TestNodeDeleteLeavesNodeListableWhenTeardownFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeStart() error = %v", err)
 	}
-	instanceName := node.LimaInstanceName
+	instanceName := node.SandboxName
 
-	failing := &deleteFailingLima{fakeLima: fl, failInstances: map[string]bool{instanceName: true}}
-	service.lima = failing
+	failing := &deleteFailingSandbox{fakeSandbox: fl, failInstances: map[string]bool{instanceName: true}}
+	service.sandbox = failing
 
 	if _, err := service.NodeDelete(ctx, node.ID); err == nil {
 		t.Fatalf("expected NodeDelete to fail when teardown fails")

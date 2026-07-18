@@ -4,41 +4,58 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 const (
-	defaultAgentValidationCommand  = "command -v sh >/dev/null 2>&1"
-	defaultCodexNodeInstallCommand = "sudo snap install node --classic"
-	defaultCodexNPMBinCommand      = `mkdir -p "$HOME/.local/bin"`
-	defaultCodexNPMPrefixCommand   = `npm config set prefix "$HOME/.local"`
-	defaultCodexPathCommand        = `for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`
-	defaultCodexNPMInstallCommand  = `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`
-	legacyCodexNPMInstallCommand   = "sudo npm install -g @openai/codex"
+	defaultAgentValidationCommand      = "command -v sh >/dev/null 2>&1"
+	defaultCodexPrerequisitesCommand   = "apt-get update && apt-get install -y ca-certificates curl git"
+	defaultCodexInstallCommand         = `curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`
+	defaultCodexValidationCommand      = `command -v codex >/dev/null 2>&1`
+	legacyCodexSnapNodeInstallCommand  = "sudo snap install node --classic"
+	legacyCodexAptNodeInstallCommand   = "apt-get update && apt-get install -y ca-certificates curl git nodejs npm"
+	legacyCodexNPMBinCommand           = `mkdir -p "$HOME/.local/bin"`
+	legacyCodexNPMPrefixCommand        = `npm config set prefix "$HOME/.local"`
+	legacyCodexPathCommand             = `for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`
+	legacyCodexUserNPMInstallCommand   = `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`
+	legacyCodexGlobalNPMInstallCommand = "sudo npm install -g @openai/codex"
 )
 
+var legacyGuessedDefaultPorts = []string{"3000:3000", "5173:5173", "8000:8000", "8080:8080"}
+
 type Config struct {
-	MetadataRoot        string               `json:"metadata_root" yaml:"metadata_root"`
-	LimaHome            string               `json:"lima_home" yaml:"lima_home"`
-	DefaultAgentProfile string               `json:"default_agent_profile" yaml:"default_agent_profile"`
-	DefaultTemplate     string               `json:"default_template" yaml:"default_template"`
-	LimaCommands        LimaCommandTemplates `json:"lima_commands" yaml:"lima_commands"`
+	MetadataRoot        string                  `json:"metadata_root" yaml:"metadata_root"`
+	DefaultAgentProfile string                  `json:"default_agent_profile" yaml:"default_agent_profile"`
+	DefaultImage        string                  `json:"default_image" yaml:"default_image"`
+	DefaultPorts        []string                `json:"default_ports" yaml:"default_ports"`
+	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands" yaml:"runtime_commands"`
 	Snapshot            struct {
 		Excludes []string `json:"excludes" yaml:"excludes"`
 	} `json:"snapshot" yaml:"snapshot"`
 	AgentProfilesDir string `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
+	Daemon           struct {
+		Autostart                       bool   `json:"autostart" yaml:"autostart"`
+		Restore                         string `json:"restore" yaml:"restore"`
+		VirtioFSReclaim                 bool   `json:"virtiofs_reclaim" yaml:"virtiofs_reclaim"`
+		VirtioFSReclaimThresholdPercent int    `json:"virtiofs_reclaim_threshold_percent" yaml:"virtiofs_reclaim_threshold_percent"`
+	} `json:"daemon" yaml:"daemon"`
 }
 
 func DefaultConfig(home string) Config {
 	cfg := Config{
 		MetadataRoot:        home,
-		LimaHome:            expandHome("~/.lima"),
 		DefaultAgentProfile: "codex-cli",
-		DefaultTemplate:     "template:default",
-		LimaCommands:        defaultLimaCommandTemplates(),
+		DefaultImage:        "ghcr.io/superradcompany/debian-systemd:12",
+		DefaultPorts:        []string{},
+		RuntimeCommands:     defaultRuntimeCommandTemplates(),
 	}
 	cfg.Snapshot.Excludes = []string{".codelima", ".git"}
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
+	cfg.Daemon.Autostart = true
+	cfg.Daemon.Restore = "respawn"
+	cfg.Daemon.VirtioFSReclaim = true
+	cfg.Daemon.VirtioFSReclaimThresholdPercent = defaultVirtioFSPressureThresholdPercent
 
 	return cfg
 }
@@ -60,10 +77,13 @@ func LoadConfig(homeOverride string) (Config, error) {
 	}
 
 	cfg := DefaultConfig(home)
-	configPath := filepath.Join(home, "_config", "config.yaml")
+	configPath := filepath.Join(home, "_config", "settings.yaml")
 	if exists(configPath) {
 		if err := readYAMLFile(configPath, &cfg); err != nil {
 			return Config{}, metadataCorruption("failed to load config.yaml", err, map[string]any{"path": configPath})
+		}
+		if slices.Equal(cfg.DefaultPorts, legacyGuessedDefaultPorts) {
+			cfg.DefaultPorts = []string{}
 		}
 	}
 
@@ -72,25 +92,26 @@ func LoadConfig(homeOverride string) (Config, error) {
 		cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
 	}
 
-	if limaHome := os.Getenv("LIMA_HOME"); limaHome != "" {
-		cfg.LimaHome = expandHome(limaHome)
+	cfg.RuntimeCommands = removeLegacyMSBCommandTemplates(cfg.RuntimeCommands).ApplyDefaults(defaultRuntimeCommandTemplates())
+	if err := validateSDKRuntimeCommandTemplates(cfg.RuntimeCommands); err != nil {
+		return Config{}, err
 	}
-
-	cfg.LimaHome = expandHome(cfg.LimaHome)
-	cfg.LimaCommands = cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates())
+	if cfg.Daemon.Restore == "" {
+		cfg.Daemon.Restore = "respawn"
+	}
 
 	return cfg, nil
 }
 
 func (c Config) Summary() map[string]any {
 	return map[string]any{
-		"metadata_root":         c.MetadataRoot,
-		"lima_home":             c.LimaHome,
-		"default_agent_profile": c.DefaultAgentProfile,
-		"default_template":      c.DefaultTemplate,
-		"lima_commands":         c.LimaCommands,
-		"snapshot_excludes":     c.Snapshot.Excludes,
-		"agent_profiles_dir":    c.AgentProfilesDir,
+		"metadata_root": c.MetadataRoot,
+		"daemon": map[string]any{
+			"autostart":                          c.Daemon.Autostart,
+			"restore":                            c.Daemon.Restore,
+			"virtiofs_reclaim":                   c.Daemon.VirtioFSReclaim,
+			"virtiofs_reclaim_threshold_percent": c.Daemon.VirtioFSReclaimThresholdPercent,
+		},
 	}
 }
 
@@ -128,15 +149,22 @@ func validateConfig(cfg Config) error {
 		return invalidArgument("metadata root must not be /", nil)
 	}
 
-	if cfg.DefaultTemplate == "" {
-		return invalidArgument("default template is required", nil)
+	if cfg.DefaultImage == "" {
+		return invalidArgument("default image is required", nil)
+	}
+
+	if _, err := validatePorts(cfg.DefaultPorts); err != nil {
+		return err
+	}
+
+	if cfg.Daemon.Restore != "respawn" && cfg.Daemon.Restore != "forget" {
+		return invalidArgument("daemon.restore must be respawn or forget", map[string]any{"restore": cfg.Daemon.Restore})
+	}
+	if cfg.Daemon.VirtioFSReclaimThresholdPercent < 1 || cfg.Daemon.VirtioFSReclaimThresholdPercent > 95 {
+		return invalidArgument("daemon.virtiofs_reclaim_threshold_percent must be between 1 and 95", map[string]any{"threshold_percent": cfg.Daemon.VirtioFSReclaimThresholdPercent})
 	}
 
 	return nil
-}
-
-func defaultConfigYAML(cfg Config) ([]byte, error) {
-	return configYAMLBytes(cfg)
 }
 
 func builtInProfiles() map[string]AgentProfile {
@@ -168,11 +196,9 @@ func builtInEnvironmentConfigs() []builtInEnvironmentConfigSpec {
 		{
 			Slug: "codex",
 			BootstrapCommands: []string{
-				defaultCodexNodeInstallCommand,
-				defaultCodexNPMBinCommand,
-				defaultCodexNPMPrefixCommand,
-				defaultCodexPathCommand,
-				defaultCodexNPMInstallCommand,
+				defaultCodexPrerequisitesCommand,
+				defaultCodexInstallCommand,
+				defaultCodexValidationCommand,
 			},
 		},
 		{
@@ -184,20 +210,15 @@ func builtInEnvironmentConfigs() []builtInEnvironmentConfigSpec {
 	}
 }
 
-func legacyBuiltInEnvironmentConfigs() map[string]builtInEnvironmentConfigSpec {
-	return map[string]builtInEnvironmentConfigSpec{
+func legacyBuiltInEnvironmentConfigs() map[string][]builtInEnvironmentConfigSpec {
+	return map[string][]builtInEnvironmentConfigSpec{
 		"codex": {
-			Slug: "codex",
-			BootstrapCommands: []string{
-				defaultCodexNodeInstallCommand,
-				legacyCodexNPMInstallCommand,
-			},
+			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexGlobalNPMInstallCommand}},
+			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
+			{Slug: "codex", BootstrapCommands: []string{legacyCodexAptNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
 		},
 		"claude-code": {
-			Slug: "claude-code",
-			BootstrapCommands: []string{
-				"curl -fsSL https://claude.ai/install.sh | bash",
-			},
+			{Slug: "claude-code", BootstrapCommands: []string{"curl -fsSL https://claude.ai/install.sh | bash"}},
 		},
 	}
 }

@@ -14,6 +14,101 @@ type Store struct {
 	cfg Config
 }
 
+const metadataSchemaVersion = "3"
+
+func ensureSchemaVersion(home string) error {
+	marker := filepath.Join(home, "_config", "schema.version")
+	if data, err := os.ReadFile(marker); err == nil {
+		found := strings.TrimSpace(string(data))
+		if found == "2" {
+			return preconditionFailed("this CODELIMA_HOME uses schema v2. Point --home/CODELIMA_HOME at a new directory; no automatic migration exists", map[string]any{"found": found, "required": metadataSchemaVersion})
+		}
+		if found != metadataSchemaVersion {
+			return preconditionFailed("unsupported CODELIMA_HOME schema version", map[string]any{"found": strings.TrimSpace(string(data)), "required": metadataSchemaVersion})
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return metadataCorruption("failed to read schema version", err, map[string]any{"path": marker})
+	}
+
+	legacy, err := homeContainsLimaArtifacts(home)
+	if err != nil {
+		return err
+	}
+	if legacy {
+		return preconditionFailed("this CODELIMA_HOME contains Lima-backed nodes from codelima <v1>. Delete them with the previous release (codelima node delete ...) or point --home/CODELIMA_HOME at a new directory. No automatic migration exists.", nil)
+	}
+	fresh, err := homeIsFresh(home)
+	if err != nil {
+		return err
+	}
+	if !fresh {
+		return preconditionFailed("this CODELIMA_HOME has an unrecognized home layout; point --home/CODELIMA_HOME at a new directory", nil)
+	}
+	if err := ensureDir(filepath.Dir(marker)); err != nil {
+		return err
+	}
+	return atomicWriteFile(marker, []byte(metadataSchemaVersion+"\n"), 0o644)
+}
+
+func homeContainsLimaArtifacts(home string) (bool, error) {
+	paths := []string{filepath.Join(home, "_config", "config.yaml")}
+	for _, root := range []string{"nodes", "projects"} {
+		entries, err := os.ReadDir(filepath.Join(home, root))
+		if err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if root == "nodes" && exists(filepath.Join(home, root, entry.Name(), "lima-instance.ref")) {
+				return true, nil
+			}
+			paths = append(paths, filepath.Join(home, root, entry.Name(), map[string]string{"nodes": "node.yaml", "projects": "project.yaml"}[root]))
+		}
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		current := string(data)
+		for _, marker := range []string{"lima_home:", "lima_commands:", "lima_instance_name:", "default_lima_template:"} {
+			if strings.Contains(current, marker) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func homeIsFresh(home string) (bool, error) {
+	entries, err := os.ReadDir(home)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			return false, nil
+		}
+		children, err := os.ReadDir(filepath.Join(home, entry.Name()))
+		if err != nil {
+			return false, err
+		}
+		if len(children) != 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func NewStore(cfg Config) *Store {
 	return &Store{cfg: cfg}
 }
@@ -21,7 +116,7 @@ func NewStore(cfg Config) *Store {
 // EnsureLayout fully initializes the metadata home: directory layout plus
 // seeded/repaired metadata. Read paths must not use it — they call
 // ensureDirectories only, while mutating paths run seedAndRepair under the
-// environment-configs/projects/nodes locks (see Service.EnsureReady).
+// environments/configurations/nodes locks (see Service.EnsureReady).
 func (s *Store) EnsureLayout() error {
 	if err := s.ensureDirectories(); err != nil {
 		return err
@@ -36,16 +131,20 @@ func (s *Store) ensureDirectories() error {
 	if err := validateConfig(s.cfg); err != nil {
 		return err
 	}
+	if err := ensureSchemaVersion(s.cfg.MetadataRoot); err != nil {
+		return err
+	}
 
 	directories := []string{
 		filepath.Join(s.cfg.MetadataRoot, "_config"),
 		s.cfg.AgentProfilesDir,
 		filepath.Join(s.cfg.MetadataRoot, "_locks"),
-		filepath.Join(s.cfg.MetadataRoot, "_index", "environment-configs", "by-slug"),
-		filepath.Join(s.cfg.MetadataRoot, "_index", "projects", "by-slug"),
+		filepath.Join(s.cfg.MetadataRoot, "_daemon"),
+		filepath.Join(s.cfg.MetadataRoot, "_index", "environments", "by-slug"),
+		filepath.Join(s.cfg.MetadataRoot, "_index", "configurations", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance"),
-		filepath.Join(s.cfg.MetadataRoot, "environment-configs"),
-		filepath.Join(s.cfg.MetadataRoot, "projects"),
+		filepath.Join(s.cfg.MetadataRoot, "environments"),
+		filepath.Join(s.cfg.MetadataRoot, "configurations"),
 		filepath.Join(s.cfg.MetadataRoot, "nodes"),
 	}
 
@@ -59,9 +158,9 @@ func (s *Store) ensureDirectories() error {
 }
 
 // seedAndRepair writes the global config when missing or stale, seeds built-in
-// agent profiles and environment configs, and refreshes project/node metadata
-// files that predate the current schema. Callers must hold the
-// environment-configs, projects, and nodes locks (Store keeps no locking of
+// agent profiles, environments, and the default configuration, and refreshes
+// node metadata files. Callers must hold the environments, configurations,
+// and nodes locks (Store keeps no locking of
 // its own — lock discipline lives at the Service operation level).
 func (s *Store) seedAndRepair(now time.Time) error {
 	if err := s.ensureConfigFile(); err != nil {
@@ -82,8 +181,7 @@ func (s *Store) seedAndRepair(now time.Time) error {
 	if err := s.ensureBuiltInEnvironmentConfigs(now); err != nil {
 		return err
 	}
-
-	if err := s.ensureProjectMetadataFiles(); err != nil {
+	if err := s.ensureDefaultConfiguration(now); err != nil {
 		return err
 	}
 
@@ -106,50 +204,6 @@ func (s *Store) ensureConfigFile() error {
 	}
 
 	return writeConfigFile(path, s.cfg)
-}
-
-func (s *Store) ensureProjectMetadataFiles() error {
-	projectRoot := filepath.Join(s.cfg.MetadataRoot, "projects")
-	entries, err := os.ReadDir(projectRoot)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-
-		return err
-	}
-
-	defaults := s.cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates())
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		path := filepath.Join(projectRoot, entry.Name(), "project.yaml")
-		if !exists(path) {
-			continue
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return metadataCorruption("failed to read project metadata", err, map[string]any{"path": path})
-		}
-
-		var project Project
-		if err := readYAMLFile(path, &project); err != nil {
-			return metadataCorruption("failed to load project", err, map[string]any{"path": path})
-		}
-
-		if !projectFileNeedsRefresh(data, project, defaults) {
-			continue
-		}
-
-		if err := writeProjectFile(path, project, defaults); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (s *Store) ensureNodeMetadataFiles() error {
@@ -184,11 +238,14 @@ func (s *Store) ensureNodeMetadataFiles() error {
 		}
 		node := wire.node()
 
-		project, err := s.ProjectByID(node.ProjectID)
-		if err != nil {
-			return err
+		defaults := s.cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
+		if node.ProjectID != "" {
+			project, err := s.ProjectByID(node.ProjectID)
+			if err != nil {
+				return err
+			}
+			defaults = project.RuntimeCommands.ApplyDefaults(defaults)
 		}
-		defaults := project.LimaCommands.ApplyDefaults(s.cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates()))
 
 		if !nodeFileNeedsRefresh(data, node, defaults) {
 			continue
@@ -215,8 +272,18 @@ func (s *Store) ensureBuiltInEnvironmentConfigs(createdAt time.Time) error {
 				continue
 			}
 
-			legacy, ok := legacyConfigs[spec.Slug]
-			if !ok || !bootstrapCommandsEqual(config.BootstrapCommands, legacy.BootstrapCommands) {
+			legacySpecs, ok := legacyConfigs[spec.Slug]
+			if !ok {
+				continue
+			}
+			matchesLegacy := false
+			for _, legacy := range legacySpecs {
+				if bootstrapCommandsEqual(config.BootstrapCommands, legacy.BootstrapCommands) {
+					matchesLegacy = true
+					break
+				}
+			}
+			if !matchesLegacy {
 				continue
 			}
 
@@ -258,7 +325,7 @@ func bootstrapCommandsEqual(a, b []string) bool {
 }
 
 func (s *Store) configPath() string {
-	return filepath.Join(s.cfg.MetadataRoot, "_config", "config.yaml")
+	return filepath.Join(s.cfg.MetadataRoot, "_config", "settings.yaml")
 }
 
 func (s *Store) agentProfilePath(name string) string {
@@ -313,27 +380,18 @@ func (s *Store) nodeContextPath(nodeID string) string {
 	return filepath.Join(s.nodeDir(nodeID), "context.jsonl")
 }
 
-func (s *Store) nodeTemplatePath(nodeID string) string {
-	return filepath.Join(s.nodeDir(nodeID), "instance.lima.yaml")
-}
-
 func (s *Store) nodeBootstrapPath(nodeID string) string {
 	return filepath.Join(s.nodeDir(nodeID), "bootstrap.json")
 }
 
 func (s *Store) nodeInstanceRefPath(nodeID string) string {
-	return filepath.Join(s.nodeDir(nodeID), "lima-instance.ref")
+	return filepath.Join(s.nodeDir(nodeID), "sandbox.ref")
 }
 
 func (s *Store) incompleteNodeMetadata(nodeID string) (IncompleteNodeMetadata, error) {
 	item := IncompleteNodeMetadata{
 		NodeID:        nodeID,
 		DirectoryPath: s.nodeDir(nodeID),
-	}
-
-	templatePath := s.nodeTemplatePath(nodeID)
-	if exists(templatePath) {
-		item.TemplatePath = templatePath
 	}
 
 	instanceRefPath := s.nodeInstanceRefPath(nodeID)
@@ -343,7 +401,7 @@ func (s *Store) incompleteNodeMetadata(nodeID string) (IncompleteNodeMetadata, e
 		if err != nil {
 			return IncompleteNodeMetadata{}, metadataCorruption("failed to read node instance ref", err, map[string]any{"path": instanceRefPath})
 		}
-		item.InstanceName = strings.TrimSpace(string(data))
+		item.SandboxName = strings.TrimSpace(string(data))
 	}
 
 	return item, nil
@@ -375,13 +433,16 @@ func (s *Store) SaveProject(project Project) error {
 	if err := ensureDir(s.projectDir(project.ID)); err != nil {
 		return err
 	}
+	if err := ensureDir(filepath.Dir(s.projectSlugIndexPath(project.Slug))); err != nil {
+		return err
+	}
 
 	var previous *Project
 	if loaded, err := s.ProjectByID(project.ID); err == nil {
 		previous = &loaded
 	}
 
-	if err := writeProjectFile(s.projectPath(project.ID), project, s.cfg.LimaCommands); err != nil {
+	if err := writeProjectFile(s.projectPath(project.ID), project, s.cfg.RuntimeCommands); err != nil {
 		return err
 	}
 
@@ -492,6 +553,9 @@ func (s *Store) ListProjects(includeDeleted bool) ([]Project, error) {
 	root := filepath.Join(s.cfg.MetadataRoot, "projects")
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []Project{}, nil
+		}
 		return nil, err
 	}
 
@@ -603,7 +667,7 @@ func (s *Store) LatestSnapshot(projectID string) (SnapshotManifest, error) {
 	return latest, nil
 }
 
-func (s *Store) SaveNode(node Node, bootstrap BootstrapState, template []byte) error {
+func (s *Store) SaveNode(node Node, bootstrap BootstrapState) error {
 	if err := ensureDir(s.nodeDir(node.ID)); err != nil {
 		return err
 	}
@@ -613,11 +677,14 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState, template []byte) e
 		previous = &loaded
 	}
 
-	project, err := s.ProjectByID(node.ProjectID)
-	if err != nil {
-		return err
+	defaults := s.cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
+	if node.ProjectID != "" {
+		project, err := s.ProjectByID(node.ProjectID)
+		if err != nil {
+			return err
+		}
+		defaults = project.RuntimeCommands.ApplyDefaults(defaults)
 	}
-	defaults := project.LimaCommands.ApplyDefaults(s.cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates()))
 
 	if err := writeNodeFile(s.nodePath(node.ID), node, defaults); err != nil {
 		return err
@@ -627,17 +694,11 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState, template []byte) e
 		return err
 	}
 
-	if len(template) > 0 {
-		if err := atomicWriteFile(s.nodeTemplatePath(node.ID), template, 0o644); err != nil {
-			return err
-		}
-	}
-
-	if err := atomicWriteFile(s.nodeInstanceRefPath(node.ID), []byte(node.LimaInstanceName+"\n"), 0o644); err != nil {
+	if err := atomicWriteFile(s.nodeInstanceRefPath(node.ID), []byte(node.SandboxName+"\n"), 0o644); err != nil {
 		return err
 	}
 
-	if err := atomicWriteFile(s.nodeInstanceIndexPath(node.LimaInstanceName), []byte(node.ID+"\n"), 0o644); err != nil {
+	if err := atomicWriteFile(s.nodeInstanceIndexPath(node.SandboxName), []byte(node.ID+"\n"), 0o644); err != nil {
 		return err
 	}
 
@@ -647,12 +708,12 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState, template []byte) e
 		}
 	}
 
-	if previous != nil && previous.LimaInstanceName != node.LimaInstanceName {
-		_ = os.Remove(s.nodeInstanceIndexPath(previous.LimaInstanceName))
+	if previous != nil && previous.SandboxName != node.SandboxName {
+		_ = os.Remove(s.nodeInstanceIndexPath(previous.SandboxName))
 	}
 
 	if node.DeletedAt != nil || node.Status == NodeStatusTerminated {
-		_ = os.Remove(s.nodeInstanceIndexPath(node.LimaInstanceName))
+		_ = os.Remove(s.nodeInstanceIndexPath(node.SandboxName))
 	}
 
 	return nil
@@ -708,7 +769,7 @@ func (s *Store) NodeByIDOrSlug(value string) (Node, error) {
 	return Node{}, notFound("node not found", map[string]any{"query": value})
 }
 
-func (s *Store) NodeByInstanceName(instanceName string) (Node, error) {
+func (s *Store) NodeBySandboxName(instanceName string) (Node, error) {
 	indexPath := s.nodeInstanceIndexPath(instanceName)
 	if exists(indexPath) {
 		data, err := os.ReadFile(indexPath)
@@ -725,12 +786,12 @@ func (s *Store) NodeByInstanceName(instanceName string) (Node, error) {
 	}
 
 	for _, node := range nodes {
-		if node.LimaInstanceName == instanceName {
+		if node.SandboxName == instanceName {
 			return node, nil
 		}
 	}
 
-	return Node{}, notFound("node not found", map[string]any{"instance_name": instanceName})
+	return Node{}, notFound("node not found", map[string]any{"sandbox_name": instanceName})
 }
 
 func (s *Store) LoadBootstrapState(nodeID string) (BootstrapState, error) {
@@ -814,8 +875,8 @@ func (s *Store) IncompleteNodeMetadata() ([]IncompleteNodeMetadata, error) {
 
 func (s *Store) RemoveIncompleteNodeMetadata(items []IncompleteNodeMetadata) error {
 	for _, item := range items {
-		if strings.TrimSpace(item.InstanceName) != "" {
-			_ = os.Remove(s.nodeInstanceIndexPath(item.InstanceName))
+		if strings.TrimSpace(item.SandboxName) != "" {
+			_ = os.Remove(s.nodeInstanceIndexPath(item.SandboxName))
 		}
 		if err := os.RemoveAll(item.DirectoryPath); err != nil {
 			return err
@@ -880,8 +941,8 @@ func (s *Store) MissingNodeIndexes() ([]string, error) {
 
 	missing := []string{}
 	for _, node := range nodes {
-		if !exists(s.nodeInstanceIndexPath(node.LimaInstanceName)) && node.Status != NodeStatusTerminated {
-			missing = append(missing, fmt.Sprintf("node instance index missing for %s", node.LimaInstanceName))
+		if !exists(s.nodeInstanceIndexPath(node.SandboxName)) && node.Status != NodeStatusTerminated {
+			missing = append(missing, fmt.Sprintf("node instance index missing for %s", node.SandboxName))
 		}
 	}
 
@@ -897,8 +958,8 @@ func (s *Store) IncompleteNodeWarnings() ([]string, error) {
 	warnings := make([]string, 0, len(items))
 	for _, item := range items {
 		message := fmt.Sprintf("incomplete node metadata directory: %s", item.DirectoryPath)
-		if item.InstanceName != "" {
-			message += fmt.Sprintf(" (instance %s)", item.InstanceName)
+		if item.SandboxName != "" {
+			message += fmt.Sprintf(" (instance %s)", item.SandboxName)
 		}
 		message += "; remove it with `codelima node cleanup-incomplete --apply`"
 		warnings = append(warnings, message)

@@ -8,453 +8,117 @@ import (
 	"time"
 )
 
-func TestEnsureDirectoriesCreatesLayoutWithoutSeeding(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-
-	if err := store.ensureDirectories(); err != nil {
-		t.Fatalf("ensureDirectories() error = %v", err)
+func TestEnsureLayoutCreatesSchemaV3WithoutProjectStorage(t *testing.T) {
+	home := t.TempDir()
+	store := NewStore(DefaultConfig(home))
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
 	}
-
-	for _, dir := range []string{"_config", "_locks", "environment-configs", "projects", "nodes"} {
-		if !exists(filepath.Join(home, dir)) {
-			t.Fatalf("expected directory %q to exist", dir)
+	for _, path := range []string{"configurations", "environments", "nodes", "_config/settings.yaml", "_config/schema.version"} {
+		if _, err := os.Stat(filepath.Join(home, path)); err != nil {
+			t.Fatalf("expected %s: %v", path, err)
 		}
 	}
-
-	if exists(filepath.Join(home, "_config", "config.yaml")) {
-		t.Fatal("expected ensureDirectories to not write config.yaml")
-	}
-
-	profiles, err := os.ReadDir(cfg.AgentProfilesDir)
-	if err != nil {
-		t.Fatalf("ReadDir(agent profiles) error = %v", err)
-	}
-	if len(profiles) != 0 {
-		t.Fatalf("expected no seeded agent profiles, got %d entries", len(profiles))
-	}
-
-	configs, err := store.ListEnvironmentConfigs(true)
-	if err != nil {
-		t.Fatalf("ListEnvironmentConfigs() error = %v", err)
-	}
-	if len(configs) != 0 {
-		t.Fatalf("expected no seeded environment configs, got %#v", configs)
-	}
-
-	// The composite EnsureLayout still seeds for callers that want full setup.
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
-	}
-	configs, err = store.ListEnvironmentConfigs(true)
-	if err != nil {
-		t.Fatalf("ListEnvironmentConfigs(after EnsureLayout) error = %v", err)
-	}
-	if len(configs) == 0 {
-		t.Fatal("expected EnsureLayout to seed built-in environment configs")
-	}
-}
-
-func TestEnsureDirectoriesOmitsLegacyPatchDirs(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-
-	if err := store.ensureDirectories(); err != nil {
-		t.Fatalf("ensureDirectories() error = %v", err)
-	}
-
-	for _, dir := range []string{
-		filepath.Join(home, "patches"),
-		filepath.Join(home, "_index", "patches"),
-	} {
-		if exists(dir) {
-			t.Fatalf("expected fresh home not to create dead patch directory %q", dir)
+	for _, removed := range []string{"projects", "environment-configs", "_index/projects"} {
+		if _, err := os.Stat(filepath.Join(home, removed)); !os.IsNotExist(err) {
+			t.Fatalf("removed v2 path still exists: %s", removed)
 		}
 	}
-}
-
-func TestEnsureLayoutBackfillsUntouchedLegacyBuiltInEnvironmentConfigs(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-	createdAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-
-	if err := store.SaveEnvironmentConfig(EnvironmentConfig{
-		ID:   "legacy-codex",
-		Slug: "codex",
-		BootstrapCommands: []string{
-			"sudo snap install node --classic",
-			"sudo npm install -g @openai/codex",
-		},
-		CreatedAt: createdAt,
-		UpdatedAt: createdAt,
-	}); err != nil {
-		t.Fatalf("SaveEnvironmentConfig(legacy codex) error = %v", err)
+	marker, err := os.ReadFile(filepath.Join(home, "_config", "schema.version"))
+	if err != nil || string(marker) != "3\n" {
+		t.Fatalf("schema marker = %q, %v", marker, err)
 	}
-
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
-	}
-
-	config, err := store.EnvironmentConfigByIDOrSlug("codex")
+	configuration, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
 	if err != nil {
-		t.Fatalf("EnvironmentConfigByIDOrSlug(codex) error = %v", err)
+		t.Fatalf("default configuration missing: %v", err)
 	}
-	if config.ID != "legacy-codex" {
-		t.Fatalf("expected legacy config id to be preserved, got %q", config.ID)
+	if configuration.VCPUs != 2 || configuration.MemoryMiB != 4096 || configuration.DiskMiB != 20480 {
+		t.Fatalf("unexpected default resources: %+v", configuration)
 	}
-
-	want := []string{
-		"sudo snap install node --classic",
-		`mkdir -p "$HOME/.local/bin"`,
-		`npm config set prefix "$HOME/.local"`,
-		`for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`,
-		`PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`,
-	}
-	if got := strings.Join(config.BootstrapCommands, "|"); got != strings.Join(want, "|") {
-		t.Fatalf("expected legacy codex config to be backfilled, got %q", got)
+	if got := strings.Join(configuration.Environments, ","); got != "codex,claude-code" {
+		t.Fatalf("expected default coding-agent environments, got %q", got)
 	}
 }
 
-func TestEnsureLayoutDoesNotOverwriteCustomizedBuiltInEnvironmentConfigs(t *testing.T) {
+func TestEnsureLayoutPreservesExistingDefaultConfigurationEnvironments(t *testing.T) {
 	t.Parallel()
 
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-	createdAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	customizedCommands := []string{"mise install", "npm update -g @openai/codex"}
-
-	if err := store.SaveEnvironmentConfig(EnvironmentConfig{
-		ID:                "custom-codex",
-		Slug:              "codex",
-		BootstrapCommands: customizedCommands,
-		CreatedAt:         createdAt,
-		UpdatedAt:         createdAt,
-	}); err != nil {
-		t.Fatalf("SaveEnvironmentConfig(custom codex) error = %v", err)
-	}
-
+	home := t.TempDir()
+	store := NewStore(DefaultConfig(home))
 	if err := store.EnsureLayout(); err != nil {
 		t.Fatalf("EnsureLayout() error = %v", err)
 	}
-
-	config, err := store.EnvironmentConfigByIDOrSlug("codex")
+	configuration, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
 	if err != nil {
-		t.Fatalf("EnvironmentConfigByIDOrSlug(codex) error = %v", err)
+		t.Fatalf("ConfigurationByIDOrSlug(default) error = %v", err)
 	}
-	if got := strings.Join(config.BootstrapCommands, "|"); got != strings.Join(customizedCommands, "|") {
-		t.Fatalf("expected customized codex config to persist, got %q", got)
+	configuration.Environments = []string{}
+	if err := store.SaveConfiguration(configuration); err != nil {
+		t.Fatalf("SaveConfiguration(default) error = %v", err)
+	}
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() second error = %v", err)
+	}
+	preserved, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
+	if err != nil {
+		t.Fatalf("ConfigurationByIDOrSlug(default) after repair error = %v", err)
+	}
+	if len(preserved.Environments) != 0 {
+		t.Fatalf("expected explicitly cleared default environments to stay cleared, got %#v", preserved.Environments)
 	}
 }
 
-func TestSaveProjectWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	cfg.LimaCommands.Start = []string{"{{binary}} start {{instance_name}} --vm-type=vz"}
-	store := NewStore(cfg)
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
+func TestSchemaV2HomeIsRejectedWithoutMutation(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "_config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	project := Project{
-		ID:                  newID(),
-		Slug:                "root",
-		WorkspacePath:       "/workspace/root",
-		AgentProfileName:    "codex-cli",
-		EnvironmentConfigs:  []string{},
-		DefaultRuntime:      RuntimeVM,
-		DefaultProvider:     ProviderLima,
-		DefaultLimaTemplate: "template:default",
-		CreatedAt:           time.Now().UTC(),
-		UpdatedAt:           time.Now().UTC(),
+	marker := filepath.Join(configDir, "schema.version")
+	if err := os.WriteFile(marker, []byte("2\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	if err := store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
+	err := NewStore(DefaultConfig(home)).EnsureLayout()
+	if err == nil || !strings.Contains(err.Error(), "schema v2") || !strings.Contains(err.Error(), "new directory") {
+		t.Fatalf("expected actionable v2 rejection, got %v", err)
 	}
-
-	data, err := os.ReadFile(store.projectPath(project.ID))
-	if err != nil {
-		t.Fatalf("ReadFile(project.yaml) error = %v", err)
+	data, readErr := os.ReadFile(marker)
+	if readErr != nil || string(data) != "2\n" {
+		t.Fatalf("v2 marker was mutated: %q, %v", data, readErr)
 	}
-
-	output := string(data)
-	if !strings.Contains(output, projectLimaCommandsTemplateComment) {
-		t.Fatalf("expected project metadata to include the override template comment, got %s", output)
-	}
-	if !strings.Contains(output, "\n# lima_commands:\n") {
-		t.Fatalf("expected project metadata to include a commented lima_commands block, got %s", output)
-	}
-	if !strings.Contains(output, "#     workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
-		t.Fatalf("expected project metadata to include the default workspace seed prepare command example, got %s", output)
-	}
-	if !strings.Contains(output, "#     start:") || !strings.Contains(output, "{{binary}} start {{instance_name}} --vm-type=vz") {
-		t.Fatalf("expected project metadata to include the global default start command example, got %s", output)
-	}
-	if !strings.Contains(output, "#     bootstrap: []") {
-		t.Fatalf("expected project metadata to include the bootstrap command example, got %s", output)
+	if _, statErr := os.Stat(filepath.Join(home, "configurations")); !os.IsNotExist(statErr) {
+		t.Fatalf("v2 rejection mutated the home")
 	}
 }
 
-func TestEnsureLayoutBackfillsProjectMetadataWithCommentedLimaCommandTemplate(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
+func TestConfigurationAndFrozenNodeRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	store := NewStore(DefaultConfig(home))
 	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
+		t.Fatal(err)
 	}
-
-	projectID := "project-1"
-	projectPath := store.projectPath(projectID)
-	if err := os.MkdirAll(filepath.Dir(projectPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll(project dir) error = %v", err)
+	now := time.Now().UTC().Round(0)
+	configuration := Configuration{ID: newID(), Slug: "large", Image: "example/image:1", AgentProfileName: "codex-cli", Environments: []string{"codex"}, BootstrapCommands: []string{"true"}, VCPUs: 8, MemoryMiB: 8192, DiskMiB: 40960, CreatedAt: now, UpdatedAt: now}
+	if err := store.SaveConfiguration(configuration); err != nil {
+		t.Fatalf("SaveConfiguration() error = %v", err)
 	}
-	legacyProject := `id: project-1
-slug: root
-workspace_path: /workspace/root
-agent_profile_name: codex-cli
-environment_configs: []
-environment_commands: []
-default_runtime: vm
-default_provider: lima
-default_lima_template: template:default
-created_at: 2026-03-25T00:00:00Z
-updated_at: 2026-03-25T00:00:00Z
-`
-	if err := os.WriteFile(projectPath, []byte(legacyProject), 0o644); err != nil {
-		t.Fatalf("WriteFile(project.yaml) error = %v", err)
-	}
-
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout(second pass) error = %v", err)
-	}
-
-	data, err := os.ReadFile(projectPath)
-	if err != nil {
-		t.Fatalf("ReadFile(project.yaml) error = %v", err)
-	}
-
-	output := string(data)
-	if !strings.Contains(output, projectLimaCommandsTemplateComment) {
-		t.Fatalf("expected rewritten project metadata to include the override template comment, got %s", output)
-	}
-	if !strings.Contains(output, "\n# lima_commands:\n") {
-		t.Fatalf("expected rewritten project metadata to include a commented lima_commands block, got %s", output)
-	}
-
-	project, err := store.ProjectByID(projectID)
-	if err != nil {
-		t.Fatalf("ProjectByID() error = %v", err)
-	}
-	if project.LimaCommands.IsZero() != true {
-		t.Fatalf("expected legacy project to keep zero explicit command overrides, got %#v", project.LimaCommands)
-	}
-}
-
-func TestSaveNodeWritesCommentedLimaCommandTemplateWhenOverridesUnset(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
-	}
-
-	project := Project{
-		ID:                  newID(),
-		Slug:                "root",
-		WorkspacePath:       "/workspace/root",
-		AgentProfileName:    "codex-cli",
-		EnvironmentConfigs:  []string{},
-		DefaultRuntime:      RuntimeVM,
-		DefaultProvider:     ProviderLima,
-		DefaultLimaTemplate: "template:default",
-		CreatedAt:           time.Now().UTC(),
-		UpdatedAt:           time.Now().UTC(),
-	}
-
-	if err := store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
-	}
-
-	node := Node{
-		ID:                    newID(),
-		Slug:                  "root-node",
-		ProjectID:             project.ID,
-		Runtime:               RuntimeVM,
-		Provider:              ProviderLima,
-		LimaInstanceName:      "root-root-node-12345678",
-		Status:                NodeStatusCreated,
-		AgentProfileName:      "codex-cli",
-		BootstrapCommands:     []string{},
-		GeneratedTemplatePath: store.nodeTemplatePath("unused"),
-		CreatedAt:             time.Now().UTC(),
-		UpdatedAt:             time.Now().UTC(),
-	}
-	if err := store.SaveNode(node, BootstrapState{}, nil); err != nil {
+	directory := t.TempDir()
+	node := Node{ID: newID(), Slug: "worker", ConfigurationID: configuration.ID, DirectoryPath: directory, Runtime: RuntimeVM, Provider: ProviderMicrosandbox, SandboxName: "worker", Image: configuration.Image, VCPUs: configuration.VCPUs, MemoryMiB: configuration.MemoryMiB, DiskMiB: configuration.DiskMiB, Environments: []string{"codex"}, Status: NodeStatusCreated, AgentProfileName: "codex-cli", BootstrapCommands: []string{"true"}, WorkspaceMode: WorkspaceModeCopy, GuestWorkspacePath: directory, CreatedAt: now, UpdatedAt: now}
+	if err := store.SaveNode(node, BootstrapState{AgentProfileName: "codex-cli"}); err != nil {
 		t.Fatalf("SaveNode() error = %v", err)
 	}
-
-	data, err := os.ReadFile(store.nodePath(node.ID))
-	if err != nil {
-		t.Fatalf("ReadFile(node.yaml) error = %v", err)
-	}
-
-	output := string(data)
-	if !strings.Contains(output, nodeLimaCommandsTemplateComment) {
-		t.Fatalf("expected node metadata to include the node override template comment, got %s", output)
-	}
-	if !strings.Contains(output, "\n# lima_commands:\n") {
-		t.Fatalf("expected node metadata to include a commented lima_commands block, got %s", output)
-	}
-	if !strings.Contains(output, "#     create:") || !strings.Contains(output, "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}") {
-		t.Fatalf("expected node metadata to include the effective create command example, got %s", output)
-	}
-	if !strings.Contains(output, "#     workspace_seed_prepare:") || !strings.Contains(output, `sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown "$(id -un)":"$(id -gn)" {{target_parent}}`) {
-		t.Fatalf("expected node metadata to include the workspace seed prepare example, got %s", output)
-	}
-}
-
-func TestSaveNodeOmitsRuntimeStatusFromNodeMetadata(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
-	}
-
-	project := Project{
-		ID:                  newID(),
-		Slug:                "root",
-		WorkspacePath:       "/workspace/root",
-		AgentProfileName:    "codex-cli",
-		EnvironmentConfigs:  []string{},
-		DefaultRuntime:      RuntimeVM,
-		DefaultProvider:     ProviderLima,
-		DefaultLimaTemplate: "template:default",
-		CreatedAt:           time.Now().UTC(),
-		UpdatedAt:           time.Now().UTC(),
-	}
-	if err := store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
-	}
-
-	now := time.Now().UTC()
-	node := Node{
-		ID:               newID(),
-		Slug:             "root-node",
-		ProjectID:        project.ID,
-		Runtime:          RuntimeVM,
-		Provider:         ProviderLima,
-		LimaInstanceName: "root-root-node-12345678",
-		Status:           NodeStatusRunning,
-		AgentProfileName: "codex-cli",
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		LastReconciledAt: &now,
-		LastRuntimeObservation: &RuntimeObservation{
-			Name:   "root-root-node-12345678",
-			Exists: true,
-			Status: "running",
-		},
-	}
-
-	if err := store.SaveNode(node, BootstrapState{}, nil); err != nil {
-		t.Fatalf("SaveNode() error = %v", err)
-	}
-
-	data, err := os.ReadFile(store.nodePath(node.ID))
-	if err != nil {
-		t.Fatalf("ReadFile(node.yaml) error = %v", err)
-	}
-
-	output := string(data)
-	for _, unexpected := range []string{
-		"\nstatus:",
-		"\nlast_reconciled_at:",
-		"\nlast_runtime_observation:",
-		"\nlifecycle_state:",
-	} {
-		if strings.Contains(output, unexpected) {
-			t.Fatalf("expected node metadata to omit %q, got %s", unexpected, output)
-		}
-	}
-}
-
-func TestNodeByIDLoadsLegacyNodeStatusIntoLifecycleState(t *testing.T) {
-	t.Parallel()
-
-	home := filepath.Join(t.TempDir(), ".codelima")
-	cfg := DefaultConfig(home)
-	store := NewStore(cfg)
-	if err := store.EnsureLayout(); err != nil {
-		t.Fatalf("EnsureLayout() error = %v", err)
-	}
-
-	project := Project{
-		ID:                  "project-1",
-		Slug:                "root",
-		WorkspacePath:       "/workspace/root",
-		AgentProfileName:    "codex-cli",
-		EnvironmentConfigs:  []string{},
-		DefaultRuntime:      RuntimeVM,
-		DefaultProvider:     ProviderLima,
-		DefaultLimaTemplate: "template:default",
-		CreatedAt:           time.Now().UTC(),
-		UpdatedAt:           time.Now().UTC(),
-	}
-	if err := store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
-	}
-
-	nodeID := "node-1"
-	legacyNode := `id: node-1
-slug: root-node
-project_id: project-1
-runtime: vm
-provider: lima
-lima_instance_name: root-root-node-12345678
-status: created
-agent_profile_name: codex-cli
-bootstrap_commands: []
-generated_template_path: /tmp/node-1/instance.lima.yaml
-workspace_seeded: false
-bootstrap_completed: false
-created_at: 2026-03-28T00:00:00Z
-updated_at: 2026-03-28T00:00:00Z
-`
-	if err := os.MkdirAll(filepath.Dir(store.nodePath(nodeID)), 0o755); err != nil {
-		t.Fatalf("MkdirAll(node dir) error = %v", err)
-	}
-	if err := os.WriteFile(store.nodePath(nodeID), []byte(legacyNode), 0o644); err != nil {
-		t.Fatalf("WriteFile(node.yaml) error = %v", err)
-	}
-
-	node, err := store.NodeByID(nodeID)
+	loaded, err := store.NodeByID(node.ID)
 	if err != nil {
 		t.Fatalf("NodeByID() error = %v", err)
 	}
-
-	if node.Status != NodeStatusCreated {
-		t.Fatalf("expected legacy status to load as created, got %q", node.Status)
+	if loaded.ConfigurationID != configuration.ID || loaded.DirectoryPath != directory || loaded.VCPUs != 8 || loaded.MemoryMiB != 8192 || loaded.DiskMiB != 40960 {
+		t.Fatalf("frozen node fields did not round trip: %+v", loaded)
 	}
-	if node.LifecycleState != NodeStatusCreated {
-		t.Fatalf("expected legacy status to populate lifecycle state, got %q", node.LifecycleState)
+	data, err := os.ReadFile(store.nodePath(node.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "project_id") || strings.Contains(string(data), "runtime_commands") {
+		t.Fatalf("v3 node metadata contains removed fields:\n%s", data)
 	}
 }

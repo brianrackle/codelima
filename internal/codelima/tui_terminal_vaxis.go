@@ -3,6 +3,9 @@ package codelima
 import (
 	"os/exec"
 	"reflect"
+	"sync"
+	"syscall"
+	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/widgets/term"
@@ -24,9 +27,11 @@ func newTUITerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
 func newTUIVaxisTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
 	model := term.New()
 	model.TERM = tuiEmbeddedTermEnv
+	terminal := &vaxisTUITerminal{model: model, closed: make(chan struct{})}
 	model.Attach(func(event vaxis.Event) {
 		switch event := event.(type) {
 		case term.EventClosed:
+			terminal.closeOnce.Do(func() { close(terminal.closed) })
 			postEvent(tuiTerminalClosedEvent{TargetKey: targetKey, Err: event.Error})
 		case term.EventPanic:
 			postEvent(tuiTerminalErrorEvent{TargetKey: targetKey, Err: error(event)})
@@ -34,7 +39,7 @@ func newTUIVaxisTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTermi
 			postEvent(event)
 		}
 	})
-	return &vaxisTUITerminal{model: model}
+	return terminal
 }
 
 type vaxisTUITerminal struct {
@@ -43,6 +48,8 @@ type vaxisTUITerminal struct {
 	started     bool
 	pendingCols int
 	pendingRows int
+	closed      chan struct{}
+	closeOnce   sync.Once
 }
 
 func (t *vaxisTUITerminal) Start(cmd *exec.Cmd) error {
@@ -81,15 +88,22 @@ func (t *vaxisTUITerminal) Draw(win vaxis.Window) {
 }
 
 func (t *vaxisTUITerminal) Close() {
-	// The widget kills and reaps the direct child and closes the PTY (the
-	// close delivers SIGHUP to the foreground process group).
-	t.model.Close()
 	if t.cmd != nil && t.cmd.Process != nil {
-		// The widget starts the child with Setsid, so it is a session leader
-		// (pgid == pid); sweep any descendants left in its process group.
-		// done is nil because the widget owns cmd.Wait, not us.
+		// The widget owns cmd.Wait on its parser goroutine. Signal the entire
+		// session first, then wait for EventClosed before calling Model.Close;
+		// Model.Close also calls Wait and otherwise races the widget reaper.
+		_ = signalTerminalProcessGroup(t.cmd.Process.Pid, syscall.SIGHUP)
 		_ = shutdownTerminalProcess(t.cmd.Process.Pid, nil, nil)
+		if t.closed != nil {
+			select {
+			case <-t.closed:
+			case <-time.After(terminalShutdownReapDeadline):
+			}
+		}
 	}
+	// With the widget reaper finished, this sequential second Wait is safe;
+	// Close still owns the PTY descriptor and internal parser resources.
+	t.model.Close()
 }
 
 func (t *vaxisTUITerminal) Focus() {

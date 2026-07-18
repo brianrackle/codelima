@@ -2,16 +2,18 @@
 
 ## Open Work
 
-### 0. Manually verify the reworked per-target TUI terminal tabs in a real terminal
+### 0. Manually verify the reworked per-node TUI terminal tabs in a real terminal
 
 Problem:
 
-- Terminal tabs were rebuilt to be per-target (`Option+t` opens additional tabs, `Option+Left`/`Option+Right` switch, `Option+w` closes with adjacent focus, tabs scoped to the focused tree item, and TUI startup opens one default tab for the initial project or running node; F-key and tree `t` fallbacks removed). Automated tests cover the model with fake sessions, but the real-PTY, real-Ghostty path needs a human at a terminal.
-- macOS Option delivery depends on the emulator: if Ghostty is not configured with `macos-option-as-alt = true` and the Option glyph fallbacks (`†`, `∑`) do not arrive, the tab keybindings cannot fire.
+- Terminal tabs are node-scoped (`Option+t` opens guest tabs, `Option+Shift+t` opens host tabs, `Option+Left`/`Option+Right` switch, `Option+w` closes with adjacent focus, and TUI startup opens one default tab for the initial running node). Guest and host shells are different tab kinds on the same node target. Automated tests cover the model with fake sessions, but the real-PTY, real-Ghostty path still needs native macOS observation.
+- macOS Option delivery depends on the emulator: if Ghostty is not configured with `macos-option-as-alt = true` and the Option glyph fallbacks (`†`, `ˇ`, `∑`) do not arrive, the tab keybindings cannot fire.
+- Daemon integration coverage proves that a second TUI takes input ownership and can open a terminal after several connection read-timeout intervals. A real two-terminal run still needs to confirm the first TUI reports revocation and the second TUI can open its first guest or host tab after the 35-second QA idle interval.
 
 Suggested solution:
 
-- Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Left`/`Option+Right`/`Option+w` adjacent-close steps, with and without `macos-option-as-alt`.
+- Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+w` adjacent-close steps, with and without `macos-option-as-alt`.
+- Launch the same path-scoped TUI from a second real terminal, leave the new owner idle for at least 35 seconds, and verify its first guest/host terminal action succeeds while the original TUI shows the ownership-revoked message.
 
 Advantages:
 
@@ -19,7 +21,7 @@ Advantages:
 
 Disadvantages:
 
-- Needs a real Lima-capable host and an interactive terminal; cannot be automated in CI today.
+- Needs a real microsandbox-capable host and an interactive terminal; cannot be automated in CI today.
 
 ### 1. Feed the host terminal background into the Ghostty backend
 
@@ -127,20 +129,20 @@ Disadvantages:
 
 Problem:
 
-- Project create and update plus environment config create, update, and delete now avoid Lima runtime validation because they only mutate local metadata.
-- Other mutating service paths may still call the broader runtime validation helper even when they do not need `limactl` or live Lima state.
+- Configuration and environment create, update, clone, and delete avoid Microsandbox validation because they only mutate local metadata.
+- Other mutating service paths may still call the broader runtime validation helper even when they do not need live sandbox state.
 - That keeps some metadata-only commands slower and harder to use from environments that only need the local store.
 
 Suggested solution:
 
 - Audit all mutating `Service` methods and classify them as metadata-only or runtime-backed.
-- Keep the current dependency validation only on runtime-backed operations such as node lifecycle, shell, clone, and patch apply.
-- Add focused regression tests that fail if metadata-only mutations start querying Lima again.
+- Keep dependency validation only on runtime-backed operations such as node create, lifecycle, shell, and clone.
+- Add focused regression tests that fail if metadata-only mutations start querying microsandbox again.
 
 Advantages:
 
 - Keeps metadata operations predictably fast.
-- Makes CLI and TUI behavior more consistent when Lima is unavailable or slow.
+- Makes CLI and TUI behavior more consistent when microsandbox is unavailable or slow.
 - Reduces surprising coupling between local metadata edits and host virtualization state.
 
 Disadvantages:
@@ -188,23 +190,25 @@ Problem:
 Suggested solution:
 
 - Design a new explicit export or sync flow for copied-workspace nodes that does not depend on lineage patch proposals.
-- Decide whether that replacement should be node-scoped, project-scoped, or workspace-scoped, and whether it should sync whole trees or a selected diff.
-- Once the product direction is settled, remove or rework the remaining internal patch implementation to match the new transfer model.
+- Keep the replacement node-scoped and directory-aware, and decide whether it should sync whole trees or a selected diff.
+- Define conflict handling explicitly when several nodes are bound to the same host directory.
 
 Advantages:
 
 - Replaces the removed feature with a clearer workflow that better matches the copy-versus-mounted workspace model.
 - Avoids preserving an outdated patch UX while the new file-return model is being designed.
-- Creates a cleaner boundary between project lineage management and workspace synchronization.
+- Creates a clear boundary between reusable configurations, directory-bound nodes, and workspace synchronization.
 
 Disadvantages:
 
 - Users in copy mode temporarily lose any built-in way to push guest-side changes back to the host.
 - The final solution may require larger storage and workflow changes than the removed patch surface.
 
-Update: the internal patch implementation has been removed entirely (work item 0.6, ADR 60), so this is now a clean-slate design — build the new export/sync transfer model from scratch rather than adapting the old lineage-patch code. The `syncWorkspaceFromTree`/`restoreWorkspace` snapshot helpers the patch flow relied on were also removed; `captureSnapshot`/`materializeSnapshot` remain (used by `ProjectFork`) and are the reusable primitives for the replacement.
+Update: the internal patch implementation has been removed entirely (work item 0.6, ADR 60), so this is now a clean-slate, node-scoped design rather than an adaptation of the old lineage-patch code.
 
-### 9. Complete the interactive `TUI Verification` flow from `QA.md` on a real terminal session
+### 9. [superseded] Complete the pre-schema-v3 interactive `TUI Verification` flow
+
+Resolution: superseded by the schema-v3 QA flow and the focused native terminal-tab qualification in item 0. The checklist below describes the retired project/Lima surface and is retained only as historical context.
 
 Problem:
 
@@ -230,7 +234,9 @@ Disadvantages:
 - Takes materially longer than the automated test and lint verification already completed here.
 - May expose environment-specific Lima issues that are not reproducible in the current sandbox.
 
-### 10. Fix `node delete` so runtime cleanup cannot orphan Lima instances after metadata removal
+### 10. [resolved] Fix `node delete` so runtime cleanup cannot orphan runtime instances after metadata removal
+
+Resolution: resolved by the teardown-first deletion and incomplete-cleanup work in Track 0, retained through the microsandbox swap. Runtime deletion completes before metadata removal, and automated rollback/cleanup tests cover failed runtime deletion.
 
 Problem:
 
@@ -256,7 +262,9 @@ Disadvantages:
 - Fixing the ordering may require broader changes in how runtime-backed service mutations reconcile metadata.
 - A durable cleanup record or retry path would add state and complexity to node lifecycle management.
 
-### 11. Investigate Lima-backed `node start` hangs when the optional containerd readiness check never completes
+### 11. [cancelled] Investigate Lima-backed `node start` hangs when the optional containerd readiness check never completes
+
+Resolution: cancelled because Lima is no longer a runtime dependency. Microsandbox has no equivalent Lima containerd readiness wait.
 
 Problem:
 
@@ -364,8 +372,8 @@ Disadvantages:
 
 Problem:
 
-- Long-running TUI mutations now run as background tasks and reject conflicting follow-up actions on the same node or project.
-- The footer and action hotkeys still reflect the persisted node or project state, so a selected busy node can continue to advertise actions like `start`, `stop`, `delete`, or `clone` even though pressing them will now return an in-progress error.
+- Long-running TUI mutations now run as background tasks and reject conflicting follow-up actions on the same node or configuration.
+- The footer and action hotkeys still reflect persisted node state, so a selected busy node can continue to advertise actions like `start`, `stop`, `delete`, or `clone` even though pressing them will now return an in-progress error.
 - The behavior is correct, but the hint surface is still one step behind the new background-task model.
 
 Suggested solution:
@@ -391,7 +399,7 @@ Disadvantages:
 Problem:
 
 - Interactive `codelima shell` sessions and embedded TUI shells now install temporary readline bindings so bash consumes modified-enter sequences as literal newlines instead of echoing fragments like `;2;13~`.
-- That repair is intentionally scoped to the default guest shell path, which is bash on the Lima images CodeLima provisions today.
+- That repair is intentionally scoped to the default guest shell path, which is bash in CodeLima's default Microsandbox image.
 - If a user changes their guest login shell to zsh or another line editor, the current `INPUTRC`-based fix will not help because those shells ignore readline configuration.
 
 Suggested solution:
@@ -412,23 +420,23 @@ Disadvantages:
 - Supporting multiple shell families will complicate the interactive shell wrapper and its tests.
 - More shell-specific logic increases the risk of drift between CLI shell sessions and embedded TUI sessions if it is not kept centralized.
 
-### 17. Separate durable node lifecycle from live Lima runtime state
+### 17. Separate durable node lifecycle from live microsandbox runtime state
 
 Problem:
 
-- `node.yaml` now persists only CodeLima-owned lifecycle metadata, but the in-memory `Node` model and user-facing outputs still expose a single `status` field that mixes lifecycle values with live Lima runtime values.
-- That means callers still have to infer whether a given `status` came from CodeLima lifecycle state such as `failed` or `terminated`, or from a fresh Lima observation such as `running` or `stopped`.
+- `node.yaml` now persists only CodeLima-owned lifecycle metadata, but the in-memory `Node` model and user-facing outputs still expose a single `status` field that mixes lifecycle values with live microsandbox runtime values.
+- That means callers still have to infer whether a given `status` came from CodeLima lifecycle state such as `failed` or `terminated`, or from a fresh Microsandbox observation such as `running` or `stopped`.
 - The storage-layer split is done, but the API and renderer vocabulary still overlap.
 
 Suggested solution:
 
-- Split the public node model into an explicit lifecycle field for CodeLima-owned states such as `created`, `provisioning`, `failed`, `terminating`, and `terminated`, plus a separate live runtime field sourced from Lima.
+- Split the public node model into an explicit lifecycle field for CodeLima-owned states such as `created`, `provisioning`, `failed`, `terminating`, and `terminated`, plus a separate live runtime field sourced from microsandbox.
 - Update CLI and TUI rendering so operator-facing surfaces can present both concepts deliberately instead of overloading one `status` field.
 - Keep compatibility shims only as long as needed for existing API and test callers.
 
 Advantages:
 
-- Makes Lima the single source of truth for live VM state.
+- Makes microsandbox the single source of truth for live VM state.
 - Clarifies which parts of node state are CodeLima-owned orchestration metadata versus external runtime facts.
 - Reduces ambiguity for renderers, tests, and future API consumers.
 
@@ -466,13 +474,15 @@ Disadvantages:
 - May need different fallback behavior for CLI shells versus TUI project previews.
 - Adds more environment probing to a startup path that should remain lightweight.
 
-### 19. Run the full interactive `QA.md` pass against the info-first split-pane TUI
+### 19. [superseded] Run the pre-schema-v3 info-first split-pane QA pass
+
+Resolution: superseded by schema-v3 `QA.md`, which covers the flat directory-scoped node list and node-scoped guest/host tabs. Native macOS keyboard and rendering qualification remains tracked once, in item 0.
 
 Problem:
 
 - The TUI now defaults the split pane to `[Info] Terminal` and defers terminal preview session startup until the operator toggles into terminal mode or focuses fullscreen terminal view.
 - Automated coverage now verifies the new default, the inverted tab order, sticky pane-mode behavior, and the affected mouse and node-action paths.
-- Automated coverage now verifies that clicking inside a host-local fullscreen terminal preserves the host-terminal override instead of switching back to the selected VM node.
+- Automated coverage now verifies that clicking inside an active host tab preserves that tab instead of switching to the selected VM node's guest tab.
 - Automated coverage now verifies automatic tree refresh, multiline paste normalization, resize-time active-terminal resizing, TUI terminal tab keybinds, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 clipboard event dispatch.
 - Automated coverage now verifies DECSET 1004 focus-report gating and focus gained/lost bytes through the Ghostty focus encoder path.
 - Automated coverage now verifies path-scoped TUI launch and refresh filtering, and that TUI node creation selects the new node, switches the split pane to terminal mode, and does not start a shell for a non-running node.
@@ -482,7 +492,7 @@ Suggested solution:
 
 - Run the complete `QA.md` verification set from a host terminal with Lima available, using the updated TUI flow that starts in info mode and toggles into terminal mode with `i`.
 - Confirm both project and node selections restore the expected pane mode after fullscreen terminal focus and that stopped-node terminal placeholders still behave correctly after the default change.
-- Confirm a fullscreen host-local terminal stays on the host shell after a mouse click inside the terminal pane, then toggles back to the selected VM node with `Option+Shift+Backtick`.
+- Confirm a fullscreen host tab stays active after a mouse click inside the terminal pane, then switches back to the selected VM node's guest tab with `Option+Left` or `Option+Right`.
 - Confirm the new TUI checks from `QA.md`: automatic tree refresh, multiline paste preservation, resize repainting, `Alt+t`/`Alt+Left`/`Alt+Right`/`Alt+w` terminal tab behavior, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 guest-to-host clipboard sync.
 - Confirm the new Ghostty focus-report check from `QA.md`: enable DECSET 1004 inside a focused embedded terminal, toggle terminal focus away and back, and verify `^[[O` then `^[[I` are delivered to the guest.
 - Confirm the path-scoped TUI launch from `QA.md`: `./bin/codelima --home "$CODELIMA_HOME" "$WORK_ROOT"` hides `qa-tui-outside` and keeps that scope after automatic refresh.
@@ -527,9 +537,11 @@ Disadvantages:
 - May reveal a broader store or readiness bug that touches more than just environment-config seeding.
 - Could require follow-up migration or cleanup logic for homes that already contain duplicate seeded records.
 
-Resolution: resolved by work item 0.3 (ADR 57). Root cause: `EnsureReady(mutating=false)` ran the full `EnsureLayout` seeding pass on every read with no locks; concurrent readers each missed the slug lookup and persisted built-ins with fresh IDs. Seeding now runs only from mutating readiness checks, TUI startup, and `doctor --repair`, always under the `environment-configs`/`projects`/`nodes` flocks. Regression tests: `TestFreshHomeSeedsSingleBuiltInEnvironmentConfigs`, `TestConcurrentSeedingDoesNotDuplicate` (under `-race`).
+Resolution: resolved by work item 0.3 (ADR 57). Root cause: `EnsureReady(mutating=false)` ran the full `EnsureLayout` seeding pass on every read with no locks; concurrent readers each missed the slug lookup and persisted built-ins with fresh IDs. Seeding now runs only from mutating readiness checks, TUI startup, and `doctor --repair`, always under the `environments`/`configurations`/`nodes` flocks. Regression tests: `TestFreshHomeSeedsSingleBuiltInEnvironmentConfigs`, `TestConcurrentSeedingDoesNotDuplicate` (under `-race`).
 
-### 21. Design independent multi-shell TUI split panes
+### 21. [cancelled] Design independent multi-shell TUI split panes
+
+Resolution: cancelled when split panes were removed. The supported model is multiple daemon-owned terminal tabs per node target.
 
 Problem:
 
@@ -646,7 +658,9 @@ Disadvantages:
 
 - Depends on upstream acceptance timing; interim status quo knowingly carries a benign-but-real race in the fallback path.
 
-### 26. Vaxis fallback terminal double-`cmd.Wait()` data race
+### 26. [resolved] Vaxis fallback terminal double-`cmd.Wait()` data race
+
+Resolution: resolved during Track 4 verification. `vaxisTUITerminal.Close` now signals the process group, waits for the widget's `EventClosed` single-reaper notification, and only then invokes widget cleanup. `make test-race` is a repository Make target and passes.
 
 Problem:
 
@@ -666,7 +680,9 @@ Disadvantages:
 
 - Root fix depends on upstream; a local vendor patch adds to the `ghostty-vt`/vaxis patch-maintenance surface.
 
-### 27. Bounded POLLOUT wait in `waitGhosttyPTYWritable`
+### 27. [resolved] Bounded POLLOUT wait in `waitGhosttyPTYWritable`
+
+Resolution: resolved during Track 4. PTY masters are nonblocking and the POLLOUT waiter uses a 100 ms bounded poll, allowing teardown or handoff closure to be observed by the next write attempt on every supported Unix host.
 
 Problem:
 
@@ -684,3 +700,173 @@ Advantages:
 Disadvantages:
 
 - 10Hz retry while genuinely backpressured; touches a tested helper.
+
+### 28. Complete microsandbox E1 release qualification on both native platforms
+
+Problem:
+
+- E1–E10 passed against microsandbox 0.6.6 in the available nested
+  Linux/aarch64-on-Apple environment. The production swap, Track 3 daemon, and
+  Track 4 handoff are implemented and locally verified; ADR 55 is Accepted.
+- The tested guest contract is `--init auto` with
+  `ghcr.io/superradcompany/debian-systemd:12`. It eliminates the zombie seen
+  with microsandbox's minimal agent as PID 1.
+- Native macOS/Apple Silicon and native Linux/KVM runs, a host reboot
+  persistence check, and human observation of a full-screen authenticated
+  agent remain release qualifications. No native result is claimed by the
+  nested run.
+- The native rerun must qualify the official Go SDK paths from ADR 71,
+  including streaming exec/stdin, interactive `Attach`, snapshot clone,
+  mounted workspaces, and the CodeLima SDK SSH helper. It must also prove that
+  a failing PATH-shadow `msb` executable is never invoked by CodeLima.
+- Those SDK paths passed in the available nested Linux/aarch64 environment on
+  2026-07-10, including recursive copy after fixing the SDK's file-at-a-time
+  copy semantic. The native rerun remains a release qualification rather than
+  unfinished SDK implementation.
+- A native macOS trial exposed multi-second input echo while the TUI repeatedly
+  redrew a daemon terminal. ADR 68 removes the draw/unchanged-resize/event
+  feedback loop with client and daemon regression coverage; the native rerun
+  must confirm that ordinary typing remains responsive after repeated redraws
+  and resizes.
+- The same native qualification must create a fresh node with the built-in
+  `codex` environment after ADR 69, confirm bootstrap invokes the official
+  standalone installer, and verify `command -v codex` plus an authenticated
+  interactive Codex session from the ordinary node shell.
+- The native macOS run must execute QA Flow 8 from ADR 73 against Apple
+  Virtualization.framework, record `kern.num_files` and the owning
+  virtualization process's descriptor count before and after reclamation, and
+  confirm the default 20% trigger intervenes before the observed `ENFILE`
+  failure under a large mounted-tree traversal.
+
+Suggested solution:
+
+- Re-run all of E1 through CodeLima's embedded Ghostty terminal on native
+  macOS/Apple Silicon and native Linux/KVM, including both login transports,
+  full-screen agents, mouse, clipboard, latency, and abrupt terminal close.
+- Re-run lifecycle, mount, port, clone, daemon, and live-update QA on each host,
+  and verify writable-layer persistence after a physical reboot.
+- On macOS, run the pressure flow first at the QA-only 1% threshold and then at
+  the production 20% threshold while watching host descriptor counts; adjust
+  the default in a follow-up ADR if the native failure boundary leaves
+  insufficient headroom.
+- Record exact host, image digest, commands, and output in the spike notes before
+  publishing a release.
+
+Advantages:
+
+- Confirms the already implemented contract on both supported native host
+  virtualization stacks.
+- Separates local implementation completion from release evidence that cannot
+  be produced in a nested development guest.
+
+Disadvantages:
+
+- Requires two physical host environments and human terminal interaction.
+- Host reboot verification is unsuitable for ordinary CI.
+
+### 29. Build and publish a smaller pre-baked default guest image
+
+Problem:
+
+- The safe default is currently a third-party Debian systemd image selected
+  because it passed the real-PID-1 close contract and supports the apt-based
+  built-in bootstraps.
+- Pulling and bootstrapping general-purpose images increases first-node startup
+  time, and CodeLima does not control that image's update cadence or digest.
+
+Suggested solution:
+
+- Define a minimal apt-based image with a real reaper (`tini`, s6, or systemd),
+  `/bin/sh`, CA certificates, curl, git, Node/npm prerequisites, and no embedded
+  user secrets.
+- Publish immutable multi-architecture digests, add an image build/scan Make
+  recipe and release job, then rerun E1–E10 and the complete QA matrix before
+  changing `default_image` in a new ADR.
+
+Advantages:
+
+- Faster and more reproducible first start.
+- CodeLima controls security updates and the exact guest contract.
+
+Disadvantages:
+
+- Adds an image supply chain, registry, vulnerability response, and release
+  surface that must be maintained for every supported architecture.
+
+### 30. Extend and harden dynamic node service forwarding after v1
+
+Problem:
+
+- ADR 70 delivers automatic HTTP/WebSocket routes at
+  `{node}.localhost:{port}`, but raw TCP has no HTTP Host header, UDP is not
+  supported by the Microsandbox SSH seam, and direct TLS hides the hostname
+  until after connection establishment.
+- ADR 71 removed the former additive global `msb ssh authorize` mutation. The
+  SDK helper now applies the per-home public key only to its per-sandbox SSH
+  server, so there is no stale global authorization to revoke.
+- Live daemon update reconstructs forwarding peers and host listeners after
+  commit rather than transferring them with the terminal descriptors.
+
+Suggested solution:
+
+- Evaluate unique per-node loopback IPs plus a local resolver only if raw TCP
+  demand justifies privileged host integration; separately evaluate local TLS
+  termination and certificate trust as an opt-in feature.
+- Transfer or coordinate forwarding listeners during live update if the brief
+  route reconstruction window proves disruptive in native qualification.
+
+Advantages:
+
+- Could extend node-name addressing beyond HTTP and reduce forwarding churn
+  during daemon replacement.
+- Could reduce reliance on a stable per-home forwarding key if rotation is
+  later added to the SDK-helper lifecycle.
+
+Disadvantages:
+
+- Per-node addresses, DNS, and trusted TLS materially expand host privileges
+  and cross-platform support burden.
+- Socket handoff couples dynamic routing state to the already-sensitive PTY
+  update transaction.
+
+### 31. Validate and surface guest privileges for VirtioFS cache reclamation
+
+Problem:
+
+- Writing `2` to `/proc/sys/vm/drop_caches` requires guest root or the
+  equivalent `CAP_SYS_ADMIN` privilege. The current reclaimer executes
+  `sh -c 'echo 2 > /proc/sys/vm/drop_caches'` without checking either.
+- The default Microsandbox guest contract was validated as `uid=0` with no
+  `sudo`, so the command is expected to work for the shipped default image,
+  but configurable images or future guest-identity changes may run SDK execs
+  without sufficient privilege.
+- Unit coverage currently uses a fake guest shell. Native macOS QA has not yet
+  demonstrated that the real command can write the sysctl and release host
+  descriptors. An unprivileged node reports a generic reclaim error and then
+  retries after the ordinary 30-second cooldown.
+
+Suggested solution:
+
+- Add a tested guest privilege/writability probe before reclamation and expose
+  an explicit unsupported or insufficient-privilege result in the daemon
+  snapshot instead of relying on the redirection failure.
+- Keep the direct write for the root-based default contract. If non-root
+  guests are intentionally supported, use a non-interactive elevation path
+  such as `sudo -n sh -c 'echo 2 > /proc/sys/vm/drop_caches'`; never use
+  `sudo echo 2 > ...`, because the calling shell performs the redirection.
+- Extend QA Flow 8 to assert the effective guest identity, successful sysctl
+  write, and a measurable descriptor reduction on native macOS.
+
+Advantages:
+
+- Prevents silent dependence on a mutable image/user contract and makes a
+  disabled reclaim path immediately diagnosable.
+- Gives the real privileged operation automated coverage and native release
+  evidence.
+
+Disadvantages:
+
+- Supporting `sudo` adds another guest dependency and must remain strictly
+  non-interactive so the daemon cannot block on a password prompt.
+- A capability probe adds a guest round trip unless its result is cached per
+  node runtime.

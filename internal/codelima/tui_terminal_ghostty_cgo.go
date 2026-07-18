@@ -164,7 +164,7 @@ func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTe
 		rows:      24,
 		state:     runtimeStateRunning,
 		commands:  make(chan actorEnvelope),
-		readCh:    make(chan []byte),
+		readCh:    make(chan []byte, 64),
 		readErrCh: make(chan error, 1),
 		quit:      make(chan struct{}),
 		actorDone: make(chan struct{}),
@@ -276,13 +276,17 @@ type ghosttyTUITerminal struct {
 	// (runActor) is the sole live mutator of pty+emulator; interface methods
 	// enqueue onto commands, the read pump feeds readCh/readErrCh, quit stops
 	// the pump during teardown, and actorDone closes when the actor exits.
-	state     runtimeState
-	commands  chan actorEnvelope
-	readCh    chan []byte
-	readErrCh chan error
-	quit      chan struct{}
-	quitOnce  sync.Once
-	actorDone chan struct{}
+	state        runtimeState
+	commands     chan actorEnvelope
+	readCh       chan []byte
+	readErrCh    chan error
+	quit         chan struct{}
+	quitOnce     sync.Once
+	actorDone    chan struct{}
+	childPID     int
+	replay       []byte
+	handoffPTY   *os.File
+	readPumpDone chan struct{}
 }
 
 type ghosttyKeyEncoder struct {
@@ -314,6 +318,7 @@ type ghosttyPTYWriter struct {
 	cond   *sync.Cond
 	queue  bytes.Buffer
 	closed bool
+	active bool
 	done   chan struct{}
 }
 
@@ -412,7 +417,12 @@ func (w *ghosttyPTYWriter) loop() {
 		if !ok {
 			return
 		}
-		if err := ghosttyWriteAllToPTY(w.target, chunk, w.waitWritable); err != nil {
+		err := ghosttyWriteAllToPTY(w.target, chunk, w.waitWritable)
+		w.mu.Lock()
+		w.active = false
+		w.cond.Broadcast()
+		w.mu.Unlock()
+		if err != nil {
 			if w.isClosed() || isGhosttyPTYClosedError(err) {
 				return
 			}
@@ -437,7 +447,28 @@ func (w *ghosttyPTYWriter) nextChunk() ([]byte, bool) {
 
 	chunk := append([]byte(nil), w.queue.Bytes()...)
 	w.queue.Reset()
+	w.active = true
 	return chunk, true
+}
+
+func (w *ghosttyPTYWriter) Drain(timeout time.Duration) error {
+	if w == nil {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		w.mu.Lock()
+		empty := w.queue.Len() == 0 && !w.active
+		closed := w.closed
+		w.mu.Unlock()
+		if empty || closed {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out draining terminal writes")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func (w *ghosttyPTYWriter) isClosed() bool {
@@ -495,9 +526,12 @@ func waitGhosttyPTYWritable(fd int) error {
 	if fd < 0 {
 		return unix.EBADF
 	}
-	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT}}
 	for {
-		_, err := unix.Poll(fds, -1)
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLOUT | unix.POLLHUP | unix.POLLERR}}
+		// Keep this wait bounded. Handoff PTYs are nonblocking, and closing an
+		// fd concurrently with poll is not guaranteed to wake on every Unix;
+		// returning after one beat lets the write loop observe EBADF/closed.
+		_, err := unix.Poll(fds, 100)
 		if errors.Is(err, unix.EINTR) {
 			continue
 		}
@@ -1232,6 +1266,10 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
+	if err := unix.SetNonblock(int(ptyFile.Fd()), true); err != nil {
+		_ = ptyFile.Close()
+		return fmt.Errorf("set terminal pty nonblocking: %w", err)
+	}
 
 	// Wire the real POLLOUT waiter so an EAGAIN on the PTY master parks on
 	// poll() instead of busy-spinning (work item 2.1 busy-spin fix, ADR 63).
@@ -1249,9 +1287,11 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	waitDone := make(chan struct{})
 	t.mu.Lock()
 	t.cmd = cmd
+	t.childPID = cmd.Process.Pid
 	t.pty = ptyFile
 	t.ptyWriter = ptyWriter
 	t.waitDone = waitDone
+	t.readPumpDone = make(chan struct{})
 	t.mu.Unlock()
 
 	// The read pump only reads the fd and forwards bytes to the actor, which
@@ -1287,18 +1327,53 @@ func (t *ghosttyTUITerminal) applyResize(width, height int) {
 // actor (which owns ingest). On any read error it reports once and exits; the
 // quit channel unblocks it if the actor tore the terminal down first.
 func (t *ghosttyTUITerminal) readPump() {
+	t.mu.Lock()
+	done := t.readPumpDone
+	t.mu.Unlock()
+	if done != nil {
+		defer close(done)
+	}
 	buffer := make([]byte, 32*1024)
 	for {
 		n, err := t.readPTY(buffer)
 		if n > 0 {
 			data := append([]byte(nil), buffer[:n]...)
-			select {
-			case t.readCh <- data:
-			case <-t.quit:
-				return
+			if t.handoffInProgress() {
+				t.readCh <- data
+			} else {
+				select {
+				case <-t.quit:
+					return
+				default:
+				}
+				select {
+				case t.readCh <- data:
+				case <-t.quit:
+					if t.handoffInProgress() {
+						t.readCh <- data
+					}
+					return
+				}
 			}
 		}
 		if err != nil {
+			if isGhosttyPTYWouldBlockError(err) {
+				select {
+				case <-t.quit:
+					return
+				default:
+				}
+				_ = waitGhosttyPTYReadable(int(t.currentPTYFD()), 50*time.Millisecond)
+				continue
+			}
+			if t.handoffInProgress() {
+				return
+			}
+			select {
+			case <-t.quit:
+				return
+			default:
+			}
 			select {
 			case t.readErrCh <- err:
 			case <-t.quit:
@@ -1306,6 +1381,36 @@ func (t *ghosttyTUITerminal) readPump() {
 			return
 		}
 	}
+}
+
+func (t *ghosttyTUITerminal) currentPTYFD() uintptr {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.pty == nil {
+		return ^uintptr(0)
+	}
+	return t.pty.Fd()
+}
+
+func waitGhosttyPTYReadable(fd int, timeout time.Duration) error {
+	if fd < 0 {
+		return os.ErrClosed
+	}
+	timeoutMS := int(timeout / time.Millisecond)
+	for {
+		pollFDs := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
+		_, err := unix.Poll(pollFDs, timeoutMS)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err
+	}
+}
+
+func (t *ghosttyTUITerminal) handoffInProgress() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.state == runtimeStateQuiescing || t.state == runtimeStateQuiesced
 }
 
 // isGhosttyPTYClosedReadError reports whether a read error means the PTY was
@@ -1335,6 +1440,10 @@ func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
 
 	if t.closed || t.term == nil || len(data) == 0 {
 		return
+	}
+	t.replay = append(t.replay, data...)
+	if len(t.replay) > 8*1024 {
+		t.replay = append([]byte(nil), t.replay[len(t.replay)-8*1024:]...)
 	}
 
 	withGhosttyStderrSuppressed(func() struct{} {
@@ -1479,6 +1588,7 @@ func (t *ghosttyTUITerminal) snapshotLockedRaw() SnapshotResult {
 	snap.CursorVisible = bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term))
 	snap.CursorX = int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
 	snap.CursorY = int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
+	snap.CapturesMouse = bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
 	return SnapshotResult{Snapshot: snap}
 }
 
@@ -1487,7 +1597,7 @@ func (t *ghosttyTUITerminal) snapshotCellLocked(row, col int, cell C.GhosttyReso
 	if grapheme == "" {
 		grapheme = " "
 	}
-	return SnapshotCell{
+	snapshot := SnapshotCell{
 		Grapheme:      grapheme,
 		Width:         int(cell.width),
 		FG:            ghosttyRGB(uint8(cell.fg_r), uint8(cell.fg_g), uint8(cell.fg_b)),
@@ -1503,6 +1613,12 @@ func (t *ghosttyTUITerminal) snapshotCellLocked(row, col int, cell C.GhosttyReso
 		Invisible:     cell.flags&C.GHOSTTY_CELL_INVISIBLE != 0,
 		Blink:         cell.flags&C.GHOSTTY_CELL_BLINK != 0,
 	}
+	if cell.hyperlink_id != 0 {
+		if target, ok := t.hyperlinkAtLocked(row, col); ok {
+			snapshot.Hyperlink = target
+		}
+	}
+	return snapshot
 }
 
 func (t *ghosttyTUITerminal) visibleTextLockedRaw(format ReadFormat) string {
@@ -2236,7 +2352,7 @@ func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 		return
 	}
 	t.closed = true
-	cmd := t.cmd
+	childPID := t.childPID
 	ptyFile := t.pty
 	ptyWriter := t.ptyWriter
 	term := t.term
@@ -2249,7 +2365,15 @@ func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 	t.term = nil
 	t.keyEncoder = nil
 	t.mouseEncoder = nil
+	if kill {
+		t.childPID = 0
+	}
+	handoffPTY := t.handoffPTY
+	t.handoffPTY = nil
 	t.mu.Unlock()
+	if handoffPTY != nil {
+		_ = handoffPTY.Close()
+	}
 
 	closeIO := func() {
 		// Writer first (it drains and closes its PTY target), then the PTY
@@ -2262,10 +2386,10 @@ func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 			_ = ptyFile.Close()
 		}
 	}
-	if kill && cmd != nil && cmd.Process != nil {
+	if kill && childPID > 0 {
 		// The child is a session leader (Setsid in Start), so its process
 		// group id equals its pid and the helper can group-kill descendants.
-		_ = shutdownTerminalProcess(cmd.Process.Pid, closeIO, waitDone)
+		_ = shutdownTerminalProcess(childPID, closeIO, waitDone)
 	} else {
 		closeIO()
 	}
@@ -2289,6 +2413,117 @@ func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 	if postEvent && t.postEvent != nil {
 		t.postEvent(tuiTerminalClosedEvent{TargetKey: t.targetKey, Err: err})
 	}
+}
+
+func (t *ghosttyTUITerminal) beginHandoff(timeout time.Duration) handoffTerminalState {
+	t.mu.Lock()
+	if t.closed || t.pty == nil || t.state != runtimeStateRunning {
+		t.mu.Unlock()
+		return handoffTerminalState{Err: errTerminalClosed}
+	}
+	t.state = runtimeStateQuiescing
+	writer := t.ptyWriter
+	ptyFile := t.pty
+	childPID, cols, rows := t.childPID, t.cols, t.rows
+	t.mu.Unlock()
+	if err := writer.Drain(timeout); err != nil {
+		t.mu.Lock()
+		t.state = runtimeStateRunning
+		t.mu.Unlock()
+		return handoffTerminalState{Err: err}
+	}
+	rollbackFD, err := unix.Dup(int(ptyFile.Fd()))
+	if err != nil {
+		t.mu.Lock()
+		t.state = runtimeStateRunning
+		t.mu.Unlock()
+		return handoffTerminalState{Err: err}
+	}
+	transferFD, err := unix.Dup(int(ptyFile.Fd()))
+	if err != nil {
+		_ = unix.Close(rollbackFD)
+		t.mu.Lock()
+		t.state = runtimeStateRunning
+		t.mu.Unlock()
+		return handoffTerminalState{Err: err}
+	}
+	t.quitOnce.Do(func() { close(t.quit) })
+	writer.Close()
+	t.mu.Lock()
+	readPumpDone := t.readPumpDone
+	t.mu.Unlock()
+	if readPumpDone != nil {
+		select {
+		case <-readPumpDone:
+		case <-time.After(250 * time.Millisecond):
+			// A blocking PTY read with no pending child output may outlive close
+			// on some kernels. The actor is already gated and the old process
+			// exits immediately after commit; drain any delivered boundary bytes
+			// below without turning an idle terminal into a failed handoff.
+		}
+	}
+	for {
+		select {
+		case data := <-t.readCh:
+			t.ingestPTY(data)
+		default:
+			goto readsDrained
+		}
+	}
+readsDrained:
+	t.mu.Lock()
+	t.pty = nil
+	t.ptyWriter = nil
+	t.handoffPTY = os.NewFile(uintptr(rollbackFD), "codelima-handoff-rollback")
+	t.state = runtimeStateQuiesced
+	replay := append([]byte(nil), t.replay...)
+	t.mu.Unlock()
+	return handoffTerminalState{PTY: os.NewFile(uintptr(transferFD), "codelima-handoff-transfer"), ChildPID: childPID, Cols: cols, Rows: rows, Replay: replay}
+}
+
+func (t *ghosttyTUITerminal) rollbackHandoff() error {
+	t.mu.Lock()
+	if t.state != runtimeStateQuiesced || t.handoffPTY == nil {
+		t.mu.Unlock()
+		return fmt.Errorf("terminal is not quiesced")
+	}
+	ptyFile := t.handoffPTY
+	t.handoffPTY = nil
+	t.quit = make(chan struct{})
+	t.quitOnce = sync.Once{}
+	writer := newGhosttyPTYWriter(ptyFile, waitGhosttyPTYWritable, nil)
+	t.pty = ptyFile
+	t.ptyWriter = writer
+	t.readPumpDone = make(chan struct{})
+	t.state = runtimeStateRunning
+	t.mu.Unlock()
+	go t.readPump()
+	return nil
+}
+
+func adoptGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event), ptyFile *os.File, childPID, cols, rows int, replay []byte) (daemonTerminal, error) {
+	base, err := newGhosttyTUITerminal(targetKey, postEvent)
+	if err != nil {
+		return nil, err
+	}
+	term := base.(*ghosttyTUITerminal)
+	term.mu.Lock()
+	term.cols, term.rows = cols, rows
+	term.pty = ptyFile
+	term.childPID = childPID
+	term.ptyWriter = newGhosttyPTYWriter(ptyFile, waitGhosttyPTYWritable, nil)
+	term.mu.Unlock()
+	if len(replay) > 0 {
+		term.ingestPTY(replay)
+	}
+	return term, nil
+}
+
+func (t *ghosttyTUITerminal) ActivateAfterHandoff() {
+	t.mu.Lock()
+	t.readPumpDone = make(chan struct{})
+	t.mu.Unlock()
+	go t.readPump()
 }
 
 func (t *ghosttyTUITerminal) wait() error {

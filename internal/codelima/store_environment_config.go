@@ -8,15 +8,15 @@ import (
 )
 
 func (s *Store) environmentConfigDir(configID string) string {
-	return filepath.Join(s.cfg.MetadataRoot, "environment-configs", configID)
+	return filepath.Join(s.cfg.MetadataRoot, "environments", configID)
 }
 
 func (s *Store) environmentConfigPath(configID string) string {
-	return filepath.Join(s.environmentConfigDir(configID), "environment-config.yaml")
+	return filepath.Join(s.environmentConfigDir(configID), "environment.yaml")
 }
 
 func (s *Store) environmentConfigSlugIndexPath(slug string) string {
-	return filepath.Join(s.cfg.MetadataRoot, "_index", "environment-configs", "by-slug", slug)
+	return filepath.Join(s.cfg.MetadataRoot, "_index", "environments", "by-slug", slug)
 }
 
 func (s *Store) SaveEnvironmentConfig(config EnvironmentConfig) error {
@@ -109,7 +109,7 @@ func (s *Store) EnvironmentConfigByIDOrSlug(value string) (EnvironmentConfig, er
 }
 
 func (s *Store) ListEnvironmentConfigs(includeDeleted bool) ([]EnvironmentConfig, error) {
-	root := filepath.Join(s.cfg.MetadataRoot, "environment-configs")
+	root := filepath.Join(s.cfg.MetadataRoot, "environments")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func (s *Store) MissingEnvironmentConfigIndexes() ([]string, error) {
 	missing := []string{}
 	for _, config := range configs {
 		if !exists(s.environmentConfigSlugIndexPath(config.Slug)) {
-			missing = append(missing, "environment config slug index missing for "+config.Slug)
+			missing = append(missing, "environment slug index missing for "+config.Slug)
 		}
 	}
 

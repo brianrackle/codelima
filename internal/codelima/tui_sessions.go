@@ -7,9 +7,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 
+	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
 	"github.com/brianrackle/test_lima/internal/codelima/terminal"
 )
 
@@ -31,21 +34,88 @@ type tuiSessionStore struct {
 	// targets holds per-target tab bookkeeping (ordered tabs, monotonic tab
 	// counter, and the last open error). It replaces the former parallel
 	// tabCounters/sessionOrder/sessionErrors maps (see ADR 61, Track 1 PR3).
-	targets  map[terminal.TargetKey]*terminal.TargetTerminalState
-	registry *terminal.TerminalRuntimeRegistry[tuiTerminal]
+	targets     map[terminal.TargetKey]*terminal.TargetTerminalState
+	registry    *terminal.TerminalRuntimeRegistry[tuiTerminal]
+	events      *daemonclient.Client
+	eventCancel context.CancelFunc
 
 	preferredCols int
 	preferredRows int
 }
 
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
-	return &tuiSessionStore{
+	store := &tuiSessionStore{
 		ctx:       ctx,
 		service:   service,
 		postEvent: postEvent,
 		sessions:  map[string]*tuiSession{},
 		targets:   map[terminal.TargetKey]*terminal.TargetTerminalState{},
 		registry:  terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
+	}
+	if service != nil && service.daemonClient != nil {
+		if err := store.restoreDaemonSessions(); err != nil {
+			service.log().Error("restore daemon terminal tabs failed", "error", err.Error())
+		}
+		store.startDaemonEvents()
+	}
+	return store
+}
+
+func (s *tuiSessionStore) startDaemonEvents() {
+	ctx, cancel := context.WithCancel(s.ctx)
+	client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: s.service.cfg.MetadataRoot, Version: Version, Events: true, Timeout: 2 * time.Second})
+	if err != nil {
+		cancel()
+		s.service.log().Error("connect daemon event stream failed", "error", err.Error())
+		return
+	}
+	if err := client.Subscribe(ctx, []string{"terminal", "target", "node", "daemon", "input"}); err != nil {
+		_ = client.Close()
+		cancel()
+		s.service.log().Error("subscribe daemon events failed", "error", err.Error())
+		return
+	}
+	s.events, s.eventCancel = client, cancel
+	go func() {
+		for {
+			event, err := client.NextEvent(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				continue
+			}
+			s.handleDaemonEvent(event)
+		}
+	}()
+}
+
+func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
+	data, _ := event.Data.(map[string]any)
+	sessionKey, _ := data["tab_id"].(string)
+	switch event.Event {
+	case "terminal.dirty", "terminal.resized", "target.tabs_changed", "node.status_changed":
+		if s.postEvent != nil {
+			s.postEvent(vaxis.Redraw{})
+		}
+	case "terminal.clipboard":
+		text, _ := data["text"].(string)
+		if s.postEvent != nil {
+			s.postEvent(tuiClipboardEvent{TargetKey: sessionKey, Text: text})
+		}
+	case "terminal.closed":
+		if sessionKey != "" && s.postEvent != nil {
+			s.postEvent(tuiTerminalClosedEvent{TargetKey: sessionKey})
+		}
+	case "input.revoked":
+		clientID, _ := data["client_id"].(string)
+		if s.postEvent != nil && s.service != nil && s.service.daemonClient != nil && clientID == s.service.daemonClient.Hello.ClientID {
+			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("terminal input ownership was taken by another client")})
+		}
+	case "daemon.shutdown":
+		if s.postEvent != nil {
+			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("codelima daemon stopped")})
+		}
 	}
 }
 
@@ -176,6 +246,26 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	return key, nil
 }
 
+func (s *tuiSessionStore) OpenNodeHostTab(node Node) (string, error) {
+	target := terminal.NodeTarget(node.ID)
+	targetKey := target.String()
+	s.ClearSessionError(targetKey)
+	spec, err := s.service.TerminalLaunchSpec(target, terminal.NodeHostShell, node.DirectoryPath)
+	if err != nil {
+		s.setSessionError(targetKey, err)
+		return "", err
+	}
+	key, err := s.launchTabFromSpec(targetKey, spec, &tuiSession{
+		kind: tuiTreeEntryProject, label: node.Slug + " host", node: node,
+	}, nil)
+	if err != nil {
+		s.setSessionError(targetKey, err)
+		return "", err
+	}
+	s.service.log().Debug("terminal opened", "kind", "node-host", "target", targetKey, "session", key)
+	return key, nil
+}
+
 // launchTabFromSpec spawns a terminal for an already-built LaunchSpec, registers
 // its runtime, and records the session. It is the single spawn path shared by
 // both open flows: the LaunchSpec is the one shell-launch contract (built by
@@ -184,6 +274,39 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 // (ClearSessionError/setSessionError) so both flows keep identical bookkeeping.
 // wrapStartErr, when non-nil, decorates a Start failure before it is returned.
 func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, session *tuiSession, wrapStartErr func(error) error) (string, error) {
+	if s.service.daemonClient != nil {
+		kind := terminal.NodeHostShell.String()
+		if session.kind == tuiTreeEntryNode {
+			kind = terminal.NodeShell.String()
+		}
+		var state daemon.TerminalState
+		err := s.service.daemonClient.Call(s.ctx, "terminal.open", map[string]any{
+			"target": targetKey,
+			"kind":   kind,
+			"label":  session.label,
+			"cols":   s.preferredCols,
+			"rows":   s.preferredRows,
+		}, &state)
+		if err != nil {
+			return "", fromDaemonError(err)
+		}
+		key := state.TabID
+		if key == "" {
+			key = formatSessionKey(targetKey, s.targetState(targetKey).AllocateTabIndex())
+		}
+		remote := newDaemonTUITerminal(s.service.daemonClient, state.TerminalID, s.postEvent)
+		runtime, ok := s.registry.Register(terminal.TerminalID(state.TerminalID), remote)
+		if !ok {
+			remote.Detach()
+			return "", fmt.Errorf("daemon returned duplicate terminal id %q", state.TerminalID)
+		}
+		session.key = key
+		session.target = targetKey
+		session.terminalID = runtime.ID
+		s.putSession(session)
+		return key, nil
+	}
+
 	command := exec.CommandContext(s.ctx, spec.Argv[0], spec.Argv[1:]...)
 	command.Env = spec.Env
 	command.Dir = spec.Dir
@@ -206,6 +329,38 @@ func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, s
 	session.terminalID = runtime.ID
 	s.putSession(session)
 	return key, nil
+}
+
+func (s *tuiSessionStore) restoreDaemonSessions() error {
+	var states []daemon.TerminalState
+	if err := s.service.daemonClient.Call(s.ctx, "terminal.list", nil, &states); err != nil {
+		return fromDaemonError(err)
+	}
+	for _, state := range states {
+		key := state.TabID
+		if key == "" {
+			key = state.Target + "#" + state.TerminalID
+		}
+		kind := tuiTreeEntryNode
+		session := &tuiSession{key: key, target: state.Target, label: state.Label, terminalID: terminal.TerminalID(state.TerminalID)}
+		target, err := terminal.ParseTargetKey(state.Target)
+		if err == nil && target.Kind == terminal.TargetNode {
+			if state.Kind == terminal.NodeHostShell.String() {
+				kind = tuiTreeEntryProject
+			}
+			if node, nodeErr := s.service.store.NodeByID(target.ID); nodeErr == nil {
+				session.node = node
+			}
+		}
+		session.kind = kind
+		remote := newDaemonTUITerminal(s.service.daemonClient, state.TerminalID, s.postEvent)
+		if _, ok := s.registry.Register(session.terminalID, remote); !ok {
+			remote.Detach()
+			continue
+		}
+		s.putSession(session)
+	}
+	return nil
 }
 
 func resolveCodelimaExecutablePath(executable string) string {
@@ -334,9 +489,20 @@ func (s *tuiSessionStore) RemoveSession(sessionKey string) (*tuiSession, bool) {
 }
 
 func (s *tuiSessionStore) Close() {
+	if s.eventCancel != nil {
+		s.eventCancel()
+	}
+	if s.events != nil {
+		_ = s.events.Close()
+		s.events = nil
+	}
 	for sessionKey, session := range s.sessions {
 		if runtime, ok := s.registry.Remove(session.terminalID); ok {
-			runtime.Backend.Close()
+			if detachable, ok := runtime.Backend.(interface{ Detach() }); ok {
+				detachable.Detach()
+			} else {
+				runtime.Backend.Close()
+			}
 		}
 		s.service.log().Debug("terminal closed", "target", session.target, "session", sessionKey, "reason", "shutdown")
 		delete(s.sessions, sessionKey)

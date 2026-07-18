@@ -14,22 +14,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
 	"github.com/brianrackle/test_lima/internal/codelima/terminal"
-	"gopkg.in/yaml.v3"
 )
 
 type Service struct {
-	cfg      Config
-	store    *Store
-	lima     LimaClient
-	tui      TUIRunner
-	stdin    io.Reader
-	stdout   io.Writer
-	stderr   io.Writer
-	now      func() time.Time
-	ready    *serviceReadiness
-	logger   *slog.Logger
-	logLevel slog.Level
+	cfg            Config
+	store          *Store
+	sandbox        SandboxClient
+	tui            TUIRunner
+	stdin          io.Reader
+	stdout         io.Writer
+	stderr         io.Writer
+	now            func() time.Time
+	ready          *serviceReadiness
+	logger         *slog.Logger
+	logLevel       slog.Level
+	daemonClient   *daemonclient.Client
+	localTerminals bool
 }
 
 // serviceReadiness caches the once-per-instance directory bootstrap for read
@@ -46,7 +48,8 @@ type ProjectCreateInput struct {
 	AgentProfile       string
 	EnvironmentConfigs []string
 	BootstrapCommands  []string
-	Template           string
+	Image              string
+	DefaultPorts       []string
 }
 
 type ProjectUpdateInput struct {
@@ -57,7 +60,9 @@ type ProjectUpdateInput struct {
 	ClearEnvironmentConfigs bool
 	BootstrapCommands       []string
 	ClearBootstrap          bool
-	Template                *string
+	Image                   *string
+	DefaultPorts            []string
+	ClearDefaultPorts       bool
 }
 
 type ProjectForkInput struct {
@@ -67,40 +72,45 @@ type ProjectForkInput struct {
 }
 
 type NodeCreateInput struct {
-	Project       string
-	Slug          string
-	Runtime       string
-	Provider      string
-	AgentProfile  string
-	WorkspaceMode string
-	LimaCommands  LimaCommandTemplates
+	Configuration   string
+	Directory       string
+	Project         string
+	Slug            string
+	Runtime         string
+	Provider        string
+	AgentProfile    string
+	WorkspaceMode   string
+	Image           string
+	Ports           []string
+	NetPolicy       *NetPolicy
+	RuntimeCommands RuntimeCommandTemplates
 }
 
 type NodeCloneInput struct {
-	SourceNode   string
-	NodeSlug     string
-	AgentProfile string
-	LimaCommands LimaCommandTemplates
+	SourceNode      string
+	NodeSlug        string
+	AgentProfile    string
+	RuntimeCommands RuntimeCommandTemplates
 }
 
-func NewService(cfg Config, lima LimaClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
-	if lima == nil {
-		lima = NewExecLimaClient()
+func NewService(cfg Config, sandbox SandboxClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
+	if sandbox == nil {
+		sandbox = NewSDKSandboxClient()
 	}
-	if execLima, ok := lima.(*ExecLimaClient); ok {
-		execLima.LimaCommands = execLima.LimaCommands.ApplyDefaults(cfg.LimaCommands.ApplyDefaults(defaultLimaCommandTemplates()))
-		execLima.Stdout = stdout
-		execLima.Stderr = stderr
+	if sdk, ok := sandbox.(*SDKSandboxClient); ok {
+		sdk.RuntimeCommands = sdk.RuntimeCommands.ApplyDefaults(cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates()))
+		sdk.Stdout = stdout
+		sdk.Stderr = stderr
 	}
 
 	return &Service{
-		cfg:    cfg,
-		store:  NewStore(cfg),
-		lima:   lima,
-		tui:    newTUIRunner(),
-		stdin:  stdin,
-		stdout: stdout,
-		stderr: stderr,
+		cfg:     cfg,
+		store:   NewStore(cfg),
+		sandbox: sandbox,
+		tui:     newTUIRunner(),
+		stdin:   stdin,
+		stdout:  stdout,
+		stderr:  stderr,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -165,11 +175,11 @@ func (s *Service) logOperation(op string, start time.Time, errp *error) {
 	logger.Debug("operation finished", "op", op, "duration", duration.String())
 }
 
-// logLima records a runtime (lima) invocation at a service call site: the verb
+// logRuntime records a runtime (sandbox) invocation at a service call site: the verb
 // only, never the full argv (argv can carry host paths). Debug level keeps it out
 // of default CLI output.
-func (s *Service) logLima(verb, nodeID string) {
-	s.log().Debug("lima invocation", "verb", verb, "node", nodeID)
+func (s *Service) logRuntime(verb, nodeID string) {
+	s.log().Debug("sandbox invocation", "verb", verb, "node", nodeID)
 }
 
 // recordNodeStartRollback persists the failed-start rollback state and logs any
@@ -177,7 +187,7 @@ func (s *Service) logLima(verb, nodeID string) {
 // item 0.7.2). Behaviour is otherwise unchanged: the caller still returns the
 // original start failure.
 func (s *Service) recordNodeStartRollback(node Node, bootstrap BootstrapState, event Event) {
-	if saveErr := s.store.SaveNode(node, bootstrap, nil); saveErr != nil {
+	if saveErr := s.store.SaveNode(node, bootstrap); saveErr != nil {
 		s.log().Error("node start rollback save failed", "node", node.ID, "error", saveErr.Error())
 	}
 	if eventErr := s.store.AppendNodeEvent(node.ID, event); eventErr != nil {
@@ -194,11 +204,8 @@ func (s *Service) withIO(stdout, stderr io.Writer) *Service {
 	cloned.stdout = stdout
 	cloned.stderr = stderr
 
-	if execLima, ok := s.lima.(*ExecLimaClient); ok {
-		limaClone := *execLima
-		limaClone.Stdout = stdout
-		limaClone.Stderr = stderr
-		cloned.lima = &limaClone
+	if sdk, ok := s.sandbox.(*SDKSandboxClient); ok {
+		cloned.sandbox = sdk.withIO(stdout, stderr)
 	}
 
 	return &cloned
@@ -211,9 +218,20 @@ func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	// This is idempotent, flock-guarded, and once per process — categorically
 	// different from the per-tick unlocked writes work item 0.3 removed (ADR
 	// 57). The 2s auto-refresh path stays a pure read, and no runtime
-	// dependencies are validated: launching the TUI must work without limactl.
+	// dependencies are validated: launching the TUI must work without msb.
 	if err := s.ensureReadyForWrite(); err != nil {
 		return err
+	}
+	if !s.localTerminals {
+		client, err := s.connectTUIDaemon(ctx)
+		if err != nil {
+			return err
+		}
+		s.daemonClient = client
+		defer func() {
+			_ = client.Close()
+			s.daemonClient = nil
+		}()
 	}
 
 	if s.tui == nil {
@@ -223,11 +241,46 @@ func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	return s.tui.Run(ctx, s, workspaceRoot)
 }
 
+func (s *Service) connectTUIDaemon(ctx context.Context) (*daemonclient.Client, error) {
+	client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: s.cfg.MetadataRoot, Version: Version, WantInput: true})
+	if err == nil {
+		return claimTUIDaemonInput(ctx, client)
+	}
+	if !s.cfg.Daemon.Autostart {
+		return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
+	}
+	if _, startErr := startDaemon(ctx, s); startErr != nil {
+		return nil, startErr
+	}
+	client, err = daemonclient.Dial(ctx, daemonclient.Options{Home: s.cfg.MetadataRoot, Version: Version, WantInput: true})
+	if err != nil {
+		return nil, dependencyUnavailable("daemon did not accept the TUI connection", err, nil)
+	}
+	return claimTUIDaemonInput(ctx, client)
+}
+
+func claimTUIDaemonInput(ctx context.Context, client *daemonclient.Client) (*daemonclient.Client, error) {
+	if client.Hello.InputOwner {
+		return client, nil
+	}
+	var result map[string]bool
+	if err := client.Call(ctx, "input.takeover", nil, &result); err != nil {
+		_ = client.Close()
+		return nil, fromDaemonError(err)
+	}
+	if !result["input_owner"] {
+		_ = client.Close()
+		return nil, preconditionFailed("daemon did not grant TUI input ownership", map[string]any{"client_id": client.Hello.ClientID})
+	}
+	client.Hello.InputOwner = true
+	return client, nil
+}
+
 // EnsureReady prepares CODELIMA_HOME for an operation. Read surfaces call it
 // with mutating=false: that only creates missing directories (once per Service
 // instance) and never writes, seeds, or rewrites files — reads must not write.
 // mutating=true additionally seeds and repairs metadata under the
-// environment-configs/projects/nodes locks and validates runtime dependencies.
+// environments/configurations/nodes locks and validates runtime dependencies.
 // Stale metadata (for example an old config.yaml) is therefore upgraded only
 // by mutating commands or `codelima doctor --repair`.
 func (s *Service) EnsureReady(mutating bool) error {
@@ -249,8 +302,8 @@ func (s *Service) ensureReady(ctx context.Context, mutating bool) error {
 // ensureReadyForWrite prepares the home for a metadata mutation: directory
 // skeleton plus seed/repair under locks, without the runtime-dependency
 // validation that EnsureReady(mutating=true) performs. Metadata-only mutations
-// (project and environment-config writes) call it directly so they keep
-// working without limactl present.
+// (configuration and environment writes) call it directly so they keep
+// working without a usable Microsandbox runtime.
 func (s *Service) ensureReadyForWrite() error {
 	if err := s.ensureDirectories(); err != nil {
 		return err
@@ -268,12 +321,12 @@ func (s *Service) ensureDirectories() error {
 }
 
 // seedAndRepair seeds built-in metadata and repairs stale files while holding
-// the environment-configs, projects, and nodes flocks (acquireLocks sorts its
+// the environments, configurations, and nodes flocks (acquireLocks sorts its
 // keys, so the lock order stays deadlock-free). Holding the locks is what
 // keeps concurrent seeding from duplicating built-in environment configs
 // (TODO #20).
 func (s *Service) seedAndRepair() error {
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environment-configs", "projects", "nodes")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments", "configurations", "nodes")
 	if err != nil {
 		return err
 	}
@@ -289,13 +342,13 @@ func (s *Service) validateDependencies(ctx context.Context) error {
 		return dependencyUnavailable("git is required", err, nil)
 	}
 
-	if _, err := exec.LookPath("limactl"); err != nil {
-		if _, ok := s.lima.(*ExecLimaClient); ok {
-			return dependencyUnavailable("limactl is required", err, nil)
-		}
+	if version, err := s.sandbox.Version(ctx); err != nil {
+		return err
+	} else if version != requiredMicrosandboxVersion {
+		return dependencyUnavailable(fmt.Sprintf("microsandbox SDK runtime %s found; codelima %s requires exactly %s (see docs: pinning microsandbox)", version, Version, requiredMicrosandboxVersion), nil, nil)
 	}
 
-	if _, err := s.lima.List(ctx); err != nil {
+	if _, err := s.sandbox.List(ctx); err != nil {
 		return err
 	}
 
@@ -334,17 +387,19 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 		report.Checks = append(report.Checks, DoctorCheck{Name: "git", Status: "ok", Message: "git is available"})
 	}
 
-	if _, err := exec.LookPath("limactl"); err != nil {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "limactl", Status: "fail", Message: err.Error()})
+	if version, versionErr := s.sandbox.Version(ctx); versionErr != nil {
+		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_sdk", Status: "fail", Message: versionErr.Error()})
+	} else if version != requiredMicrosandboxVersion {
+		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_sdk", Status: "fail", Message: fmt.Sprintf("found %s, required exactly %s", version, requiredMicrosandboxVersion)})
 	} else {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "limactl", Status: "ok", Message: "limactl is available"})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_sdk", Status: "ok", Message: fmt.Sprintf("SDK and runtime match required version %s", version)})
 	}
 
-	observations, err := s.lima.List(ctx)
+	observations, err := s.sandbox.List(ctx)
 	if err != nil {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "limactl_list", Status: "fail", Message: err.Error()})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_list", Status: "fail", Message: err.Error()})
 	} else {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "limactl_list", Status: "ok", Message: "limactl list --json succeeded"})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_list", Status: "ok", Message: "SDK sandbox listing succeeded"})
 		orphanWarnings, orphanErr := s.detectOrphans(observations)
 		if orphanErr != nil {
 			return DoctorReport{}, orphanErr
@@ -353,7 +408,7 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 		report.Warnings = append(report.Warnings, orphanWarnings...)
 	}
 
-	if missing, err := s.store.MissingProjectIndexes(); err != nil {
+	if missing, err := s.store.MissingConfigurationIndexes(); err != nil {
 		return DoctorReport{}, err
 	} else {
 		report.Warnings = append(report.Warnings, missing...)
@@ -384,7 +439,7 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 	}
 
 	if len(s.cfg.MetadataRoot) > 120 {
-		report.Warnings = append(report.Warnings, "CODELIMA_HOME path is long and may hit Lima path length limits")
+		report.Warnings = append(report.Warnings, "CODELIMA_HOME path is long; keep MSB_HOME short enough for Unix sockets")
 	}
 
 	return report, nil
@@ -399,12 +454,12 @@ func (s *Service) detectOrphans(observations []RuntimeObservation) ([]string, er
 
 	nodeByInstance := map[string]Node{}
 	for _, node := range nodes {
-		nodeByInstance[node.LimaInstanceName] = node
+		nodeByInstance[node.SandboxName] = node
 	}
 
 	for _, observation := range observations {
 		if _, ok := nodeByInstance[observation.Name]; !ok {
-			warnings = append(warnings, "lima instance without metadata: "+observation.Name)
+			warnings = append(warnings, "microsandbox without metadata: "+observation.Name)
 		}
 	}
 
@@ -413,8 +468,8 @@ func (s *Service) detectOrphans(observations []RuntimeObservation) ([]string, er
 			continue
 		}
 
-		if _, ok := findObservation(observations, node.LimaInstanceName); !ok {
-			warnings = append(warnings, "metadata exists but lima instance is missing: "+node.LimaInstanceName)
+		if _, ok := findObservation(observations, node.SandboxName); !ok {
+			warnings = append(warnings, "metadata exists but microsandbox is missing: "+node.SandboxName)
 		}
 	}
 
@@ -460,17 +515,18 @@ func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (
 
 	now := s.now()
 	project := Project{
-		ID:                  newID(),
-		Slug:                slug,
-		WorkspacePath:       workspacePath,
-		AgentProfileName:    coalesce(input.AgentProfile, s.cfg.DefaultAgentProfile),
-		EnvironmentConfigs:  environmentConfigs,
-		LimaCommands:        LimaCommandTemplates{Bootstrap: append([]string(nil), input.BootstrapCommands...)},
-		DefaultRuntime:      RuntimeVM,
-		DefaultProvider:     ProviderLima,
-		DefaultLimaTemplate: coalesce(input.Template, s.cfg.DefaultTemplate),
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		ID:                 newID(),
+		Slug:               slug,
+		WorkspacePath:      workspacePath,
+		AgentProfileName:   coalesce(input.AgentProfile, s.cfg.DefaultAgentProfile),
+		EnvironmentConfigs: environmentConfigs,
+		RuntimeCommands:    RuntimeCommandTemplates{Bootstrap: append([]string(nil), input.BootstrapCommands...)},
+		DefaultRuntime:     RuntimeVM,
+		DefaultProvider:    ProviderMicrosandbox,
+		DefaultImage:       coalesce(input.Image, s.cfg.DefaultImage),
+		DefaultPorts:       resolvePorts(input.DefaultPorts, nil, s.cfg.DefaultPorts),
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 
 	if err := s.store.SaveProject(project); err != nil {
@@ -505,7 +561,7 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 		return Project{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "nodes")
 	if err != nil {
 		return Project{}, err
 	}
@@ -553,9 +609,9 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 	}
 
 	if input.ClearBootstrap {
-		project.LimaCommands.Bootstrap = []string{}
+		project.RuntimeCommands.Bootstrap = []string{}
 	} else if input.BootstrapCommands != nil {
-		project.LimaCommands.Bootstrap = append([]string(nil), input.BootstrapCommands...)
+		project.RuntimeCommands.Bootstrap = append([]string(nil), input.BootstrapCommands...)
 	}
 
 	if input.ClearEnvironmentConfigs {
@@ -568,8 +624,16 @@ func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project
 		project.EnvironmentConfigs = environmentConfigs
 	}
 
-	if input.Template != nil {
-		project.DefaultLimaTemplate = *input.Template
+	if input.Image != nil {
+		project.DefaultImage = *input.Image
+	}
+	if input.ClearDefaultPorts {
+		project.DefaultPorts = []string{}
+	} else if input.DefaultPorts != nil {
+		if _, err := validatePorts(input.DefaultPorts); err != nil {
+			return Project{}, err
+		}
+		project.DefaultPorts = append([]string(nil), input.DefaultPorts...)
 	}
 
 	project.UpdatedAt = s.now()
@@ -861,19 +925,20 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 	}
 
 	child := Project{
-		ID:                  newID(),
-		Slug:                slug,
-		WorkspacePath:       destinationPath,
-		ParentProjectID:     source.ID,
-		ForkBaseSnapshotID:  baseSnapshot.ID,
-		AgentProfileName:    source.AgentProfileName,
-		EnvironmentConfigs:  append([]string(nil), source.EnvironmentConfigs...),
-		DefaultRuntime:      source.DefaultRuntime,
-		DefaultProvider:     source.DefaultProvider,
-		DefaultLimaTemplate: source.DefaultLimaTemplate,
-		LimaCommands:        source.LimaCommands,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		ID:                 newID(),
+		Slug:               slug,
+		WorkspacePath:      destinationPath,
+		ParentProjectID:    source.ID,
+		ForkBaseSnapshotID: baseSnapshot.ID,
+		AgentProfileName:   source.AgentProfileName,
+		EnvironmentConfigs: append([]string(nil), source.EnvironmentConfigs...),
+		DefaultRuntime:     source.DefaultRuntime,
+		DefaultProvider:    source.DefaultProvider,
+		DefaultImage:       source.DefaultImage,
+		DefaultPorts:       append([]string(nil), source.DefaultPorts...),
+		RuntimeCommands:    source.RuntimeCommands,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 
 	if err := s.store.SaveProject(child); err != nil {
@@ -897,14 +962,14 @@ func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInpu
 }
 
 func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
-	s.log().Debug("operation started", "op", "node.create", "project", input.Project)
+	s.log().Debug("operation started", "op", "node.create", "configuration", input.Configuration, "directory", input.Directory)
 	defer s.logOperation("node.create", s.now(), &err)
 
 	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "nodes")
 	if err != nil {
 		return Node{}, err
 	}
@@ -912,48 +977,77 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		_ = lockSet.Close()
 	}()
 
-	project, err := s.store.ProjectByIDOrSlug(input.Project)
-	if err != nil {
-		return Node{}, err
+	if strings.TrimSpace(input.Slug) == "" {
+		return Node{}, invalidArgument("node slug is required", nil)
+	}
+	if slugify(input.Slug) != input.Slug {
+		return Node{}, invalidArgument("node slug must be a lowercase slug", map[string]any{"slug": input.Slug})
 	}
 
-	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
-		return Node{}, err
+	var configuration Configuration
+	var project Project
+	var directoryPath string
+	if input.Project != "" { // Pre-v3 internal compatibility; the public CLI has no project surface.
+		project, err = s.store.ProjectByIDOrSlug(input.Project)
+		if err != nil {
+			return Node{}, err
+		}
+		directoryPath = project.WorkspacePath
+		configuration = Configuration{
+			ID: project.ID, Slug: project.Slug, Image: project.DefaultImage,
+			AgentProfileName: project.AgentProfileName, Environments: project.EnvironmentConfigs,
+			BootstrapCommands: append([]string(nil), project.RuntimeCommands.Bootstrap...),
+			VCPUs:             DefaultVCPUs, MemoryMiB: DefaultMemoryMiB, DiskMiB: DefaultDiskMiB,
+		}
+	} else {
+		configurationRef := coalesce(input.Configuration, DefaultConfigurationSlug)
+		configuration, err = s.store.ConfigurationByIDOrSlug(configurationRef)
+		if err != nil {
+			return Node{}, err
+		}
+		directoryPath, err = s.resolveNodeDirectoryPath(input.Directory)
+		if err != nil {
+			return Node{}, err
+		}
+		project = runtimeProjectForNode(Node{DirectoryPath: directoryPath, Image: configuration.Image})
 	}
 
-	runtime := coalesce(input.Runtime, project.DefaultRuntime)
-	provider := coalesce(input.Provider, project.DefaultProvider)
+	runtime := coalesce(input.Runtime, RuntimeVM)
+	provider := coalesce(input.Provider, ProviderMicrosandbox)
 	if runtime != RuntimeVM {
 		return Node{}, unsupportedFeature("runtime is reserved but not implemented in Milestone 1", map[string]any{"runtime": runtime})
 	}
 
-	if provider != ProviderLima {
+	if provider != ProviderMicrosandbox {
 		return Node{}, unsupportedFeature("provider is reserved but not implemented in Milestone 1", map[string]any{"provider": provider})
 	}
 
-	profileName := coalesce(input.AgentProfile, project.AgentProfileName, s.cfg.DefaultAgentProfile)
+	profileName := configuration.AgentProfileName
+	if input.Project != "" {
+		profileName = coalesce(input.AgentProfile, profileName, s.cfg.DefaultAgentProfile)
+	}
 	profile, err := s.store.LoadAgentProfile(profileName)
 	if err != nil {
 		return Node{}, err
 	}
 
-	workspaceMode := normalizeWorkspaceMode(input.WorkspaceMode)
+	workspaceMode := normalizeWorkspaceMode(coalesce(input.WorkspaceMode, DefaultWorkspaceMode))
 	if workspaceMode == "" {
 		return Node{}, invalidArgument("workspace mode must be copy or mounted", map[string]any{"workspace_mode": input.WorkspaceMode})
 	}
 
-	projectCommands, err := s.resolveProjectBootstrapCommands(project, input.LimaCommands)
+	configurationCommands, err := s.resolveConfigurationBootstrapCommands(configuration)
 	if err != nil {
 		return Node{}, err
 	}
 
 	nodeID := newID()
-	nodeSlug := coalesce(input.Slug, slugify(project.Slug+"-node"))
+	nodeSlug := input.Slug
 	if err := s.ensureUniqueNodeSlug(nodeSlug); err != nil {
 		return Node{}, err
 	}
 
-	instanceName, err := s.generateInstanceName(nodeSlug)
+	sandboxName, err := s.generateSandboxName(nodeSlug)
 	if err != nil {
 		return Node{}, err
 	}
@@ -961,45 +1055,60 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	bootstrap := BootstrapState{
 		AgentProfileName:  profile.Name,
 		InstallCommands:   append([]string(nil), profile.InstallCommands...),
-		BootstrapCommands: projectCommands,
+		BootstrapCommands: configurationCommands,
 		ValidationCommand: profile.ValidationCommand,
 		LaunchCommand:     profile.LaunchCommand,
 		Environment:       cloneMap(profile.Environment),
 		Completed:         false,
 	}
 
-	guestWorkspacePath := project.WorkspacePath
+	guestWorkspacePath := directoryPath
 	workspaceMountPath := ""
 	workspaceSeeded := false
 	if workspaceMode == WorkspaceModeMounted {
-		guestWorkspacePath = ""
-		workspaceMountPath = project.WorkspacePath
+		workspaceMountPath = directoryPath
+	}
+	image := configuration.Image
+	ports := resolvePorts(input.Ports, []string{})
+	if input.Project != "" {
+		image = coalesce(input.Image, configuration.Image, s.cfg.DefaultImage)
+		ports = resolvePorts(input.Ports, project.DefaultPorts, s.cfg.DefaultPorts)
+	}
+	if _, err := validatePorts(ports); err != nil {
+		return Node{}, err
 	}
 
 	node := Node{
-		ID:                    nodeID,
-		Slug:                  nodeSlug,
-		ProjectID:             project.ID,
-		Runtime:               runtime,
-		Provider:              provider,
-		LimaInstanceName:      instanceName,
-		Status:                NodeStatusCreated,
-		AgentProfileName:      profileName,
-		LimaCommands:          input.LimaCommands,
-		BootstrapCommands:     bootstrap.CombinedCommands(),
-		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		WorkspaceMode:         workspaceMode,
-		GuestWorkspacePath:    guestWorkspacePath,
-		WorkspaceMountPath:    workspaceMountPath,
-		WorkspaceSeeded:       workspaceSeeded,
-		BootstrapCompleted:    false,
-		CreatedAt:             s.now(),
-		UpdatedAt:             s.now(),
+		ID:                 nodeID,
+		Slug:               nodeSlug,
+		ConfigurationID:    configuration.ID,
+		ConfigurationSlug:  configuration.Slug,
+		DirectoryPath:      directoryPath,
+		Runtime:            runtime,
+		Provider:           provider,
+		SandboxName:        sandboxName,
+		Image:              image,
+		VCPUs:              configuration.VCPUs,
+		MemoryMiB:          configuration.MemoryMiB,
+		DiskMiB:            configuration.DiskMiB,
+		Environments:       append([]string(nil), configuration.Environments...),
+		Ports:              ports,
+		NetPolicy:          cloneNetPolicy(input.NetPolicy),
+		Status:             NodeStatusCreated,
+		AgentProfileName:   profileName,
+		RuntimeCommands:    input.RuntimeCommands,
+		BootstrapCommands:  bootstrap.CombinedCommands(),
+		WorkspaceMode:      workspaceMode,
+		GuestWorkspacePath: guestWorkspacePath,
+		WorkspaceMountPath: workspaceMountPath,
+		WorkspaceSeeded:    workspaceSeeded,
+		BootstrapCompleted: false,
+		CreatedAt:          s.now(),
+		UpdatedAt:          s.now(),
 	}
-
-	template, err := s.renderTemplate(ctx, project, node, bootstrap, workspaceMode)
-	if err != nil {
-		return Node{}, err
+	if input.Project != "" {
+		node.ProjectID = project.ID
+		node.ConfigurationID = ""
 	}
 
 	cleanupNodeDir := true
@@ -1009,24 +1118,20 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 			return
 		}
 		if cleanupInstance {
-			_ = s.lima.Delete(ctx, project, node)
+			_ = s.sandbox.Delete(ctx, project, node)
 		}
 		if cleanupNodeDir {
 			_ = os.RemoveAll(s.store.nodeDir(nodeID))
 		}
 	}()
 
-	if err := atomicWriteFile(s.store.nodeTemplatePath(nodeID), template, 0o644); err != nil {
-		return Node{}, err
-	}
-
-	s.logLima("create", node.ID)
-	if err := s.lima.Create(ctx, project, node, s.store.nodeTemplatePath(nodeID)); err != nil {
+	s.logRuntime("create", node.ID)
+	if err := s.sandbox.Create(ctx, project, node); err != nil {
 		return Node{}, err
 	}
 	cleanupInstance = true
 
-	if err := s.store.SaveNode(node, bootstrap, template); err != nil {
+	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
 	cleanupNodeDir = false
@@ -1049,14 +1154,84 @@ func (s *Service) NodeList(ctx context.Context, includeDeleted bool) ([]Node, er
 		return nil, err
 	}
 
-	return s.reconcileNodes(ctx, nodes, false)
+	nodes, err = s.reconcileNodes(ctx, nodes, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.hydrateConfigurationSlugs(nodes); err != nil {
+		return nil, err
+	}
+	sortNodesByDirectory(nodes)
+	return nodes, nil
+}
+
+func (s *Service) NodeListByDirectoryRoot(ctx context.Context, directoryRoot string, includeDeleted bool) ([]Node, error) {
+	nodes, err := s.NodeList(ctx, includeDeleted)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(directoryRoot) == "" {
+		return nodes, nil
+	}
+	root, err := canonicalPath(directoryRoot)
+	if err != nil {
+		return nil, invalidArgument("directory scope must be resolvable", map[string]any{"path": directoryRoot})
+	}
+	filtered := make([]Node, 0)
+	for _, node := range nodes {
+		if pathWithinRoot(root, node.DirectoryPath) {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered, nil
+}
+
+func sortNodesByDirectory(nodes []Node) {
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].DirectoryPath == nodes[j].DirectoryPath {
+			return nodes[i].Slug < nodes[j].Slug
+		}
+		return nodes[i].DirectoryPath < nodes[j].DirectoryPath
+	})
+}
+
+func (s *Service) hydrateConfigurationSlugs(nodes []Node) error {
+	cache := make(map[string]string)
+	for index := range nodes {
+		if nodes[index].ConfigurationID == "" {
+			continue
+		}
+		slug, ok := cache[nodes[index].ConfigurationID]
+		if !ok {
+			configuration, err := s.store.ConfigurationByID(nodes[index].ConfigurationID)
+			if err != nil {
+				return err
+			}
+			slug = configuration.Slug
+			cache[configuration.ID] = slug
+		}
+		nodes[index].ConfigurationSlug = slug
+	}
+	return nil
+}
+
+func (s *Service) hydrateConfigurationSlug(node *Node) error {
+	if node == nil || node.ConfigurationID == "" {
+		return nil
+	}
+	configuration, err := s.store.ConfigurationByID(node.ConfigurationID)
+	if err != nil {
+		return err
+	}
+	node.ConfigurationSlug = configuration.Slug
+	return nil
 }
 
 func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult, error) {
 	// A dry run only inspects the home, so it stays on the read tier and never
 	// requires a runtime backend. Applying can tear down live runtime instances,
 	// so it takes the full write-readiness path (seed/repair under locks plus
-	// runtime-dependency validation, which requires limactl).
+	// runtime-dependency validation, which requires msb).
 	if apply {
 		if err := s.EnsureReady(true); err != nil {
 			return IncompleteNodeCleanupResult{}, err
@@ -1084,23 +1259,23 @@ func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult
 	}
 
 	// Consult the runtime before deleting any metadata. An incomplete node dir
-	// still carries its lima-instance.ref, so os.RemoveAll'ing it while the
+	// still carries its sandbox-instance.ref, so os.RemoveAll'ing it while the
 	// instance is live orphans a running VM and loses the only pointer back to
 	// it (TODO #10). Tear the instance down first; only then is removing the
 	// metadata that references it safe. Dirs with no matching live instance keep
 	// the historical behavior of a straight metadata removal.
-	observations, err := s.lima.List(context.Background())
+	observations, err := s.sandbox.List(context.Background())
 	if err != nil {
 		return IncompleteNodeCleanupResult{}, err
 	}
 
 	var teardownFailures []string
 	for _, item := range items {
-		if instanceName := strings.TrimSpace(item.InstanceName); instanceName != "" {
+		if instanceName := strings.TrimSpace(item.SandboxName); instanceName != "" {
 			if _, live := findObservation(observations, instanceName); live {
-				if delErr := s.lima.Delete(context.Background(), Project{}, Node{LimaInstanceName: instanceName}); delErr != nil {
+				if delErr := s.sandbox.Delete(context.Background(), Project{}, Node{SandboxName: instanceName}); delErr != nil {
 					// Leave the dir (and its ref) in place so a retry or a
-					// manual limactl delete can still find the instance.
+					// manual msb removal can still find the sandbox.
 					teardownFailures = append(teardownFailures, instanceName)
 					continue
 				}
@@ -1134,7 +1309,25 @@ func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {
 	}
 
 	// Showing a node is a read: merge the live observation in memory only.
-	return s.reconcileNode(ctx, node, false)
+	node, err = s.reconcileNode(ctx, node, false)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := s.hydrateConfigurationSlug(&node); err != nil {
+		return Node{}, err
+	}
+	return node, nil
+}
+
+// nodeTerminalMetadata resolves the durable node fields needed to launch a
+// terminal without reconciling live VM status. A host terminal must remain
+// available when Microsandbox is stopped or temporarily unavailable, and a
+// guest terminal's child command performs its own runtime checks.
+func (s *Service) nodeTerminalMetadata(value string) (Node, error) {
+	if err := s.EnsureReady(false); err != nil {
+		return Node{}, err
+	}
+	return s.store.NodeByIDOrSlug(value)
 }
 
 func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err error) {
@@ -1158,7 +1351,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		return Node{}, err
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
+	project, err := s.runtimeProject(node)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1174,8 +1367,8 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 	}
 
 	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != "running" {
-		s.logLima("start", node.ID)
-		if err := s.lima.Start(ctx, project, node); err != nil {
+		s.logRuntime("start", node.ID)
+		if err := s.sandbox.Start(ctx, project, node); err != nil {
 			return Node{}, err
 		}
 	}
@@ -1183,7 +1376,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 	now := s.now()
 	node.Status = NodeStatusProvisioning
 	node.UpdatedAt = now
-	if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
 
@@ -1196,13 +1389,13 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 			if err := s.prepareGuestWorkspace(ctx, project, node); err != nil {
 				node.Status = NodeStatusFailed
 				node.UpdatedAt = s.now()
-				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"workspace_path": project.WorkspacePath, "error": err.Error()}})
+				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"directory_path": node.DirectoryPath, "error": err.Error()}})
 				return Node{}, err
 			}
 
 			node.WorkspaceSeeded = true
 			node.UpdatedAt = s.now()
-			if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+			if err := s.store.SaveNode(node, bootstrap); err != nil {
 				return Node{}, err
 			}
 		}
@@ -1232,7 +1425,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 
 	node.Status = NodeStatusRunning
 	node.UpdatedAt = s.now()
-	if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
 
@@ -1240,7 +1433,14 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		return Node{}, err
 	}
 
-	return s.reconcileNode(ctx, node, true)
+	result, err := s.reconcileNode(ctx, node, true)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := s.hydrateConfigurationSlug(&result); err != nil {
+		return Node{}, err
+	}
+	return result, nil
 }
 
 func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error) {
@@ -1274,7 +1474,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 		return Node{}, err
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
+	project, err := s.runtimeProject(node)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1282,20 +1482,23 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 	if node.LastRuntimeObservation != nil && node.LastRuntimeObservation.Status != "running" {
 		node.Status = NodeStatusStopped
 		node.UpdatedAt = s.now()
-		if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+		if err := s.store.SaveNode(node, bootstrap); err != nil {
+			return Node{}, err
+		}
+		if err := s.hydrateConfigurationSlug(&node); err != nil {
 			return Node{}, err
 		}
 		return node, nil
 	}
 
-	s.logLima("stop", node.ID)
-	if err := s.lima.Stop(ctx, project, node); err != nil {
+	s.logRuntime("stop", node.ID)
+	if err := s.sandbox.Stop(ctx, project, node); err != nil {
 		return Node{}, err
 	}
 
 	node.Status = NodeStatusStopped
 	node.UpdatedAt = s.now()
-	if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
 
@@ -1303,7 +1506,14 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 		return Node{}, err
 	}
 
-	return s.reconcileNode(ctx, node, true)
+	result, err := s.reconcileNode(ctx, node, true)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := s.hydrateConfigurationSlug(&result); err != nil {
+		return Node{}, err
+	}
+	return result, nil
 }
 
 func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
@@ -1314,7 +1524,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
+	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
 	if err != nil {
 		return Node{}, err
 	}
@@ -1324,6 +1534,9 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 
 	sourceNode, err := s.store.NodeByIDOrSlug(input.SourceNode)
 	if err != nil {
+		return Node{}, err
+	}
+	if err := s.hydrateConfigurationSlug(&sourceNode); err != nil {
 		return Node{}, err
 	}
 
@@ -1336,7 +1549,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		return Node{}, preconditionFailed("node clone copies the source VM and does not support agent profile overrides", map[string]any{"source_node_id": sourceNode.ID, "agent_profile_name": input.AgentProfile})
 	}
 
-	sourceProject, err := s.store.ProjectByID(sourceNode.ProjectID)
+	sourceProject, err := s.runtimeProject(sourceNode)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1348,7 +1561,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 
 	sourceWasRunning := sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == "running"
 	if sourceWasRunning {
-		if err := s.lima.Stop(ctx, sourceProject, sourceNode); err != nil {
+		if err := s.sandbox.Stop(ctx, sourceProject, sourceNode); err != nil {
 			return Node{}, err
 		}
 	}
@@ -1357,7 +1570,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 			return
 		}
 
-		if restartErr := s.lima.Start(ctx, sourceProject, sourceNode); restartErr != nil {
+		if restartErr := s.sandbox.Start(ctx, sourceProject, sourceNode); restartErr != nil {
 			err = errors.Join(err, restartErr)
 			return
 		}
@@ -1367,13 +1580,19 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		}
 	}()
 
-	childNodeSlug := coalesce(input.NodeSlug, slugify(sourceNode.Slug+"-clone"))
+	childNodeSlug := strings.TrimSpace(input.NodeSlug)
+	if childNodeSlug == "" {
+		return Node{}, invalidArgument("node clone requires --slug", nil)
+	}
+	if slugify(childNodeSlug) != childNodeSlug {
+		return Node{}, invalidArgument("node slug must be a lowercase slug", map[string]any{"slug": childNodeSlug})
+	}
 	if err := s.ensureUniqueNodeSlug(childNodeSlug); err != nil {
 		return Node{}, err
 	}
 
 	nodeID := newID()
-	instanceName, err := s.generateInstanceName(childNodeSlug)
+	sandboxName, err := s.generateSandboxName(childNodeSlug)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1384,35 +1603,42 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
 	childNode = Node{
-		ID:                    nodeID,
-		Slug:                  childNodeSlug,
-		ProjectID:             sourceProject.ID,
-		ParentNodeID:          sourceNode.ID,
-		Runtime:               RuntimeVM,
-		Provider:              ProviderLima,
-		LimaInstanceName:      instanceName,
-		Status:                NodeStatusCreated,
-		AgentProfileName:      sourceNode.AgentProfileName,
-		LimaCommands:          input.LimaCommands.ApplyDefaults(sourceNode.LimaCommands),
-		BootstrapCommands:     append([]string(nil), sourceNode.BootstrapCommands...),
-		GeneratedTemplatePath: s.store.nodeTemplatePath(nodeID),
-		WorkspaceMode:         nodeWorkspaceMode(sourceNode),
-		GuestWorkspacePath:    sourceNode.GuestWorkspacePath,
-		WorkspaceMountPath:    sourceNode.WorkspaceMountPath,
-		WorkspaceSeeded:       sourceNode.WorkspaceSeeded,
-		BootstrapCompleted:    bootstrap.Completed,
-		BootstrapCompletedAt:  bootstrap.CompletedAt,
-		CreatedAt:             s.now(),
-		UpdatedAt:             s.now(),
+		ID:                   nodeID,
+		Slug:                 childNodeSlug,
+		ConfigurationID:      sourceNode.ConfigurationID,
+		ConfigurationSlug:    sourceNode.ConfigurationSlug,
+		DirectoryPath:        sourceNode.DirectoryPath,
+		ProjectID:            sourceNode.ProjectID,
+		ParentNodeID:         sourceNode.ID,
+		Runtime:              RuntimeVM,
+		Provider:             ProviderMicrosandbox,
+		SandboxName:          sandboxName,
+		Image:                sourceNode.Image,
+		VCPUs:                sourceNode.VCPUs,
+		MemoryMiB:            sourceNode.MemoryMiB,
+		DiskMiB:              sourceNode.DiskMiB,
+		Environments:         append([]string(nil), sourceNode.Environments...),
+		Ports:                append([]string(nil), sourceNode.Ports...),
+		NetPolicy:            cloneNetPolicy(sourceNode.NetPolicy),
+		Status:               NodeStatusCreated,
+		AgentProfileName:     sourceNode.AgentProfileName,
+		RuntimeCommands:      sourceNode.RuntimeCommands,
+		BootstrapCommands:    append([]string(nil), sourceNode.BootstrapCommands...),
+		WorkspaceMode:        nodeWorkspaceMode(sourceNode),
+		GuestWorkspacePath:   sourceNode.GuestWorkspacePath,
+		WorkspaceMountPath:   sourceNode.WorkspaceMountPath,
+		WorkspaceSeeded:      sourceNode.WorkspaceSeeded,
+		BootstrapCompleted:   bootstrap.Completed,
+		BootstrapCompletedAt: bootstrap.CompletedAt,
+		CreatedAt:            s.now(),
+		UpdatedAt:            s.now(),
+	}
+	if sourceNode.ProjectID != "" {
+		childNode.RuntimeCommands = input.RuntimeCommands.ApplyDefaults(sourceNode.RuntimeCommands)
 	}
 
-	s.logLima("clone", childNode.ID)
-	if err := s.lima.Clone(ctx, sourceProject, sourceNode, childNode); err != nil {
-		return Node{}, err
-	}
-
-	template, err := s.renderTemplate(ctx, sourceProject, childNode, bootstrap, nodeWorkspaceMode(sourceNode))
-	if err != nil {
+	s.logRuntime("clone", childNode.ID)
+	if err := s.sandbox.Clone(ctx, sourceProject, sourceNode, childNode); err != nil {
 		return Node{}, err
 	}
 
@@ -1421,7 +1647,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		return Node{}, err
 	}
 	if reconciledChildNode.LastRuntimeObservation != nil && reconciledChildNode.LastRuntimeObservation.Status == "running" {
-		if err := s.lima.Stop(ctx, sourceProject, childNode); err != nil {
+		if err := s.sandbox.Stop(ctx, sourceProject, childNode); err != nil {
 			return Node{}, err
 		}
 		reconciledChildNode, err = s.reconcileNode(ctx, childNode, false)
@@ -1431,7 +1657,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	}
 	childNode = reconciledChildNode
 
-	if err := s.store.SaveNode(childNode, bootstrap, template); err != nil {
+	if err := s.store.SaveNode(childNode, bootstrap); err != nil {
 		return Node{}, err
 	}
 
@@ -1459,6 +1685,9 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
+	if err := s.hydrateConfigurationSlug(&node); err != nil {
+		return Node{}, err
+	}
 
 	bootstrap, err := s.store.LoadBootstrapState(node.ID)
 	if err != nil {
@@ -1468,16 +1697,16 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 	now := s.now()
 	node.Status = NodeStatusTerminating
 	node.UpdatedAt = now
-	if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
+	project, err := s.runtimeProject(node)
 	if err != nil {
 		return Node{}, err
 	}
 
-	if err := s.lima.Delete(ctx, project, node); err != nil {
+	if err := s.sandbox.Delete(ctx, project, node); err != nil {
 		return Node{}, err
 	}
 
@@ -1485,7 +1714,7 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 	node.Status = NodeStatusTerminated
 	node.UpdatedAt = deletedAt
 	node.DeletedAt = &deletedAt
-	if err := s.store.SaveNode(node, bootstrap, nil); err != nil {
+	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
 
@@ -1523,7 +1752,7 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 		return err
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
+	project, err := s.runtimeProject(node)
 	if err != nil {
 		return err
 	}
@@ -1534,7 +1763,7 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 	if interactive {
 		command = interactiveShellLaunchCommand()
 	}
-	return s.lima.Shell(ctx, project, node, command, workdir, interactive, ShellStreams{
+	return s.sandbox.Shell(ctx, project, node, command, workdir, interactive, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
 		Stderr: s.stderr,
@@ -1562,15 +1791,14 @@ type LaunchSpec struct {
 //     rather than a raw runtime shell. The codelima executable is resolved here
 //     in the Service (os.Executable + resolveCodelimaExecutablePath), not taken
 //     from any caller-cached copy.
-//   - ProjectHostShell is an interactive login shell rooted at the project's
-//     host workspace. The workspace path is validated here (non-empty, exists,
+//   - NodeHostShell is an interactive login shell rooted at the node's host
+//     directory. The path is validated here (non-empty, exists,
 //     is a directory); a failure is returned as a typed InvalidArgument error
 //     that the caller records against the target.
 //
-// The caller supplies the already-resolved project workspace path (node shells
-// pass ""); resolution of the project/node from the store stays with the caller
-// — the TUI store today, the daemon with its own lock discipline tomorrow —
-// which keeps this a pure, store-free spec builder.
+// The caller supplies the already-resolved node directory path (node shells
+// pass ""); resolution of the node from the store stays with the caller, which
+// keeps this a pure, store-free spec builder.
 func (s *Service) TerminalLaunchSpec(target terminal.TargetKey, kind terminal.TerminalKind, workspacePath string) (LaunchSpec, error) {
 	switch kind {
 	case terminal.NodeShell:
@@ -1586,16 +1814,16 @@ func (s *Service) TerminalLaunchSpec(target terminal.TargetKey, kind terminal.Te
 			Argv: []string{executable, "--home", s.cfg.MetadataRoot, "shell", nodeID},
 			Env:  os.Environ(),
 		}, nil
-	case terminal.ProjectHostShell:
+	case terminal.NodeHostShell:
 		if strings.TrimSpace(workspacePath) == "" {
-			return LaunchSpec{}, invalidArgument("project workspace path is not configured", map[string]any{"target": target.String()})
+			return LaunchSpec{}, invalidArgument("node directory path is not configured", map[string]any{"target": target.String()})
 		}
 		info, err := os.Stat(workspacePath)
 		if err != nil {
-			return LaunchSpec{}, invalidArgument("project workspace path is unavailable", map[string]any{"target": target.String(), "workspace_path": workspacePath, "error": err.Error()})
+			return LaunchSpec{}, invalidArgument("node directory path is unavailable", map[string]any{"target": target.String(), "directory_path": workspacePath, "error": err.Error()})
 		}
 		if !info.IsDir() {
-			return LaunchSpec{}, invalidArgument("project workspace path is not a directory", map[string]any{"target": target.String(), "workspace_path": workspacePath})
+			return LaunchSpec{}, invalidArgument("node directory path is not a directory", map[string]any{"target": target.String(), "directory_path": workspacePath})
 		}
 		return LaunchSpec{
 			Argv: interactiveShellLaunchCommand(),
@@ -1695,36 +1923,84 @@ func (s *Service) resolveEnvironmentConfigRefs(refs []string) ([]string, error) 
 	return resolved, nil
 }
 
-func (s *Service) resolveProjectBootstrapCommands(project Project, nodeCommands LimaCommandTemplates) ([]string, error) {
-	commands := []string{}
-	for _, slug := range project.EnvironmentConfigs {
-		config, err := s.store.EnvironmentConfigByIDOrSlug(slug)
+func (s *Service) resolveConfigurationBootstrapCommands(configuration Configuration) ([]string, error) {
+	commands := make([]string, 0)
+	for _, slug := range configuration.Environments {
+		environment, err := s.store.EnvironmentConfigByIDOrSlug(slug)
 		if err != nil {
 			return nil, err
 		}
-		if config.DeletedAt != nil {
-			return nil, notFound("environment config not found", map[string]any{"query": slug})
+		if environment.DeletedAt != nil {
+			return nil, notFound("environment not found", map[string]any{"query": slug})
 		}
-		commands = append(commands, config.BootstrapCommands...)
+		commands = append(commands, environment.BootstrapCommands...)
 	}
-
-	resolved, err := resolveConfiguredLimaCommands("limactl", s.cfg.LimaCommands, project, nodeCommands, limaCommandBootstrap, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	commands = append(commands, resolved...)
+	commands = append(commands, configuration.BootstrapCommands...)
 	return commands, nil
 }
 
-func (s *Service) generateInstanceName(nodeSlug string) (string, error) {
-	instanceName := slugify(nodeSlug)
-	if len(instanceName) > 63 {
-		instanceName = instanceName[:63]
-		instanceName = strings.Trim(instanceName, "-")
+func runtimeProjectForNode(node Node) Project {
+	return Project{
+		ID:              node.ConfigurationID,
+		Slug:            "configuration",
+		WorkspacePath:   node.DirectoryPath,
+		DefaultRuntime:  RuntimeVM,
+		DefaultProvider: ProviderMicrosandbox,
+		DefaultImage:    node.Image,
 	}
-	if instanceName == "" {
-		instanceName = "node"
+}
+
+func (s *Service) runtimeProject(node Node) (Project, error) {
+	if node.ProjectID != "" {
+		return s.store.ProjectByID(node.ProjectID)
+	}
+	return runtimeProjectForNode(node), nil
+}
+
+func (s *Service) resolveNodeDirectoryPath(input string) (string, error) {
+	if strings.TrimSpace(input) == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", invalidArgument("current directory is unavailable", nil)
+		}
+		input = cwd
+	}
+	directoryPath, err := canonicalPath(input)
+	if err != nil {
+		return "", invalidArgument("node directory must be resolvable", map[string]any{"path": input})
+	}
+	info, err := os.Stat(directoryPath)
+	if err != nil || !info.IsDir() {
+		return "", invalidArgument("node directory must be an existing directory", map[string]any{"path": directoryPath})
+	}
+	if pathWithinRoot(s.cfg.MetadataRoot, directoryPath) {
+		return "", invalidArgument("node directory must not be inside CODELIMA_HOME", map[string]any{"path": directoryPath})
+	}
+	return directoryPath, nil
+}
+
+func ensureNodeDirectoryAvailable(node Node) error {
+	info, err := os.Stat(node.DirectoryPath)
+	if err != nil {
+		return preconditionFailed("node directory no longer exists on the host", map[string]any{"node_id": node.ID, "directory_path": node.DirectoryPath})
+	}
+	if !info.IsDir() {
+		return preconditionFailed("node directory is no longer a directory on the host", map[string]any{"node_id": node.ID, "directory_path": node.DirectoryPath})
+	}
+	return nil
+}
+
+func (s *Service) generateSandboxName(nodeSlug string) (string, error) {
+	sandboxName := slugify(nodeSlug)
+	if len(sandboxName) > 128 {
+		sandboxName = sandboxName[:128]
+		sandboxName = strings.Trim(sandboxName, "-")
+	}
+	if sandboxName == "" {
+		sandboxName = "node"
+	}
+	if err := validateSandboxName(sandboxName); err != nil {
+		return "", err
 	}
 
 	nodes, err := s.store.ListNodes(false)
@@ -1733,61 +2009,12 @@ func (s *Service) generateInstanceName(nodeSlug string) (string, error) {
 	}
 
 	for _, node := range nodes {
-		if node.LimaInstanceName == instanceName && node.Status != NodeStatusTerminated {
-			return "", preconditionFailed("lima instance name already exists", map[string]any{"instance_name": instanceName})
+		if node.SandboxName == sandboxName && node.Status != NodeStatusTerminated {
+			return "", preconditionFailed("sandbox name already exists", map[string]any{"sandbox_name": sandboxName})
 		}
 	}
 
-	return instanceName, nil
-}
-
-func (s *Service) renderTemplate(ctx context.Context, project Project, node Node, bootstrap BootstrapState, workspaceMode string) ([]byte, error) {
-	rawTemplate, err := s.lima.BaseTemplate(ctx, project, node.LimaCommands, project.DefaultLimaTemplate)
-	if err != nil {
-		return nil, err
-	}
-
-	document := map[string]any{}
-	if err := yaml.Unmarshal(rawTemplate, &document); err != nil {
-		return nil, metadataCorruption("failed to parse base lima template", err, nil)
-	}
-
-	delete(document, "cpus")
-	delete(document, "memory")
-	delete(document, "disk")
-	document["provision"] = appendLimaProvision(document["provision"], map[string]any{
-		"mode":   "system",
-		"script": nodeHostnameProvisionScript(node.LimaInstanceName),
-	})
-	document["mounts"] = renderWorkspaceMounts(project.WorkspacePath, workspaceMode)
-
-	templateBytes, err := yaml.Marshal(document)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(templateBytes, []byte(bootstrapComment(bootstrap))...), nil
-}
-
-func appendLimaProvision(existing any, provision map[string]any) []any {
-	provisions := []any{}
-	if values, ok := existing.([]any); ok {
-		provisions = append(provisions, values...)
-	}
-	return append(provisions, provision)
-}
-
-func nodeHostnameProvisionScript(hostname string) string {
-	quotedHostname := shellQuote(hostname)
-	return fmt.Sprintf(`#!/bin/sh
-set -eu
-if command -v hostnamectl >/dev/null 2>&1; then
-	hostnamectl set-hostname %[1]s
-else
-	hostname %[1]s
-	printf '%%s\n' %[1]s > /etc/hostname
-fi
-`, quotedHostname)
+	return sandboxName, nil
 }
 
 func (s *Service) runGuestCommand(ctx context.Context, node Node, command string) error {
@@ -1795,7 +2022,7 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		return nil
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
+	project, err := s.runtimeProject(node)
 	if err != nil {
 		return err
 	}
@@ -1805,11 +2032,53 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 	if workdir != "" {
 		script = fmt.Sprintf("cd %q && %s", workdir, command)
 	}
-	return s.lima.Shell(ctx, project, node, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+	return s.sandbox.Shell(ctx, project, node, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+}
+
+func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, error) {
+	nodes, err := s.NodeList(ctx, false)
+	if err != nil {
+		return 0, err
+	}
+
+	reclaimed := 0
+	var reclaimErr error
+	for _, node := range nodes {
+		if nodeWorkspaceMode(node) != WorkspaceModeMounted || node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != NodeStatusRunning {
+			continue
+		}
+		project, projectErr := s.runtimeProject(node)
+		if projectErr != nil {
+			reclaimErr = errors.Join(reclaimErr, fmt.Errorf("resolve runtime project for mounted node %s: %w", node.Slug, projectErr))
+			continue
+		}
+		reclaimCtx, cancel := context.WithTimeout(ctx, guestFilesystemCacheReclaimTimeout)
+		shellErr := s.sandbox.Shell(
+			reclaimCtx,
+			project,
+			node,
+			[]string{"sh", "-c", "echo 2 > /proc/sys/vm/drop_caches"},
+			"",
+			false,
+			ShellStreams{},
+		)
+		cancel()
+		if shellErr != nil {
+			reclaimErr = errors.Join(reclaimErr, fmt.Errorf("reclaim filesystem metadata cache for mounted node %s: %w", node.Slug, shellErr))
+			continue
+		}
+		reclaimed++
+	}
+
+	return reclaimed, reclaimErr
 }
 
 func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, node Node) error {
-	if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
+	if node.ProjectID != "" {
+		if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
+			return err
+		}
+	} else if err := ensureNodeDirectoryAvailable(node); err != nil {
 		return err
 	}
 
@@ -1822,21 +2091,25 @@ func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, no
 
 func (s *Service) seedGuestWorkspace(ctx context.Context, project Project, node Node) error {
 	targetPath := s.nodeGuestWorkspacePath(node)
-	prepareScript, err := s.resolveWorkspaceSeedPrepareCommand(project, node, project.WorkspacePath, targetPath)
+	sourcePath := node.DirectoryPath
+	if sourcePath == "" {
+		sourcePath = project.WorkspacePath
+	}
+	prepareScript, err := s.resolveWorkspaceSeedPrepareCommand(project, node, sourcePath, targetPath)
 	if err != nil {
 		return err
 	}
 
-	if err := s.lima.Shell(ctx, project, node, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
+	if err := s.sandbox.Shell(ctx, project, node, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
 		return err
 	}
 
-	return s.lima.CopyToGuest(ctx, project, node, project.WorkspacePath, targetPath, true)
+	return s.sandbox.CopyToGuest(ctx, project, node, sourcePath, targetPath, true)
 }
 
 func (s *Service) resolveWorkspaceSeedPrepareCommand(project Project, node Node, sourcePath, targetPath string) (string, error) {
-	commands, err := resolveConfiguredLimaCommands("limactl", s.cfg.LimaCommands, project, node.LimaCommands, limaCommandWorkspaceSeedPrepare, map[string]string{
-		"instance_name": shellQuote(node.LimaInstanceName),
+	commands, err := s.sandbox.ResolveCommands(project, node, runtimeCommandWorkspaceSeedPrepare, map[string]string{
+		"sandbox_name":  shellQuote(node.SandboxName),
 		"source_path":   shellQuote(sourcePath),
 		"target_path":   shellQuote(targetPath),
 		"target_parent": shellQuote(filepath.Dir(targetPath)),
@@ -1914,12 +2187,16 @@ func (s *Service) nodeGuestWorkspacePath(node Node) string {
 		return node.WorkspaceMountPath
 	}
 
-	project, err := s.store.ProjectByID(node.ProjectID)
-	if err != nil {
-		return ""
+	if node.DirectoryPath != "" {
+		return node.DirectoryPath
 	}
-
-	return project.WorkspacePath
+	if node.ProjectID != "" {
+		project, err := s.store.ProjectByID(node.ProjectID)
+		if err == nil {
+			return project.WorkspacePath
+		}
+	}
+	return ""
 }
 
 func normalizeWorkspaceMode(mode string) string {
@@ -1941,20 +2218,6 @@ func nodeWorkspaceMode(node Node) string {
 		return WorkspaceModeMounted
 	}
 	return WorkspaceModeCopy
-}
-
-func renderWorkspaceMounts(workspacePath, workspaceMode string) []map[string]any {
-	if normalizeWorkspaceMode(workspaceMode) != WorkspaceModeMounted || strings.TrimSpace(workspacePath) == "" {
-		return []map[string]any{}
-	}
-
-	return []map[string]any{
-		{
-			"location":   workspacePath,
-			"mountPoint": workspacePath,
-			"writable":   true,
-		},
-	}
 }
 
 func (s *Service) resolveProjectWorkspacePath(input string, currentProjectID string) (string, error) {
@@ -1999,7 +2262,7 @@ func (s *Service) ensureProjectWorkspaceAvailable(project Project) error {
 }
 
 func (s *Service) reconcileNode(ctx context.Context, node Node, persist bool) (Node, error) {
-	observations, err := s.lima.List(ctx)
+	observations, err := s.sandbox.List(ctx)
 	if err != nil {
 		return Node{}, err
 	}
@@ -2008,7 +2271,7 @@ func (s *Service) reconcileNode(ctx context.Context, node Node, persist bool) (N
 }
 
 func (s *Service) reconcileNodes(ctx context.Context, nodes []Node, persist bool) ([]Node, error) {
-	observations, err := s.lima.List(ctx)
+	observations, err := s.sandbox.List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2027,7 +2290,7 @@ func (s *Service) reconcileNodes(ctx context.Context, nodes []Node, persist bool
 }
 
 func (s *Service) reconcileNodeWithObservations(node Node, observations []RuntimeObservation, persist bool, now time.Time) (Node, error) {
-	observation, ok := findObservation(observations, node.LimaInstanceName)
+	observation, ok := findObservation(observations, node.SandboxName)
 	node.LastReconciledAt = &now
 	if ok {
 		node.LastRuntimeObservation = &observation
@@ -2042,7 +2305,7 @@ func (s *Service) reconcileNodeWithObservations(node Node, observations []Runtim
 			}
 		}
 	} else {
-		node.LastRuntimeObservation = &RuntimeObservation{Name: node.LimaInstanceName, Exists: false}
+		node.LastRuntimeObservation = &RuntimeObservation{Name: node.SandboxName, Exists: false}
 	}
 
 	if persist {
@@ -2052,7 +2315,7 @@ func (s *Service) reconcileNodeWithObservations(node Node, observations []Runtim
 		}
 
 		node.UpdatedAt = now
-		if saveErr := s.store.SaveNode(node, bootstrap, nil); saveErr != nil {
+		if saveErr := s.store.SaveNode(node, bootstrap); saveErr != nil {
 			return Node{}, saveErr
 		}
 	}

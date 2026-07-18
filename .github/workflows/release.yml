@@ -54,8 +54,6 @@ jobs:
             target: linux-amd64
           - runner: ubuntu-24.04-arm
             target: linux-arm64
-          - runner: macos-15-intel
-            target: darwin-amd64
           - runner: macos-14
             target: darwin-arm64
     runs-on: ${{ matrix.runner }}
@@ -91,7 +89,7 @@ jobs:
         shell: bash
         run: |
           TAG="${{ needs.metadata.outputs.tag }}"
-          gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GH_REPO" --title "$TAG" --notes ""
+          gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1 || gh release create "$TAG" --repo "$GH_REPO" --title "$TAG" --generate-notes
           find "$RUNNER_TEMP/dist" -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.json' \) -print0 \
             | xargs -0 gh release upload "$TAG" --repo "$GH_REPO" --clobber
 

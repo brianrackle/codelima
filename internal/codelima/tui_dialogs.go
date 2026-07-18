@@ -208,34 +208,185 @@ func (a *vaxisTUIApp) openCreateProjectDialog() {
 	a.dialog = dialog
 }
 
-func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
+func (a *vaxisTUIApp) openConfigurationsMenu() error {
+	configurations, err := a.service.ConfigurationList(false)
+	if err != nil {
+		return err
+	}
+	description := []string{"Reusable configurations define image, agent, environments, bootstrap, and VM resources for future nodes."}
+	for _, configuration := range configurations {
+		description = append(description, fmt.Sprintf("- %s: %d CPU, %d MiB memory, %d MiB disk", configuration.Slug, configuration.VCPUs, configuration.MemoryMiB, configuration.DiskMiB))
+	}
+	entries := []tuiMenuEntry{{Key: 'c', Label: "Create Configuration", Action: func() error { a.openCreateConfigurationDialog(); return nil }}}
+	if len(configurations) != 0 {
+		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Configuration", Action: func() error {
+			return a.openManageConfigurationSelector(configurations[0].Slug)
+		}})
+	}
+	a.menu = &tuiMenu{Title: "Configurations", Description: description, Entries: entries}
+	return nil
+}
+
+func (a *vaxisTUIApp) openConfigurationSelector(current string, onSubmit func(string) error) error {
+	configurations, err := a.service.ConfigurationList(false)
+	if err != nil {
+		return err
+	}
+	options := make([]tuiSelectorOption, 0, len(configurations))
+	for _, configuration := range configurations {
+		options = append(options, tuiSelectorOption{Label: configuration.Slug, Value: configuration.Slug})
+	}
+	a.selector = newTUISelector("Select Configuration", nil, options, []string{coalesce(current, DefaultConfigurationSlug)}, false, func(values []string) error {
+		if len(values) != 1 {
+			return fmt.Errorf("select a configuration")
+		}
+		return onSubmit(values[0])
+	})
+	return nil
+}
+
+func (a *vaxisTUIApp) openManageConfigurationSelector(current string) error {
+	return a.openConfigurationSelector(current, func(value string) error {
+		configuration, err := a.service.ConfigurationShow(value)
+		if err != nil {
+			return err
+		}
+		a.openConfigurationMenu(configuration)
+		return nil
+	})
+}
+
+func (a *vaxisTUIApp) openConfigurationMenu(configuration Configuration) {
+	entries := []tuiMenuEntry{
+		{Key: 'u', Label: "Update Configuration", Action: func() error { a.openUpdateConfigurationDialog(configuration); return nil }},
+		{Key: 'c', Label: "Clone Configuration", Action: func() error { a.openCloneConfigurationDialog(configuration); return nil }},
+	}
+	if configuration.Slug != DefaultConfigurationSlug {
+		entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Delete Configuration", Action: func() error { a.openDeleteConfigurationDialog(configuration); return nil }})
+	}
+	a.menu = &tuiMenu{
+		Title: "Configuration: " + configuration.Slug,
+		Description: []string{
+			"Image: " + configuration.Image,
+			"Agent: " + configuration.AgentProfileName,
+			fmt.Sprintf("Resources: %d CPU, %d MiB memory, %d MiB disk", configuration.VCPUs, configuration.MemoryMiB, configuration.DiskMiB),
+			"Environments: " + environmentConfigSelectionSummary(configuration.Environments),
+			fmt.Sprintf("Bootstrap commands: %d", len(configuration.BootstrapCommands)),
+		},
+		Entries: entries,
+	}
+}
+
+func (a *vaxisTUIApp) openCreateConfigurationDialog() {
+	a.dialog = newTUIDialog("Create Configuration", "Create", []string{"New configurations copy the current default configuration once."}, []tuiDialogField{
+		newTUIInputField("slug", "Configuration Slug", "", true),
+	}, func(values map[string]string) error {
+		configuration, err := a.service.ConfigurationCreate(ConfigurationCreateInput{Slug: values["slug"]})
+		if err != nil {
+			return err
+		}
+		a.status = "created configuration " + configuration.Slug
+		a.openConfigurationMenu(configuration)
+		return nil
+	})
+}
+
+func (a *vaxisTUIApp) openUpdateConfigurationDialog(configuration Configuration) {
+	dialog := newTUIDialog("Update Configuration", "Update", []string{"Changes apply to future nodes only; existing nodes keep their frozen values."}, []tuiDialogField{
+		newTUIInputField("slug", "Configuration Slug", configuration.Slug, true),
+		newTUIInputField("image", "Image", configuration.Image, true),
+		newTUIInputField("agent", "Agent Profile", configuration.AgentProfileName, true),
+		newTUIInputField("vcpus", "vCPUs", strconv.Itoa(int(configuration.VCPUs)), true),
+		newTUIInputField("memory", "Memory MiB", strconv.FormatUint(uint64(configuration.MemoryMiB), 10), true),
+		newTUIInputField("disk", "Disk MiB", strconv.FormatUint(uint64(configuration.DiskMiB), 10), true),
+		newTUISelectorField("environments", "Environments", commaSeparatedValues(configuration.Environments), false, nil),
+	}, func(values map[string]string) error {
+		vcpus64, err := strconv.ParseUint(values["vcpus"], 10, 8)
+		if err != nil || vcpus64 == 0 {
+			return fmt.Errorf("vCPUs must be a positive integer")
+		}
+		memory, err := parseSizeMiB(values["memory"])
+		if err != nil {
+			return fmt.Errorf("memory must be a positive MiB value")
+		}
+		disk, err := parseSizeMiB(values["disk"])
+		if err != nil {
+			return fmt.Errorf("disk must be a positive MiB value")
+		}
+		image, agent, vcpus := values["image"], values["agent"], uint8(vcpus64)
+		updated, err := a.service.ConfigurationUpdate(configuration.ID, ConfigurationUpdateInput{
+			Slug: values["slug"], Image: &image, AgentProfile: &agent,
+			Environments: parseCommaSeparatedValues(values["environments"]), VCPUs: &vcpus, MemoryMiB: &memory, DiskMiB: &disk,
+		})
+		if err != nil {
+			return err
+		}
+		a.status = "updated configuration " + updated.Slug
+		a.openConfigurationMenu(updated)
+		return a.reloadData(a.state.selectedEntry().key())
+	})
+	dialog.Fields[6].Display = func(value string) string { return environmentConfigSelectionSummary(parseCommaSeparatedValues(value)) }
+	dialog.Fields[6].Activate = func() error {
+		return a.openEnvironmentConfigSelector("Select Environments", []string{"Choose reusable environments for future nodes."}, parseCommaSeparatedValues(dialog.Fields[6].Value), true, func(values []string) error {
+			dialog.SetFieldValue("environments", commaSeparatedValues(values))
+			return nil
+		})
+	}
+	a.dialog = dialog
+}
+
+func (a *vaxisTUIApp) openCloneConfigurationDialog(configuration Configuration) {
+	a.dialog = newTUIDialog("Clone Configuration", "Clone", []string{"Copy this reusable configuration under a new slug."}, []tuiDialogField{
+		newTUIInputField("slug", "New Configuration Slug", "", true),
+	}, func(values map[string]string) error {
+		cloned, err := a.service.ConfigurationClone(ConfigurationCloneInput{Source: configuration.ID, Slug: values["slug"]})
+		if err != nil {
+			return err
+		}
+		a.status = "cloned configuration " + cloned.Slug
+		a.openConfigurationMenu(cloned)
+		return nil
+	})
+}
+
+func (a *vaxisTUIApp) openDeleteConfigurationDialog(configuration Configuration) {
+	a.dialog = newTUIDialog("Delete Configuration", "Delete", []string{"Delete configuration " + configuration.Slug + ". Referenced configurations cannot be deleted."}, nil, func(map[string]string) error {
+		deleted, err := a.service.ConfigurationDelete(configuration.ID)
+		if err != nil {
+			return err
+		}
+		a.status = "deleted configuration " + deleted.Slug
+		return a.reloadData(a.state.selectedEntry().key())
+	})
+}
+
+func (a *vaxisTUIApp) openCreateNodeDialog() error {
+	cwd, err := canonicalPath(".")
+	if err != nil {
+		return err
+	}
 	dialog := newTUIDialog(
 		"Create Node",
 		"Create",
-		[]string{
-			"Selected project: " + project.Slug,
-		},
+		[]string{"Create a directory-bound node from a reusable configuration."},
 		[]tuiDialogField{
-			newTUIInputField("slug", "Node Slug", project.Slug+"-node", true),
-			newTUIValueSelectorField("workspace_mode", "Workspace Mode", WorkspaceModeCopy, true, workspaceModeDisplay, nil),
-			newTUIInputField("lima_commands_file", "Lima Commands File (optional)", "", false),
+			newTUIInputField("slug", "Node Slug", "", true),
+			newTUIInputField("directory", "Directory", "", false),
+			newTUIValueSelectorField("configuration", "Configuration", DefaultConfigurationSlug, true, func(value string) string { return value }, nil),
+			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, true, workspaceModeDisplay, nil),
 		},
 		func(values map[string]string) error {
-			limaCommands, err := loadOptionalLimaCommandsFile(values["lima_commands_file"])
-			if err != nil {
-				return err
-			}
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Creating node " + values["slug"],
 				DisplayStatus: "creating",
-				ResourceKeys:  []string{terminal.ProjectTarget(project.ID).String()},
-				EntryKeys:     []string{terminal.ProjectTarget(project.ID).String()},
+				ResourceKeys:  []string{"nodes"},
+				EntryKeys:     []string{"nodes"},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 					node, err := service.NodeCreate(ctx, NodeCreateInput{
-						Project:       project.ID,
+						Configuration: values["configuration"],
+						Directory:     values["directory"],
 						Slug:          values["slug"],
 						WorkspaceMode: values["workspace_mode"],
-						LimaCommands:  limaCommands,
 					})
 					if err != nil {
 						return tuiOperationResult{}, err
@@ -250,9 +401,17 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 			})
 		},
 	)
-	dialog.Fields[1].Activate = func() error {
+	dialog.Fields[1].Input.SetPrompt(cwd)
+	dialog.Fields[1].Input.Prompt = tuiMutedStyle()
+	dialog.Fields[2].Activate = func() error {
+		return a.openConfigurationSelector(dialog.Fields[2].rawValue(), func(value string) error {
+			dialog.SetFieldValue("configuration", value)
+			return nil
+		})
+	}
+	dialog.Fields[3].Activate = func() error {
 		return a.openWorkspaceModeSelector(
-			dialog.Fields[1].rawValue(),
+			dialog.Fields[3].rawValue(),
 			func(value string) error {
 				dialog.SetFieldValue("workspace_mode", value)
 				return nil
@@ -260,6 +419,32 @@ func (a *vaxisTUIApp) openCreateNodeDialog(project Project) {
 		)
 	}
 	a.dialog = dialog
+	return nil
+}
+
+func (a *vaxisTUIApp) openLegacyCreateNodeDialog(project Project) error {
+	dialog := newTUIDialog("Create Node", "Create", []string{"Selected project: " + project.Slug}, []tuiDialogField{
+		newTUIInputField("slug", "Node Slug", project.Slug+"-node", true),
+		newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, true, workspaceModeDisplay, nil),
+		newTUIInputField("runtime_commands_file", "Runtime Commands File (optional)", "", false),
+	}, func(values map[string]string) error {
+		runtimeCommands, err := loadOptionalRuntimeCommandsFile(values["runtime_commands_file"])
+		if err != nil {
+			return err
+		}
+		return a.startOperation(tuiOperationRequest{Title: "Creating node " + values["slug"], DisplayStatus: "creating", ResourceKeys: []string{terminal.ProjectTarget(project.ID).String()}, EntryKeys: []string{terminal.ProjectTarget(project.ID).String()}, Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: values["slug"], WorkspaceMode: values["workspace_mode"], RuntimeCommands: runtimeCommands})
+			if err != nil {
+				return tuiOperationResult{}, err
+			}
+			return tuiOperationResult{Status: "created node " + node.Slug, PreferredKey: terminal.NodeTarget(node.ID).String(), ReloadData: true, ShowTerminalPane: true}, nil
+		}})
+	})
+	dialog.Fields[1].Activate = func() error {
+		return a.openWorkspaceModeSelector(dialog.Fields[1].rawValue(), func(value string) error { dialog.SetFieldValue("workspace_mode", value); return nil })
+	}
+	a.dialog = dialog
+	return nil
 }
 
 func (a *vaxisTUIApp) openWorkspaceModeSelector(current string, onSubmit func(value string) error) error {
@@ -271,7 +456,7 @@ func (a *vaxisTUIApp) openWorkspaceModeSelector(current string, onSubmit func(va
 		"Workspace Mode",
 		nil,
 		options,
-		[]string{coalesce(current, WorkspaceModeCopy)},
+		[]string{coalesce(current, DefaultWorkspaceMode)},
 		false,
 		func(values []string) error {
 			if len(values) == 0 {
@@ -298,7 +483,7 @@ func (a *vaxisTUIApp) openUpdateProjectDialog(project Project) {
 		"Update",
 		[]string{
 			"Update the selected project slug, workspace path, and assigned environment configs.",
-			"Edit the project file shown in the right pane when you need advanced per-project settings such as Lima command overrides.",
+			"Edit the project file shown in the right pane when you need advanced per-project settings such as microsandbox command overrides.",
 		},
 		[]tuiDialogField{
 			newTUIInputField("slug", "Project Slug", project.Slug, true),
@@ -658,7 +843,7 @@ func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
 		"Delete",
 		[]string{
 			"Delete node " + node.Slug + ".",
-			"The associated Lima instance will be terminated.",
+			"The associated microsandbox will be terminated.",
 		},
 		nil,
 		func(_ map[string]string) error {
@@ -683,39 +868,37 @@ func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
 	)
 }
 
-func (a *vaxisTUIApp) openCloneNodeDialog(node Node, project Project) {
+func (a *vaxisTUIApp) openCloneNodeDialog(node Node) {
+	fields := []tuiDialogField{newTUIInputField("node_slug", "Cloned Node Slug", "", true)}
+	if node.ProjectID != "" {
+		fields[0] = newTUIInputField("node_slug", "Cloned Node Slug", node.Slug+"-clone", true)
+		fields = append(fields, newTUIInputField("runtime_commands_file", "Runtime Commands File (optional)", "", false))
+	}
 	a.dialog = newTUIDialog(
 		"Clone Node",
 		"Clone",
 		[]string{
-			"Clone the selected node into another node in the same project.",
-			"The cloned VM keeps the same guest workspace path and bootstrap state as the source.",
+			"Clone the selected node in the same directory and configuration.",
+			"The cloned VM keeps the source's frozen configuration and writable state.",
 		},
-		[]tuiDialogField{
-			newTUIInputField("node_slug", "Cloned Node Slug", node.Slug+"-clone", true),
-			newTUIInputField("lima_commands_file", "Lima Commands File (optional)", "", false),
-		},
+		fields,
 		func(values map[string]string) error {
-			limaCommands, err := loadOptionalLimaCommandsFile(values["lima_commands_file"])
+			runtimeCommands, err := loadOptionalRuntimeCommandsFile(values["runtime_commands_file"])
 			if err != nil {
 				return err
 			}
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Cloning node " + node.Slug,
 				DisplayStatus: "cloning",
-				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String(), terminal.ProjectTarget(project.ID).String()},
-				EntryKeys:     []string{terminal.NodeTarget(node.ID).String(), terminal.ProjectTarget(project.ID).String()},
+				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String()},
+				EntryKeys:     []string{terminal.NodeTarget(node.ID).String()},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-					childNode, err := service.NodeClone(ctx, NodeCloneInput{
-						SourceNode:   node.ID,
-						NodeSlug:     values["node_slug"],
-						LimaCommands: limaCommands,
-					})
+					childNode, err := service.NodeClone(ctx, NodeCloneInput{SourceNode: node.ID, NodeSlug: values["node_slug"], RuntimeCommands: runtimeCommands})
 					if err != nil {
 						return tuiOperationResult{}, err
 					}
 					return tuiOperationResult{
-						Status:       "cloned node " + node.Slug + " to " + childNode.Slug + " in " + project.Slug,
+						Status:       "cloned node " + node.Slug + " to " + childNode.Slug,
 						PreferredKey: terminal.NodeTarget(childNode.ID).String(),
 						ReloadData:   true,
 					}, nil

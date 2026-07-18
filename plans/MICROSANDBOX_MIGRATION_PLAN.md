@@ -1,8 +1,12 @@
 # Microsandbox Migration Plan — Implementation Handover
 
-Status: Approved — breaking change
+> Historical migration handover. The backend swap and Go SDK work are complete. Project-oriented examples below describe the source model at migration time and are superseded by schema v3 in ADR 72 and `SPEC.md`.
+
+Status: Complete in the current environment — E1–E10, implementation, automated verification, and manual local QA passed (2026-07-09)
+SDK follow-up: The CLI implementation in this historical handover is superseded by `MICROSANDBOX_GO_SDK_MIGRATION_SPEC.md` and ADR 71. Production now uses the official Go SDK exclusively, with no `msb` CLI fallback.
 Supersedes: `RUNTIME_PROVIDER_PLAN.md` (cancelled; its abstraction-first premise no longer applies — we keep its inventory of Lima-shaped fields, reproduced and extended in §2)
 Decision record: `decisions/replace_lima_with_microsandbox_as_sole_runtime_55.md`
+Spike result: `plans/spike-notes/MSB_SPIKE.md` (real PID 1 reaper required; all local gates passed; native release coverage remains)
 Prerequisite reading: `IMPROVEMENT_PLAN.md` Parts A and B (setup, process, architecture map). The same work-item rules apply here: TDD, ADRs, `make verify` per PR, trust-the-code-over-the-document.
 
 ---
@@ -70,13 +74,14 @@ Everything in this section is verified against `cb90e7a`. This is the complete i
 
 ## 3. The guest contract (new concept — decide once, document)
 
-With Lima, guests were full Ubuntu VMs: systemd, snapd, sudo, apt, cloud-init. With msb, guests are OCI images with (assume) a minimal init and **no systemd/snapd**. Define and document a minimum guest contract that CodeLima requires of any image used for a node:
+With Lima, guests were full Ubuntu VMs: systemd, snapd, sudo, apt, cloud-init. With msb, guests are OCI images. The spike found that microsandbox's minimal agent as guest PID 1 does not reap an interactive shell's orphaned job after terminal disconnect; CodeLima must therefore enable microsandbox's supported `--init` handoff and use an image with a real PID 1 reaper. This does not require application bootstraps to depend on systemd: a smaller init such as `tini` or s6 may satisfy the lifecycle contract once it passes the same close probe. Define and document a minimum guest contract that CodeLima requires of any image used for a node:
 
 - `sh` at `/bin/sh`; `curl` or `wget`; a package manager appropriate to the image; `git` (agents need it).
+- A real PID 1 init/reaper selected with `msb create --init auto`; the default microsandbox agent as PID 1 is not supported for CodeLima nodes.
 - A writable layer that persists across `msb stop/start` (verified in spike E6).
 - Known user identity: determine in the spike (E9) whether the default guest user is root; all built-in bootstrap commands must work under whichever it is (§7.2).
 
-Default image: a mainstream apt-based image (`debian:bookworm` or `ubuntu:24.04` — pick in the spike based on what msb's examples use and image pull size). Users can override per project/node (§6.2). Record the contract + default choice in the Phase 3 ADR.
+Focused-retest image: `ghcr.io/superradcompany/debian-systemd:12` with `--init auto` passed the embedded close test for both `exec -t` and SSH. Use it for the full E1 rerun unless a smaller apt-based image with `tini`/s6 passes the same test first. Users can override per project/node (§6.2), but every supported image must satisfy the real-init contract. Record the contract + final default choice in the Phase 3 ADR.
 
 ---
 
@@ -92,7 +97,7 @@ Setup: install microsandbox per docs.microsandbox.dev; record the exact version 
 
 Why this is the gate and not just another row: the evidence that microsandbox supports interactive PTYs at all is **documentation-only and was contradictory during evaluation**. The project README documents no interactive shell whatsoever; only the CLI reference claims `msb exec` auto-detects a TTY (`-t/--tty` to force) and that `msb ssh <name>` exists. Nobody has verified either claim on a real install, and everything downstream (the TUI, the Track 3 daemon, agent detection) assumes a full-fidelity interactive PTY into the guest. Treat vendor docs as hypotheses; this experiment is the test.
 
-Setup: `msb create` a debian sandbox. Then run every check below through **both** `msb ssh <n>` and `msb exec -t <n> -- bash`, **inside the CodeLima TUI's embedded Ghostty terminal** (hack `OpenNodeTab`'s argv locally, or open a project tab and run `msb` from it — the point is that msb's stdin/stdout is CodeLima's PTY, exactly as it will be in production). A check passing in a bare host terminal but failing inside the embedded terminal is a FAIL.
+Setup: create the candidate default sandbox with `--init auto`, then verify `/proc/1/comm` names the intended init and that the guest process table starts with no zombies. Run every check below through **both** `msb ssh <n>` and `msb exec -t <n> -- bash`, **inside the CodeLima TUI's embedded Ghostty terminal** (hack `OpenNodeTab`'s argv locally, or open a project tab and run `msb` from it — the point is that msb's stdin/stdout is CodeLima's PTY, exactly as it will be in production). A check passing in a bare host terminal but failing inside the embedded terminal is a FAIL.
 
 1. **True PTY allocation, guest side.** `tty` prints a `/dev/pts/*` device (not "not a tty"); `stty -a` shows sane raw-capable termios; `[ -t 0 ] && echo interactive` succeeds.
 2. **Window size truth + resize propagation.** `stty size` in the guest matches the embedded terminal's cell geometry. Resize the CodeLima pane/window repeatedly: `stty size` updates (SIGWINCH propagates through msb's host→guest transport), and a running `vim`/`htop` reflows instead of clearing or corrupting.
@@ -154,7 +159,7 @@ Keep the command-template-first pattern exactly (config → project → node pre
 func defaultRuntimeCommandTemplates() RuntimeCommandTemplates {
     return RuntimeCommandTemplates{
         List:        "msb ls --json",                                                  // finalize per E2
-        Create:      "msb create --name {{sandbox_name}} --image {{image}} --cpus {{cpus}} --memory {{memory}}{{mount_flags}}{{port_flags}}{{net_flags}}",
+        Create:      "msb create --name {{sandbox_name}} --cpus {{cpus}} --memory {{memory}} --init auto --shell /bin/bash{{mount_flags}}{{port_flags}}{{net_flags}} {{image}}",
         Start:       "msb start {{sandbox_name}}",
         Stop:        "msb stop {{sandbox_name}}",
         Delete:      "msb rm {{sandbox_name}}",
@@ -256,9 +261,9 @@ The whole bootstrap pipeline: `EnvironmentConfig{BootstrapCommands []string}` �
 
 ### 7.2 What changes: the built-in bootstrap commands
 
-The current `codex` built-in **starts with `sudo snap install node --classic`. snapd requires systemd; OCI-image guests have neither.** This is not optional cleanup — the built-in is broken on day one of msb. Rewrite both built-ins against the §3 guest contract (apt-based image), adjusting for spike E9 (if guest user is root, drop `sudo`; if not, keep it and the image must provide it):
+The current `codex` built-in **starts with `sudo snap install node --classic`. snapd is not part of the guest contract, even when the selected init happens to be systemd.** This is not optional cleanup — the built-in is broken on day one of msb. Rewrite both built-ins against the §3 guest contract (apt-based image), adjusting for spike E9 (if guest user is root, drop `sudo`; if not, keep it and the image must provide it):
 
-- `codex`: NodeSource or distro node install (e.g. `apt-get update && apt-get install -y nodejs npm` if the distro version suffices for the codex CLI — check its engines requirement), then the existing npm-prefix/PATH steps and `npm install -g @openai/codex`.
+- `codex`: install apt prerequisites (`ca-certificates`, `curl`, and `git`), use OpenAI's official standalone installer with `/usr/local/bin` as the root-based guest command directory, then require `command -v codex` before bootstrap completes (ADR 69).
 - `claude-code`: `curl -fsSL https://claude.ai/install.sh | bash` — survives as-is *if* the image has curl (guest contract) — verify interactively in the spike-adjacent QA run.
 
 Update `builtInEnvironmentConfigs()` and **add the old commands to `legacyBuiltInEnvironmentConfigs()`** so the existing upgrade-if-unedited seeding logic (`ensureBuiltInEnvironmentConfigs`, verified: upgrades only when current commands match a legacy spec) migrates untouched configs and leaves user-edited ones alone. Tests: fresh home seeds the new commands; a home with old-spec commands upgrades; a home with user-edited commands doesn't.
@@ -279,11 +284,11 @@ Lima auto-forwarded every guest listening port to host localhost with zero confi
 
 ### 8.1 Default port set
 
-`Config.DefaultPorts` seeded into config.yaml as a commented default, e.g. `["3000:3000","5173:5173","8000:8000","8080:8080"]`, applied to every node without explicit ports. Per-project/node override per §6.2. Validation at create: `H:G` numeric, no duplicate host ports across the node's list (duplicate host ports across *nodes* will fail at `msb create` — map that error to `preconditionFailed` naming the conflicting node).
+ADR 70 supersedes the original guessed-port proposal. `Config.DefaultPorts` is empty for fresh homes. The daemon discovers guest listeners and exposes HTTP/WebSocket services at `{node}.localhost:{port}` over Microsandbox SSH. Explicit `HOST:GUEST` publication remains supported for raw TCP and other advanced cases. Validation at create still requires numeric `H:G` values and no duplicate host ports within one node's list.
 
 ### 8.2 Surfacing
 
-`node show` prints the port list; the TUI info pane shows it; `node create` output mentions it ("ports: 3000, 5173, 8000, 8080 → change requires delete+recreate until runtime port add exists upstream"). README + release notes explain the regression prominently, with the workaround (put your dev-server ports in config before creating the node).
+`node show` and the TUI info pane continue to display explicit published ports. `daemon snapshot` displays dynamically discovered URLs, peer count, loopback listeners, conflicts, and the last forwarding error. README and QA document the automatic node-hostname path plus the explicit-port escape hatch.
 
 ### 8.3 Egress policy (new differentiator — opt-in)
 
@@ -355,7 +360,7 @@ On a machine with only `msb` (no Lima installed), both macOS and Linux:
 
 1. Fresh home: `codelima project create` → `node create` (image pulls, ports listed in output) → `node start` (bootstrap runs, completes) — all green.
 2. TUI: open the node tab; run a full-screen agent session; resize; copy via OSC 52; close the tab → spike-E5-verified process tree shows nothing leaked (Track 0.1's test extended to the msb chain).
-3. `python3 -m http.server 8000` in the node → `curl localhost:8000` on the host succeeds.
+3. `python3 -m http.server 8000` in the node → `curl http://{node}.localhost:8000` on the host succeeds through the daemon.
 4. `node stop` → `node start` → previously installed packages still present.
 5. `node clone` produces a working copy (or the documented degraded path, per E3 decision).
 6. `node delete` → `msb ls` shows nothing; metadata terminated; re-delete is a no-op.

@@ -3,13 +3,12 @@ package codelima
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/widgets/border"
-
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
 )
 
 // tuiMessageLogDefaultCap bounds the message ring; older entries are evicted.
@@ -386,11 +385,15 @@ func (a *vaxisTUIApp) rightPaneOverrideActive() bool {
 	return a.menu != nil || a.dialog != nil || a.selector != nil || a.messagesView != nil
 }
 
-func (a *vaxisTUIApp) hostTerminalOverrideActive() bool {
-	return a != nil &&
-		a.state != nil &&
-		a.state.hostTerminalReturnKey != "" &&
-		isTargetKind(a.state.activeTerminalTargetKey(), terminal.TargetProject)
+func (a *vaxisTUIApp) hostTerminalTabActive() bool {
+	if a == nil || a.state == nil || a.sessions == nil || a.rightPaneOverrideActive() {
+		return false
+	}
+	if a.state.focus != tuiFocusTerminal && a.state.treePaneMode != tuiTreePaneModeTerminal {
+		return false
+	}
+	session, ok := a.sessions.Session(a.state.activeSessionKey())
+	return ok && session.kind == tuiTreeEntryProject && session.node.ID != ""
 }
 
 func (a *vaxisTUIApp) effectiveLayoutFocus() tuiFocus {
@@ -566,7 +569,7 @@ func (a *vaxisTUIApp) draw() {
 	errorStyle := vaxis.Style{Foreground: vaxis.ColorRed, Attribute: vaxis.AttrBold}
 
 	layoutFocus := a.effectiveLayoutFocus()
-	hostIndicator := a.hostTerminalOverrideActive()
+	hostIndicator := a.hostTerminalTabActive()
 	if hostIndicator {
 		headerStyle = errorStyle
 	}
@@ -578,29 +581,11 @@ func (a *vaxisTUIApp) draw() {
 		entry = a.state.activeTerminalEntry()
 	}
 
-	projectSlug := "none"
-	switch entry.kind {
-	case tuiTreeEntryProject:
-		projectSlug = entry.project.Slug
-	case tuiTreeEntryNode:
-		projectSlug = entry.project.Slug
-	default:
-	}
-	if projectSlug == "" {
-		projectSlug = "none"
-	}
-	if projectSlug == "none" {
-		if project, ok := a.state.activeProject(); ok {
-			projectSlug = project.Slug
-		}
-	}
-
-	headerSegments := []vaxis.Segment{
-		{Text: "Project: " + projectSlug, Style: headerStyle},
-	}
+	headerSegments := []vaxis.Segment{{Text: "CodeLima", Style: headerStyle}}
 	if entry.kind == tuiTreeEntryNode {
 		headerSegments = append(headerSegments,
 			vaxis.Segment{Text: "  Node: " + entry.node.Slug, Style: headerStyle},
+			vaxis.Segment{Text: "  Configuration: " + entry.node.ConfigurationSlug, Style: headerStyle},
 			vaxis.Segment{Text: "  Mode: " + nodeWorkspaceMode(entry.node), Style: headerStyle},
 		)
 	}
@@ -612,7 +597,7 @@ func (a *vaxisTUIApp) draw() {
 		treeOuter := window.New(0, bodyTop, layout.treeWidth, bodyHeight)
 		treeInner := border.All(treeOuter, mutedStyle)
 
-		treeInner.Println(0, vaxis.Segment{Text: "Projects / Nodes", Style: headerStyle})
+		treeInner.Println(0, vaxis.Segment{Text: "Nodes", Style: headerStyle})
 		treeInnerWidth, treeInnerHeight := treeInner.Size()
 		treeContentHeight := treeInnerHeight - 1
 		if treeContentHeight < 0 {
@@ -737,6 +722,11 @@ func (a *vaxisTUIApp) treeEntryLabel(entry tuiTreeEntry) string {
 	status := ""
 	if entry.kind == tuiTreeEntryNode {
 		status = a.nodeStatusText(entry.node)
+		if root := strings.TrimSpace(a.treeWorkspaceRoot); root != "" && entry.node.DirectoryPath != "" {
+			if relative, err := filepath.Rel(root, entry.node.DirectoryPath); err == nil && pathWithinRoot(root, entry.node.DirectoryPath) {
+				entry.node.DirectoryPath = relative
+			}
+		}
 	}
 	return tuiEntryLabelWithStatus(entry, status)
 }
@@ -764,7 +754,7 @@ func (a *vaxisTUIApp) entryOperations(entry tuiTreeEntry) []*tuiOperationState {
 		if operation == nil {
 			continue
 		}
-		if containsString(operation.EntryKeys, entryKey) || containsString(operation.EntryKeys, "projects") {
+		if containsString(operation.EntryKeys, entryKey) || containsString(operation.EntryKeys, "nodes") || containsString(operation.EntryKeys, "configurations") {
 			operations = append(operations, operation)
 		}
 	}
@@ -818,20 +808,22 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 			win.Println(row, vaxis.Segment{Text: "Environment configs: " + commaSeparatedValues(entry.project.EnvironmentConfigs), Style: mutedStyle})
 			row++
 		}
-		if len(entry.project.LimaCommands.Bootstrap) == 0 {
+		if len(entry.project.RuntimeCommands.Bootstrap) == 0 {
 			win.Println(row, vaxis.Segment{Text: "Project bootstrap commands: none", Style: mutedStyle})
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Project bootstrap commands: configured", Style: mutedStyle})
 		}
 		row++
 		row++
-		win.Println(row, vaxis.Segment{Text: "Create nodes, update the project binding, or edit the project file directly for advanced settings such as Lima command overrides.", Style: mutedStyle})
+		win.Println(row, vaxis.Segment{Text: "Create nodes, update the project binding, or edit the project file directly for advanced settings such as microsandbox command overrides.", Style: mutedStyle})
 		row++
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
 	case tuiTreeEntryNode:
 		win.Println(row, vaxis.Segment{Text: "Node controls", Style: headerStyle})
 		row++
 		win.Println(row, vaxis.Segment{Text: "Slug: " + entry.node.Slug})
+		row++
+		win.Println(row, vaxis.Segment{Text: "Configuration: " + entry.node.ConfigurationSlug})
 		row++
 		win.Println(row, vaxis.Segment{Text: "Status: " + a.nodeStatusText(entry.node)})
 		row++
@@ -845,20 +837,22 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		}
 		win.Println(row, vaxis.Segment{Text: "Workspace mode: " + nodeWorkspaceMode(entry.node)})
 		row++
-		if workspace := nodeWorkspacePath(entry.node); workspace != "" {
-			a.printLinkifiedLine(win, row, "Workspace: "+workspace, vaxis.Style{})
+		if entry.node.DirectoryPath != "" {
+			a.printLinkifiedLine(win, row, "Directory: "+entry.node.DirectoryPath, vaxis.Style{})
 			row++
 		}
+		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Resources: %d CPU, %d MiB memory, %d MiB disk", entry.node.VCPUs, entry.node.MemoryMiB, entry.node.DiskMiB), Style: mutedStyle})
+		row++
 		row++
 		if nodeAutoStartsSession(entry.node) {
 			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to open a terminal tab or %s to focus its terminal.", terminalTabOpenFooterHint, terminalViewToggleTextHint), Style: mutedStyle})
 		} else {
-			win.Println(row, vaxis.Segment{Text: "Start the node before opening its terminal tabs, or edit the node file directly for advanced per-node Lima command overrides.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: "Start the node before opening its terminal tabs.", Style: mutedStyle})
 		}
 		row++
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
 	default:
-		win.Println(0, vaxis.Segment{Text: "Press [a] to create a project or select a project or node in the tree.", Style: mutedStyle})
+		win.Println(0, vaxis.Segment{Text: "Press [n] to create a node or [a] to manage configurations.", Style: mutedStyle})
 		_ = a.drawEntryOperations(win, 2, entry, headerStyle, mutedStyle)
 	}
 }
@@ -924,7 +918,7 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 		row++
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
 	case "":
-		win.Println(0, vaxis.Segment{Text: "Select a project or node in the tree.", Style: mutedStyle})
+		win.Println(0, vaxis.Segment{Text: "Select a node in the list.", Style: mutedStyle})
 	default:
 		a.drawDetails(win, entry, headerStyle, mutedStyle)
 	}
@@ -969,7 +963,7 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 			terminalTabCloseFooterHint + " close tab",
 		}
 		if entry.kind == tuiTreeEntryNode || entry.kind == tuiTreeEntryProject {
-			parts = append(parts, hostTerminalToggleFooterHint+" host/node")
+			parts = append(parts, hostTerminalTabOpenFooterHint+" host tab")
 		}
 		parts = append(parts, "q quit")
 		return strings.Join(parts, "   ")
@@ -990,7 +984,7 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 			parts = append(parts, infoViewToggleFooterHint+" terminal")
 		}
 		if entry.kind == tuiTreeEntryNode {
-			parts = append(parts, hostTerminalToggleFooterHint+" host terminal")
+			parts = append(parts, hostTerminalTabOpenFooterHint+" host tab")
 		}
 	}
 
@@ -1019,7 +1013,15 @@ func tuiEntryLabelWithStatus(entry tuiTreeEntry, statusOverride string) string {
 			status = nodeVMStatus(entry.node)
 		}
 		status = strings.ToUpper(status)
-		return indent + "• " + entry.node.Slug + "  " + status
+		configuration := entry.node.ConfigurationSlug
+		if configuration == "" {
+			configuration = DefaultConfigurationSlug
+		}
+		directory := entry.node.DirectoryPath
+		if directory != "" {
+			directory = filepath.Clean(directory)
+		}
+		return indent + "• " + entry.node.Slug + "  [" + configuration + "]  " + directory + "  " + status
 	default:
 		return ""
 	}

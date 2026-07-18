@@ -369,7 +369,7 @@ func TestCloseKillsGrandchildProcesses(t *testing.T) {
 			script: `sleep 300 & echo "GRANDCHILD=$!"; exec sleep 300`,
 		},
 		{
-			// Mirrors real node-tab chains (limactl/ssh descendants that
+			// Mirrors real node-tab chains (msb/ssh descendants that
 			// survive hangup): Close must escalate to a process-group kill.
 			name:   "sighup-ignored",
 			script: `trap '' HUP; sleep 300 & echo "GRANDCHILD=$!"; exec sleep 300`,
@@ -719,14 +719,14 @@ func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
 	cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-i")
 	cmd.Env = append(os.Environ(),
 		"TERM="+tuiEmbeddedTermEnv,
-		`PS1=brianrackle@lima-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianrackle/Projects/codelima\$ `,
+		`PS1=brianrackle@sandbox-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianrackle/Projects/codelima\$ `,
 	)
 	if err := ghostty.Start(cmd); err != nil {
 		t.Fatalf("ghostty.Start() error = %v", err)
 	}
 
 	waitForCondition(t, 5*time.Second, func() bool {
-		return strings.Contains(strings.ReplaceAll(renderSnapshot(24, 12), "\n", ""), "brianrackle@lima-codelima")
+		return strings.Contains(strings.ReplaceAll(renderSnapshot(24, 12), "\n", ""), "brianrackle@sandbox-codelima")
 	}, "bash prompt to appear")
 
 	for _, width := range []int{28, 32, 40, 48, 56, 64, 72, 80} {
@@ -737,8 +737,8 @@ func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
 
 	got := strings.Join(nonEmptyRenderedLines(wide), "\n")
 	want := strings.Join([]string{
-		"brianrackle@lima-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianra",
-		"ckle/Projects/codelima$",
+		"brianrackle@sandbox-codelima-codex-codelima-codex-node-test-019d2fff:/Users/bria",
+		"nrackle/Projects/codelima$",
 	}, "\n")
 	if got != want {
 		t.Fatalf("rendered terminal after width growth = %q, want %q", got, want)
@@ -798,6 +798,62 @@ func TestGhosttyTerminalShiftEnterDoesNotLeakModifyOtherKeysSequenceAtBashPrompt
 	if strings.Contains(screen, ";2;13~") {
 		t.Fatalf("shift-enter leaked modifyOtherKeys sequence at bash prompt: %q", screen)
 	}
+}
+
+func TestGhosttyTerminalHandoffTransfersPTYAndRollbackResumes(t *testing.T) {
+	base, err := newGhosttyTUITerminal("handoff-old", func(vaxis.Event) {})
+	if err != nil {
+		t.Fatalf("newGhosttyTUITerminal() error = %v", err)
+	}
+	old := base.(*ghosttyTUITerminal)
+	cmd := exec.Command("/bin/sh")
+	if err := old.Start(cmd); err != nil {
+		old.Close()
+		t.Fatalf("Start() error = %v", err)
+	}
+	old.SendInput([]byte("printf before-handoff\\n\n"))
+	waitForCondition(t, 5*time.Second, func() bool { return strings.Contains(old.ReadRecent(ReadText).Text, "before-handoff") }, "pre-handoff output")
+
+	state := old.BeginHandoff()
+	if state.Err != nil || state.PTY == nil || state.ChildPID <= 0 {
+		old.Close()
+		t.Fatalf("BeginHandoff() = %#v", state)
+	}
+	adopted, err := adoptGhosttyTUITerminal("handoff-new", func(vaxis.Event) {}, state.PTY, state.ChildPID, state.Cols, state.Rows, state.Replay)
+	if err != nil {
+		_ = state.PTY.Close()
+		_ = old.RollbackHandoff()
+		old.Close()
+		t.Fatalf("adoptGhosttyTUITerminal() error = %v", err)
+	}
+	old.ReleaseAfterHandoff()
+	adopted.(*ghosttyTUITerminal).ActivateAfterHandoff()
+	adopted.SendInput([]byte("printf after-handoff\\n\n"))
+	waitForCondition(t, 5*time.Second, func() bool { return strings.Contains(adopted.ReadRecent(ReadText).Text, "after-handoff") }, "post-handoff output")
+	adopted.Close()
+
+	rollbackBase, err := newGhosttyTUITerminal("handoff-rollback", func(vaxis.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback := rollbackBase.(*ghosttyTUITerminal)
+	if err := rollback.Start(exec.Command("/bin/sh")); err != nil {
+		rollback.Close()
+		t.Fatal(err)
+	}
+	rollbackState := rollback.BeginHandoff()
+	if rollbackState.Err != nil {
+		rollback.Close()
+		t.Fatal(rollbackState.Err)
+	}
+	_ = rollbackState.PTY.Close()
+	if err := rollback.RollbackHandoff(); err != nil {
+		rollback.Close()
+		t.Fatal(err)
+	}
+	rollback.SendInput([]byte("printf rollback-ok\\n\n"))
+	waitForCondition(t, 5*time.Second, func() bool { return strings.Contains(rollback.ReadRecent(ReadText).Text, "rollback-ok") }, "rollback output")
+	rollback.Close()
 }
 
 func nonEmptyRenderedLines(text string) []string {

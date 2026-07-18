@@ -4,6 +4,8 @@ package codelima
 
 import (
 	"errors"
+	"os"
+	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 )
@@ -63,9 +65,18 @@ type cmdClose struct{ Reason string }
 // Track 4 extends the dispatch switch rather than reshaping the loop. They drive
 // the actor through Running -> Quiescing -> Quiesced -> Released (see
 // runtimeState); in Track 2 only Running and the closed terminal matter.
-type cmdBeginHandoff struct{}
+type cmdBeginHandoff struct{ Reply chan handoffTerminalState }
 type cmdReleaseAfterHandoff struct{}
-type cmdRollbackHandoff struct{}
+type cmdRollbackHandoff struct{ Reply chan error }
+
+type handoffTerminalState struct {
+	PTY      *os.File
+	ChildPID int
+	Cols     int
+	Rows     int
+	Replay   []byte
+	Err      error
+}
 
 // cmdUpdate is the internal TUI-facing input command: a vaxis event that the
 // actor encodes against the live emulator modes (application keypad, cursor
@@ -139,6 +150,7 @@ type SnapshotCell struct {
 	Inverse       bool
 	Invisible     bool
 	Blink         bool
+	Hyperlink     string
 }
 
 // TerminalSnapshot is a consistent, TUI-free view of the emulator grid: it is
@@ -154,6 +166,7 @@ type TerminalSnapshot struct {
 	CursorY       int
 	CursorVisible bool
 	Generation    uint64
+	CapturesMouse bool
 }
 
 // SnapshotResult is the reply to cmdSnapshot.
@@ -219,9 +232,20 @@ func (t *ghosttyTUITerminal) dispatch(env actorEnvelope) (exit bool) {
 	case cmdClose:
 		t.teardown(true, false, nil)
 		return true
-	case cmdBeginHandoff, cmdReleaseAfterHandoff, cmdRollbackHandoff:
-		// Track 4 (live update) implements the quiesce/handoff state machine.
-		// Declared-but-unimplemented on purpose (ADR 63): no-op today.
+	case cmdBeginHandoff:
+		state := t.beginHandoff(2 * time.Second)
+		if c.Reply != nil {
+			c.Reply <- state
+		}
+	case cmdReleaseAfterHandoff:
+		t.state = runtimeStateReleased
+		t.teardown(false, false, nil)
+		return true
+	case cmdRollbackHandoff:
+		err := t.rollbackHandoff()
+		if c.Reply != nil {
+			c.Reply <- err
+		}
 	}
 	return false
 }
@@ -326,4 +350,38 @@ func (t *ghosttyTUITerminal) SendInput(data []byte) {
 		return
 	}
 	t.sendSync(cmdInput{Data: append([]byte(nil), data...)})
+}
+
+func (t *ghosttyTUITerminal) BeginHandoff() handoffTerminalState {
+	reply := make(chan handoffTerminalState, 1)
+	select {
+	case t.commands <- actorEnvelope{cmd: cmdBeginHandoff{Reply: reply}}:
+	case <-t.actorDone:
+		return handoffTerminalState{Err: errTerminalClosed}
+	}
+	select {
+	case state := <-reply:
+		return state
+	case <-t.actorDone:
+		return handoffTerminalState{Err: errTerminalClosed}
+	}
+}
+
+func (t *ghosttyTUITerminal) ReleaseAfterHandoff() {
+	t.sendSync(cmdReleaseAfterHandoff{})
+}
+
+func (t *ghosttyTUITerminal) RollbackHandoff() error {
+	reply := make(chan error, 1)
+	select {
+	case t.commands <- actorEnvelope{cmd: cmdRollbackHandoff{Reply: reply}}:
+	case <-t.actorDone:
+		return errTerminalClosed
+	}
+	select {
+	case err := <-reply:
+		return err
+	case <-t.actorDone:
+		return errTerminalClosed
+	}
 }

@@ -42,24 +42,37 @@ characterization suite unmodified.
 
 | Item | Status | Notes |
 |---|---|---|
-| Phase 0 spike E1 — embeddability go/no-go | blocked (msb not installed) | ADR 55 accepted; gate before all later phases |
-| Phases 1–5 | pending | after E1 passes |
+| Phase 0 spike E1 — embeddability go/no-go | passed (current automated environment) | `spike-notes/MSB_SPIKE.md`; real-init exec/SSH matrix green; native release qualification and human agent observation remain |
+| Phase 0 E2–E10 | passed (current automated environment) | all local hard gates green; release-platform coverage remains in TODO |
+| Phases 1–5 | done | sole `msb` client, v2 schema break, image/bootstrap/ports/net UX, official validated Codex installer (ADR 69), packaging/docs; guessed ports subsequently replaced by dynamic `{node}.localhost` HTTP/WebSocket forwarding (ADR 70) |
 
 ## Track 3 — Daemon
 
 | Item | Status | Notes |
 |---|---|---|
-| 3.0 Embed version + `--version` | pending | backend-independent; can run before the swap |
-| 3.1 Process model & sockets | pending | after swap |
-| 3.2 Protocol (JSON-lines, exact-match version) | pending | |
-| 3.3 Minimum API surface + CLI verbs | pending | |
-| 3.4 Client-side rendering (dirty → snapshot pull) | pending | decision fixed — do not relitigate |
-| 3.5 Reconnect + input ownership | pending | |
-| 3.6 session.json persistence | pending | |
+| 3.0 Embed version + `--version` | done | build/package ldflags + CLI test |
+| 3.1 Process model & sockets | done | ADR 64; lifecycle/stale recovery integration tests; kernel peer-UID enforcement |
+| 3.2 Protocol (JSON-lines, exact-match version) | done | ADR 65; 1 MiB cap, deadlines, typed errors, private peer boundary |
+| 3.3 Minimum API surface + CLI verbs | done | daemon configuration/node/terminal API; terminal open/close/list/read/send/takeover |
+| 3.4 Client-side rendering (dirty → snapshot pull) | done | daemon Ghostty actors + remote snapshot terminal; edge-triggered/idempotent geometry (ADR 68) prevents redraw feedback |
+| 3.5 Reconnect + input ownership | done | observe-only clients + explicit takeover; detach integration test |
+| 3.6 session.json persistence | done | ADR 66; respawn/forget |
 
 ## Track 4 — Live update
 
-Pending; hard-gated on Track 3 soaked in daily use.
+Done. Authenticated `unixpacket` manifest + batched SCM_RIGHTS, commit and rollback (ADR 67); bounded nonblocking PTY polling; continuity and injected-failure integration tests.
+
+## Dynamic node service forwarding
+
+Done locally. ADR 70 replaces guessed static defaults with daemon-owned discovery and HTTP/WebSocket routing at `{node}.localhost:{port}` over multiplexed Microsandbox SSH. Two same-port nodes, guest-loopback binding, Upgrade passthrough, daemon restart recovery, stopped-node removal, and bind-conflict retry passed in the available nested Linux/aarch64 environment. Native release qualification remains in `TODO.md`.
+
+## Microsandbox Go SDK migration
+
+Done locally. ADR 71 replaces every CodeLima `msb` CLI invocation with the official Go SDK pinned to `v0.6.6`. Typed SDK calls now own lifecycle, listing, copy, streaming exec, interactive attach, snapshots, mounts, ports, and network policy. Dynamic forwarding launches the current CodeLima binary as a hidden SDK SSH helper; there is no CLI fallback. Exact legacy built-in CLI templates migrate away, customized lifecycle templates fail explicitly, and the release matrix is limited to SDK-supported `darwin/arm64`, `linux/amd64`, and `linux/arm64`. Native release qualification remains in `TODO.md`.
+
+## Schema v3 object model
+
+Done locally. ADR 72 removes the public project model and introduces reusable global configurations plus directory-bound nodes. The editable protected default configuration seeds typed SDK resources; node creation and cloning freeze effective configuration values. CLI/TUI/daemon surfaces are configuration/node based, path-scoped TUI rows are flat, and schema-v2 homes require a fresh `CODELIMA_HOME`.
 
 ## Track 5 — Agent awareness
 
@@ -80,7 +93,7 @@ All pending: 6.1 keybindings/prefix, 6.2 roadmap 0.15+0.4, 6.3 goto picker,
 | Item | Status | Notes |
 |---|---|---|
 | 7.1 Characterization-test policy in AGENTS.md | pending | practiced in Tracks 1–2; policy text not yet codified |
-| 7.2 Integration test tier + CODELIMA_REQUIRE_GHOSTTY | pending | wanted before Track 3 (daemon lifecycle tests live there) |
+| 7.2 Integration test tier + CODELIMA_REQUIRE_GHOSTTY | partially complete | `make test-integration` covers lifecycle, stale recovery, detach, ownership and live handoff; fail-on-skip environment policy remains |
 | 7.3 TUI visual verification harness | pending | |
 | 7.4 Self-update | pending | needs 3.0 |
 | 7.5 scripts/patches/PATCHES.md | pending | small, anytime |

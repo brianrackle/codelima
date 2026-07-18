@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"git.sr.ht/~rockorager/vaxis"
+
+	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
 )
 
 func TestMessageLogAppendPreservesOrderAndLatest(t *testing.T) {
@@ -33,6 +36,28 @@ func TestMessageLogAppendPreservesOrderAndLatest(t *testing.T) {
 	latest, ok := log.Latest()
 	if !ok || latest.Text != "third" {
 		t.Fatalf("Latest() = (%+v, %v), want third", latest, ok)
+	}
+}
+
+func TestDaemonInputRevokedEventOnlyNotifiesPreviousOwner(t *testing.T) {
+	client := &daemonclient.Client{Hello: daemon.HelloResult{ClientID: "owner-client"}}
+	var events []vaxis.Event
+	store := &tuiSessionStore{
+		service:   &Service{daemonClient: client},
+		postEvent: func(event vaxis.Event) { events = append(events, event) },
+	}
+
+	store.handleDaemonEvent(daemon.Event{Event: "input.revoked", Data: map[string]any{"client_id": "another-client"}})
+	if len(events) != 0 {
+		t.Fatalf("unrelated revocation posted %d events", len(events))
+	}
+
+	store.handleDaemonEvent(daemon.Event{Event: "input.revoked", Data: map[string]any{"client_id": "owner-client"}})
+	if len(events) != 1 {
+		t.Fatalf("owner revocation posted %d events, want 1", len(events))
+	}
+	if _, ok := events[0].(tuiTerminalErrorEvent); !ok {
+		t.Fatalf("revocation event = %T, want tuiTerminalErrorEvent", events[0])
 	}
 }
 
@@ -181,7 +206,7 @@ func TestRefreshErrorRecordedInMessagesAtWarnLevel(t *testing.T) {
 
 	app := &vaxisTUIApp{messages: newTUIMessageLog(10)}
 
-	app.finishDataRefresh(tuiRefreshCompleteEvent{Err: fmt.Errorf("lima unreachable")})
+	app.finishDataRefresh(tuiRefreshCompleteEvent{Err: fmt.Errorf("sandbox unreachable")})
 
 	entries := app.messages.Entries()
 	if len(entries) != 1 {
@@ -190,12 +215,12 @@ func TestRefreshErrorRecordedInMessagesAtWarnLevel(t *testing.T) {
 	if entries[0].Level != slog.LevelWarn {
 		t.Fatalf("refresh failure recorded at level %v, want warn", entries[0].Level)
 	}
-	if !strings.Contains(entries[0].Text, "refresh failed") || !strings.Contains(entries[0].Text, "lima unreachable") {
+	if !strings.Contains(entries[0].Text, "refresh failed") || !strings.Contains(entries[0].Text, "sandbox unreachable") {
 		t.Fatalf("refresh failure text = %q, want it to name the failure", entries[0].Text)
 	}
 
 	// The same error on the next tick must not append a duplicate...
-	app.finishDataRefresh(tuiRefreshCompleteEvent{Err: fmt.Errorf("lima unreachable")})
+	app.finishDataRefresh(tuiRefreshCompleteEvent{Err: fmt.Errorf("sandbox unreachable")})
 	if got := app.messages.Len(); got != 1 {
 		t.Fatalf("identical consecutive refresh failure duplicated in ring, Len() = %d, want 1", got)
 	}

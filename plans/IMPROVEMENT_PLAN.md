@@ -1,8 +1,10 @@
 # CodeLima Improvement Plan — Implementation Handover
 
+> Historical implementation handover. Project-oriented object-model and terminal examples below describe the pre-schema-v3 codebase. ADR 72 and `SPEC.md` now define reusable configurations, directory-bound nodes, and node-scoped host terminals; do not implement new work from the superseded project examples.
+
 Status: Handover — implementation-ready
 Audience: the implementing team. This document assumes you know Go. It does **not** assume prior knowledge of this codebase, the TUI internals, the Ghostty bridge, PTY/process-group mechanics, or the daemon design space — everything you need is either in here or pointed to from here.
-Companion document: `plans/MICROSANDBOX_MIGRATION_PLAN.md` (the Lima → microsandbox backend swap, slotted between Tracks 2 and 3).
+Companion document: `plans/MICROSANDBOX_MIGRATION_PLAN.md` (the proposed Lima → microsandbox backend swap; automated E1 passed in the current environment with a real guest init, while E2–E10 and release qualification remain; see `plans/spike-notes/MSB_SPIKE.md`).
 
 ---
 
@@ -187,7 +189,7 @@ Why this is worth the effort, in product terms:
 - **Agent monitoring becomes cheap.** Once the daemon owns terminal screen state, blocked/working/done detection is a pure function over screen snapshots.
 - **Upgrades stop being session-destroying.** Live handoff (Track 4) lets the daemon replace itself while PTYs survive.
 
-What we deliberately keep: `CODELIMA_HOME` stays the metadata store; the `Service` layer stays the control plane (the daemon *hosts* it, it does not replace it); the current tab UX semantics are preserved exactly. **Lima does not stay**: it is replaced outright by microsandbox between Tracks 2 and 3 (ADR 55, `plans/MICROSANDBOX_MIGRATION_PLAN.md`). Until that swap lands, work against Lima as-is; after it, every reference to `limactl`/`LimaClient` in this document reads as "the runtime client" (`msb`/`SandboxClient`) — the shapes are deliberately identical.
+What we deliberately keep: `CODELIMA_HOME` stays the metadata store; the `Service` layer stays the control plane (the daemon *hosts* it, it does not replace it); the current tab UX semantics are preserved exactly. ADR 55 originally selected an outright Lima replacement. The initial microsandbox close probe failed with its minimal agent as guest PID 1; the supported real-init configuration then passed the complete automated E1 matrix in the available environment. The decision remains reopened until the remaining Phase 0 hard gates and release qualifications pass. Continue to work against Lima as-is until then; do not read later `msb`/`SandboxClient` references as an approved implementation direction.
 
 ---
 
@@ -478,7 +480,7 @@ The dialog/action/operation layer is the "shared controller" the tmux-sidebar pl
 
 # Part G — the backend swap happens here
 
-Between Track 2 and Track 3, execute `plans/MICROSANDBOX_MIGRATION_PLAN.md` (Lima → microsandbox, breaking change, ADR 55). It is written as the same kind of handover as this document. Its Phase 0 spike can start any time — even today; only its Phases 1–5 need Track 2 done. Nothing in Track 3 below may reference `limactl` — by the time you start the daemon, the runtime client is `msb`.
+The Lima → microsandbox swap is complete in the current environment. E1–E10 passed, ADR 55 is accepted, metadata schema 2 rejects old Lima homes, and all runtime commands remain behind `SandboxClient`. Native release qualification remains tracked separately.
 
 ---
 
@@ -646,11 +648,11 @@ Then ship a `SKILL.md`-style document (herdr's cleverest product idea): a short 
 ```text
 Track 0 (stabilize) ──► Track 1 (identity/registry) ──► Track 2 (actors + launch contract + decomposition)
                                                             │
-                                        ┌───────────────────┼──────────────────────┐
-                                        ▼                   ▼                      ▼
-                              microsandbox swap      Track 6.1/6.2           (Phase 0 spike of the
-                              (plans/MICROSANDBOX_   (keys, defaults —        swap can run any time)
-                              MIGRATION_PLAN.md)      anytime)
+                                        ┌───────────────────┤
+                                        ▼                   ▼
+                              backend decision       Track 6.1/6.2
+                              (local E1 passed;       (keys, defaults —
+                              Phase 0 continues)      anytime)
                                         │
                                         ▼
                                  Track 3 (daemon)
@@ -669,14 +671,14 @@ Track 7 runs continuously; 7.1–7.2 start with Track 1.
 | 2 | Track 0.6–0.8 + backlog | — | S each |
 | 3 | Track 1 (identity + registry; 3 PRs) | 0 | M |
 | 4 | Track 2 (actors, launch contract, decomposition) | 1 | L |
-| 4.5 | Lima → microsandbox swap (`plans/MICROSANDBOX_MIGRATION_PLAN.md`, ADR 55) | 2 (Phase 0 spike: anytime) | L |
+| 4.5 | Resolve reopened backend decision (microsandbox local E1 passed; remaining Phase 0 + release qualification pending; ADR 55) | 2 | L |
 | 5 | Track 3 (daemon; 3.0–3.6) | 2 + 4.5 | XL |
 | 6 | Track 5.1–5.3 (detection, badges, wait primitives) | 3 (engine prototypable on 2) | M–L |
 | 7 | Track 4 (live update) | 3 stable + soaked | L |
 | 8 | Track 5.4, Track 6.5–6.6 (guest monitor, kitty, splits) | 3–5 | M–L |
 | — | Track 6.1–6.4, 6.7, Track 7 | interleave | S–M each |
 
-Do not start the daemon until the Track 2 definition-of-done is met **and** the microsandbox swap has landed. Do not start live-update until detach/reattach has soaked in daily use. Live-update is the reward for a clean runtime model, not a shortcut to one.
+Do not start the daemon until the Track 2 definition-of-done is met **and** the reopened backend decision is resolved by a candidate that passes its gate. Do not start live-update until detach/reattach has soaked in daily use. Live-update is the reward for a clean runtime model, not a shortcut to one.
 
 ## Non-goals for the daemon milestone
 
@@ -685,7 +687,7 @@ Do not start the daemon until the Track 2 definition-of-done is met **and** the 
 - No PTY resurrection after machine reboot; `session.json` respawn-restore is the ceiling.
 - No split panes until the daemon and registry have soaked.
 - No live-update on platforms where FD passing is unavailable — graceful restart fallback only.
-- No *additional* VM backends and no provider abstraction. Lima itself is replaced by microsandbox as the sole backend (ADR 55) — a direct swap behind the client seam, not a multi-provider layer. Docker/Firecracker/apple-container stay cancelled.
+- No provider abstraction is approved. ADR 55's direct microsandbox replacement remains reopened pending the remaining Phase 0 and release results; Lima remains the implemented backend in the meantime. Docker/Firecracker/apple-container stay cancelled unless a new ADR explicitly revisits them.
 
 ## Risks
 

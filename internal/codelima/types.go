@@ -12,11 +12,11 @@ const (
 	RuntimeVM        = "vm"
 	RuntimeContainer = "container"
 
-	ProviderLima   = "lima"
-	ProviderColima = "colima"
+	ProviderMicrosandbox = "microsandbox"
 
 	WorkspaceModeCopy    = "copy"
 	WorkspaceModeMounted = "mounted"
+	DefaultWorkspaceMode = WorkspaceModeMounted
 
 	NodeStatusCreated      = "created"
 	NodeStatusProvisioning = "provisioning"
@@ -26,10 +26,16 @@ const (
 	NodeStatusFailed       = "failed"
 	NodeStatusTerminating  = "terminating"
 	NodeStatusTerminated   = "terminated"
+
+	DefaultConfigurationSlug = "default"
+	DefaultVCPUs             = uint8(2)
+	DefaultMemoryMiB         = uint32(4 * 1024)
+	DefaultDiskMiB           = uint32(20 * 1024)
 )
 
-type LimaCommandTemplates struct {
-	TemplateCopy         []string `json:"template_copy,omitempty" yaml:"template_copy,omitempty"`
+type RuntimeCommandTemplates struct {
+	Version              []string `json:"version,omitempty" yaml:"version,omitempty"`
+	List                 []string `json:"list,omitempty" yaml:"list,omitempty"`
 	Create               []string `json:"create,omitempty" yaml:"create,omitempty"`
 	Start                []string `json:"start,omitempty" yaml:"start,omitempty"`
 	Stop                 []string `json:"stop,omitempty" yaml:"stop,omitempty"`
@@ -38,24 +44,50 @@ type LimaCommandTemplates struct {
 	Bootstrap            []string `json:"bootstrap,omitempty" yaml:"bootstrap,omitempty"`
 	WorkspaceSeedPrepare []string `json:"workspace_seed_prepare,omitempty" yaml:"workspace_seed_prepare,omitempty"`
 	Copy                 []string `json:"copy,omitempty" yaml:"copy,omitempty"`
-	Shell                []string `json:"shell,omitempty" yaml:"shell,omitempty"`
+	ShellExec            []string `json:"shell_exec,omitempty" yaml:"shell_exec,omitempty"`
+	ShellLogin           []string `json:"shell_login,omitempty" yaml:"shell_login,omitempty"`
+}
+
+type NetPolicy struct {
+	Default string   `json:"default" yaml:"default"`
+	Allow   []string `json:"allow,omitempty" yaml:"allow,omitempty"`
+}
+
+// Configuration is a reusable sandbox recipe. Nodes copy its resolved values
+// when they are created, so later configuration edits affect future nodes only.
+// A configuration deliberately has no host-directory field: directory identity
+// belongs to a node.
+type Configuration struct {
+	ID                string     `json:"id" yaml:"id"`
+	Slug              string     `json:"slug" yaml:"slug"`
+	Image             string     `json:"image" yaml:"image"`
+	AgentProfileName  string     `json:"agent_profile_name" yaml:"agent_profile_name"`
+	Environments      []string   `json:"environments" yaml:"environments"`
+	BootstrapCommands []string   `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	VCPUs             uint8      `json:"vcpus" yaml:"vcpus"`
+	MemoryMiB         uint32     `json:"memory_mib" yaml:"memory_mib"`
+	DiskMiB           uint32     `json:"disk_mib" yaml:"disk_mib"`
+	CreatedAt         time.Time  `json:"created_at" yaml:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" yaml:"updated_at"`
+	DeletedAt         *time.Time `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
 type Project struct {
-	ID                  string               `json:"id" yaml:"id"`
-	Slug                string               `json:"slug" yaml:"slug"`
-	WorkspacePath       string               `json:"workspace_path" yaml:"workspace_path"`
-	ParentProjectID     string               `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
-	ForkBaseSnapshotID  string               `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
-	AgentProfileName    string               `json:"agent_profile_name" yaml:"agent_profile_name"`
-	EnvironmentConfigs  []string             `json:"environment_configs" yaml:"environment_configs"`
-	DefaultRuntime      string               `json:"default_runtime" yaml:"default_runtime"`
-	DefaultProvider     string               `json:"default_provider" yaml:"default_provider"`
-	DefaultLimaTemplate string               `json:"default_lima_template" yaml:"default_lima_template"`
-	LimaCommands        LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
-	CreatedAt           time.Time            `json:"created_at" yaml:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at" yaml:"updated_at"`
-	DeletedAt           *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	ID                 string                  `json:"id" yaml:"id"`
+	Slug               string                  `json:"slug" yaml:"slug"`
+	WorkspacePath      string                  `json:"workspace_path" yaml:"workspace_path"`
+	ParentProjectID    string                  `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
+	ForkBaseSnapshotID string                  `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
+	AgentProfileName   string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
+	EnvironmentConfigs []string                `json:"environment_configs" yaml:"environment_configs"`
+	DefaultRuntime     string                  `json:"default_runtime" yaml:"default_runtime"`
+	DefaultProvider    string                  `json:"default_provider" yaml:"default_provider"`
+	DefaultImage       string                  `json:"default_image" yaml:"default_image"`
+	DefaultPorts       []string                `json:"default_ports,omitempty" yaml:"default_ports,omitempty"`
+	RuntimeCommands    RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
+	CreatedAt          time.Time               `json:"created_at" yaml:"created_at"`
+	UpdatedAt          time.Time               `json:"updated_at" yaml:"updated_at"`
+	DeletedAt          *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
 type EnvironmentConfig struct {
@@ -67,6 +99,11 @@ type EnvironmentConfig struct {
 	DeletedAt         *time.Time `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
+// Environment is the public name for a reusable bootstrap bundle. Keep the
+// alias while older internal call sites are retired; serialized data and the
+// v3 layout use the concise "environment" terminology.
+type Environment = EnvironmentConfig
+
 type RuntimeObservation struct {
 	Name     string `json:"name,omitempty" yaml:"name,omitempty"`
 	Exists   bool   `json:"exists" yaml:"exists"`
@@ -76,55 +113,74 @@ type RuntimeObservation struct {
 }
 
 type Node struct {
-	ID                     string               `json:"id" yaml:"id"`
-	Slug                   string               `json:"slug" yaml:"slug"`
-	ProjectID              string               `json:"project_id" yaml:"project_id"`
-	ParentNodeID           string               `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
-	Runtime                string               `json:"runtime" yaml:"runtime"`
-	Provider               string               `json:"provider" yaml:"provider"`
-	LimaInstanceName       string               `json:"lima_instance_name" yaml:"lima_instance_name"`
-	Status                 string               `json:"status" yaml:"status"`
-	LifecycleState         string               `json:"-" yaml:"-"`
-	AgentProfileName       string               `json:"agent_profile_name" yaml:"agent_profile_name"`
-	LimaCommands           LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
-	BootstrapCommands      []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
-	GeneratedTemplatePath  string               `json:"generated_template_path" yaml:"generated_template_path"`
-	WorkspaceMode          string               `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
-	GuestWorkspacePath     string               `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
-	WorkspaceMountPath     string               `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
-	WorkspaceSeeded        bool                 `json:"workspace_seeded" yaml:"workspace_seeded"`
-	BootstrapCompleted     bool                 `json:"bootstrap_completed" yaml:"bootstrap_completed"`
-	BootstrapCompletedAt   *time.Time           `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
-	CreatedAt              time.Time            `json:"created_at" yaml:"created_at"`
-	UpdatedAt              time.Time            `json:"updated_at" yaml:"updated_at"`
-	DeletedAt              *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-	LastReconciledAt       *time.Time           `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
-	LastRuntimeObservation *RuntimeObservation  `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
+	ID                string `json:"id" yaml:"id"`
+	Slug              string `json:"slug" yaml:"slug"`
+	ConfigurationID   string `json:"configuration_id" yaml:"configuration_id"`
+	ConfigurationSlug string `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
+	DirectoryPath     string `json:"directory_path" yaml:"directory_path"`
+	// ProjectID is retained only for source compatibility with pre-v3 internal
+	// tests and is never populated or serialized for v3 nodes.
+	ProjectID              string                  `json:"-" yaml:"-"`
+	ParentNodeID           string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime                string                  `json:"runtime" yaml:"runtime"`
+	Provider               string                  `json:"provider" yaml:"provider"`
+	SandboxName            string                  `json:"sandbox_name" yaml:"sandbox_name"`
+	Image                  string                  `json:"image" yaml:"image"`
+	VCPUs                  uint8                   `json:"vcpus" yaml:"vcpus"`
+	MemoryMiB              uint32                  `json:"memory_mib" yaml:"memory_mib"`
+	DiskMiB                uint32                  `json:"disk_mib" yaml:"disk_mib"`
+	Environments           []string                `json:"environments" yaml:"environments"`
+	Ports                  []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
+	NetPolicy              *NetPolicy              `json:"net_policy,omitempty" yaml:"net_policy,omitempty"`
+	Status                 string                  `json:"status" yaml:"status"`
+	LifecycleState         string                  `json:"-" yaml:"-"`
+	AgentProfileName       string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
+	RuntimeCommands        RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
+	BootstrapCommands      []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	WorkspaceMode          string                  `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath     string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath     string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded        bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
+	BootstrapCompleted     bool                    `json:"bootstrap_completed" yaml:"bootstrap_completed"`
+	BootstrapCompletedAt   *time.Time              `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
+	CreatedAt              time.Time               `json:"created_at" yaml:"created_at"`
+	UpdatedAt              time.Time               `json:"updated_at" yaml:"updated_at"`
+	DeletedAt              *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	LastReconciledAt       *time.Time              `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
+	LastRuntimeObservation *RuntimeObservation     `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
 }
 
 type nodeFileWire struct {
-	ID                    string               `json:"id" yaml:"id"`
-	Slug                  string               `json:"slug" yaml:"slug"`
-	ProjectID             string               `json:"project_id" yaml:"project_id"`
-	ParentNodeID          string               `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
-	Runtime               string               `json:"runtime" yaml:"runtime"`
-	Provider              string               `json:"provider" yaml:"provider"`
-	LimaInstanceName      string               `json:"lima_instance_name" yaml:"lima_instance_name"`
-	LifecycleState        string               `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
-	Status                string               `json:"status,omitempty" yaml:"status,omitempty"`
-	AgentProfileName      string               `json:"agent_profile_name" yaml:"agent_profile_name"`
-	LimaCommands          LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
-	BootstrapCommands     []string             `json:"bootstrap_commands" yaml:"bootstrap_commands"`
-	GeneratedTemplatePath string               `json:"generated_template_path" yaml:"generated_template_path"`
-	WorkspaceMode         string               `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
-	GuestWorkspacePath    string               `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
-	WorkspaceMountPath    string               `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
-	WorkspaceSeeded       bool                 `json:"workspace_seeded" yaml:"workspace_seeded"`
-	BootstrapCompleted    bool                 `json:"bootstrap_completed" yaml:"bootstrap_completed"`
-	BootstrapCompletedAt  *time.Time           `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
-	CreatedAt             time.Time            `json:"created_at" yaml:"created_at"`
-	UpdatedAt             time.Time            `json:"updated_at" yaml:"updated_at"`
-	DeletedAt             *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	ID                   string                  `json:"id" yaml:"id"`
+	Slug                 string                  `json:"slug" yaml:"slug"`
+	ConfigurationID      string                  `json:"configuration_id" yaml:"configuration_id"`
+	DirectoryPath        string                  `json:"directory_path" yaml:"directory_path"`
+	ProjectID            string                  `json:"project_id,omitempty" yaml:"project_id,omitempty"`
+	ParentNodeID         string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime              string                  `json:"runtime" yaml:"runtime"`
+	Provider             string                  `json:"provider" yaml:"provider"`
+	SandboxName          string                  `json:"sandbox_name" yaml:"sandbox_name"`
+	Image                string                  `json:"image" yaml:"image"`
+	VCPUs                uint8                   `json:"vcpus" yaml:"vcpus"`
+	MemoryMiB            uint32                  `json:"memory_mib" yaml:"memory_mib"`
+	DiskMiB              uint32                  `json:"disk_mib" yaml:"disk_mib"`
+	Environments         []string                `json:"environments" yaml:"environments"`
+	Ports                []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
+	NetPolicy            *NetPolicy              `json:"net_policy,omitempty" yaml:"net_policy,omitempty"`
+	LifecycleState       string                  `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
+	Status               string                  `json:"status,omitempty" yaml:"status,omitempty"`
+	AgentProfileName     string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
+	RuntimeCommands      RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
+	BootstrapCommands    []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	WorkspaceMode        string                  `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath   string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath   string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded      bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
+	BootstrapCompleted   bool                    `json:"bootstrap_completed" yaml:"bootstrap_completed"`
+	BootstrapCompletedAt *time.Time              `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
+	CreatedAt            time.Time               `json:"created_at" yaml:"created_at"`
+	UpdatedAt            time.Time               `json:"updated_at" yaml:"updated_at"`
+	DeletedAt            *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
 func normalizeNodeLifecycleState(state string) string {
@@ -171,27 +227,35 @@ func nodeLifecycleState(node Node) string {
 
 func newNodeFileWire(node Node) nodeFileWire {
 	return nodeFileWire{
-		ID:                    node.ID,
-		Slug:                  node.Slug,
-		ProjectID:             node.ProjectID,
-		ParentNodeID:          node.ParentNodeID,
-		Runtime:               node.Runtime,
-		Provider:              node.Provider,
-		LimaInstanceName:      node.LimaInstanceName,
-		LifecycleState:        nodeLifecycleState(node),
-		AgentProfileName:      node.AgentProfileName,
-		LimaCommands:          node.LimaCommands,
-		BootstrapCommands:     append([]string(nil), node.BootstrapCommands...),
-		GeneratedTemplatePath: node.GeneratedTemplatePath,
-		WorkspaceMode:         node.WorkspaceMode,
-		GuestWorkspacePath:    node.GuestWorkspacePath,
-		WorkspaceMountPath:    node.WorkspaceMountPath,
-		WorkspaceSeeded:       node.WorkspaceSeeded,
-		BootstrapCompleted:    node.BootstrapCompleted,
-		BootstrapCompletedAt:  node.BootstrapCompletedAt,
-		CreatedAt:             node.CreatedAt,
-		UpdatedAt:             node.UpdatedAt,
-		DeletedAt:             node.DeletedAt,
+		ID:                   node.ID,
+		Slug:                 node.Slug,
+		ConfigurationID:      node.ConfigurationID,
+		DirectoryPath:        node.DirectoryPath,
+		ProjectID:            node.ProjectID,
+		ParentNodeID:         node.ParentNodeID,
+		Runtime:              node.Runtime,
+		Provider:             node.Provider,
+		SandboxName:          node.SandboxName,
+		Image:                node.Image,
+		VCPUs:                node.VCPUs,
+		MemoryMiB:            node.MemoryMiB,
+		DiskMiB:              node.DiskMiB,
+		Environments:         append([]string(nil), node.Environments...),
+		Ports:                append([]string(nil), node.Ports...),
+		NetPolicy:            cloneNetPolicy(node.NetPolicy),
+		LifecycleState:       nodeLifecycleState(node),
+		AgentProfileName:     node.AgentProfileName,
+		RuntimeCommands:      node.RuntimeCommands,
+		BootstrapCommands:    append([]string(nil), node.BootstrapCommands...),
+		WorkspaceMode:        node.WorkspaceMode,
+		GuestWorkspacePath:   node.GuestWorkspacePath,
+		WorkspaceMountPath:   node.WorkspaceMountPath,
+		WorkspaceSeeded:      node.WorkspaceSeeded,
+		BootstrapCompleted:   node.BootstrapCompleted,
+		BootstrapCompletedAt: node.BootstrapCompletedAt,
+		CreatedAt:            node.CreatedAt,
+		UpdatedAt:            node.UpdatedAt,
+		DeletedAt:            node.DeletedAt,
 	}
 }
 
@@ -208,29 +272,44 @@ func (w nodeFileWire) node() Node {
 	}
 
 	return Node{
-		ID:                    w.ID,
-		Slug:                  w.Slug,
-		ProjectID:             w.ProjectID,
-		ParentNodeID:          w.ParentNodeID,
-		Runtime:               w.Runtime,
-		Provider:              w.Provider,
-		LimaInstanceName:      w.LimaInstanceName,
-		Status:                status,
-		LifecycleState:        lifecycleState,
-		AgentProfileName:      w.AgentProfileName,
-		LimaCommands:          w.LimaCommands,
-		BootstrapCommands:     append([]string(nil), w.BootstrapCommands...),
-		GeneratedTemplatePath: w.GeneratedTemplatePath,
-		WorkspaceMode:         w.WorkspaceMode,
-		GuestWorkspacePath:    w.GuestWorkspacePath,
-		WorkspaceMountPath:    w.WorkspaceMountPath,
-		WorkspaceSeeded:       w.WorkspaceSeeded,
-		BootstrapCompleted:    w.BootstrapCompleted,
-		BootstrapCompletedAt:  w.BootstrapCompletedAt,
-		CreatedAt:             w.CreatedAt,
-		UpdatedAt:             w.UpdatedAt,
-		DeletedAt:             w.DeletedAt,
+		ID:                   w.ID,
+		Slug:                 w.Slug,
+		ConfigurationID:      w.ConfigurationID,
+		DirectoryPath:        w.DirectoryPath,
+		ProjectID:            w.ProjectID,
+		ParentNodeID:         w.ParentNodeID,
+		Runtime:              w.Runtime,
+		Provider:             w.Provider,
+		SandboxName:          w.SandboxName,
+		Image:                w.Image,
+		VCPUs:                w.VCPUs,
+		MemoryMiB:            w.MemoryMiB,
+		DiskMiB:              w.DiskMiB,
+		Environments:         append([]string(nil), w.Environments...),
+		Ports:                append([]string(nil), w.Ports...),
+		NetPolicy:            cloneNetPolicy(w.NetPolicy),
+		Status:               status,
+		LifecycleState:       lifecycleState,
+		AgentProfileName:     w.AgentProfileName,
+		RuntimeCommands:      removeLegacyMSBCommandTemplates(w.RuntimeCommands),
+		BootstrapCommands:    append([]string(nil), w.BootstrapCommands...),
+		WorkspaceMode:        w.WorkspaceMode,
+		GuestWorkspacePath:   w.GuestWorkspacePath,
+		WorkspaceMountPath:   w.WorkspaceMountPath,
+		WorkspaceSeeded:      w.WorkspaceSeeded,
+		BootstrapCompleted:   w.BootstrapCompleted,
+		BootstrapCompletedAt: w.BootstrapCompletedAt,
+		CreatedAt:            w.CreatedAt,
+		UpdatedAt:            w.UpdatedAt,
+		DeletedAt:            w.DeletedAt,
 	}
+}
+
+func cloneNetPolicy(policy *NetPolicy) *NetPolicy {
+	if policy == nil {
+		return nil
+	}
+	return &NetPolicy{Default: policy.Default, Allow: append([]string(nil), policy.Allow...)}
 }
 
 type BootstrapState struct {
@@ -295,7 +374,7 @@ type IncompleteNodeMetadata struct {
 	NodeID          string `json:"node_id" yaml:"node_id"`
 	DirectoryPath   string `json:"directory_path" yaml:"directory_path"`
 	TemplatePath    string `json:"template_path,omitempty" yaml:"template_path,omitempty"`
-	InstanceName    string `json:"instance_name,omitempty" yaml:"instance_name,omitempty"`
+	SandboxName     string `json:"sandbox_name,omitempty" yaml:"sandbox_name,omitempty"`
 	InstanceRefPath string `json:"instance_ref_path,omitempty" yaml:"instance_ref_path,omitempty"`
 }
 
@@ -311,22 +390,23 @@ type ProjectTreeNode struct {
 }
 
 type projectWire struct {
-	ID                  string               `json:"id" yaml:"id"`
-	Slug                string               `json:"slug" yaml:"slug"`
-	WorkspacePath       string               `json:"workspace_path" yaml:"workspace_path"`
-	ParentProjectID     string               `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
-	ForkBaseSnapshotID  string               `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
-	AgentProfileName    string               `json:"agent_profile_name" yaml:"agent_profile_name"`
-	EnvironmentConfigs  []string             `json:"environment_configs" yaml:"environment_configs"`
-	EnvironmentCommands []string             `json:"environment_commands,omitempty" yaml:"environment_commands,omitempty"`
-	SetupCommands       []string             `json:"setup_commands,omitempty" yaml:"setup_commands,omitempty"`
-	DefaultRuntime      string               `json:"default_runtime" yaml:"default_runtime"`
-	DefaultProvider     string               `json:"default_provider" yaml:"default_provider"`
-	DefaultLimaTemplate string               `json:"default_lima_template" yaml:"default_lima_template"`
-	LimaCommands        LimaCommandTemplates `json:"lima_commands,omitempty" yaml:"lima_commands,omitempty"`
-	CreatedAt           time.Time            `json:"created_at" yaml:"created_at"`
-	UpdatedAt           time.Time            `json:"updated_at" yaml:"updated_at"`
-	DeletedAt           *time.Time           `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	ID                  string                  `json:"id" yaml:"id"`
+	Slug                string                  `json:"slug" yaml:"slug"`
+	WorkspacePath       string                  `json:"workspace_path" yaml:"workspace_path"`
+	ParentProjectID     string                  `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
+	ForkBaseSnapshotID  string                  `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
+	AgentProfileName    string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
+	EnvironmentConfigs  []string                `json:"environment_configs" yaml:"environment_configs"`
+	EnvironmentCommands []string                `json:"environment_commands,omitempty" yaml:"environment_commands,omitempty"`
+	SetupCommands       []string                `json:"setup_commands,omitempty" yaml:"setup_commands,omitempty"`
+	DefaultRuntime      string                  `json:"default_runtime" yaml:"default_runtime"`
+	DefaultProvider     string                  `json:"default_provider" yaml:"default_provider"`
+	DefaultImage        string                  `json:"default_image" yaml:"default_image"`
+	DefaultPorts        []string                `json:"default_ports,omitempty" yaml:"default_ports,omitempty"`
+	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
+	CreatedAt           time.Time               `json:"created_at" yaml:"created_at"`
+	UpdatedAt           time.Time               `json:"updated_at" yaml:"updated_at"`
+	DeletedAt           *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
 func (p Project) MarshalJSON() ([]byte, error) {
@@ -359,43 +439,45 @@ func (p *Project) UnmarshalYAML(node *yaml.Node) error {
 
 func newProjectWire(project Project) projectWire {
 	return projectWire{
-		ID:                  project.ID,
-		Slug:                project.Slug,
-		WorkspacePath:       project.WorkspacePath,
-		ParentProjectID:     project.ParentProjectID,
-		ForkBaseSnapshotID:  project.ForkBaseSnapshotID,
-		AgentProfileName:    project.AgentProfileName,
-		EnvironmentConfigs:  append([]string(nil), project.EnvironmentConfigs...),
-		DefaultRuntime:      project.DefaultRuntime,
-		DefaultProvider:     project.DefaultProvider,
-		DefaultLimaTemplate: project.DefaultLimaTemplate,
-		LimaCommands:        project.LimaCommands,
-		CreatedAt:           project.CreatedAt,
-		UpdatedAt:           project.UpdatedAt,
-		DeletedAt:           project.DeletedAt,
+		ID:                 project.ID,
+		Slug:               project.Slug,
+		WorkspacePath:      project.WorkspacePath,
+		ParentProjectID:    project.ParentProjectID,
+		ForkBaseSnapshotID: project.ForkBaseSnapshotID,
+		AgentProfileName:   project.AgentProfileName,
+		EnvironmentConfigs: append([]string(nil), project.EnvironmentConfigs...),
+		DefaultRuntime:     project.DefaultRuntime,
+		DefaultProvider:    project.DefaultProvider,
+		DefaultImage:       project.DefaultImage,
+		DefaultPorts:       append([]string(nil), project.DefaultPorts...),
+		RuntimeCommands:    project.RuntimeCommands,
+		CreatedAt:          project.CreatedAt,
+		UpdatedAt:          project.UpdatedAt,
+		DeletedAt:          project.DeletedAt,
 	}
 }
 
 func (w projectWire) project() Project {
 	project := Project{
-		ID:                  w.ID,
-		Slug:                w.Slug,
-		WorkspacePath:       w.WorkspacePath,
-		ParentProjectID:     w.ParentProjectID,
-		ForkBaseSnapshotID:  w.ForkBaseSnapshotID,
-		AgentProfileName:    w.AgentProfileName,
-		EnvironmentConfigs:  append([]string(nil), w.EnvironmentConfigs...),
-		DefaultRuntime:      w.DefaultRuntime,
-		DefaultProvider:     w.DefaultProvider,
-		DefaultLimaTemplate: w.DefaultLimaTemplate,
-		LimaCommands:        w.LimaCommands,
-		CreatedAt:           w.CreatedAt,
-		UpdatedAt:           w.UpdatedAt,
-		DeletedAt:           w.DeletedAt,
+		ID:                 w.ID,
+		Slug:               w.Slug,
+		WorkspacePath:      w.WorkspacePath,
+		ParentProjectID:    w.ParentProjectID,
+		ForkBaseSnapshotID: w.ForkBaseSnapshotID,
+		AgentProfileName:   w.AgentProfileName,
+		EnvironmentConfigs: append([]string(nil), w.EnvironmentConfigs...),
+		DefaultRuntime:     w.DefaultRuntime,
+		DefaultProvider:    w.DefaultProvider,
+		DefaultImage:       w.DefaultImage,
+		DefaultPorts:       append([]string(nil), w.DefaultPorts...),
+		RuntimeCommands:    removeLegacyMSBCommandTemplates(w.RuntimeCommands),
+		CreatedAt:          w.CreatedAt,
+		UpdatedAt:          w.UpdatedAt,
+		DeletedAt:          w.DeletedAt,
 	}
 
-	if len(project.LimaCommands.Bootstrap) == 0 {
-		project.LimaCommands.Bootstrap = commandSliceWithLegacy(nil, w.EnvironmentCommands, w.SetupCommands)
+	if len(project.RuntimeCommands.Bootstrap) == 0 {
+		project.RuntimeCommands.Bootstrap = commandSliceWithLegacy(nil, w.EnvironmentCommands, w.SetupCommands)
 	}
 
 	return project
@@ -532,8 +614,9 @@ func (w environmentConfigWire) environmentConfig() EnvironmentConfig {
 	}
 }
 
-type limaCommandTemplatesWire struct {
-	TemplateCopy         commandList `json:"template_copy,omitempty" yaml:"template_copy,omitempty"`
+type runtimeCommandTemplatesWire struct {
+	Version              commandList `json:"version,omitempty" yaml:"version,omitempty"`
+	List                 commandList `json:"list,omitempty" yaml:"list,omitempty"`
 	Create               commandList `json:"create,omitempty" yaml:"create,omitempty"`
 	Start                commandList `json:"start,omitempty" yaml:"start,omitempty"`
 	Stop                 commandList `json:"stop,omitempty" yaml:"stop,omitempty"`
@@ -542,15 +625,16 @@ type limaCommandTemplatesWire struct {
 	Bootstrap            commandList `json:"bootstrap" yaml:"bootstrap"`
 	WorkspaceSeedPrepare commandList `json:"workspace_seed_prepare,omitempty" yaml:"workspace_seed_prepare,omitempty"`
 	Copy                 commandList `json:"copy,omitempty" yaml:"copy,omitempty"`
-	Shell                commandList `json:"shell,omitempty" yaml:"shell,omitempty"`
+	ShellExec            commandList `json:"shell_exec,omitempty" yaml:"shell_exec,omitempty"`
+	ShellLogin           commandList `json:"shell_login,omitempty" yaml:"shell_login,omitempty"`
 }
 
-func (t LimaCommandTemplates) MarshalJSON() ([]byte, error) {
+func (t RuntimeCommandTemplates) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.wire())
 }
 
-func (t *LimaCommandTemplates) UnmarshalJSON(data []byte) error {
-	var wire limaCommandTemplatesWire
+func (t *RuntimeCommandTemplates) UnmarshalJSON(data []byte) error {
+	var wire runtimeCommandTemplatesWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
@@ -559,12 +643,12 @@ func (t *LimaCommandTemplates) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (t LimaCommandTemplates) MarshalYAML() (any, error) {
+func (t RuntimeCommandTemplates) MarshalYAML() (any, error) {
 	return t.wire(), nil
 }
 
-func (t *LimaCommandTemplates) UnmarshalYAML(node *yaml.Node) error {
-	var wire limaCommandTemplatesWire
+func (t *RuntimeCommandTemplates) UnmarshalYAML(node *yaml.Node) error {
+	var wire runtimeCommandTemplatesWire
 	if err := node.Decode(&wire); err != nil {
 		return err
 	}
@@ -573,9 +657,10 @@ func (t *LimaCommandTemplates) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (t LimaCommandTemplates) wire() limaCommandTemplatesWire {
-	return limaCommandTemplatesWire{
-		TemplateCopy:         commandList(copyCommandList(t.TemplateCopy)),
+func (t RuntimeCommandTemplates) wire() runtimeCommandTemplatesWire {
+	return runtimeCommandTemplatesWire{
+		Version:              commandList(copyCommandList(t.Version)),
+		List:                 commandList(copyCommandList(t.List)),
 		Create:               commandList(copyCommandList(t.Create)),
 		Start:                commandList(copyCommandList(t.Start)),
 		Stop:                 commandList(copyCommandList(t.Stop)),
@@ -584,13 +669,15 @@ func (t LimaCommandTemplates) wire() limaCommandTemplatesWire {
 		Bootstrap:            commandList(copyCommandList(t.Bootstrap)),
 		WorkspaceSeedPrepare: commandList(copyCommandList(t.WorkspaceSeedPrepare)),
 		Copy:                 commandList(copyCommandList(t.Copy)),
-		Shell:                commandList(copyCommandList(t.Shell)),
+		ShellExec:            commandList(copyCommandList(t.ShellExec)),
+		ShellLogin:           commandList(copyCommandList(t.ShellLogin)),
 	}
 }
 
-func (w limaCommandTemplatesWire) templates() LimaCommandTemplates {
-	return LimaCommandTemplates{
-		TemplateCopy:         copyCommandList([]string(w.TemplateCopy)),
+func (w runtimeCommandTemplatesWire) templates() RuntimeCommandTemplates {
+	return RuntimeCommandTemplates{
+		Version:              copyCommandList([]string(w.Version)),
+		List:                 copyCommandList([]string(w.List)),
 		Create:               copyCommandList([]string(w.Create)),
 		Start:                copyCommandList([]string(w.Start)),
 		Stop:                 copyCommandList([]string(w.Stop)),
@@ -599,7 +686,8 @@ func (w limaCommandTemplatesWire) templates() LimaCommandTemplates {
 		Bootstrap:            copyCommandList([]string(w.Bootstrap)),
 		WorkspaceSeedPrepare: copyCommandList([]string(w.WorkspaceSeedPrepare)),
 		Copy:                 copyCommandList([]string(w.Copy)),
-		Shell:                copyCommandList([]string(w.Shell)),
+		ShellExec:            copyCommandList([]string(w.ShellExec)),
+		ShellLogin:           copyCommandList([]string(w.ShellLogin)),
 	}
 }
 

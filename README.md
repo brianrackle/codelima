@@ -1,731 +1,344 @@
 # CodeLima
 
-> Sandbox agentic coding in real Lima VMs instead of on your host machine.
+CodeLima is a Go CLI and shell-first TUI for directory-bound coding VMs. It uses Microsandbox as its sole runtime and the official Microsandbox Go SDK as its sole integration; CodeLima never shells out to the `msb` CLI and has no CLI fallback.
 
-CodeLima is a Go CLI and shell-first TUI for managing lineage-aware projects, Lima-backed nodes, and reusable environment configs from one control plane. It helps you run coding agents, dev environments, and repo-specific toolchains inside real Linux VMs while keeping your macOS or Linux workstation cleaner, safer, and easier to reason about.
+The model has three user-facing objects:
 
-## The Problem
+- A configuration is a reusable, directory-independent VM recipe: image, agent profile, environments, direct bootstrap commands, vCPUs, memory, and disk.
+- An environment is a reusable ordered list of bootstrap commands that configurations can reference.
+- A node is a VM bound to one host directory. A directory can have multiple nodes, and every node records the configuration that created it.
 
-Modern coding workflows are powerful, but the default setup is messy:
+Projects are not part of schema v3. Passing a directory to CodeLima scopes the TUI to nodes bound to that directory or its descendants.
 
-- running agents with broad permissions directly on the host
-- accumulating `apt`, `npm`, language runtimes, and shell-state drift across repos
-- conflicting toolchains between projects
-- accidental writes outside the repo you meant to touch
-- slow context switching when you juggle many repos, many environments, and many terminal sessions
+## Requirements
 
-## How CodeLima Solves It
+- macOS arm64, Linux amd64, or Linux arm64
+- A host capable of running Microsandbox (including its virtualization requirements)
+- `git`
 
-CodeLima is a thin workflow layer on top of Lima, not a replacement for it. You register host workspaces as projects, create Lima-backed nodes for those projects, choose whether each node gets an isolated guest copy or a live writable mount of the repo, and bootstrap nodes with reusable environment configs.
+The Go module pins the official SDK at `v0.6.6`. On its first runtime dependency check, the SDK ensures its matching `msb` and `libkrunfw` support files are installed under `~/.microsandbox`; an initial download may therefore require network access. CodeLima does not execute that `msb` binary and has no CLI fallback.
 
-That gives you:
-
-- **real VM isolation** for risky agent sessions
-- **two workspace modes**: `copy` for safer experimentation and `mounted` for immediate host sync
-- **shared environment configs** for Codex, Claude Code, and custom Linux toolchains
-- **global, project, and node Lima command overrides** when a repo or VM needs non-default `limactl` flags
-- **one control plane** for many repos and many nodes
-- **a shell-first TUI** that keeps reusable project-local and node terminal sessions available while the TUI is running
-- **direct Lima escape hatches** whenever you want to use `limactl` yourself
-
-## What That Feels Like In Practice
-
-- Run `codex` or `claude` inside the VM without giving the same reach to your host.
-- Keep package installs, shell state, and experiments off your workstation.
-- Move between projects and nodes quickly from the CLI or the TUI.
-
-## See The Value In 60 Seconds
-
-Once `codelima` is on your `PATH`, you can register a repo, create a sandboxed node, and drop into the VM:
-
-```sh
-codelima project create \
-  --slug payments \
-  --workspace /Users/you/src/payments \
-  --env-config codex \
-  --agent-profile codex-cli
-
-codelima node create --project payments --slug payments-sandbox --workspace-mode copy
-codelima node start payments-sandbox
-codelima shell payments-sandbox
-```
-
-Then, inside the VM shell:
-
-```sh
-codex
-```
-
-Use `copy` when you want the strongest sandbox boundary around agent actions. Use `mounted` when you intentionally want the VM to act directly on your host workspace with immediate sync.
+Keep both `CODELIMA_HOME` and `MSB_HOME` reasonably short. Microsandbox derives Unix-domain socket paths beneath them, and operating systems impose a small fixed path-length limit. Prefer paths such as `~/.codelima-v3` and `~/.msb` over deeply nested directories.
 
 ## Install
 
-Install the latest packaged release from Homebrew:
+Install the latest packaged release with Homebrew:
 
 ```sh
 brew tap brianrackle/codelima
 brew install codelima
 ```
 
-The Homebrew formula installs the packaged `codelima` binary plus the bundled `libghostty-vt` runtime library, and declares `git` and `lima` as runtime dependencies.
+The formula installs CodeLima, its bundled `libghostty-vt` library, and `git`. Microsandbox remains a host prerequisite and installs its matching runtime support files during CodeLima's first dependency check. Release archives are published for macOS arm64, Linux amd64, and Linux arm64.
 
-## Supported Systems
+## Build
 
-Current packaged releases are built for:
-
-- macOS `arm64`
-- macOS `amd64`
-- Linux `arm64`
-- Linux `amd64`
-
-Repository-local development and CI are exercised on macOS and Linux.
-
-## Prerequisites
-
-- macOS or Linux
-- `curl`, `tar`, `git`, and `make`
-- a working C toolchain for Go's `cgo` path (`clang` via Xcode Command Line Tools on macOS, or the equivalent build tools on Linux)
-- Lima installed and working on the host
-
-`make init` installs the Go toolchain, `gopls`, `golangci-lint`, Zig, and a patched `libghostty-vt` build locally under `.tooling/<os>-<arch>`; system Go, `gopls`, or Zig installs are not required. It also refreshes `.tooling/ghostty-vt/current` as a compatibility link for the cgo bridge. The per-platform layout avoids host and guest toolchain collisions when the same repository is used from both macOS and a Linux VM.
-
-## Build From Source
+The repository manages its toolchain under `.tooling/<os>-<arch>`:
 
 ```sh
 make init
-make build
+make verify
 ```
 
-The platform-native binary is written to `./bin/<os>-<arch>/codelima`, for example `./bin/linux-aarch64/codelima` or `./bin/darwin-arm64/codelima`. `make build` also refreshes `./bin/codelima` as a compatibility symlink to the current platform's build.
-
-Run repository-scoped `gopls` commands through make:
-
-```sh
-make gopls
-make gopls GOPLS_ARGS="check internal/codelima/tui_test.go"
-```
-
-To build a distributable archive for the current platform:
-
-```sh
-make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
-```
-
-That writes a Homebrew-ready tarball plus a JSON manifest under `./tmp/dist`.
-
-## Quick Start
-
-The examples below assume `codelima` is installed and available on `PATH`.
-For repository-local development, use `make run ARGS="..."`, the platform-scoped binary under `./bin/<os>-<arch>/codelima`, or the refreshed `./bin/codelima` compatibility symlink.
-
-Create a project from a host repo:
-
-```sh
-codelima project create --slug api --workspace /Users/you/src/api
-```
-
-Create a Lima-backed node for that project:
-
-```sh
-codelima node create --project api --slug api-copy --workspace-mode copy
-```
-
-Start the node and open a shell inside it:
-
-```sh
-codelima node start api-copy
-codelima shell api-copy
-```
-
-Open the TUI instead of running a subcommand:
-
-```sh
-codelima
-```
-
-Use `copy` when you want an isolated guest workspace. Use `mounted` when you want guest edits to appear on the host immediately.
-
-## Core Concepts
-
-CodeLima manages:
-
-- projects and immutable workspace snapshots under `CODELIMA_HOME`
-- Lima-backed nodes delegated through `limactl`
-- reusable environment configs that bootstrap new nodes
-- a canonical shell surface that passes through to `limactl shell`
-- a shell-first TUI that keeps reusable project-local and node terminal sessions while the TUI process is running
-
-### Capabilities
-
-- register host workspaces as lineage-aware projects
-- capture immutable snapshots on demand for lineage-aware project workflows
-- create, start, stop, clone, inspect, and delete Lima-backed nodes, choosing either an isolated copied workspace or a writable mounted workspace per node
-- detect and clean up incomplete node metadata directories left by failed node creation attempts
-- create reusable environment configs and assign them to multiple projects as shared bootstrap defaults, including built-in `codex` and `claude-code` installers
-- open an interactive shell or run one-off commands inside a node, starting in a guest-local copy of the project workspace that keeps the same absolute path
-- browse the project tree, manage selected projects and nodes, scope the TUI to a workspace directory, and jump between preserved project-local and node sessions in a Ghostty-backed embedded terminal
-- switch a focused node terminal to the host-local project terminal and back without losing the selected node context
-- turn the existing TUI top bar red while the focused node terminal is temporarily switched to the host machine
-- start with one default TUI terminal tab, then explicitly open, switch, and close per-project and per-node tabs with Option keybindings
-- keep navigating the tree or focus another preserved project or node terminal while long-running project or node mutations continue in the background
-- keep the TUI project tree refreshed automatically while preserving expansion state, selection, and open terminals
-- paste multiline text, resize the host window, and sync OSC 52 guest clipboard writes to the host clipboard in the embedded terminal
-- inspect local control-plane health with `doctor` and resolved defaults with `config show`
-- view project lineage with attached project nodes via `project tree`
-
-## Command Structure
-
-Most commands follow this shape:
-
-```sh
-codelima [--home PATH] [--json] [PATH]
-codelima [--home PATH] [--json] <group> <command> [flags]
-```
-
-Running `codelima` with no command opens the TUI:
-
-```sh
-codelima [--home PATH]
-```
-
-Pass a directory path to open the TUI with only registered projects whose workspace paths are in that directory or one of its subdirectories:
-
-```sh
-codelima [--home PATH] /Users/you/src
-```
-
-Useful global flags:
-
-- `--home PATH` points the CLI at a specific `CODELIMA_HOME`
-- `--json` returns structured output for automation
-- `--log-level LEVEL` reserves a verbosity setting for future CLI logging
-
-`project list` renders a compact table by default with `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`. `node list` adds `workspace_mode` and `vm_status` so both the workspace binding strategy and live VM state are visible without switching to `node show`. `node cleanup-incomplete` also renders a compact table, showing each incomplete node directory plus any recovered Lima instance name. Use `--json` when you need the full structured payload for scripts.
-
-## TUI Quick Start
-
-The TUI opens when you run `codelima` with no command:
-
-```sh
-codelima
-```
-
-To focus the tree on one workspace root, pass that directory:
-
-```sh
-codelima /Users/you/src
-```
-
-Basic layout:
-
-```text
-+---------------------------+---------------------------------------------+
-| Projects / Nodes          | [Info] Terminal                             |
-|                           |                                             |
-| ▼ api                     | Project controls                            |
-|   • api-copy    STOPPED   | Slug: api                                   |
-|   • api-mount   RUNNING   | Workspace: /Users/you/src/api               |
-| ▼ billing                 | Press i for terminal preview                |
-|   • billing-a   RUNNING   |                                             |
-+---------------------------+---------------------------------------------+
-```
-
-Fast key reference:
-
-- `Option+\`` or `F6`: toggle between tree focus and terminal focus
-- `Option+Shift+Backtick`: switch a selected node's fullscreen terminal to its host-local project terminal and back
-- `Option+t`: open a fresh terminal tab for the selected project or node without leaving tree focus
-- `Option+Left` / `Option+Right`: switch among the selected project's or node's open terminal tabs
-- `Option+w`: close the active terminal tab and focus the adjacent tab
-- `i`: toggle the right pane between info and terminal while the tree is focused
-- macOS note: the terminal emulator must send Option as Alt/Meta for these bindings (in Ghostty set `macos-option-as-alt = true`). CodeLima also accepts the raw macOS Option text sequences (`†` for `Option+t`, `∑` for `Option+w`, and `Esc f`/`Esc b` for `Option+Right`/`Option+Left`) when Option is not remapped.
-- `q`: quit the TUI
-- `Up` / `Down`: move selection in the tree
-- `Left` / `Right`: collapse or expand projects in the tree
-- `[a]`: add project
-- `[g]`: manage reusable environment configs
-- on a selected project: `[n]` create node, `[u]` update project, `[x]` delete project
-- on a selected node: `[s]` start or stop node, `[d]` delete node, `[c]` clone node
-- mouse: click tree entries to select, click links to open them, and wheel-scroll local terminal scrollback when the guest is not capturing the mouse; use your terminal emulator's host-selection bypass gesture for terminal text selection/copy while mouse-aware apps keep receiving guest mouse input
-
-In tree focus, selecting a project or node shows its info pane by default. Press `i` to switch the split pane to that project's host-local shell or the selected node's guest terminal preview without changing fullscreen terminal focus behavior; stopped nodes still show a terminal-oriented placeholder until you start them.
-
-Project and node forms, menus, and selectors replace the right pane instead of opening centered modals, so the tree stays visible while you work through them. Long-running project and node mutations run in the background, render transient task state in the tree and details pane, and leave the rest of the TUI usable while they finish. The tree also refreshes periodically, so out-of-process node status or metadata changes appear without restarting the TUI.
-
-Creating a node from the TUI selects the new node and switches the right pane to its terminal view immediately. If the node is not running yet, the pane shows the terminal placeholder and start guidance instead of opening a shell session.
-
-On launch, CodeLima opens one initial terminal tab for the starting project or running node when that shell can be started, while keeping tree focus and the info pane visible. Additional terminal tabs are explicit and belong to a single project or node. Selecting or visiting items in the tree never opens another tab; press `Option+t` with a project or running node selected to open a fresh embedded terminal tab for it. Each press opens another tab for that same item, `Option+Left`/`Option+Right` switch among the focused item's tabs, and `Option+w` closes the active one. Closing a tab focuses the next higher-numbered adjacent tab when one exists, otherwise the previous lower-numbered tab. The terminal pane border shows only the focused item's tabs (numbered when there is more than one, with host-local project shells labeled `host:<project>` and the active tab bracketed); tabs for other projects and nodes stay hidden until their item is focused again, and each item remembers its active tab. Use `Option+\`` or `F6` when you want the active terminal fullscreen. When a node terminal is switched to the host-local project shell with `Option+Shift+Backtick`, the existing TUI top bar turns red until you switch back.
-
-Guest applications that emit OSC 52 clipboard writes sync that text to the host clipboard; ordinary visible-text selection still uses your terminal emulator's host-selection bypass gesture.
-
-Create Project form in the right pane:
-
-```text
-+--------------------------- Create Project ----------------------------+
-| Project Slug: api                                                 |
-| Workspace Path: /Users/you/src/api                                |
-| Environment Configs: codex                                        |
-+--------------------------------------------------------------------+
-```
-
-Create Node form in the right pane:
-
-```text
-+---------------------------- Create Node -----------------------------+
-| Selected project: api                                             |
-| Node Slug: api-copy                                               |
-| Workspace Mode: copy: isolated guest workspace copy               |
-+--------------------------------------------------------------------+
-```
-
-## Workflow 1: Manage Many Codebases From One Control Plane
-
-Use one `CODELIMA_HOME` to track many host workspaces while giving each codebase its own projects and nodes.
-
-CLI:
-
-```sh
-codelima project create --slug api --workspace /Users/you/src/api
-codelima project create --slug billing --workspace /Users/you/src/billing
-codelima project create --slug docs --workspace /Users/you/src/docs
-
-codelima project list
-codelima project tree
-```
-
-TUI view after registering several repos:
-
-```text
-+---------------------------+---------------------------------------------+
-| Projects / Nodes          | [Info] Terminal                             |
-|                           |                                             |
-| ▼ api                     | Project controls                            |
-|   • api-copy    STOPPED   | Slug: api                                   |
-| ▼ billing                 | Workspace: /Users/you/src/billing           |
-|   • billing-a   RUNNING   |                                             |
-| ▼ docs                    | Press i for terminal preview                |
-|                           |                                             |
-+---------------------------+---------------------------------------------+
-```
-
-Why this helps for agentic coding:
-
-- one place to switch between many repos quickly
-- per-project default environments and agent profile metadata
-- project and node terminals that stay attached while you move around the tree
-
-Global Lima command defaults live in `CODELIMA_HOME/_config/config.yaml`.
-Project-specific overrides live in the project metadata file shown in the TUI project info pane under `CODELIMA_HOME/projects/<project-id>/project.yaml`.
-Node-specific overrides live in `CODELIMA_HOME/nodes/<node-id>/node.yaml`, and the TUI node info pane links that file directly.
-When a project or node has no overrides yet, its metadata file includes a commented example `lima_commands` block you can uncomment and edit.
-
-Each `lima_commands` action is an ordered command list. CodeLima executes the list in order, and higher-precedence overrides replace the whole list for that action. `lima_commands.bootstrap` runs during the first successful node start and replaces the older project-level `environment_commands` field.
-
-Global default example:
-
-```yaml
-lima_commands:
-  create:
-    - "{{binary}} create -y --name {{instance_name}} --cpus=2 --memory=4 --disk=20 {{template_path}}"
-  start:
-    - "{{binary}} start -y {{instance_name}}"
-  bootstrap: []
-  workspace_seed_prepare:
-    - "sudo rm -rf {{target_path}} && sudo mkdir -p {{target_parent}} && sudo chown \"$(id -un)\":\"$(id -gn)\" {{target_parent}}"
-  clone:
-    - "{{binary}} clone -y {{source_instance}} {{target_instance}}"
-```
-
-Project override example:
-
-```yaml
-lima_commands:
-  bootstrap:
-    - "./script/setup"
-    - "direnv allow"
-  workspace_seed_prepare:
-    - "install -d {{target_parent}} && rm -rf {{target_path}}"
-  copy:
-    - "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}}"
-  create:
-    - "{{binary}} create -y --name {{instance_name}} --cpus=6 --memory=12 --disk=80 --vm-type=vz {{template_path}}"
-  start:
-    - "{{binary}} start {{instance_name}} --vm-type=vz"
-  clone:
-    - "{{binary}} clone -y {{source_instance}} {{target_instance}}"
-```
-
-Node override example:
-
-```yaml
-lima_commands:
-  start:
-    - "{{binary}} start {{instance_name}} --tty=false"
-  copy:
-    - "{{binary}} copy --backend=rsync{{recursive_flag}} {{source_path}} {{copy_target}} --checksum"
-```
-
-Global, project, and node overrides follow normal precedence in that order. For the very first `node create` or `node clone`, use `--lima-commands-file` or the TUI `Lima Commands File` field when you need node-specific `create`, `clone`, or `template_copy` overrides to apply before the node metadata file already exists on disk.
-
-Available placeholders depend on the command and include:
-
-- `{{binary}}`
-- `{{locator}}`
-- `{{instance_name}}`
-- `{{template_path}}`
-- `{{source_instance}}`
-- `{{target_instance}}`
-- `{{source_path}}`
-- `{{target_path}}`
-- `{{target_parent}}`
-- `{{copy_target}}`
-- `{{recursive_flag}}`
-- `{{workdir_flag}}`
-- `{{command_args}}`
-
-## Workflow 2: Choose How VM Changes Sync Back To The Host
-
-Node creation gives you two workspace modes:
-
-- `copy`: safest for experimentation; the host repo is copied into the VM on first start and guest edits stay in the VM
-- `mounted`: fastest feedback loop; the host repo is mounted writable and guest edits appear on the host immediately
-
-When a project needs non-default copy-mode seeding, override `lima_commands.workspace_seed_prepare` for the guest-side directory prep and `lima_commands.copy` for the host-to-guest transfer itself. The TUI create-node and clone-node dialogs also accept an optional `Lima Commands File` path for first-create per-node overrides.
-
-CLI:
-
-```sh
-codelima node create --project api --slug api-copy --workspace-mode copy
-codelima node create --project api --slug api-mounted --workspace-mode mounted
-codelima node create --project api --slug api-tuned --lima-commands-file ./tmp/api-node-lima.yaml
-
-codelima node start api-copy
-codelima node start api-mounted
-codelima node list
-```
-
-ASCII comparison:
-
-```text
-copy mode                         mounted mode
----------                         ------------
-host repo ----copy once----> VM   host repo <----live writable----> VM
-safe isolation                    immediate sync to host
-best for risky agents             best for tight edit/test loops
-```
-
-Practical rule:
-
-- use `copy` when you want the strongest sandbox boundary around a coding agent
-- use `mounted` when you intentionally want the VM to act directly on your host workspace
-
-## Workflow 3: Run Codex Or Claude In A Sandboxed VM
-
-Fresh homes include:
-
-- environment config `codex`
-- environment config `claude-code`
-- agent profiles `codex-cli` and `claude-code`
-
-The environment config installs the tool in the VM. The agent profile records which command that project or node expects to run. The built-in Codex and Claude profiles use the plain executable names by default.
-
-The built-in `codex` environment config installs the Codex npm package under the VM user's `~/.local` prefix instead of using `sudo npm`. After bootstrap, update Codex inside the VM with:
-
-```sh
-npm update -g @openai/codex
-```
-
-Codex example:
-
-```sh
-codelima project create \
-  --slug payments \
-  --workspace /Users/you/src/payments \
-  --env-config codex \
-  --agent-profile codex-cli
-
-codelima node create --project payments --slug payments-codex --workspace-mode copy
-codelima node start payments-codex
-codelima shell payments-codex
-```
-
-Then, inside the VM shell:
-
-```sh
-codex
-```
-
-Claude example:
-
-```sh
-codelima project create \
-  --slug frontend \
-  --workspace /Users/you/src/frontend \
-  --env-config claude-code \
-  --agent-profile claude-code
-
-codelima node create --project frontend --slug frontend-claude --workspace-mode copy
-codelima node start frontend-claude
-codelima shell frontend-claude
-```
-
-Then, inside the VM shell:
-
-```sh
-claude
-```
-
-TUI view after creating the project and node:
-
-```text
-+---------------------------+---------------------------------------------+
-| Projects / Nodes          | Project: payments                           |
-| ▼ payments                | Node: payments-codex  Mode: copy            |
-|   • payments-codex RUNNING| Environment configs: codex                  |
-|                           | Open terminal, then run `codex` in the VM   |
-+---------------------------+---------------------------------------------+
-```
-
-Why this is safer:
-
-- agent actions happen inside the VM
-- package installs and shell state stay off the host
-- if the agent breaks the VM, you can stop, delete, and recreate the node
-- `copy` mode keeps accidental file damage out of the host workspace
-
-## Workflow 4: Build Custom Environments For Any Agent Or Linux Package Set
-
-Reusable environment configs are just ordered command lists that run when a new node is first bootstrapped. Use them to install editors, CLIs, package managers, or custom agent wrappers.
-
-CLI:
-
-```sh
-codelima environment create \
-  --slug devbox \
-  --bootstrap-command "sudo apt-get update" \
-  --bootstrap-command "sudo apt-get install -y ripgrep fd-find jq gh" \
-  --bootstrap-command "curl -fsSL https://mise.run | sh"
-
-codelima environment update devbox \
-  --bootstrap-command 'mkdir -p "$HOME/.local/bin"' \
-  --bootstrap-command 'npm config set prefix "$HOME/.local"' \
-  --bootstrap-command 'PATH="$HOME/.local/bin:$PATH" npm install -g @anthropic-ai/claude-code'
-codelima environment show devbox
-
-codelima project create \
-  --slug tooling \
-  --workspace /Users/you/src/tooling \
-  --env-config devbox
-```
-
-TUI flow:
-
-```text
-[g] Env Configs
-  -> Create Config
-  -> Add Bootstrap Command
-  -> Move Bootstrap Command
-  -> Remove Bootstrap Command
-
-[a] Add Project
-  -> choose Environment Configs: devbox
-```
-
-Good uses for custom environments:
-
-- installing Linux packages for a repo-specific toolchain
-- installing your preferred coding agent if it is not one of the built-ins
-- installing helper tools such as `gh`, `just`, `direnv`, `uv`, `pnpm`, or `docker` clients
-- encoding repeatable setup once instead of repeating it in every VM by hand
-
-## Lima Fallback Examples
-
-Because CodeLima uses Lima instead of inventing a separate VM backend, you can always fall back to `limactl` if you need something CodeLima does not expose yet:
-
-```sh
-limactl list
-limactl shell <instance-name>
-limactl copy <instance-name>:/var/log/cloud-init-output.log ./cloud-init-output.log
-limactl copy ./local-config <instance-name>:/tmp/local-config
-limactl stop <instance-name>
-limactl delete -f <instance-name>
-```
-
-That makes CodeLima a higher-level workflow layer on top of Lima rather than a dead-end abstraction.
-
-## CLI Commands At A Glance
-
-TUI:
-
-```sh
-codelima
-codelima /path/to/workspace-root
-```
-
-Health and config:
-
-```sh
-codelima doctor
-codelima config show
-```
-
-Reusable environments:
-
-```sh
-codelima environment create --slug NAME --bootstrap-command '...'
-codelima environment list
-codelima environment show NAME
-codelima environment update NAME --bootstrap-command '...'
-codelima environment delete NAME
-```
-
-Projects:
-
-```sh
-codelima project create --slug NAME --workspace /path/to/repo
-codelima project list
-codelima project show NAME
-codelima project update NAME --workspace /new/path
-codelima project delete NAME
-codelima project tree
-codelima project fork SOURCE --slug CHILD --workspace /path/to/child
-```
-
-Global Lima command defaults are stored in `CODELIMA_HOME/_config/config.yaml` under `lima_commands`.
-Project-specific overrides live in each project's `project.yaml` under the same key.
-Node-specific overrides live in each node's `node.yaml` under the same key.
-Use `config show` to inspect the effective global defaults, `project show` to inspect project-specific overrides, `node show` to inspect node-specific overrides, and the TUI details pane to find the on-disk metadata files quickly.
-
-Nodes:
-
-```sh
-codelima node create --project PROJECT --slug NODE [--workspace-mode copy|mounted] [--lima-commands-file PATH]
-codelima node list
-codelima node show NODE
-codelima node start NODE
-codelima node stop NODE
-codelima node clone NODE --node-slug NEW-NODE [--lima-commands-file PATH]
-codelima node delete NODE
-codelima node status NODE
-codelima node logs NODE
-codelima node cleanup-incomplete
-codelima node cleanup-incomplete --apply
-```
-
-Shell entry:
-
-```sh
-codelima shell NODE
-codelima shell NODE -- uname -a
-```
-
-## Make Shortcuts
-
-```sh
-make run ARGS="doctor"
-make run ARGS="config show"
-make run ARGS="environment create --slug shared-dev --bootstrap-command ./script/setup"
-make run ARGS="project create --slug root --workspace ./test-project-dir --env-config shared-dev"
-make run ARGS="node create --project root --slug root-node"
-make run ARGS="node start root-node"
-make run ARGS="shell root-node -- uname -a"
-make tui ARGS="--home /tmp/codelima-dev/.codelima"
-make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
-make package-formula PACKAGE_VERSION=1.2.3 RELEASE_TAG=v1.2.3 RELEASE_REPO=brianrackle/codelima DIST_DIR=./tmp/dist FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
-```
-
-## Tooling
+`make build` writes `bin/<os>-<arch>/codelima` and refreshes `bin/codelima` as a convenience symlink. Other useful recipes are:
 
 ```sh
 make fmt
 make lint
 make test
-make build
-make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
-make package-formula PACKAGE_VERSION=1.2.3 RELEASE_TAG=v1.2.3 RELEASE_REPO=brianrackle/codelima DIST_DIR=./tmp/dist FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
-make verify
-```
-
-Local builds are platform-scoped under `./bin/<os>-<arch>/codelima` so a macOS host and Linux guest can share one checkout without overwriting each other's executable. The `./bin/codelima` path remains a convenience symlink to the platform that last ran `make build`.
-
-## Releases
-
-Local release packaging uses the same make targets as CI:
-
-```sh
-make package PACKAGE_VERSION=1.2.3 DIST_DIR=./tmp/dist
-make package-formula \
-  PACKAGE_VERSION=1.2.3 \
-  RELEASE_TAG=v1.2.3 \
-  RELEASE_REPO=brianrackle/codelima \
-  DIST_DIR=./tmp/dist \
-  FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
-```
-
-`make package` builds a platform-native archive that contains:
-
-- `bin/codelima` as a small launcher that points `CODELIMA_GHOSTTY_VT_LIB` at the packaged Ghostty library
-- `bin/codelima-real` as the compiled Go binary
-- `lib/libghostty-vt.{dylib,so}` as the runtime terminal backend
-- `<asset>.json` as the manifest used to generate the Homebrew formula
-
-The repository ships two GitHub Actions workflows:
-
-- `.github/workflows/ci.yml` runs `make verify` on Ubuntu and macOS for pushes to `main` and pull requests
-- `.github/workflows/release.yml` builds release archives for `darwin-amd64`, `darwin-arm64`, `linux-amd64`, and `linux-arm64`, creates or updates the GitHub release for the tag, uploads the archives and manifests, and then updates a Homebrew tap when the required repository settings are present
-
-To enable automatic tap updates, configure:
-
-- repository variable `HOMEBREW_TAP_REPO`, for example `brianrackle/homebrew-codelima`
-- optional repository variable `HOMEBREW_TAP_BRANCH`, which defaults to `main`
-- repository secret `HOMEBREW_TAP_TOKEN` with permission to push to the tap repository
-
-Once those are in place, releasing a new Homebrew version is:
-
-```sh
-git tag v1.2.3
-git push origin v1.2.3
-```
-
-The release workflow publishes the assets and updates `Formula/codelima.rb` in the tap. End users then upgrade with `brew update && brew upgrade codelima`.
-
-## Documentation
-
-Keep `README.md` focused on user-facing setup, capabilities, workflows, and command examples.
-Internal documentation for design, maintenance, and tooling should live in `BUILD.md`.
-
-## Smoke Test
-
-The smoke test uses the real `limactl` binary and the repository fixture in `test-project-dir` to create and manage three VM layers inside one project:
-
-```sh
+make test-race
+make test-integration
 make smoke
 ```
 
-The script:
+See `BUILD.md` for packaging and release details.
 
-1. creates a root project bound to `test-project-dir`
-2. creates and starts a root Lima-backed node
-3. clones that node into a second node in the same project
-4. clones the second node into a third node in the same project
-5. prints the resulting project tree and node list
+## Use a separate home
 
-## Metadata Layout
+Schema v3 intentionally does not migrate old Lima-backed or schema-v2 homes. To run old and new CodeLima builds side by side, give the new binary its own home:
 
-By default the CLI stores metadata in `~/.codelima`:
-
-```text
-~/.codelima/
-  _config/
-  _locks/
-  _index/
-  projects/
-  nodes/
+```sh
+CODELIMA_HOME="$HOME/.codelima-msb" ./bin/darwin-arm64/codelima .
 ```
 
-Override the location with `--home` or `CODELIMA_HOME`.
+or:
 
-## Notes
+```sh
+./bin/darwin-arm64/codelima --home "$HOME/.codelima-msb" .
+```
 
-- `config show` displays the active defaults and resolved paths.
-- Built-in `codex-cli` and `claude-code` agent profiles define the default launch command names. Pair them with the matching `codex` or `claude-code` environment config so the executable is actually installed in the VM.
+`--home` must precede the command or directory argument. The old build can continue using `~/.codelima`; each home has its own daemon, metadata, and terminal sessions.
+
+## Quick start
+
+Inspect the global settings and repair/seed a fresh home:
+
+```sh
+codelima settings show
+codelima doctor --repair
+```
+
+The reserved `default` configuration starts with:
+
+- image `ghcr.io/superradcompany/debian-systemd:12`
+- agent profile `codex-cli`
+- environments `codex` and `claude-code`
+- 2 vCPUs
+- 4096 MiB memory
+- 20480 MiB disk
+
+It is editable, but it cannot be renamed or deleted. Creating another configuration copies the current default once; later default edits do not change that copy.
+
+The two built-in coding-agent environments install both CLIs in nodes created from the default configuration. The `codex-cli` agent profile selects Codex for validation and launch behavior; Claude Code remains available as `claude`.
+
+```sh
+codelima node create --slug codelima-dev --directory .
+codelima node start codelima-dev
+codelima shell codelima-dev
+```
+
+Inside the node, both agents are available:
+
+```sh
+codex --yolo
+claude
+```
+
+Configuration values are frozen into the node at creation. Updating `default` affects future nodes only.
+
+## Configurations
+
+List and inspect configurations:
+
+```sh
+codelima configuration list
+codelima configuration show default
+```
+
+Create a reusable recipe. Memory and disk accept MiB or GiB values:
+
+```sh
+codelima configuration create \
+  --slug large-codex \
+  --image ghcr.io/superradcompany/debian-systemd:12 \
+  --agent-profile codex-cli \
+  --environment codex \
+  --bootstrap-command 'apt-get update && apt-get install -y ripgrep' \
+  --vcpus 4 \
+  --memory 8GiB \
+  --disk 40GiB
+```
+
+Update, clone, and delete:
+
+```sh
+codelima configuration update large-codex --memory 12GiB
+codelima configuration clone large-codex --slug large-codex-copy
+codelima configuration delete large-codex-copy
+```
+
+A configuration referenced by any live node cannot be deleted. Repeated `--environment` and `--bootstrap-command` flags preserve order. Use `--clear-environments` or `--clear-bootstrap-commands` to clear either list.
+
+## Environments
+
+Environments are reusable bootstrap bundles:
+
+```sh
+codelima environment create \
+  --slug web-tools \
+  --bootstrap-command 'apt-get update' \
+  --bootstrap-command 'apt-get install -y nodejs npm'
+
+codelima environment list
+codelima environment show web-tools
+codelima environment update web-tools --bootstrap-command 'npm install -g pnpm'
+codelima environment delete web-tools
+```
+
+The built-in `codex` and `claude-code` environments are seeded by a mutating command, `doctor --repair`, or TUI startup. An environment referenced by a configuration cannot be deleted.
+
+## Nodes and directories
+
+Create a node in the current directory with the default configuration:
+
+```sh
+codelima node create --slug api-dev
+```
+
+Select another configuration or directory explicitly:
+
+```sh
+codelima node create \
+  --slug api-large \
+  --configuration large-codex \
+  --directory /Users/me/src/api
+```
+
+Multiple nodes may be bound to the same directory. Node slugs are globally unique within one `CODELIMA_HOME` so every command can address a node unambiguously.
+
+Lifecycle and inspection commands:
+
+```sh
+codelima node list
+codelima node show api-dev
+codelima node start api-dev
+codelima node status api-dev
+codelima node logs api-dev
+codelima node stop api-dev
+codelima node delete api-dev
+```
+
+Cloning requires a new slug and keeps the source node's directory, configuration association, frozen resources, environments, bootstrap state, and workspace mode:
+
+```sh
+codelima node clone api-dev --slug api-experiment
+```
+
+Workspace modes:
+
+- `copy` seeds a guest-local copy of the directory on first start.
+- `mounted` mounts the host directory read/write at the same absolute path in the guest.
+
+New nodes default to `mounted`, so host and guest edits are immediately shared. Select isolated copy mode explicitly when needed:
+
+```sh
+codelima node create --slug api-isolated --workspace-mode copy
+```
+
+## TUI
+
+Open all nodes:
+
+```sh
+codelima
+```
+
+Open only nodes bound to the current directory or a descendant:
+
+```sh
+codelima .
+```
+
+The left pane is a flat list of nodes with configuration, relative directory, and runtime status. Configuration and environment management are global actions; there are no project rows.
+
+Important bindings:
+
+- `Up` / `Down`: select a node
+- `i`: toggle info and terminal views
+- `Option+Backtick` or `F6`: toggle tree and terminal focus
+- `Option+t`: open another guest terminal tab for the selected node
+- `Option+Shift+t`: open a host terminal tab rooted at the node directory
+- `Option+Left` / `Option+Right`: switch tabs
+- `Option+w`: close the active tab
+- `n`: create a node
+- `a`: manage configurations
+- `g`: manage environments
+- `s`: start or stop the selected node
+- `c`: clone the selected node
+- `d`: delete the selected node
+- `q`: quit
+
+The host and guest shells are both tabs of the node target. Host mode is indicated by the red top bar. Host tabs resolve their working directory from stored node metadata, so they remain available when the node is stopped or Microsandbox is temporarily unavailable.
+
+## Local development servers
+
+The daemon discovers listening guest TCP ports and routes HTTP and WebSocket traffic dynamically:
+
+```text
+http://{node-slug}.localhost:{guest-port}
+```
+
+For a node named `api-dev` serving on guest port 8080:
+
+```sh
+curl http://api-dev.localhost:8080
+```
+
+No fixed list such as 3000/5173/8080 is preconfigured. Two nodes can use the same guest port because the hostname selects the node. The server may bind guest loopback; traffic is tunneled through the daemon's Microsandbox SDK SSH helper.
+
+Raw TCP services can still use explicit `--port HOST:GUEST` mappings at node creation. Explicit host ports must be unique among simultaneously running nodes.
+
+## Daemon and terminal automation
+
+The daemon owns terminal runtimes, dynamic forwarding, input ownership, and live-update handoff:
+
+```sh
+codelima daemon start
+codelima daemon status
+codelima daemon snapshot
+codelima daemon stop
+```
+
+The TUI starts or connects to the daemon automatically according to `_config/settings.yaml`.
+
+An interactive TUI claims daemon input ownership when it connects, making any older client observe-only, and its authenticated connection remains open while idle. Returning to that TUI and opening a terminal therefore requires neither a manual `terminal takeover` nor a daemon restart.
+
+On macOS, the daemon also protects mounted VirtioFS workspaces from system file-table exhaustion. It samples the host-wide `kern.num_files` against the host-wide `kern.maxfiles` every two seconds and, at 20% by default, asks running mounted nodes to release clean dentry/inode caches. Every attempt has a 30-second cooldown. The operation does not run `sync`, does not discard dirty data, and does not interrupt active file handles; the tradeoff is temporarily colder path-lookup caches.
+
+The daemon-only settings are:
+
+```yaml
+daemon:
+  autostart: true
+  restore: respawn
+  virtiofs_reclaim: true
+  virtiofs_reclaim_threshold_percent: 20
+```
+
+The threshold accepts 1 through 95. Set `virtiofs_reclaim: false` to disable the macOS workaround. `codelima daemon snapshot` reports whether the integration is supported, current host usage, the last reclaim result, and the next eligible attempt.
+
+`_daemon/session.json` contains only terminal restoration intent. With `restore: respawn`, CodeLima preserves an unsupported or malformed file beside that path, writes a fresh current-version session, logs the recovery, and continues starting the daemon. With `restore: forget`, it replaces old session state directly. This recovery never changes nodes, VM disks, or workspace files.
+
+Automation can open guest or host tabs for a node target:
+
+```sh
+NODE_ID="$(codelima --json node show api-dev | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)"
+codelima --json terminal open "node:$NODE_ID" --kind node-shell
+codelima --json terminal open "node:$NODE_ID" --kind node-host-shell
+codelima terminal list
+```
+
+Use `terminal read`, `terminal send`, `terminal close`, and `terminal takeover` for snapshot reads and explicit input ownership. Client and daemon versions must match exactly.
+
+## Metadata layout
+
+Schema v3 uses:
+
+```text
+CODELIMA_HOME/
+├── _config/
+│   ├── schema.version
+│   ├── settings.yaml
+│   └── agent-profiles/
+├── _daemon/
+├── _index/
+│   ├── configurations/by-slug/
+│   ├── environments/by-slug/
+│   └── nodes/by-instance/
+├── _locks/
+├── configurations/<id>/configuration.yaml
+├── environments/<id>/environment.yaml
+└── nodes/<id>/
+    ├── node.yaml
+    ├── bootstrap.yaml
+    ├── sandbox-instance.ref
+    └── events.jsonl
+```
+
+There is no `projects/` directory. A home with schema version 2 is rejected with instructions to choose a fresh home; automatic migration is intentionally unsupported.
+
+## Command summary
+
+```text
+codelima [--home PATH] [--json] [--log-level LEVEL] [PATH]
+codelima doctor [--repair]
+codelima settings show
+codelima environment create|list|show|update|delete
+codelima configuration create|list|show|update|delete|clone
+codelima node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
+codelima shell <node> [-- command...]
+codelima daemon run|start|stop|status|snapshot|update
+codelima terminal open|close|list|read|send|takeover
+```
+
+Use global flags before the command group, for example `codelima --home ~/.codelima-msb --json node list`.

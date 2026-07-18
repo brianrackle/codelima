@@ -40,6 +40,20 @@ func (r *TerminalRuntimeRegistry[B]) Allocate(backend B) *TerminalRuntime[B] {
 	return runtime
 }
 
+// Register records a backend under an identity allocated by an external owner,
+// such as the daemon. Existing identities are never replaced.
+func (r *TerminalRuntimeRegistry[B]) Register(id TerminalID, backend B) (*TerminalRuntime[B], bool) {
+	if id == "" {
+		return nil, false
+	}
+	if _, exists := r.runtimes[id]; exists {
+		return nil, false
+	}
+	runtime := &TerminalRuntime[B]{ID: id, Backend: backend}
+	r.runtimes[id] = runtime
+	return runtime, true
+}
+
 // nextID mints an opaque identity of the form
 // "term_<unix-nano-hex>_<counter-hex>". It is deliberately NOT derived from any
 // tab index, pane, layout position, or TargetKey: identity must survive any

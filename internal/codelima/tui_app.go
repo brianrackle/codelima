@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
@@ -47,15 +46,15 @@ type vaxisTUIApp struct {
 }
 
 const (
-	terminalViewToggleFooterHint = "Opt-`/F6"
-	terminalViewToggleTextHint   = "Opt-` or F6"
-	hostTerminalToggleFooterHint = "Opt-Shift-`"
-	infoViewToggleFooterHint     = "[i]"
-	terminalTabOpenFooterHint    = "Opt-t"
-	terminalTabNextFooterHint    = "Opt-Right"
-	terminalTabPrevFooterHint    = "Opt-Left"
-	terminalTabCloseFooterHint   = "Opt-w"
-	tuiAutoRefreshInterval       = 2 * time.Second
+	terminalViewToggleFooterHint  = "Opt-`/F6"
+	terminalViewToggleTextHint    = "Opt-` or F6"
+	hostTerminalTabOpenFooterHint = "Opt-Shift-t"
+	infoViewToggleFooterHint      = "[i]"
+	terminalTabOpenFooterHint     = "Opt-t"
+	terminalTabNextFooterHint     = "Opt-Right"
+	terminalTabPrevFooterHint     = "Opt-Left"
+	terminalTabCloseFooterHint    = "Opt-w"
+	tuiAutoRefreshInterval        = 2 * time.Second
 )
 
 func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoot string) error {
@@ -119,8 +118,10 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // cancelled context (e.g. Ctrl+C wired through signal.NotifyContext in main)
 // still closes every terminal — group-killing the VM shells — instead of the
 // process exiting through a happy-path-only cleanup. Run keeps its own
-// sessions.Close() defer as a backstop for failures before the loop starts
-// (Close drains the session map, so the second call is a no-op), and keeps
+// sessions.Close() defer as a backstop for failures before the loop starts.
+// Daemon-backed runtimes detach here and keep their PTYs alive; local fallback
+// runtimes still close and group-kill their child trees. Close drains the
+// session map, so a second call is a no-op. Run also keeps
 // host-terminal restoration (vx.Close) and auto-refresh cancellation deferred
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
@@ -146,10 +147,11 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 }
 
 func loadTUIProjectTree(ctx context.Context, service *Service, workspaceRoot string) ([]ProjectTreeNode, error) {
-	if strings.TrimSpace(workspaceRoot) != "" {
-		return service.ProjectTreeByWorkspaceRoot(ctx, workspaceRoot, false)
+	nodes, err := service.NodeListByDirectoryRoot(ctx, workspaceRoot, false)
+	if err != nil {
+		return nil, err
 	}
-	return service.ProjectTree(ctx, "", false)
+	return []ProjectTreeNode{{Project: Project{ID: "flat-nodes", Slug: "nodes"}, Nodes: nodes}}, nil
 }
 
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
@@ -325,8 +327,8 @@ func (a *vaxisTUIApp) applyReloadedTree(tree []ProjectTreeNode, preferredKey str
 	return nil
 }
 
-// targetKeyStillExists reports whether targetKey resolves to a live project or
-// node in the current tree. A key that does not parse as a target is treated as
+// targetKeyStillExists reports whether targetKey resolves to a live node in the
+// current list. A key that does not parse as a target is treated as
 // still existing (left untouched), matching the prior prefix-switch default arm.
 func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 	target, err := terminal.ParseTargetKey(targetKey)
@@ -338,8 +340,9 @@ func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 		_, ok := a.state.nodesByID[target.ID]
 		return ok
 	case terminal.TargetProject:
-		_, ok := a.state.projectsByID[target.ID]
-		return ok
+		// Project targets belong to the retired project-terminal model. Treat
+		// any restored bookkeeping for them as stale in schema v3.
+		return false
 	default:
 		return true
 	}
@@ -419,10 +422,21 @@ func (a *vaxisTUIApp) terminalContextEntry() tuiTreeEntry {
 func (a *vaxisTUIApp) openTerminalTab() error {
 	entry := a.terminalContextEntry()
 	if entry.kind != tuiTreeEntryProject && entry.kind != tuiTreeEntryNode {
-		return fmt.Errorf("select a project or node to open a terminal tab")
+		return fmt.Errorf("select a node to open a terminal tab")
 	}
 
 	if _, err := a.state.openTerminalTabEntry(entry); err != nil {
+		return err
+	}
+	if a.state.focus != tuiFocusTerminal {
+		a.state.treePaneMode = tuiTreePaneModeTerminal
+	}
+	return nil
+}
+
+func (a *vaxisTUIApp) openHostTerminalTab() error {
+	entry := a.terminalContextEntry()
+	if _, err := a.state.openHostTerminalTabEntry(entry); err != nil {
 		return err
 	}
 	if a.state.focus != tuiFocusTerminal {
@@ -480,9 +494,6 @@ func (a *vaxisTUIApp) closeTerminalTab() error {
 	}
 
 	a.state.clearActiveTab(targetKey)
-	if a.state.hostTerminalReturnKey != "" && isTargetKind(targetKey, terminal.TargetProject) {
-		a.state.hostTerminalReturnKey = ""
-	}
 	if a.state.focus == tuiFocusTerminal && a.state.terminalTarget == targetKey {
 		a.state.focusTree()
 	}

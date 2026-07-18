@@ -11,7 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
+	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +23,7 @@ type globalOptions struct {
 	JSON     bool
 	LogLevel string
 	Help     bool
+	Version  bool
 }
 
 type stringSliceFlag []string
@@ -34,6 +38,14 @@ func (f *stringSliceFlag) Set(value string) error {
 }
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == sdkSSHServeCommand {
+		if err := dispatchSDKSSHServe(ctx, args[1:]); err != nil {
+			_, _ = fmt.Fprintln(stderr, err)
+			return exitCodeForError(err)
+		}
+		return ExitSuccess
+	}
+
 	options, rest, err := parseGlobalOptions(args)
 	if err != nil {
 		writeError(stdout, stderr, true, err)
@@ -42,6 +54,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 
 	if options.Help {
 		_, _ = fmt.Fprint(stdout, usage())
+		return ExitSuccess
+	}
+	if options.Version {
+		_, _ = fmt.Fprintln(stdout, Version)
 		return ExitSuccess
 	}
 
@@ -70,6 +86,26 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	return ExitSuccess
 }
 
+func dispatchSDKSSHServe(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet(sdkSSHServeCommand, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	sandboxName := flags.String("sandbox", "", "")
+	authorizedKeysPath := flags.String("authorized-keys", "", "")
+	if err := flags.Parse(args); err != nil {
+		return invalidArgument(err.Error(), nil)
+	}
+	if flags.NArg() != 0 {
+		return invalidArgument("unexpected SDK SSH helper arguments", map[string]any{"arguments": flags.Args()})
+	}
+	if *sandboxName == "" {
+		return invalidArgument("--sandbox is required", nil)
+	}
+	if *authorizedKeysPath == "" {
+		return invalidArgument("--authorized-keys is required", nil)
+	}
+	return sdkSSHServe(ctx, *sandboxName, *authorizedKeysPath)
+}
+
 func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 	options := globalOptions{LogLevel: "info"}
 	rest := []string{}
@@ -92,6 +128,8 @@ func parseGlobalOptions(args []string) (globalOptions, []string, error) {
 			options.LogLevel = args[index]
 		case "--help", "-h":
 			options.Help = true
+		case "--version":
+			options.Version = true
 		default:
 			rest = args[index:]
 			return options, rest, nil
@@ -125,16 +163,20 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 			return nil, invalidArgument(err.Error(), nil)
 		}
 		return service.Doctor(ctx, *repair)
-	case "config":
-		return dispatchConfig(service, args[1:])
+	case "settings":
+		return dispatchSettings(service, args[1:])
 	case "environment":
 		return dispatchEnvironment(service, args[1:])
-	case "project":
-		return dispatchProject(ctx, service, args[1:])
+	case "configuration":
+		return dispatchConfiguration(service, args[1:])
 	case "node":
 		return dispatchNode(ctx, service, args[1:])
 	case "shell":
 		return dispatchShell(ctx, service, args[1:])
+	case "daemon":
+		return dispatchDaemon(ctx, service, args[1:])
+	case "terminal":
+		return dispatchTerminal(ctx, service, args[1:])
 	default:
 		return nil, invalidArgument("unknown command group", map[string]any{"group": args[0]})
 	}
@@ -142,10 +184,180 @@ func dispatch(ctx context.Context, service *Service, args []string) (any, error)
 
 func isCommandGroup(value string) bool {
 	switch value {
-	case "doctor", "config", "environment", "project", "node", "shell", "tui":
+	case "doctor", "settings", "environment", "configuration", "node", "shell", "daemon", "terminal", "tui":
 		return true
 	default:
 		return false
+	}
+}
+
+func dispatchDaemon(ctx context.Context, service *Service, args []string) (any, error) {
+	if len(args) == 0 {
+		return nil, invalidArgument("missing daemon command", nil)
+	}
+	switch args[0] {
+	case "run":
+		return nil, runDaemon(ctx, service)
+	case "import":
+		flags := flag.NewFlagSet("daemon import", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		handoff := flags.String("handoff", "", "")
+		token := flags.String("token", "", "")
+		if err := flags.Parse(args[1:]); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		return nil, importDaemon(ctx, service, *handoff, *token)
+	case "start":
+		return startDaemon(ctx, service)
+	case "stop":
+		return stopDaemon(ctx, service)
+	case "status":
+		return daemonStatus(ctx, service)
+	case "snapshot":
+		client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: service.cfg.MetadataRoot, Version: Version})
+		if err != nil {
+			return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
+		}
+		defer func() { _ = client.Close() }()
+		var snapshot map[string]any
+		if err := client.Call(ctx, "daemon.snapshot", nil, &snapshot); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return snapshot, nil
+	case "update":
+		path := ""
+		if len(args) > 1 {
+			path = args[1]
+		}
+		client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: service.cfg.MetadataRoot, Version: Version, WantInput: true, Timeout: 45 * time.Second})
+		if err != nil {
+			return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
+		}
+		defer func() { _ = client.Close() }()
+		var result map[string]any
+		if err := client.Call(ctx, "daemon.update", map[string]string{"path": path}, &result); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return result, nil
+	default:
+		return nil, invalidArgument("unknown daemon command", map[string]any{"command": args[0]})
+	}
+}
+
+func dispatchTerminal(ctx context.Context, service *Service, args []string) (any, error) {
+	if len(args) == 0 {
+		return nil, invalidArgument("missing terminal command", nil)
+	}
+	wantInput := args[0] == "send" || args[0] == "open" || args[0] == "close" || args[0] == "takeover"
+	client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: service.cfg.MetadataRoot, Version: Version, WantInput: wantInput})
+	if err != nil {
+		return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
+	}
+	defer func() { _ = client.Close() }()
+	switch args[0] {
+	case "open":
+		flags := flag.NewFlagSet("terminal open", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		kind := flags.String("kind", "", "")
+		label := flags.String("label", "", "")
+		remaining, target := args[1:], ""
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			target, remaining = remaining[0], remaining[1:]
+		}
+		if err := flags.Parse(remaining); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		if target == "" && flags.NArg() > 0 {
+			target = flags.Arg(0)
+		}
+		if target == "" {
+			return nil, invalidArgument("terminal open requires <target>", nil)
+		}
+		resolvedKind := *kind
+		if resolvedKind == "" {
+			resolvedKind = "node-shell"
+		}
+		var state daemon.TerminalState
+		if err := client.Call(ctx, "terminal.open", map[string]any{"target": target, "kind": resolvedKind, "label": *label}, &state); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return state, nil
+	case "close":
+		if len(args) < 2 {
+			return nil, invalidArgument("terminal close requires <terminal-id>", nil)
+		}
+		var result map[string]bool
+		if err := client.Call(ctx, "terminal.close", map[string]string{"terminal_id": args[1]}, &result); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return result, nil
+	case "takeover":
+		var result map[string]bool
+		if err := client.Call(ctx, "input.takeover", nil, &result); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return result, nil
+	case "list":
+		var states []daemon.TerminalState
+		if err := client.Call(ctx, "terminal.list", nil, &states); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return states, nil
+	case "read":
+		flags := flag.NewFlagSet("terminal read", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		source := flags.String("source", "visible", "")
+		format := flags.String("format", "text", "")
+		remaining, terminalID := args[1:], ""
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			terminalID, remaining = remaining[0], remaining[1:]
+		}
+		if err := flags.Parse(remaining); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		if terminalID == "" && flags.NArg() > 0 {
+			terminalID = flags.Arg(0)
+		}
+		if terminalID == "" {
+			return nil, invalidArgument("terminal read requires <terminal-id>", nil)
+		}
+		var result ReadResult
+		if err := client.Call(ctx, "terminal.read", map[string]any{"terminal_id": terminalID, "source": *source, "format": *format}, &result); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return map[string]any{"terminal_id": terminalID, "text": result.Text, "generation": result.Generation}, nil
+	case "send":
+		flags := flag.NewFlagSet("terminal send", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		text := flags.String("text", "", "")
+		var keys stringSliceFlag
+		flags.Var(&keys, "key", "")
+		remaining, terminalID := args[1:], ""
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			terminalID, remaining = remaining[0], remaining[1:]
+		}
+		if err := flags.Parse(remaining); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
+		}
+		if terminalID == "" && flags.NArg() > 0 {
+			terminalID = flags.Arg(0)
+		}
+		if terminalID == "" {
+			return nil, invalidArgument("terminal send requires <terminal-id>", nil)
+		}
+		method := "terminal.send_text"
+		params := map[string]any{"terminal_id": terminalID, "text": *text}
+		if len(keys) > 0 {
+			method = "terminal.send_keys"
+			params = map[string]any{"terminal_id": terminalID, "keys": []string(keys)}
+		}
+		var result map[string]int
+		if err := client.Call(ctx, method, params, &result); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return result, nil
+	default:
+		return nil, invalidArgument("unknown terminal command", map[string]any{"command": args[0]})
 	}
 }
 
@@ -180,12 +392,12 @@ func looksLikePathArgument(value string) bool {
 		strings.ContainsRune(value, os.PathSeparator)
 }
 
-func dispatchConfig(service *Service, args []string) (any, error) {
+func dispatchSettings(service *Service, args []string) (any, error) {
 	if len(args) == 0 || args[0] == "show" {
 		return service.ConfigSummary(), nil
 	}
 
-	return nil, invalidArgument("unknown config command", map[string]any{"command": strings.Join(args, " ")})
+	return nil, invalidArgument("unknown settings command", map[string]any{"command": strings.Join(args, " ")})
 }
 
 func dispatchEnvironment(service *Service, args []string) (any, error) {
@@ -264,151 +476,150 @@ func dispatchEnvironment(service *Service, args []string) (any, error) {
 	}
 }
 
-func dispatchProject(ctx context.Context, service *Service, args []string) (any, error) {
+func dispatchConfiguration(service *Service, args []string) (any, error) {
 	if len(args) == 0 {
-		return nil, invalidArgument("missing project command", nil)
+		return nil, invalidArgument("missing configuration command", nil)
 	}
-
 	switch args[0] {
-	case "create":
-		flags := flag.NewFlagSet("project create", flag.ContinueOnError)
+	case "create", "update":
+		flags := flag.NewFlagSet("configuration "+args[0], flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		slug := flags.String("slug", "", "")
-		workspace := flags.String("workspace", "", "")
-		agentProfile := flags.String("agent-profile", "", "")
-		template := flags.String("template", "", "")
-		var environmentConfigs stringSliceFlag
-		var bootstrapCommands stringSliceFlag
-		flags.Var(&environmentConfigs, "env-config", "")
-		flags.Var(&bootstrapCommands, "bootstrap-command", "")
-		flags.Var(&bootstrapCommands, "setup-command", "")
-		flags.Var(&bootstrapCommands, "env-command", "")
-		if err := flags.Parse(args[1:]); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		if *workspace == "" {
-			return nil, invalidArgument("--workspace is required", nil)
-		}
-		return service.ProjectCreate(ctx, ProjectCreateInput{
-			Slug:               *slug,
-			WorkspacePath:      *workspace,
-			AgentProfile:       *agentProfile,
-			EnvironmentConfigs: []string(environmentConfigs),
-			BootstrapCommands:  []string(bootstrapCommands),
-			Template:           *template,
-		})
-	case "list":
-		flags := flag.NewFlagSet("project list", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		includeDeleted := flags.Bool("include-deleted", false, "")
-		if err := flags.Parse(args[1:]); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		return service.ProjectList(*includeDeleted)
-	case "show":
-		if len(args) < 2 {
-			return nil, invalidArgument("project show requires <project>", nil)
-		}
-		return service.ProjectShow(args[1])
-	case "update":
-		flags := flag.NewFlagSet("project update", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		slug := flags.String("slug", "", "")
-		workspace := flags.String("workspace", "", "")
-		agentProfile := flags.String("agent-profile", "", "")
-		template := flags.String("template", "", "")
+		image := flags.String("image", "", "")
+		agent := flags.String("agent-profile", "", "")
+		vcpus := flags.Uint("vcpus", 0, "")
+		memory := flags.String("memory", "", "")
+		disk := flags.String("disk", "", "")
+		clearEnvironments := flags.Bool("clear-environments", false, "")
 		clearBootstrap := flags.Bool("clear-bootstrap-commands", false, "")
-		clearSetup := flags.Bool("clear-setup-commands", false, "")
-		clearEnvironment := flags.Bool("clear-env-commands", false, "")
-		clearEnvironmentConfigs := flags.Bool("clear-env-configs", false, "")
-		var environmentConfigs stringSliceFlag
-		var bootstrapCommands stringSliceFlag
-		flags.Var(&environmentConfigs, "env-config", "")
-		flags.Var(&bootstrapCommands, "bootstrap-command", "")
-		flags.Var(&bootstrapCommands, "setup-command", "")
-		flags.Var(&bootstrapCommands, "env-command", "")
-		remaining := args[1:]
-		target := ""
-		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-			target = remaining[0]
-			remaining = remaining[1:]
+		var environments stringSliceFlag
+		var bootstrap stringSliceFlag
+		flags.Var(&environments, "environment", "")
+		flags.Var(&bootstrap, "bootstrap-command", "")
+		remaining, target := args[1:], ""
+		if args[0] == "update" && len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			target, remaining = remaining[0], remaining[1:]
 		}
 		if err := flags.Parse(remaining); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
-		if target == "" && flags.NArg() > 0 {
+		if args[0] == "update" && target == "" && flags.NArg() > 0 {
 			target = flags.Arg(0)
 		}
+		input, err := configurationInputFromFlags(*slug, *image, *agent, *vcpus, *memory, *disk, environments, bootstrap, *clearEnvironments, *clearBootstrap)
+		if err != nil {
+			return nil, err
+		}
+		if args[0] == "create" {
+			if *slug == "" {
+				return nil, invalidArgument("configuration create requires --slug", nil)
+			}
+			return service.ConfigurationCreate(input)
+		}
 		if target == "" {
-			return nil, invalidArgument("project update requires <project>", nil)
+			return nil, invalidArgument("configuration update requires <configuration>", nil)
 		}
-		var slugPtr, workspacePtr, agentPtr, templatePtr *string
-		if *slug != "" {
-			slugPtr = slug
+		return service.ConfigurationUpdate(target, input)
+	case "clone":
+		flags := flag.NewFlagSet("configuration clone", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		slug := flags.String("slug", "", "")
+		remaining, source := args[1:], ""
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			source, remaining = remaining[0], remaining[1:]
 		}
-		if *workspace != "" {
-			workspacePtr = workspace
+		if err := flags.Parse(remaining); err != nil {
+			return nil, invalidArgument(err.Error(), nil)
 		}
-		if *agentProfile != "" {
-			agentPtr = agentProfile
+		if source == "" || *slug == "" {
+			return nil, invalidArgument("configuration clone requires <source> and --slug", nil)
 		}
-		if *template != "" {
-			templatePtr = template
-		}
-		return service.ProjectUpdate(target, ProjectUpdateInput{
-			Slug:                    slugPtr,
-			WorkspacePath:           workspacePtr,
-			AgentProfile:            agentPtr,
-			EnvironmentConfigs:      []string(environmentConfigs),
-			ClearEnvironmentConfigs: *clearEnvironmentConfigs,
-			BootstrapCommands:       []string(bootstrapCommands),
-			ClearBootstrap:          *clearBootstrap || *clearSetup || *clearEnvironment,
-			Template:                templatePtr,
-		})
-	case "delete":
-		if len(args) < 2 {
-			return nil, invalidArgument("project delete requires <project>", nil)
-		}
-		return service.ProjectDelete(args[1])
-	case "tree":
-		flags := flag.NewFlagSet("project tree", flag.ContinueOnError)
+		return service.ConfigurationClone(ConfigurationCloneInput{Source: source, Slug: *slug})
+	case "list":
+		flags := flag.NewFlagSet("configuration list", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
 		includeDeleted := flags.Bool("include-deleted", false, "")
 		if err := flags.Parse(args[1:]); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
-		root := ""
-		if flags.NArg() > 0 {
-			root = flags.Arg(0)
+		return service.ConfigurationList(*includeDeleted)
+	case "show":
+		if len(args) < 2 {
+			return nil, invalidArgument("configuration show requires <configuration>", nil)
 		}
-		return service.ProjectTree(ctx, root, *includeDeleted)
-	case "fork":
-		flags := flag.NewFlagSet("project fork", flag.ContinueOnError)
-		flags.SetOutput(io.Discard)
-		slug := flags.String("slug", "", "")
-		workspace := flags.String("workspace", "", "")
-		remaining := args[1:]
-		sourceProject := ""
-		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-			sourceProject = remaining[0]
-			remaining = remaining[1:]
+		return service.ConfigurationShow(args[1])
+	case "delete":
+		if len(args) < 2 {
+			return nil, invalidArgument("configuration delete requires <configuration>", nil)
 		}
-		if err := flags.Parse(remaining); err != nil {
-			return nil, invalidArgument(err.Error(), nil)
-		}
-		if sourceProject == "" && flags.NArg() > 0 {
-			sourceProject = flags.Arg(0)
-		}
-		if sourceProject == "" {
-			return nil, invalidArgument("project fork requires <source-project>", nil)
-		}
-		if *workspace == "" {
-			return nil, invalidArgument("--workspace is required", nil)
-		}
-		return service.ProjectFork(ctx, ProjectForkInput{SourceProject: sourceProject, Slug: *slug, WorkspacePath: *workspace})
+		return service.ConfigurationDelete(args[1])
 	default:
-		return nil, invalidArgument("unknown project command", map[string]any{"command": args[0]})
+		return nil, invalidArgument("unknown configuration command", map[string]any{"command": args[0]})
 	}
+}
+
+func configurationInputFromFlags(slug, image, agent string, vcpus uint, memory, disk string, environments, bootstrap stringSliceFlag, clearEnvironments, clearBootstrap bool) (ConfigurationCreateInput, error) {
+	input := ConfigurationCreateInput{Slug: slug}
+	if image != "" {
+		input.Image = &image
+	}
+	if agent != "" {
+		input.AgentProfile = &agent
+	}
+	if vcpus > 255 {
+		return ConfigurationCreateInput{}, invalidArgument("vcpus must be between 1 and 255", map[string]any{"vcpus": vcpus})
+	}
+	if vcpus != 0 {
+		value := uint8(vcpus)
+		input.VCPUs = &value
+	}
+	if memory != "" {
+		value, err := parseSizeMiB(memory)
+		if err != nil {
+			return ConfigurationCreateInput{}, invalidArgument("memory must be a positive MiB or GiB value", map[string]any{"memory": memory})
+		}
+		input.MemoryMiB = &value
+	}
+	if disk != "" {
+		value, err := parseSizeMiB(disk)
+		if err != nil {
+			return ConfigurationCreateInput{}, invalidArgument("disk must be a positive MiB or GiB value", map[string]any{"disk": disk})
+		}
+		input.DiskMiB = &value
+	}
+	if clearEnvironments {
+		input.Environments = []string{}
+	} else if environments != nil {
+		input.Environments = []string(environments)
+	}
+	if clearBootstrap {
+		input.BootstrapCommands = []string{}
+	} else if bootstrap != nil {
+		input.BootstrapCommands = []string(bootstrap)
+	}
+	return input, nil
+}
+
+func parseSizeMiB(input string) (uint32, error) {
+	value := strings.TrimSpace(strings.ToLower(input))
+	multiplier := uint64(1)
+	switch {
+	case strings.HasSuffix(value, "gib"):
+		multiplier = 1024
+		value = strings.TrimSpace(strings.TrimSuffix(value, "gib"))
+	case strings.HasSuffix(value, "gb"):
+		multiplier = 1024
+		value = strings.TrimSpace(strings.TrimSuffix(value, "gb"))
+	case strings.HasSuffix(value, "mib"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "mib"))
+	case strings.HasSuffix(value, "mb"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "mb"))
+	}
+	parsed, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || parsed == 0 || parsed*multiplier > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("invalid size")
+	}
+	return uint32(parsed * multiplier), nil
 }
 
 func dispatchNode(ctx context.Context, service *Service, args []string) (any, error) {
@@ -420,31 +631,32 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 	case "create":
 		flags := flag.NewFlagSet("node create", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
-		project := flags.String("project", "", "")
+		configuration := flags.String("configuration", DefaultConfigurationSlug, "")
+		directory := flags.String("directory", "", "")
 		slug := flags.String("slug", "", "")
-		workspaceMode := flags.String("workspace-mode", WorkspaceModeCopy, "")
-		runtime := flags.String("runtime", RuntimeVM, "")
-		provider := flags.String("provider", ProviderLima, "")
-		agentProfile := flags.String("agent-profile", "", "")
-		limaCommandsFile := flags.String("lima-commands-file", "", "")
+		workspaceMode := flags.String("workspace-mode", DefaultWorkspaceMode, "")
+		netDefault := flags.String("net-default", "", "")
+		var ports stringSliceFlag
+		var netAllow stringSliceFlag
+		flags.Var(&ports, "port", "")
+		flags.Var(&netAllow, "net-allow", "")
 		if err := flags.Parse(args[1:]); err != nil {
 			return nil, invalidArgument(err.Error(), nil)
 		}
-		if *project == "" {
-			return nil, invalidArgument("--project is required", nil)
+		if *slug == "" {
+			return nil, invalidArgument("node create requires --slug", nil)
 		}
-		limaCommands, err := loadOptionalLimaCommandsFile(*limaCommandsFile)
-		if err != nil {
-			return nil, err
+		var netPolicy *NetPolicy
+		if *netDefault != "" || netAllow != nil {
+			netPolicy = &NetPolicy{Default: coalesce(*netDefault, "deny"), Allow: []string(netAllow)}
 		}
 		return service.NodeCreate(ctx, NodeCreateInput{
-			Project:       *project,
+			Configuration: *configuration,
+			Directory:     *directory,
 			Slug:          *slug,
-			Runtime:       *runtime,
-			Provider:      *provider,
-			AgentProfile:  *agentProfile,
 			WorkspaceMode: *workspaceMode,
-			LimaCommands:  limaCommands,
+			Ports:         []string(ports),
+			NetPolicy:     netPolicy,
 		})
 	case "list":
 		flags := flag.NewFlagSet("node list", flag.ContinueOnError)
@@ -480,9 +692,7 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 	case "clone":
 		flags := flag.NewFlagSet("node clone", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)
-		nodeSlug := flags.String("node-slug", "", "")
-		agentProfile := flags.String("agent-profile", "", "")
-		limaCommandsFile := flags.String("lima-commands-file", "", "")
+		nodeSlug := flags.String("slug", "", "")
 		remaining := args[1:]
 		sourceNode := ""
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
@@ -498,15 +708,12 @@ func dispatchNode(ctx context.Context, service *Service, args []string) (any, er
 		if sourceNode == "" {
 			return nil, invalidArgument("node clone requires <source-node>", nil)
 		}
-		limaCommands, err := loadOptionalLimaCommandsFile(*limaCommandsFile)
-		if err != nil {
-			return nil, err
+		if *nodeSlug == "" {
+			return nil, invalidArgument("node clone requires --slug", nil)
 		}
 		node, err := service.NodeClone(ctx, NodeCloneInput{
-			SourceNode:   sourceNode,
-			NodeSlug:     *nodeSlug,
-			AgentProfile: *agentProfile,
-			LimaCommands: limaCommands,
+			SourceNode: sourceNode,
+			NodeSlug:   *nodeSlug,
 		})
 		if err != nil {
 			return nil, err
@@ -554,16 +761,14 @@ func writeSuccess(stdout io.Writer, asJSON bool, value any) {
 	}
 
 	switch data := value.(type) {
-	case []Project:
-		_, _ = fmt.Fprint(stdout, renderProjectList(data))
+	case []Configuration:
+		_, _ = fmt.Fprint(stdout, renderConfigurationList(data))
 	case []EnvironmentConfig:
 		_, _ = fmt.Fprint(stdout, renderEnvironmentConfigList(data))
 	case []Node:
 		_, _ = fmt.Fprint(stdout, renderNodeList(data))
 	case IncompleteNodeCleanupResult:
 		_, _ = fmt.Fprint(stdout, renderIncompleteNodeCleanupResult(data))
-	case []ProjectTreeNode:
-		_, _ = fmt.Fprint(stdout, renderProjectTree(data, ""))
 	case DoctorReport:
 		for _, check := range data.Checks {
 			_, _ = fmt.Fprintf(stdout, "[%s] %s: %s\n", strings.ToUpper(check.Status), check.Name, check.Message)
@@ -599,19 +804,21 @@ func writeError(stdout, stderr io.Writer, asJSON bool, err error) {
 	_, _ = fmt.Fprintf(stderr, "%s: %s\n", appErr.Category, appErr.Message)
 }
 
-func renderProjectList(projects []Project) string {
-	rows := make([][]string, 0, len(projects))
-	for _, project := range projects {
+func renderConfigurationList(configurations []Configuration) string {
+	rows := make([][]string, 0, len(configurations))
+	for _, configuration := range configurations {
 		rows = append(rows, []string{
-			project.Slug,
-			project.ID,
-			project.WorkspacePath,
-			project.DefaultRuntime,
-			project.AgentProfileName,
+			configuration.Slug,
+			configuration.ID,
+			configuration.Image,
+			configuration.AgentProfileName,
+			strconv.Itoa(int(configuration.VCPUs)),
+			strconv.FormatUint(uint64(configuration.MemoryMiB), 10),
+			strconv.FormatUint(uint64(configuration.DiskMiB), 10),
 		})
 	}
 
-	return renderTable([]string{"slug", "uuid", "workspace_path", "runtime", "agent"}, rows)
+	return renderTable([]string{"slug", "uuid", "image", "agent", "vcpus", "memory_mib", "disk_mib"}, rows)
 }
 
 func renderNodeList(nodes []Node) string {
@@ -620,15 +827,16 @@ func renderNodeList(nodes []Node) string {
 		rows = append(rows, []string{
 			node.Slug,
 			node.ID,
+			node.ConfigurationSlug,
+			node.DirectoryPath,
 			nodeWorkspaceMode(node),
-			nodeWorkspacePath(node),
 			node.Runtime,
 			nodeVMStatus(node),
 			node.AgentProfileName,
 		})
 	}
 
-	return renderTable([]string{"slug", "uuid", "workspace_mode", "workspace_path", "runtime", "vm_status", "agent"}, rows)
+	return renderTable([]string{"slug", "uuid", "configuration", "directory", "workspace_mode", "runtime", "vm_status", "agent"}, rows)
 }
 
 func renderEnvironmentConfigList(configs []EnvironmentConfig) string {
@@ -654,7 +862,7 @@ func renderIncompleteNodeCleanupResult(result IncompleteNodeCleanupResult) strin
 	for _, item := range result.Items {
 		rows = append(rows, []string{
 			item.NodeID,
-			coalesce(item.InstanceName, "-"),
+			coalesce(item.SandboxName, "-"),
 			action,
 		})
 	}
@@ -666,15 +874,7 @@ func renderIncompleteNodeCleanupResult(result IncompleteNodeCleanupResult) strin
 		return "removed 0 incomplete node metadata directories\n"
 	}
 
-	return renderTable([]string{"node_dir", "instance_name", "action"}, rows)
-}
-
-func nodeWorkspacePath(node Node) string {
-	if node.GuestWorkspacePath != "" {
-		return node.GuestWorkspacePath
-	}
-
-	return node.WorkspaceMountPath
+	return renderTable([]string{"node_dir", "sandbox_name", "action"}, rows)
 }
 
 func nodeVMStatus(node Node) string {
@@ -752,15 +952,18 @@ func usage() string {
 Usage:
   codelima [--home PATH] [--json] [--log-level LEVEL] [PATH]
   codelima [--home PATH] [--json] [--log-level LEVEL] <group> <command> [flags]
+  codelima --version
 
 Groups:
   doctor [--repair]
-  config show
+  settings show
   environment create|list|show|update|delete
-  project create|list|show|update|delete|tree|fork
+  configuration create|list|show|update|delete|clone
   node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
   shell <node> [-- command...]
+  daemon run|start|stop|status|snapshot|update
+  terminal open|close|list|read|send|takeover
 
-Running with no command opens the TUI. Passing PATH opens the TUI scoped to projects under that directory.
+Running with no command opens the TUI. Passing PATH opens the TUI scoped to nodes in that directory and its descendants.
 `) + "\n"
 }

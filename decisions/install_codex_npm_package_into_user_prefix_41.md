@@ -1,5 +1,7 @@
 # Install Codex npm package into a user-owned prefix
 
+Status: Superseded by [ADR 69](use_official_codex_standalone_installer_69.md)
+
 ## Context and Problem Statement
 
 The built-in `codex` environment config installed Node with `sudo snap install node --classic` and then installed Codex with `sudo npm install -g @openai/codex`. That made the `codex` binary root-owned in the VM's global npm prefix, so routine upgrades such as `npm update -g @openai/codex` required `sudo`.
@@ -64,3 +66,4 @@ Use an alternate Codex installer instead of npm.
 ## Links
 
 * Refines [Seed Default Environment Configs During Store Bootstrap](seed_default_environment_configs_6.md)
+* Superseded by [Use the official Codex standalone installer for built-in environments](use_official_codex_standalone_installer_69.md)

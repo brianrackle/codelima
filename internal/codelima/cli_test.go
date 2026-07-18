@@ -4,360 +4,119 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestWriteSuccessRendersProjectListAsTable(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-
-	writeSuccess(&stdout, false, []Project{
-		{
-			ID:               "project-uuid",
-			Slug:             "root",
-			WorkspacePath:    "/workspace/root",
-			DefaultRuntime:   RuntimeVM,
-			AgentProfileName: "codex-cli",
-		},
-	})
-
-	output := stdout.String()
-	for _, expected := range []string{
-		"slug",
-		"uuid",
-		"workspace_path",
-		"runtime",
-		"agent",
-		"root",
-		"project-uuid",
-		"/workspace/root",
-		RuntimeVM,
-		"codex-cli",
-	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("expected output to contain %q, got %q", expected, output)
+func TestHelpAdvertisesConfigurationModelWithoutProjects(t *testing.T) {
+	text := usage()
+	for _, want := range []string{"settings show", "configuration create|list|show|update|delete|clone", "nodes in that directory and its descendants"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("usage missing %q:\n%s", want, text)
 		}
 	}
-
-	if strings.Contains(output, "- slug:") {
-		t.Fatalf("expected table output instead of YAML, got %q", output)
-	}
-}
-
-func TestWriteSuccessRendersNodeListAsTableUsingGuestWorkspacePath(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-
-	writeSuccess(&stdout, false, []Node{
-		{
-			ID:                 "node-uuid",
-			Slug:               "design",
-			GuestWorkspacePath: "/guest/workspace",
-			Runtime:            RuntimeVM,
-			AgentProfileName:   "codex-cli",
-			Status:             NodeStatusRunning,
-			LastRuntimeObservation: &RuntimeObservation{
-				Exists: true,
-				Status: "running",
-			},
-		},
-	})
-
-	output := stdout.String()
-	for _, expected := range []string{
-		"slug",
-		"uuid",
-		"workspace_mode",
-		"workspace_path",
-		"runtime",
-		"vm_status",
-		"agent",
-		"design",
-		"node-uuid",
-		WorkspaceModeCopy,
-		"/guest/workspace",
-		RuntimeVM,
-		"running",
-		"codex-cli",
-	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("expected output to contain %q, got %q", expected, output)
-		}
-	}
-
-	if strings.Contains(output, "- slug:") {
-		t.Fatalf("expected table output instead of YAML, got %q", output)
-	}
-}
-
-func TestWriteSuccessRendersNodeListAsTableUsingMountWorkspaceFallback(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-
-	writeSuccess(&stdout, false, []Node{
-		{
-			ID:                 "node-uuid",
-			Slug:               "design",
-			WorkspaceMode:      WorkspaceModeMounted,
-			WorkspaceMountPath: "/host/workspace",
-			Runtime:            RuntimeVM,
-			Status:             NodeStatusCreated,
-			AgentProfileName:   "codex-cli",
-		},
-	})
-
-	output := stdout.String()
-	if !strings.Contains(output, "/host/workspace") {
-		t.Fatalf("expected output to fall back to workspace mount path, got %q", output)
-	}
-	if !strings.Contains(output, WorkspaceModeMounted) {
-		t.Fatalf("expected output to include mounted workspace mode, got %q", output)
-	}
-
-	if !strings.Contains(output, NodeStatusCreated) {
-		t.Fatalf("expected output to fall back to node status, got %q", output)
-	}
-}
-
-func TestRunHelpPrintsUsageAndExitsSuccess(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	exitCode := Run(context.Background(), []string{"--help"}, strings.NewReader(""), &stdout, &stderr)
-	if exitCode != ExitSuccess {
-		t.Fatalf("expected ExitSuccess, got %d", exitCode)
-	}
-
-	output := stdout.String()
-	if !strings.Contains(output, "Usage:\n  codelima [--home PATH] [--json] [--log-level LEVEL] [PATH]") {
-		t.Fatalf("expected help output to include usage header, got %q", output)
-	}
-	if !strings.Contains(output, "environment create|list|show|update|delete") {
-		t.Fatalf("expected help output to include the environment group, got %q", output)
-	}
-	if !strings.Contains(output, "node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell") {
-		t.Fatalf("expected help output to include the incomplete-node cleanup command, got %q", output)
-	}
-	if strings.Contains(output, "patch propose|list|show|approve|apply|reject") {
-		t.Fatalf("expected help output to omit patch commands, got %q", output)
-	}
-	if !strings.Contains(output, "Running with no command opens the TUI. Passing PATH opens the TUI scoped to projects under that directory.") {
-		t.Fatalf("expected help output to describe the default and scoped TUI launch, got %q", output)
-	}
-	if strings.Contains(output, "\n  tui\n") {
-		t.Fatalf("expected help output to omit the removed tui command, got %q", output)
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got %q", stderr.String())
-	}
-}
-
-func TestWriteSuccessRendersIncompleteNodeCleanupResultAsTable(t *testing.T) {
-	t.Parallel()
-
-	var stdout bytes.Buffer
-
-	writeSuccess(&stdout, false, IncompleteNodeCleanupResult{
-		DryRun: true,
-		Items: []IncompleteNodeMetadata{
-			{NodeID: "partial-node", InstanceName: "root-design-12345678"},
-		},
-	})
-
-	output := stdout.String()
-	for _, expected := range []string{
-		"node_dir",
-		"instance_name",
-		"action",
-		"partial-node",
-		"root-design-12345678",
-		"would_remove",
-	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("expected output to contain %q, got %q", expected, output)
+	for _, removed := range []string{"project create", "project tree", "config show"} {
+		if strings.Contains(text, removed) {
+			t.Fatalf("usage still exposes %q:\n%s", removed, text)
 		}
 	}
 }
 
-func TestDispatchNodeCleanupIncompleteParsesApplyFlag(t *testing.T) {
-	t.Parallel()
+func TestRunHelpDoesNotInitializeHome(t *testing.T) {
+	home := t.TempDir() + "/unused"
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"--home", home, "--help"}, strings.NewReader(""), &stdout, &stderr); code != ExitSuccess {
+		t.Fatalf("Run() code = %d, stderr=%s", code, stderr.String())
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("help initialized CODELIMA_HOME")
+	}
+}
 
-	ctx := context.Background()
+func TestDispatchRejectsRemovedProjectAndConfigGroups(t *testing.T) {
 	service, _ := newTestService(t)
-
-	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "partial-node")
-	if err := os.MkdirAll(partialDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(partial node) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(partialDir, "instance.lima.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(template) error = %v", err)
-	}
-
-	result, err := dispatch(ctx, service, []string{"node", "cleanup-incomplete"})
-	if err != nil {
-		t.Fatalf("dispatch(node cleanup-incomplete) error = %v", err)
-	}
-	cleanupResult, ok := result.(IncompleteNodeCleanupResult)
-	if !ok {
-		t.Fatalf("expected IncompleteNodeCleanupResult, got %T", result)
-	}
-	if !cleanupResult.DryRun {
-		t.Fatalf("expected dry-run dispatch result")
-	}
-	if !exists(partialDir) {
-		t.Fatalf("expected dry-run dispatch to leave partial directory in place")
-	}
-
-	result, err = dispatch(ctx, service, []string{"node", "cleanup-incomplete", "--apply"})
-	if err != nil {
-		t.Fatalf("dispatch(node cleanup-incomplete --apply) error = %v", err)
-	}
-	cleanupResult, ok = result.(IncompleteNodeCleanupResult)
-	if !ok {
-		t.Fatalf("expected IncompleteNodeCleanupResult, got %T", result)
-	}
-	if cleanupResult.DryRun {
-		t.Fatalf("expected apply dispatch result")
-	}
-	if exists(partialDir) {
-		t.Fatalf("expected apply dispatch to remove partial directory")
+	for _, args := range [][]string{{"project", "list"}, {"config", "show"}} {
+		if _, err := dispatch(context.Background(), service, args); err == nil || !strings.Contains(err.Error(), "unknown command group") {
+			t.Fatalf("dispatch(%v) error = %v", args, err)
+		}
 	}
 }
 
-func TestDispatchNodeCreateParsesWorkspaceMode(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	value, err := dispatchNode(ctx, service, []string{
-		"create",
-		"--project", project.ID,
-		"--slug", "mounted-node",
-		"--workspace-mode", "mounted",
-	})
-	if err != nil {
-		t.Fatalf("dispatchNode(create) error = %v", err)
-	}
-
-	node, ok := value.(Node)
-	if !ok {
-		t.Fatalf("expected Node result, got %T", value)
-	}
-	if got := nodeWorkspaceMode(node); got != WorkspaceModeMounted {
-		t.Fatalf("expected mounted workspace mode, got %q", got)
-	}
-}
-
-func TestDispatchNodeCreateLoadsLimaCommandsFile(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	commandsPath := filepath.Join(t.TempDir(), "node-create-lima.yaml")
-	if err := os.WriteFile(commandsPath, []byte("start: \"{{binary}} start {{instance_name}} --tty=false\"\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(lima commands) error = %v", err)
-	}
-
-	value, err := dispatchNode(ctx, service, []string{
-		"create",
-		"--project", project.ID,
-		"--slug", "configured-node",
-		"--lima-commands-file", commandsPath,
-	})
-	if err != nil {
-		t.Fatalf("dispatchNode(create with lima commands file) error = %v", err)
-	}
-
-	node, ok := value.(Node)
-	if !ok {
-		t.Fatalf("expected Node result, got %T", value)
-	}
-	if got := strings.Join(node.LimaCommands.Start, "|"); got != "{{binary}} start {{instance_name}} --tty=false" {
-		t.Fatalf("expected node create to load start override, got %q", got)
-	}
-}
-
-func TestDispatchNodeCloneLoadsLimaCommandsFile(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	sourceNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "source-node",
-	})
-	if err != nil {
-		t.Fatalf("NodeCreate(source-node) error = %v", err)
-	}
-
-	commandsPath := filepath.Join(t.TempDir(), "node-clone-lima.yaml")
-	if err := os.WriteFile(commandsPath, []byte("clone: \"{{binary}} clone {{source_instance}} {{target_instance}} --tty=false\"\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(lima commands) error = %v", err)
-	}
-
-	value, err := dispatchNode(ctx, service, []string{
-		"clone",
-		sourceNode.ID,
-		"--node-slug", "cloned-node",
-		"--lima-commands-file", commandsPath,
-	})
-	if err != nil {
-		t.Fatalf("dispatchNode(clone with lima commands file) error = %v", err)
-	}
-
-	node, ok := value.(Node)
-	if !ok {
-		t.Fatalf("expected Node result, got %T", value)
-	}
-	if got := strings.Join(node.LimaCommands.Clone, "|"); got != "{{binary}} clone {{source_instance}} {{target_instance}} --tty=false" {
-		t.Fatalf("expected node clone to load clone override, got %q", got)
-	}
-}
-
-func TestDispatchPatchCommandGroupIsRejected(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
+func TestConfigurationCLIUsesHumanResourceSizes(t *testing.T) {
 	service, _ := newTestService(t)
+	createdAny, err := dispatchConfiguration(service, []string{"create", "--slug", "large", "--vcpus", "8", "--memory", "8GiB", "--disk", "40GiB", "--environment", "codex"})
+	if err != nil {
+		t.Fatalf("configuration create error = %v", err)
+	}
+	created := createdAny.(Configuration)
+	if created.VCPUs != 8 || created.MemoryMiB != 8192 || created.DiskMiB != 40960 || len(created.Environments) != 1 || created.Environments[0] != "codex" {
+		t.Fatalf("unexpected configuration: %+v", created)
+	}
+	clonedAny, err := dispatchConfiguration(service, []string{"clone", "large", "--slug", "large-copy"})
+	if err != nil {
+		t.Fatalf("configuration clone error = %v", err)
+	}
+	cloned := clonedAny.(Configuration)
+	if cloned.ID == created.ID || cloned.MemoryMiB != created.MemoryMiB {
+		t.Fatalf("clone did not copy configuration: %+v", cloned)
+	}
+}
 
-	if _, err := dispatch(ctx, service, []string{"patch", "list"}); err == nil {
-		t.Fatalf("expected dispatch(patch list) to fail")
+func TestNodeCreateCLIDefaultsDirectoryConfigurationAndMountedWorkspace(t *testing.T) {
+	service, _ := newTestService(t)
+	workspace, err := canonicalPath(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdAny, err := dispatchNode(context.Background(), service, []string{"create", "--slug", "worker"})
+	if err != nil {
+		t.Fatalf("node create error = %v", err)
+	}
+	created := createdAny.(Node)
+	if created.DirectoryPath != workspace || created.ConfigurationSlug != DefaultConfigurationSlug || created.ConfigurationID == "" {
+		t.Fatalf("node defaults not resolved: %+v", created)
+	}
+	if created.VCPUs != 2 || created.MemoryMiB != 4096 || created.DiskMiB != 20480 {
+		t.Fatalf("default resources not frozen: %+v", created)
+	}
+	if created.WorkspaceMode != WorkspaceModeMounted || created.WorkspaceMountPath != workspace {
+		t.Fatalf("default mounted workspace not resolved: %+v", created)
+	}
+
+	copyAny, err := dispatchNode(context.Background(), service, []string{"create", "--slug", "worker-copy", "--workspace-mode", WorkspaceModeCopy})
+	if err != nil {
+		t.Fatalf("copy-mode node create error = %v", err)
+	}
+	copyNode := copyAny.(Node)
+	if copyNode.WorkspaceMode != WorkspaceModeCopy || copyNode.WorkspaceMountPath != "" {
+		t.Fatalf("explicit copy workspace not preserved: %+v", copyNode)
+	}
+}
+
+func TestNodeCLIRequiresExplicitSlugs(t *testing.T) {
+	service, _ := newTestService(t)
+	if _, err := dispatchNode(context.Background(), service, []string{"create"}); err == nil || !strings.Contains(err.Error(), "--slug") {
+		t.Fatalf("node create error = %v", err)
+	}
+	if _, err := dispatchNode(context.Background(), service, []string{"clone", "source"}); err == nil || !strings.Contains(err.Error(), "--slug") {
+		t.Fatalf("node clone error = %v", err)
+	}
+}
+
+func TestWriteSuccessRendersConfigurationAndDirectoryBoundNodes(t *testing.T) {
+	var output bytes.Buffer
+	writeSuccess(&output, false, []Configuration{{ID: "config-id", Slug: "default", Image: "image", AgentProfileName: "codex-cli", VCPUs: 2, MemoryMiB: 4096, DiskMiB: 20480}})
+	if text := output.String(); !strings.Contains(text, "memory_mib") || !strings.Contains(text, "20480") {
+		t.Fatalf("configuration table = %q", text)
+	}
+	output.Reset()
+	writeSuccess(&output, false, []Node{{ID: "node-id", Slug: "worker", ConfigurationSlug: "default", DirectoryPath: "/work/repo", Runtime: RuntimeVM, Status: NodeStatusCreated, AgentProfileName: "codex-cli"}})
+	if text := output.String(); !strings.Contains(text, "configuration") || !strings.Contains(text, "/work/repo") || strings.Contains(text, "project") {
+		t.Fatalf("node table = %q", text)
+	}
+	output.Reset()
+	writeSuccess(&output, false, Node{ID: "node-id", Slug: "worker", ConfigurationID: "config-id", ConfigurationSlug: "default", DirectoryPath: "/work/repo"})
+	if text := output.String(); !strings.Contains(text, "configuration_slug: default") {
+		t.Fatalf("node record = %q", text)
 	}
 }

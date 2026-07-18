@@ -1,755 +1,274 @@
-# QA
+# Manual QA
 
-All flows that say to run `make build` can use `./bin/codelima`; that path is a compatibility symlink refreshed by the build. The real development binary is platform-scoped under `./bin/<os>-<arch>/codelima`, matching the `.tooling/<os>-<arch>` layout, so host and guest builds in one shared checkout do not overwrite each other's executable.
+Run these flows from the repository root after `make verify`. Keep all disposable artifacts under `./tmp/qa-v3` and remove them when finished.
 
-## List Verification
+These checks assume the host can run Microsandbox. The pinned SDK ensures its matching `0.6.6` runtime support files are installed on the first dependency check, so that first command may download them. CodeLima uses the Go SDK directly; an `msb` executable does not need to be on `PATH`.
 
-This flow verifies that the default `project list` and `node list` output is a concise table with the expected columns, including live VM state for nodes, while `--json` remains available for automation.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
+## Setup
 
 ```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-list"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
+export QA_ROOT="$PWD/tmp/qa-v3"
+export CODELIMA_HOME="$QA_ROOT/home"
+rm -rf "$QA_ROOT"
+mkdir -p "$QA_ROOT/work/root/child" "$QA_ROOT/work/prefix"
+printf 'root\n' > "$QA_ROOT/work/root/README.md"
+printf 'child\n' > "$QA_ROOT/work/root/child/README.md"
 ```
 
-Create a project and node:
+Use a short root. CodeLima and Microsandbox derive Unix-domain socket paths, and deeply nested QA paths can exceed the kernel limit.
+
+## Flow 1: schema-v3 surface and clean break
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-list --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-list --slug qa-list-node
+./bin/codelima --help > "$QA_ROOT/help.txt"
+./bin/codelima settings show
+./bin/codelima doctor --repair
+cat "$CODELIMA_HOME/_config/schema.version"
+find "$CODELIMA_HOME" -maxdepth 3 -type d | sort
+./bin/codelima configuration list
+./bin/codelima configuration show default
 ```
 
-Verify the default table output:
+Verify:
+
+- help lists `settings`, `environment`, `configuration`, and `node`, with no project command
+- schema version is `3`
+- the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
+- `default` exists with 2 CPUs, 4096 MiB memory, 20480 MiB disk, the Debian systemd image, `codex-cli`, and ordered environments `codex` then `claude-code`
+
+Check schema-v2 rejection:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project list
-./bin/codelima --home "$CODELIMA_HOME" node list
-./bin/codelima --home "$CODELIMA_HOME" node show qa-list-node
-grep "hostnamectl set-hostname 'qa-list-node'" "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
+mkdir -p "$QA_ROOT/v2/_config"
+printf '2\n' > "$QA_ROOT/v2/_config/schema.version"
+if ./bin/codelima --home "$QA_ROOT/v2" configuration list > "$QA_ROOT/v2.out" 2> "$QA_ROOT/v2.err"; then
+  echo 'unexpected schema-v2 success' >&2
+  exit 1
+fi
+cat "$QA_ROOT/v2.err"
 ```
 
-Expected result:
+Verify the error requests a fresh `--home`/`CODELIMA_HOME` and does not claim to migrate.
 
-- `project list` prints a table with the columns `slug`, `uuid`, `workspace_path`, `runtime`, and `agent`
-- the `project list` row includes `qa-list`, `$ROOT_DIR/test-project-dir`, `vm`, and `codex-cli`
-- `node list` prints a table with the columns `slug`, `uuid`, `workspace_mode`, `workspace_path`, `runtime`, `vm_status`, and `agent`
-- the `node list` row includes `qa-list-node`, `copy`, `$ROOT_DIR/test-project-dir`, `vm`, `stopped`, and `codex-cli`
-- `node show qa-list-node` includes `lima_instance_name: qa-list-node`
-- the generated Lima template includes a provisioning command that sets the guest hostname to `qa-list-node`
-
-Start the node and verify the VM status updates:
+## Flow 2: reusable configurations and frozen node values
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" node start qa-list-node
-./bin/codelima --home "$CODELIMA_HOME" node list
-./bin/codelima --home "$CODELIMA_HOME" shell qa-list-node -- hostname
+./bin/codelima environment create \
+  --slug qa-tools \
+  --bootstrap-command 'printf qa-tools > .qa-tools-installed'
+
+./bin/codelima configuration update default \
+  --environment qa-tools \
+  --vcpus 2 \
+  --memory 4GiB \
+  --disk 20GiB
+
+./bin/codelima configuration create \
+  --slug qa-large \
+  --vcpus 3 \
+  --memory 5GiB \
+  --disk 24GiB
+
+./bin/codelima node create \
+  --slug qa-v3-root \
+  --configuration qa-large \
+  --directory "$QA_ROOT/work/root"
+
+./bin/codelima configuration update qa-large \
+  --vcpus 4 \
+  --memory 6GiB \
+  --disk 28GiB
+
+./bin/codelima node show qa-v3-root > "$QA_ROOT/frozen-node.yaml"
+cat "$QA_ROOT/frozen-node.yaml"
 ```
 
-Expected result:
+Verify the node still reports 3 CPUs, 5120 MiB memory, and 24576 MiB disk, proving configuration edits affect only future nodes. Its directory is canonical, its configuration label is `qa-large`, its workspace mode is `mounted`, and its workspace mount path matches the canonical directory.
 
-- all commands succeed
-- the `node list` row for `qa-list-node` now shows `running` under `vm_status`
-- `hostname` prints `qa-list-node`
-
-Verify structured output still works:
+Protection checks:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" --json project list
-./bin/codelima --home "$CODELIMA_HOME" --json node list
+if ./bin/codelima configuration delete default; then exit 1; fi
+if ./bin/codelima configuration update default --slug renamed-default; then exit 1; fi
+if ./bin/codelima configuration delete qa-large; then exit 1; fi
 ```
 
-Expected result:
+Verify all three fail with `PreconditionFailed`.
 
-- both commands succeed
-- both commands return JSON with `"ok": true`
-
-Cleanup:
+## Flow 3: multiple directory-bound nodes and cloning
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-list-node
-rm -rf "$WORK_ROOT"
+./bin/codelima node create \
+  --slug qa-v3-root-two \
+  --configuration default \
+  --directory "$QA_ROOT/work/root"
+
+./bin/codelima node create \
+  --slug qa-v3-child \
+  --configuration default \
+  --directory "$QA_ROOT/work/root/child"
+
+./bin/codelima node create \
+  --slug qa-v3-prefix \
+  --configuration default \
+  --directory "$QA_ROOT/work/prefix" \
+  --workspace-mode copy
+
+./bin/codelima node clone qa-v3-root --slug qa-v3-root-clone
+./bin/codelima node list
+./bin/codelima node show qa-v3-root-clone
 ```
 
-## Doctor And Incomplete Node Cleanup Verification
+Verify:
 
-This flow verifies that `doctor` reports incomplete node metadata directories left by failed node creation attempts, and that `node cleanup-incomplete` supports both dry-run inspection and explicit removal.
+- both root nodes coexist with the same directory
+- the child node is bound to the child directory
+- the prefix node is separate, not a descendant of root
+- the prefix node reports `workspace_mode: copy` and no workspace mount path, proving the default can be overridden
+- the clone has the source directory, configuration ID, frozen resources, and `parent_node_id`
+- omitting `--slug` from create or clone fails with `InvalidArgument`
 
-Note: `codelima doctor` is read-only — it reports without modifying the home. Run `codelima doctor --repair` to seed built-in metadata and upgrade stale config/project/node files (the same locked pass every mutating command runs). On a fresh home, expect `environment list` to be empty until the first mutating command, `doctor --repair`, or the first TUI launch (TUI startup runs the locked seed pass once as a session start; ADR 57).
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
+## Flow 4: lifecycle, bootstrap, and SDK resources
 
 ```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-doctor-cleanup"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-mkdir -p "$CODELIMA_HOME/nodes/partial-node"
-printf 'arch: aarch64\n' > "$CODELIMA_HOME/nodes/partial-node/instance.lima.yaml"
-printf 'qa-root-qa-node-12345678\n' > "$CODELIMA_HOME/nodes/partial-node/lima-instance.ref"
+./bin/codelima node start qa-v3-root
+./bin/codelima shell qa-v3-root -- sh -lc 'test -f .qa-tools-installed && printf bootstrap-ok'
+./bin/codelima node status qa-v3-root
+./bin/codelima node stop qa-v3-root
+./bin/codelima node status qa-v3-root
 ```
 
-Verify `doctor` warns about the incomplete node metadata:
+Verify bootstrap prints `bootstrap-ok`, the first status is running, and the final status is stopped. Review runtime diagnostics to confirm the VM uses the node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must not invoke an `msb` subprocess.
+
+## Flow 5: daemon terminals and node-host shell
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" doctor
+mkdir -p "$CODELIMA_HOME/_daemon"
+printf '{"version":1,"terminals":[]}\n' > "$CODELIMA_HOME/_daemon/session.json"
+./bin/codelima daemon start
+cat "$CODELIMA_HOME/_daemon/session.json"
+find "$CODELIMA_HOME/_daemon" -maxdepth 1 \
+  -name 'session.json.unsupported-v1-*' -print
+grep 'quarantined incompatible daemon session' \
+  "$CODELIMA_HOME/_daemon/daemon.log"
+./bin/codelima node start qa-v3-root
+NODE_ID="$(./bin/codelima --json node show qa-v3-root | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)"
+./bin/codelima --json terminal open "node:$NODE_ID" --kind node-shell > "$QA_ROOT/guest-terminal.json"
+./bin/codelima --json terminal open "node:$NODE_ID" --kind node-host-shell > "$QA_ROOT/host-terminal.json"
+./bin/codelima terminal list
+./bin/codelima daemon status
 ```
 
-Expected result:
+Verify daemon startup succeeds, `session.json` is version 2 with no terminals, exactly one version-1 quarantine file exists, and the recovery warning names that file. Then verify both terminals target the same `node:<id>` and have different kinds. Send `pwd` to the host terminal and verify it resolves to the node's host directory. Send `pwd` to the guest terminal and verify it resolves to the node workspace. Close both terminal IDs before continuing.
 
-- `doctor` succeeds
-- the output includes `warning: incomplete node metadata directory:`
-- the warning includes `qa-root-qa-node-12345678`
-- the warning includes `node cleanup-incomplete --apply`
+## Flow 6: dynamic `{node}.localhost` forwarding
 
-Verify dry-run and apply cleanup:
+Start a guest-loopback server in the running node. This uses Perl's core socket module because the default image does not promise Python:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" node cleanup-incomplete
-test -d "$CODELIMA_HOME/nodes/partial-node"
-./bin/codelima --home "$CODELIMA_HOME" node cleanup-incomplete --apply
-test ! -d "$CODELIMA_HOME/nodes/partial-node"
+./bin/codelima shell qa-v3-root -- sh -lc \
+  'nohup perl -MIO::Socket::INET -e '\''$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>18080,Listen=>5,Reuse=>1); while($c=$s->accept){<$c>; while(<$c>){last if /^\r?$/}; print $c "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nroot\n"; close $c}'\'' > .qa-http.log 2>&1 &'
 ```
 
-Expected result:
-
-- the dry-run output includes `partial-node` and `would_remove`
-- the dry-run leaves the directory on disk
-- the apply output includes `partial-node` and `removed`
-- the apply removes the incomplete node directory
-
-Live-instance teardown-first cleanup (requires `limactl`; work item 0.4, ADR 58). The steps above cover an incomplete dir with no live runtime instance; this sub-flow covers one whose `lima-instance.ref` still names a running instance:
-
-- create a real instance so `limactl list` shows it, then write an incomplete node dir (no `node.yaml`) whose `lima-instance.ref` names that instance
-- run `node cleanup-incomplete` (dry-run) and confirm it does not touch the runtime — `limactl list` still shows the instance
-- run `node cleanup-incomplete --apply`
-
-Expected result (live-instance sub-flow):
-
-- the apply output includes the node id and `removed`, and the incomplete dir is gone
-- `limactl list` no longer shows the instance — it was torn down before its metadata was removed
-- negative case: if teardown fails, the command exits non-zero with `failed to tear down runtime instances for incomplete nodes` naming the instance, and the incomplete dir is left in place for retry
-- note: `--apply` now requires `limactl`; the plain dry-run (`node cleanup-incomplete`) does not
-
-Cleanup:
+Wait for daemon discovery, then:
 
 ```sh
-rm -rf "$WORK_ROOT"
+curl --retry 10 --retry-delay 1 --retry-connrefused \
+  "http://qa-v3-root.localhost:18080/"
 ```
 
-## Tree Verification
+Verify the response contains `root`. Stop the node and verify the route is removed. This flow uses no static 8080/5173 mapping.
 
-This flow verifies that `project tree` includes both lineage projects and the nodes attached to each project.
+## Flow 7: path-scoped flat TUI
 
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
+Run in a real terminal:
 
 ```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-tree"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT/root" "$WORK_ROOT/child"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
+./bin/codelima node start qa-v3-root
+./bin/codelima "$QA_ROOT/work/root"
 ```
 
-Create a root project, a child project, and one node for each:
+After the TUI renders, launch the same command from a second real terminal. Confirm the second TUI starts normally and the first reports that terminal input ownership was taken by another client, then quit the first TUI. Leave the second TUI idle for at least 35 seconds before opening a new terminal tab or switching between guest and host terminals.
+
+Verify:
+
+- the left pane title is `Nodes` and has no project rows
+- rows include `qa-v3-root`, `qa-v3-root-two`, `qa-v3-root-clone`, and `qa-v3-child`
+- rows do not include `qa-v3-prefix`
+- root rows show directory `.` and the child row shows `child`, not absolute paths
+- each row shows a configuration label
+- `n` opens node creation with a blank directory field and muted current-directory placeholder
+- `a` opens global configuration management and `g` opens global environment management
+- `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
+- the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
+- `Option+Shift+Backtick` no longer opens or toggles a host terminal
+- the first terminal action after takeover and the idle interval succeeds without a broken pipe or `client is observe-only` error
+
+Quit with `q`.
+
+## Flow 8: macOS VirtioFS descriptor-pressure reclaim
+
+This flow is macOS-only. On Linux, verify `daemon snapshot` reports `virtiofs_reclaim.supported: false` and skip the remaining commands.
+
+Create and start a mounted node, then populate its guest dentry/inode caches:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tree-root --workspace "$WORK_ROOT/root" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tree-root --slug qa-tree-root-node
-./bin/codelima --home "$CODELIMA_HOME" project fork qa-tree-root --slug qa-tree-child --workspace "$WORK_ROOT/child"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tree-child --slug qa-tree-child-node
+./bin/codelima node create \
+  --slug qa-v3-mounted \
+  --configuration default \
+  --directory "$QA_ROOT/work/root" \
+  --workspace-mode mounted
+./bin/codelima node start qa-v3-mounted
+mkdir -p "$QA_ROOT/work/root/.qa-vfs-cache"
+i=0; while [ "$i" -lt 10000 ]; do
+  : > "$QA_ROOT/work/root/.qa-vfs-cache/file-$i"
+  i=$((i + 1))
+done
+./bin/codelima shell qa-v3-mounted -- sh -lc \
+  "find '$QA_ROOT/work/root/.qa-vfs-cache' -type f -print >/dev/null"
 ```
 
-Verify the default tree output:
+Temporarily lower the threshold so the flow does not need to consume most of the host file table:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" project tree
+./bin/codelima daemon stop || true
+cp "$CODELIMA_HOME/_config/settings.yaml" "$QA_ROOT/settings.yaml.before-vfs-qa"
+perl -0pi -e 's/virtiofs_reclaim_threshold_percent: [0-9]+/virtiofs_reclaim_threshold_percent: 1/' \
+  "$CODELIMA_HOME/_config/settings.yaml"
+./bin/codelima daemon start
+sleep 5
+./bin/codelima --json daemon snapshot > "$QA_ROOT/virtiofs-reclaim.json"
+cat "$QA_ROOT/virtiofs-reclaim.json"
 ```
 
-Expected result:
-
-- the tree includes `qa-tree-root`
-- the tree includes `node: qa-tree-root-node` under `qa-tree-root`
-- the tree includes `qa-tree-child` under `qa-tree-root`
-- the tree includes `node: qa-tree-child-node` under `qa-tree-child`
-
-Verify structured output still includes nodes:
+Verify `virtiofs_reclaim` reports `enabled: true`, `supported: true`, threshold `1`, at least one reclaimed node, and a nonzero `last_released_files`. Verify the mounted node remains running and a host write is immediately visible in the guest:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" --json project tree
+printf 'still-live\n' > "$QA_ROOT/work/root/.qa-vfs-live"
+./bin/codelima shell qa-v3-mounted -- sh -lc \
+  "grep -qx still-live '$QA_ROOT/work/root/.qa-vfs-live'"
 ```
 
-Expected result:
-
-- the JSON result includes a `nodes` array on each project tree node
-- the root `nodes` array includes `qa-tree-root-node`
-- the child `nodes` array includes `qa-tree-child-node`
-
-Cleanup:
+Restore the production threshold before continuing:
 
 ```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tree-child-node
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tree-root-node
-rm -rf "$WORK_ROOT"
+./bin/codelima daemon stop || true
+cp "$QA_ROOT/settings.yaml.before-vfs-qa" "$CODELIMA_HOME/_config/settings.yaml"
+./bin/codelima daemon start
+rm -rf "$QA_ROOT/work/root/.qa-vfs-cache"
+rm -f "$QA_ROOT/work/root/.qa-vfs-live"
 ```
 
-## Shell Verification
+## Cleanup
 
-This flow verifies that `codelima shell` enters a healthy node in the guest-local project workspace copy instead of inheriting an unrelated host working directory.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
+Close any terminal sessions, then remove every QA node before deleting the temporary home:
 
 ```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-shell"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
+for node in qa-v3-mounted qa-v3-root-clone qa-v3-prefix qa-v3-child qa-v3-root-two qa-v3-root; do
+  ./bin/codelima node delete "$node" || true
+done
+./bin/codelima daemon stop || true
+rm -rf "$QA_ROOT"
 ```
 
-Create and start a QA node:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-shell --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-shell --slug qa-shell-node
-./bin/codelima --home "$CODELIMA_HOME" node start qa-shell-node
-```
-
-Non-interactive verification:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" shell qa-shell-node -- pwd
-```
-
-Expected result:
-
-- command exits successfully
-- output is `$ROOT_DIR/test-project-dir`
-
-Isolation verification:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" shell qa-shell-node -- sh -lc 'printf vm-only > .vm-isolated'
-test ! -e "$ROOT_DIR/test-project-dir/.vm-isolated"
-```
-
-Expected result:
-
-- the guest command succeeds
-- the host command succeeds because the marker file was not written into the host workspace
-
-Interactive verification:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" shell qa-shell-node
-```
-
-Inside the shell run:
-
-```sh
-pwd
-exit
-```
-
-Expected result:
-
-- `pwd` prints `$ROOT_DIR/test-project-dir`
-- `exit` returns cleanly to the host shell
-
-Cleanup:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-shell-node
-rm -rf "$WORK_ROOT"
-```
-
-## Workspace Mode Verification
-
-This flow verifies that node creation supports both isolated copied workspaces and writable mounted workspaces, and that each mode behaves as documented.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
-
-```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-workspace-mode"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-```
-
-Create one default copy-mode node and one mounted node:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-workspace --workspace "$ROOT_DIR/test-project-dir" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-workspace --slug qa-copy-node
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-workspace --slug qa-mounted-node --workspace-mode mounted
-./bin/codelima --home "$CODELIMA_HOME" node list
-./bin/codelima --home "$CODELIMA_HOME" node show qa-copy-node
-./bin/codelima --home "$CODELIMA_HOME" node show qa-mounted-node
-```
-
-Expected result:
-
-- `node list` shows `qa-copy-node` with `workspace_mode` `copy`
-- `node list` shows `qa-mounted-node` with `workspace_mode` `mounted`
-- `node show qa-copy-node` includes `workspace_mode: copy` and `guest_workspace_path: $ROOT_DIR/test-project-dir`
-- `node show qa-mounted-node` includes `workspace_mode: mounted` and `workspace_mount_path: $ROOT_DIR/test-project-dir`
-
-Start the mounted node and verify guest edits immediately affect the host workspace:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node start qa-mounted-node
-./bin/codelima --home "$CODELIMA_HOME" shell qa-mounted-node -- sh -lc 'printf mounted > README.md'
-cat "$ROOT_DIR/test-project-dir/README.md"
-```
-
-Expected result:
-
-- `node start qa-mounted-node` succeeds
-- the final `cat` prints `mounted`
-
-Restore the host workspace, then start the copy-mode node and verify guest edits stay isolated:
-
-```sh
-printf 'hello\n' > "$ROOT_DIR/test-project-dir/README.md"
-./bin/codelima --home "$CODELIMA_HOME" node start qa-copy-node
-./bin/codelima --home "$CODELIMA_HOME" shell qa-copy-node -- sh -lc 'printf copied > README.md'
-cat "$ROOT_DIR/test-project-dir/README.md"
-```
-
-Expected result:
-
-- `node start qa-copy-node` succeeds
-- the final `cat` still prints `hello`
-
-Cleanup:
-
-```sh
-printf 'hello\n' > "$ROOT_DIR/test-project-dir/README.md"
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-copy-node
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-mounted-node
-rm -rf "$WORK_ROOT"
-```
-
-## Environment Config Verification
-
-This flow verifies that reusable environment configs can be created once, assigned to multiple projects, resolved into new node bootstrap state, and removed only after projects stop referencing them.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
-
-```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-env-config"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT/project-a" "$WORK_ROOT/project-b"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/project-a"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/project-b"
-```
-
-Verify the built-in defaults, then create one shared environment config and two projects that reference it:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" environment list
-./bin/codelima --home "$CODELIMA_HOME" environment show codex
-./bin/codelima --home "$CODELIMA_HOME" environment show claude-code
-./bin/codelima --home "$CODELIMA_HOME" environment create --slug qa-shared --bootstrap-command "./script/setup" --bootstrap-command "test -f README.md"
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-env-a --workspace "$WORK_ROOT/project-a" --env-config qa-shared
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-env-b --workspace "$WORK_ROOT/project-b" --env-config qa-shared
-./bin/codelima --home "$CODELIMA_HOME" environment list
-./bin/codelima --home "$CODELIMA_HOME" environment show qa-shared
-./bin/codelima --home "$CODELIMA_HOME" project show qa-env-a
-```
-
-Expected result:
-
-- the first `environment list` includes `codex` and `claude-code`
-- `environment show codex` includes `sudo snap install node --classic`, `npm config set prefix "$HOME/.local"`, `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`, and no `sudo npm install -g @openai/codex`
-- `environment show claude-code` includes `curl -fsSL https://claude.ai/install.sh | bash`
-- `environment list` includes `qa-shared`
-- `environment show qa-shared` includes `bootstrap_commands` with both configured commands
-- `project show qa-env-a` includes `environment_configs` with `qa-shared`
-
-Update the shared config, create a new node from one of the projects, and verify the resolved bootstrap state:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" environment update qa-shared --bootstrap-command "pwd >/dev/null"
-./bin/codelima --home "$CODELIMA_HOME" environment show qa-shared
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-env-b --slug qa-env-b-node
-find "$CODELIMA_HOME/nodes" -name bootstrap.json -exec cat {} \; | grep 'pwd'
-./bin/codelima --home "$CODELIMA_HOME" node start qa-env-b-node
-```
-
-Expected result:
-
-- `environment show qa-shared` now includes only `pwd >/dev/null`
-- the `grep` output includes the new command inside the created node's `bootstrap.json`
-- `node start qa-env-b-node` succeeds
-
-Verify the config cannot be deleted while still referenced, then clear the references and delete it:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" environment delete qa-shared
-./bin/codelima --home "$CODELIMA_HOME" project update qa-env-a --clear-env-configs
-./bin/codelima --home "$CODELIMA_HOME" project update qa-env-b --clear-env-configs
-./bin/codelima --home "$CODELIMA_HOME" environment delete qa-shared
-./bin/codelima --home "$CODELIMA_HOME" environment list
-```
-
-Expected result:
-
-- the first `environment delete qa-shared` fails because projects still reference it
-- both `project update --clear-env-configs` commands succeed
-- the second `environment delete qa-shared` succeeds
-- the final `environment list` no longer includes `qa-shared`
-
-Cleanup:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-env-b-node || true
-./bin/codelima --home "$CODELIMA_HOME" project delete qa-env-a || true
-./bin/codelima --home "$CODELIMA_HOME" project delete qa-env-b || true
-./bin/codelima --home "$CODELIMA_HOME" environment delete qa-shared || true
-rm -rf "$WORK_ROOT"
-```
-
-## TUI Verification
-
-This flow verifies that running `codelima` with no command or with a directory path renders the chosen info-first split layout, lets you manage selected projects and nodes from the tree, scopes the project tree to a workspace directory when one is provided, defaults the right pane to the selected project's or node's info surface, keeps `i` as a sticky info-versus-terminal toggle in tree focus, and preserves each project or node terminal session while the TUI process is running. It also verifies the preferred Ghostty-backed terminal path, including scrollback, hyperlink handling, and the apt/dpkg progress case that previously froze the app.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
-
-```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-tui"
-OUTSIDE_WORK_ROOT="$ROOT_DIR/tmp/qa-tui-outside"
-rm -rf "$WORK_ROOT" "$OUTSIDE_WORK_ROOT"
-mkdir -p "$WORK_ROOT/root" "$WORK_ROOT/extra" "$OUTSIDE_WORK_ROOT/root"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
-cp -R "$ROOT_DIR/test-project-dir/." "$OUTSIDE_WORK_ROOT/root"
-```
-
-Create one root project, a running node, and a forked child project:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui --workspace "$WORK_ROOT/root" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui --slug qa-tui-a
-./bin/codelima --home "$CODELIMA_HOME" node start qa-tui-a
-./bin/codelima --home "$CODELIMA_HOME" project fork qa-tui --slug qa-tui-child --workspace "$WORK_ROOT/child"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui-child --slug qa-tui-child-a
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-tui-outside --workspace "$OUTSIDE_WORK_ROOT/root"
-```
-
-Run the TUI scoped to the workspace root:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" "$WORK_ROOT"
-```
-
-Inside the TUI verify:
-
-- the left pane renders only the projects and nodes under `$WORK_ROOT`, does not show `qa-tui-outside`, the right pane defaults to the selected project's or node's info surface, and the initially selected running node has exactly one terminal tab available in the pane border without taking terminal focus
-- no centered modal overlays appear; transient interactions replace the right pane while the tree remains visible
-- press `g`, confirm the reusable environment config menu already exposes `codex` and `claude-code`, then create reusable environment config `qa-shared`, confirm the command menu opens immediately in the right pane, add `./script/setup`, then add `direnv allow`, move `direnv allow` above `./script/setup`, remove `direnv allow` through the selector plus confirmation flow, and confirm the menu stays open after each edit
-- press `a`, create a standalone project `qa-tui-extra` with workspace `$WORK_ROOT/extra`, open the Environment Configs selector from the dialog, choose `qa-shared`, and confirm the dialog and selector both use the right pane without a long frozen pause
-- select project `qa-tui-extra`, confirm the right pane border shows `[Info] Terminal`, the pane lists `qa-shared` under environment configs, shows `Project bootstrap commands: none` without listing individual bootstrap commands, shows a `Project file:` path under the workspace path so the metadata file can be edited manually when needed, and the footer shows `[i] terminal` alongside `Option+\`` or `F6` shell focus
-- with `qa-tui-extra` still selected and `[Info] Terminal` visible, confirm the footer shows the concrete project action hotkeys such as `[a] add project`, `[g] env configs`, `[n] create node`, `[u] update project`, and `[x] delete project`, and does not show the generic `Use action hotkeys in the right pane` text
-- with `qa-tui-extra` selected, press `Option+\`` or `F6` to focus the same project terminal fullscreen, run `pwd`, confirm it prints `$WORK_ROOT/extra`, type `echo pending-project` without pressing `Enter`, then return to the tree and confirm `[Info] Terminal` is restored in the split pane
-- press `Option+t` with `qa-tui-extra` selected and confirm a fresh project terminal tab opens, appears in the terminal pane border as the next numbered `host:qa-tui-extra` tab, and leaves the tree focused; press `Option+t` again and confirm another numbered tab opens for the same project, then press `Option+w` to close it and confirm focus moves to the adjacent lower-numbered project tab if the highest-numbered tab was closed
-- with `qa-tui-extra` still selected, press `i`, confirm the right pane border switches to `Info [Terminal]`, the open workspace shell tab is rooted at `$WORK_ROOT/extra`, and the footer changes to `[i] info`
-- with `qa-tui-extra` still selected and `Info [Terminal]` visible, press `Option+\`` or `F6`, confirm the project terminal focuses fullscreen, press `Option+\`` or `F6` again, and confirm `Info [Terminal]` is restored in the split pane
-- with `qa-tui-extra` still selected, press `u`, open the Environment Configs selector from the update dialog, clear the selection, submit, and confirm the right pane shows no environment configs
-- select project `qa-tui`, press `n`, create node `qa-tui-b` with workspace mode `mounted`, and confirm the new node appears selected under the project with the right pane switched to a terminal placeholder without opening a shell session
-- with `qa-tui-b` selected, confirm the right pane border shows `Info [Terminal]`, the placeholder shows the node status plus start guidance, and the footer shows `[i] info`
-- with `qa-tui-b` selected, press `i`, confirm the right pane border switches to `[Info] Terminal`, the pane shows `Workspace mode: mounted`, the pane also shows a `Node file:` path so the metadata file can be edited manually for advanced per-node Lima overrides, and the footer changes to `[i] terminal`
-- press `i` again so `Info [Terminal]` is visible, select `qa-tui-a`, and confirm the terminal mode stays sticky across selection changes, the launch-created node tab appears in the pane border, and selecting the node does not create an additional tab
-- press `i` to return to info mode, then select `qa-tui-b` and confirm the info mode stays sticky across selection changes
-- with `qa-tui` still selected, press `u`, change the project slug to `qa-tui-root`, submit, and confirm the project tree updates in place
-- from a second host shell, run `./bin/codelima --home "$CODELIMA_HOME" node create --project qa-tui-root --slug qa-tui-refresh`, wait a few seconds, and confirm the TUI project tree refreshes automatically to show `qa-tui-refresh` without restarting the TUI
-- when project or node create, start, stop, clone, or delete is in progress, confirm the TUI keeps accepting non-conflicting input instead of freezing on a blank status line
-- while a long-running project or node mutation is in progress, confirm the selected entry shows a transient task state such as `starting`, `stopping`, `creating`, or `deleting` in the tree or details pane, and that the footer shows background work is still running
-- press `i`, then select `qa-tui-a`, press `Option+t`, and confirm an additional node terminal tab opens in the split pane while the original launch-created tab remains available
-- with `qa-tui-a` selected and the tree focused, confirm the footer updates to the node action hotkeys such as `[s] stop node`, `[d] delete node`, and `[c] clone node`, alongside `Option+\`` or `F6` shell focus and `Option+Shift+Backtick` host terminal
-- `Option+\`` or `F6` toggles between tree focus with the split layout visible and terminal focus with the tree hidden
-- use `Option+\`` or `F6` to focus the `qa-tui-a` terminal, confirm the tree hides, and type `echo pending-a` without pressing `Enter`
-- in a focused project or node terminal, run `printf '\033[?1004h'; cat -v`, use `Option+\`` or `F6` to leave and re-enter terminal focus, confirm `^[[O` and `^[[I` focus reports appear, press `Ctrl-C`, then run `printf '\033[?1004l'` to disable focus reporting
-- paste `printf 'one\ntwo\n'` into the focused terminal, press `Enter`, and confirm both lines are preserved instead of being collapsed into one line
-- resize the host terminal window larger and smaller several times and confirm the focused terminal content repaints instead of clearing
-- press `Option+Shift+Backtick`, confirm the fullscreen terminal switches to the host-local project shell for `qa-tui-root` and the existing TUI top bar turns red without adding a second red line, run `pwd`, confirm it prints `$WORK_ROOT/root`, type `echo pending-host` without pressing `Enter`, wait a few seconds for automatic refresh and confirm it stays on the host-local shell, click inside the terminal pane and confirm it stays on the host-local shell with `echo pending-host` still present, then press `Option+Shift+Backtick` again and confirm the top bar returns to normal and the `qa-tui-a` node terminal is restored with `echo pending-a` still present
-- with the `qa-tui-a` terminal focused, press `Option+t` to open another tab for the node, press `Option+Left`/`Option+Right` and confirm the active terminal switches between that node's tabs only, then press `Option+w` with the first, middle, and last tabs active across repeated opens and confirm close focus moves to the adjacent higher-numbered tab when available and otherwise the adjacent lower-numbered tab
-- return to the tree, select another project or node, and confirm `qa-tui-a`'s tabs disappear from the pane border until `qa-tui-a` is focused again
-- press `Alt+d` and `Alt+Shift+d` in a focused terminal and confirm the TUI does not create right or lower split panes
-- press `Option+\`` or `F6` again to return to the tree and confirm the split layout is restored
-- select `qa-tui-b`, press `s`, confirm the node starts without opening a shell session, then press `Option+t` to open its terminal tab
-- while `qa-tui-b` is still starting or stopping, move back to `qa-tui-a`, focus its terminal, and confirm the other node terminal remains usable while the background task completes
-- in the `qa-tui-b` terminal, run `pwd` and confirm it prints `$WORK_ROOT/root`
-- use your terminal emulator's host-selection bypass gesture over the visible `pwd` output in the terminal pane, then confirm `pbpaste` in a second host shell contains the copied text
-- with the `qa-tui-b` terminal focused and the guest at a normal shell prompt, spin the mouse wheel up and down and confirm local scrollback moves without freezing the app
-- return to the tree, select `qa-tui-a` again, and confirm the partially typed `echo pending-a` input is still present
-- in a focused node terminal, start an app that captures the mouse such as `vim` or `htop`, confirm plain mouse input reaches the guest app, then use your terminal emulator's host-selection bypass gesture and confirm you can still copy visible terminal text
-- select `qa-tui-b`, press `s`, and confirm the node stops while remaining selectable in the tree
-- with `qa-tui-b` selected, press `c`, clone it into node `qa-tui-b-clone`, then confirm the cloned node appears under project `qa-tui-root`
-- click a visible workspace path in the right pane and confirm the host opens that path or dispatches it to the default `file://` handler
-- refocus the `qa-tui-a` or `qa-tui-b` terminal, print an OSC 8 hyperlink such as `printf '\033]8;;https://example.com\033\\example\033]8;;\033\\\n'`, click the visible link text, and confirm the host opens it
-- refocus a node terminal, run `printf '\033]52;c;dm0tY2xpcGJvYXJkLXFh\007'`, and confirm the host clipboard contains `vm-clipboard-qa`
-- in a focused node terminal, run `sudo apt-get install -y sl` and confirm the embedded terminal remains responsive past the `Reading database ...` progress output and returns to a prompt
-- **Messages view** (work item 0.5): from the tree, press `m` to open the scrollable messages surface. Confirm it shows recent status messages newest-last, that Up/Down and PgUp/PgDn scroll, `g`/`G` jump to top/bottom, and Esc returns to the tree. Trigger a background operation that fails (e.g. `Start Node` on a node whose bootstrap command fails); after it completes, reopen the messages view and confirm the failed operation's summary and output are still listed (they are no longer discarded), and that a background refresh failure appears at warn level.
-- **Ctrl+C cleanup**: with the TUI running and at least one node terminal tab open (a `codelima shell <node>` session visible), press Ctrl+C in the host terminal (or `kill -TERM <tui-pid>` from another shell). Expected: the TUI exits promptly; the host terminal is restored to cooked mode (typed input echoes, no raw-mode artifacts, cursor visible); `ps aux | grep -E 'limactl shell|ssh'` shows no leftover VM shell processes from the closed tabs. Relaunch the TUI afterwards to continue the remaining steps.
-
-- select `qa-tui-refresh`, press `d`, delete it, and confirm it disappears from project `qa-tui-root`
-- select `qa-tui-b-clone`, press `d`, delete the cloned node, and confirm it disappears from project `qa-tui-root`
-- select `qa-tui-child-a`, press `d`, delete the child node, then select project `qa-tui-child`, press `x`, and confirm the child project disappears from the tree
-- select `qa-tui-b`, press `d`, delete it, and confirm it disappears from the tree
-- select project `qa-tui-extra`, press `x`, and confirm the standalone project disappears from the tree
-
-Cleanup the remaining root project from either the TUI or the CLI:
-
-- in the TUI, delete `qa-tui-a`, then select project `qa-tui-root` and delete it
-- or run the equivalent CLI cleanup commands below after quitting the TUI
-
-Cleanup:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-a
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-b-clone || true
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-refresh || true
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-tui-child-a
-./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-child || true
-./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-extra || true
-./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-root || true
-./bin/codelima --home "$CODELIMA_HOME" project delete qa-tui-outside || true
-./bin/codelima --home "$CODELIMA_HOME" environment delete qa-shared || true
-rm -rf "$WORK_ROOT" "$OUTSIDE_WORK_ROOT"
-```
-
-## Clone Verification
-
-This flow verifies that `node clone` is a Lima VM copy that keeps the source guest workspace path, stays in the same project, and can clone a running source node by stopping and restarting it internally.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
-
-```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-clone"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT/root"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/root"
-```
-
-Create and start the source node:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-clone-root --workspace "$WORK_ROOT/root" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-clone-root --slug qa-clone-root-node
-./bin/codelima --home "$CODELIMA_HOME" node start qa-clone-root-node
-```
-
-Clone the running source node and inspect the project tree plus both nodes:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node clone qa-clone-root-node --node-slug qa-clone-child-node
-./bin/codelima --home "$CODELIMA_HOME" project tree
-./bin/codelima --home "$CODELIMA_HOME" node show qa-clone-root-node
-./bin/codelima --home "$CODELIMA_HOME" node show qa-clone-child-node
-```
-
-Expected result:
-
-- `node clone` succeeds even though the source node was running
-- `project tree` still shows a single project, `qa-clone-root`, with both nodes attached to it
-- `node show qa-clone-root-node` reports `status: running`
-- `node show qa-clone-child-node` reports `guest_workspace_path: $WORK_ROOT/root`
-- `node show qa-clone-child-node` reports `workspace_seeded: true`
-- `node show qa-clone-child-node` reports `bootstrap_completed: true`
-
-Start the child node and verify its shell path:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node start qa-clone-child-node
-./bin/codelima --home "$CODELIMA_HOME" shell qa-clone-child-node -- pwd
-```
-
-Expected result:
-
-- both commands succeed
-- `pwd` prints `$WORK_ROOT/root`
-
-Cleanup:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-clone-child-node
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-clone-root-node
-rm -rf "$WORK_ROOT"
-```
-
-## Workspace Rebind Verification
-
-This flow verifies that a moved workspace can be rebound to a project only after all project nodes are terminated.
-
-Prerequisites:
-
-- run `make build`
-- run the commands from the repository root
-
-Setup:
-
-```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-rebind"
-rm -rf "$WORK_ROOT"
-mkdir -p "$WORK_ROOT"
-CODELIMA_HOME="$WORK_ROOT/.codelima"
-mkdir -p "$WORK_ROOT/original" "$WORK_ROOT/moved"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/original"
-cp -R "$ROOT_DIR/test-project-dir/." "$WORK_ROOT/moved"
-```
-
-Create a project and a node:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" project create --slug qa-rebind --workspace "$WORK_ROOT/original" --bootstrap-command "./script/setup"
-./bin/codelima --home "$CODELIMA_HOME" node create --project qa-rebind --slug qa-rebind-node
-```
-
-Verify rebinding is blocked while the node is live:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" project update qa-rebind --workspace "$WORK_ROOT/moved"
-```
-
-Expected result:
-
-- command fails
-- stderr contains `project workspace cannot be changed while nodes are live`
-
-Delete the node and rebind the project:
-
-```sh
-./bin/codelima --home "$CODELIMA_HOME" node delete qa-rebind-node
-./bin/codelima --home "$CODELIMA_HOME" project update qa-rebind --workspace "$WORK_ROOT/moved"
-./bin/codelima --home "$CODELIMA_HOME" project show qa-rebind
-```
-
-Expected result:
-
-- `project update` succeeds after the node is deleted
-- `project show` reports `workspace_path: $WORK_ROOT/moved`
-
-Cleanup:
-
-```sh
-rm -rf "$WORK_ROOT"
-```
-
-## Packaging Verification
-
-This flow verifies that the repository can build a release archive for the current platform, emit the matching manifest, and render a Homebrew formula from those manifests without hand-editing release metadata.
-
-Prerequisites:
-
-- run `make init`
-- run the commands from the repository root
-
-Setup:
-
-```sh
-ROOT_DIR="$(pwd)"
-WORK_ROOT="$ROOT_DIR/tmp/qa-package"
-DIST_DIR="$WORK_ROOT/dist"
-rm -rf "$WORK_ROOT"
-mkdir -p "$DIST_DIR"
-```
-
-Build the package and inspect the generated files:
-
-```sh
-make package PACKAGE_VERSION=0.0.0-qa DIST_DIR="$DIST_DIR"
-find "$DIST_DIR" -maxdepth 1 -type f | sort
-ARCHIVE="$(find "$DIST_DIR" -maxdepth 1 -type f -name '*.tar.gz' | head -n 1)"
-MANIFEST="$(find "$DIST_DIR" -maxdepth 1 -type f -name '*.json' | head -n 1)"
-tar -tzf "$ARCHIVE"
-cat "$MANIFEST"
-```
-
-Expected result:
-
-- `make package` succeeds
-- `DIST_DIR` contains one `.tar.gz` archive and one `.json` manifest
-- the archive contains `codelima_0.0.0-qa_<goos>_<goarch>/bin/codelima`
-- the archive contains `codelima_0.0.0-qa_<goos>_<goarch>/bin/codelima-real`
-- the archive contains `codelima_0.0.0-qa_<goos>_<goarch>/lib/libghostty-vt.dylib` on macOS or `libghostty-vt.so` on Linux
-- the manifest reports the same `version`, `goos`, `goarch`, and `asset_name`
-
-Render the Homebrew formula from the generated manifest:
-
-```sh
-make package-formula \
-  PACKAGE_VERSION=0.0.0-qa \
-  RELEASE_TAG=v0.0.0-qa \
-  RELEASE_REPO=brianrackle/codelima \
-  DIST_DIR="$DIST_DIR" \
-  FORMULA_OUTPUT="$DIST_DIR/Formula/codelima.rb"
-cat "$DIST_DIR/Formula/codelima.rb"
-```
-
-Expected result:
-
-- `make package-formula` succeeds
-- the formula contains `depends_on "git"`
-- the formula contains `depends_on "lima"`
-- the formula URLs point at `https://github.com/brianrackle/codelima/releases/download/v0.0.0-qa/`
-- the formula references the generated asset name and sha256 from the manifest
-
-Cleanup:
-
-```sh
-rm -rf "$WORK_ROOT"
-```
+Verify no QA sandbox remains in the Microsandbox runtime and `git status --short` contains no QA artifacts.

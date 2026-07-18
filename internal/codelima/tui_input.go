@@ -18,6 +18,16 @@ type tuiTerminalMouseGesture struct {
 }
 
 func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
+	if isHostTerminalTabOpenKey(key) {
+		if err := a.openHostTerminalTab(); err != nil {
+			a.status = err.Error()
+			return false, nil
+		}
+		a.status = ""
+		a.syncSessionFocus()
+		return false, nil
+	}
+
 	if isTerminalTabOpenKey(key) {
 		if err := a.openTerminalTab(); err != nil {
 			a.status = err.Error()
@@ -50,16 +60,6 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
 
 	if isTerminalTabCloseKey(key) {
 		if err := a.closeTerminalTab(); err != nil {
-			a.status = err.Error()
-			return false, nil
-		}
-		a.status = ""
-		a.syncSessionFocus()
-		return false, nil
-	}
-
-	if isHostTerminalToggleKey(key) {
-		if err := a.state.toggleHostTerminal(); err != nil {
 			a.status = err.Error()
 			return false, nil
 		}
@@ -154,14 +154,16 @@ func (a *vaxisTUIApp) actionResourceKeys(action tuiActionSpec, entry tuiTreeEntr
 	switch action.ID {
 	case tuiActionProjectCreate:
 		return []string{"projects"}
-	case tuiActionProjectCreateNode:
+	case tuiActionProjectCreateNode, tuiActionProjectUpdate, tuiActionProjectDelete:
 		return []string{terminal.ProjectTarget(entry.project.ID).String()}
-	case tuiActionProjectUpdate, tuiActionProjectDelete:
-		return []string{terminal.ProjectTarget(entry.project.ID).String()}
+	case tuiActionConfigurationManage:
+		return []string{"configurations"}
+	case tuiActionNodeCreate:
+		return []string{"nodes"}
 	case tuiActionNodeStart, tuiActionNodeStop, tuiActionNodeDelete:
 		return []string{terminal.NodeTarget(entry.node.ID).String()}
 	case tuiActionNodeClone:
-		return []string{terminal.NodeTarget(entry.node.ID).String(), terminal.ProjectTarget(entry.project.ID).String()}
+		return []string{terminal.NodeTarget(entry.node.ID).String()}
 	default:
 		return nil
 	}
@@ -182,14 +184,18 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 	switch action.ID {
 	case tuiActionProjectCreate:
 		a.openCreateProjectDialog()
-	case tuiActionEnvironmentConfigManage:
-		return a.openEnvironmentConfigsMenu()
 	case tuiActionProjectCreateNode:
-		a.openCreateNodeDialog(entry.project)
+		return a.openLegacyCreateNodeDialog(entry.project)
 	case tuiActionProjectUpdate:
 		a.openUpdateProjectDialog(entry.project)
 	case tuiActionProjectDelete:
 		a.openDeleteProjectDialog(entry.project)
+	case tuiActionConfigurationManage:
+		return a.openConfigurationsMenu()
+	case tuiActionEnvironmentConfigManage:
+		return a.openEnvironmentConfigsMenu()
+	case tuiActionNodeCreate:
+		return a.openCreateNodeDialog()
 	case tuiActionNodeStart:
 		return a.startOperation(tuiOperationRequest{
 			Title:         "Starting " + entry.node.Slug,
@@ -230,7 +236,7 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 	case tuiActionNodeDelete:
 		a.openDeleteNodeDialog(entry.node)
 	case tuiActionNodeClone:
-		a.openCloneNodeDialog(entry.node, entry.project)
+		a.openCloneNodeDialog(entry.node)
 	}
 
 	return nil
@@ -415,17 +421,27 @@ func (a *vaxisTUIApp) cancelTerminalMouseGesture() {
 }
 
 func isTerminalViewToggleKey(key vaxis.Key) bool {
-	if isHostTerminalToggleKey(key) {
+	if hasTerminalModifier(normalizedKeyModifiers(key.Modifiers), vaxis.ModShift) {
 		return false
 	}
 	return keyMatchesTerminalModifier(key, '`') || key.Matches(vaxis.KeyF06)
 }
 
-func isHostTerminalToggleKey(key vaxis.Key) bool {
-	if !hasTerminalModifier(normalizedKeyModifiers(key.Modifiers), vaxis.ModShift) {
+func isHostTerminalTabOpenKey(key vaxis.Key) bool {
+	if key.Matches('t', vaxis.ModAlt|vaxis.ModShift) ||
+		key.Matches('t', vaxis.ModMeta|vaxis.ModShift) ||
+		key.Matches('t', vaxis.ModAlt|vaxis.ModMeta|vaxis.ModShift) {
+		return true
+	}
+
+	modifiers := normalizedKeyModifiers(key.Modifiers)
+	if hasTerminalModifier(modifiers, 0) && (key.Text == "T" || key.Keycode == 'T') {
+		return true
+	}
+	if modifiers != 0 && !hasTerminalModifier(modifiers, vaxis.ModShift) {
 		return false
 	}
-	return key.Keycode == '`' || key.ShiftedCode == '~' || key.BaseLayoutCode == '`' || key.Text == "~"
+	return key.Text == "ˇ" || key.Keycode == 'ˇ'
 }
 
 func isTerminalTabOpenKey(key vaxis.Key) bool {
