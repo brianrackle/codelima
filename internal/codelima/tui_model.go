@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type TUIRunner interface {
@@ -26,17 +26,9 @@ const (
 	tuiTreePaneModeInfo     tuiTreePaneMode = "info"
 )
 
-type tuiTreeEntryKind string
-
-const (
-	tuiTreeEntryProject tuiTreeEntryKind = "project"
-	tuiTreeEntryNode    tuiTreeEntryKind = "node"
-)
-
 type tuiSessionManager interface {
 	HasSession(sessionKey string) bool
 	TargetSessionKeys(targetKey string) []string
-	OpenProjectTab(project Project) (string, error)
 	OpenNodeTab(node Node) (string, error)
 	OpenNodeHostTab(node Node) (string, error)
 }
@@ -46,11 +38,7 @@ type tuiActionID string
 const (
 	tuiActionConfigurationManage     tuiActionID = "configuration.manage"
 	tuiActionNodeCreate              tuiActionID = "node.create"
-	tuiActionProjectCreate           tuiActionID = "project.create"
 	tuiActionEnvironmentConfigManage tuiActionID = "environment_config.manage"
-	tuiActionProjectCreateNode       tuiActionID = "project.create_node"
-	tuiActionProjectUpdate           tuiActionID = "project.update"
-	tuiActionProjectDelete           tuiActionID = "project.delete"
 	tuiActionNodeStart               tuiActionID = "node.start"
 	tuiActionNodeStop                tuiActionID = "node.stop"
 	tuiActionNodeDelete              tuiActionID = "node.delete"
@@ -73,10 +61,6 @@ func (tuiNoopSessionManager) TargetSessionKeys(string) []string {
 	return nil
 }
 
-func (tuiNoopSessionManager) OpenProjectTab(Project) (string, error) {
-	return "", nil
-}
-
 func (tuiNoopSessionManager) OpenNodeTab(Node) (string, error) {
 	return "", nil
 }
@@ -85,32 +69,26 @@ func (tuiNoopSessionManager) OpenNodeHostTab(Node) (string, error) {
 	return "", nil
 }
 
+// tuiTreeEntry is one row in the flat node list. A zero entry (empty node ID)
+// is the "nothing selected" sentinel.
 type tuiTreeEntry struct {
-	kind            tuiTreeEntryKind
-	depth           int
-	project         Project
-	node            Node
-	parentProjectID string
-	expanded        bool
-	hasChildren     bool
+	node Node
+}
+
+func (e tuiTreeEntry) valid() bool {
+	return e.node.ID != ""
 }
 
 func (e tuiTreeEntry) key() string {
-	switch e.kind {
-	case tuiTreeEntryProject:
-		return terminal.ProjectTarget(e.project.ID).String()
-	case tuiTreeEntryNode:
-		return terminal.NodeTarget(e.node.ID).String()
-	default:
+	if !e.valid() {
 		return ""
 	}
+	return terminal.NodeTarget(e.node.ID).String()
 }
 
 type tuiState struct {
-	tree           []ProjectTreeNode
+	nodes          []Node
 	entries        []tuiTreeEntry
-	expanded       map[string]bool
-	projectsByID   map[string]Project
 	nodesByID      map[string]Node
 	selection      int
 	scroll         int
@@ -121,15 +99,13 @@ type tuiState struct {
 	sessions       tuiSessionManager
 }
 
-func newTUIState(tree []ProjectTreeNode, sessions tuiSessionManager) (*tuiState, error) {
+func newTUIState(nodes []Node, sessions tuiSessionManager) (*tuiState, error) {
 	if sessions == nil {
 		sessions = tuiNoopSessionManager{}
 	}
 
 	state := &tuiState{
-		tree:          append([]ProjectTreeNode(nil), tree...),
-		expanded:      map[string]bool{},
-		projectsByID:  map[string]Project{},
+		nodes:         append([]Node(nil), nodes...),
 		nodesByID:     map[string]Node{},
 		selection:     -1,
 		focus:         tuiFocusTree,
@@ -138,18 +114,13 @@ func newTUIState(tree []ProjectTreeNode, sessions tuiSessionManager) (*tuiState,
 		sessions:      sessions,
 	}
 
-	state.indexTree(tree)
+	state.indexNodes()
 	state.rebuildEntries()
 	if len(state.entries) == 0 {
 		return state, nil
 	}
 
-	initialSelection := state.firstNodeIndex()
-	if initialSelection < 0 {
-		initialSelection = 0
-	}
-
-	if err := state.selectIndex(initialSelection); err != nil {
+	if err := state.selectIndex(0); err != nil {
 		return nil, err
 	}
 	state.treePaneMode = defaultTUITreePaneMode(state.selectedEntry())
@@ -158,27 +129,25 @@ func newTUIState(tree []ProjectTreeNode, sessions tuiSessionManager) (*tuiState,
 }
 
 func defaultTUITreePaneMode(entry tuiTreeEntry) tuiTreePaneMode {
-	if entry.kind == tuiTreeEntryNode && nodeAutoStartsSession(entry.node) {
+	if entry.valid() && nodeIsRunning(entry.node) {
 		return tuiTreePaneModeTerminal
 	}
 	return tuiTreePaneModeInfo
 }
 
-func (s *tuiState) indexTree(nodes []ProjectTreeNode) {
-	for _, node := range nodes {
-		s.projectsByID[node.Project.ID] = node.Project
-		s.expanded[node.Project.ID] = true
-		for _, projectNode := range node.Nodes {
-			s.nodesByID[projectNode.ID] = projectNode
-		}
-		s.indexTree(node.Children)
+func (s *tuiState) indexNodes() {
+	s.nodesByID = map[string]Node{}
+	for _, node := range s.nodes {
+		s.nodesByID[node.ID] = node
 	}
 }
 
 func (s *tuiState) rebuildEntries() {
 	selectedKey := s.selectedEntry().key()
-	entries := make([]tuiTreeEntry, 0)
-	s.flattenTree(&entries, s.tree, 0, "")
+	entries := make([]tuiTreeEntry, 0, len(s.nodes))
+	for _, node := range s.nodes {
+		entries = append(entries, tuiTreeEntry{node: node})
+	}
 	s.entries = entries
 
 	if len(s.entries) == 0 {
@@ -205,53 +174,12 @@ func (s *tuiState) rebuildEntries() {
 	}
 }
 
-func (s *tuiState) flattenTree(entries *[]tuiTreeEntry, nodes []ProjectTreeNode, depth int, parentProjectID string) {
-	for _, projectNode := range nodes {
-		if projectNode.Project.ID != "flat-nodes" {
-			expanded := s.expanded[projectNode.Project.ID]
-			*entries = append(*entries, tuiTreeEntry{
-				kind: tuiTreeEntryProject, depth: depth, project: projectNode.Project,
-				parentProjectID: parentProjectID, expanded: expanded,
-				hasChildren: len(projectNode.Nodes) > 0 || len(projectNode.Children) > 0,
-			})
-			if !expanded {
-				continue
-			}
-			for _, child := range projectNode.Nodes {
-				*entries = append(*entries, tuiTreeEntry{kind: tuiTreeEntryNode, depth: depth + 1, project: projectNode.Project, node: child, parentProjectID: projectNode.Project.ID})
-			}
-			s.flattenTree(entries, projectNode.Children, depth+1, projectNode.Project.ID)
-			continue
-		}
-		for _, projectNodeChild := range projectNode.Nodes {
-			project := runtimeProjectForNode(projectNodeChild)
-			*entries = append(*entries, tuiTreeEntry{
-				kind:    tuiTreeEntryNode,
-				depth:   0,
-				project: project,
-				node:    projectNodeChild,
-			})
-		}
-		s.flattenTree(entries, projectNode.Children, 0, "")
-	}
-}
-
 func (s *tuiState) selectedEntry() tuiTreeEntry {
 	if s.selection < 0 || s.selection >= len(s.entries) {
 		return tuiTreeEntry{}
 	}
 
 	return s.entries[s.selection]
-}
-
-func (s *tuiState) firstNodeIndex() int {
-	for index, entry := range s.entries {
-		if entry.kind == tuiTreeEntryNode {
-			return index
-		}
-	}
-
-	return -1
 }
 
 func (s *tuiState) findEntryByKey(key string) int {
@@ -262,10 +190,6 @@ func (s *tuiState) findEntryByKey(key string) int {
 	}
 
 	return -1
-}
-
-func (s *tuiState) findProjectEntry(projectID string) int {
-	return s.findEntryByKey(terminal.ProjectTarget(projectID).String())
 }
 
 func (s *tuiState) selectIndex(index int) error {
@@ -295,51 +219,15 @@ func (s *tuiState) moveSelection(delta int) error {
 	return s.selectIndex(s.selection + delta)
 }
 
-func (s *tuiState) collapseSelection() {
-	entry := s.selectedEntry()
-	switch entry.kind {
-	case tuiTreeEntryNode:
-		if index := s.findProjectEntry(entry.parentProjectID); index >= 0 {
-			_ = s.selectIndex(index)
-		}
-	case tuiTreeEntryProject:
-		if entry.expanded && entry.hasChildren {
-			s.expanded[entry.project.ID] = false
-			s.rebuildEntries()
-			return
-		}
-		if entry.parentProjectID != "" {
-			if index := s.findProjectEntry(entry.parentProjectID); index >= 0 {
-				_ = s.selectIndex(index)
-			}
-		}
-	}
-}
-
-func (s *tuiState) expandSelection() {
-	entry := s.selectedEntry()
-	if entry.kind != tuiTreeEntryProject || !entry.hasChildren || entry.expanded {
-		return
-	}
-
-	s.expanded[entry.project.ID] = true
-	s.rebuildEntries()
-}
-
 func (s *tuiState) focusTerminal() error {
-	entry := s.selectedEntry()
-	if entry.kind != tuiTreeEntryNode {
-		return errors.New("select a node to focus the terminal")
-	}
-
-	return s.focusTerminalEntry(entry)
+	return s.focusTerminalEntry(s.selectedEntry())
 }
 
 func (s *tuiState) focusTerminalEntry(entry tuiTreeEntry) error {
-	if entry.kind != tuiTreeEntryNode {
+	if !entry.valid() {
 		return errors.New("select a node to focus the terminal")
 	}
-	if entry.kind == tuiTreeEntryNode && !nodeAutoStartsSession(entry.node) {
+	if !nodeIsRunning(entry.node) {
 		return errors.New("selected node is not running; start it before focusing the terminal")
 	}
 
@@ -374,13 +262,13 @@ func (s *tuiState) ensureTargetTab(entry tuiTreeEntry) (string, error) {
 // running-node selection without changing tree focus or its default pane mode.
 func (s *tuiState) openInitialTerminalTab() error {
 	entry := s.selectedEntry()
-	if entry.kind != tuiTreeEntryNode {
+	if !entry.valid() {
 		return nil
 	}
 	if s.targetActiveSessionKey(entry.key()) != "" {
 		return nil
 	}
-	if entry.kind == tuiTreeEntryNode && !nodeAutoStartsSession(entry.node) {
+	if !nodeIsRunning(entry.node) {
 		return nil
 	}
 	_, err := s.openTerminalTabEntry(entry)
@@ -390,27 +278,25 @@ func (s *tuiState) openInitialTerminalTab() error {
 // openTerminalTabEntry opens a fresh terminal tab for the entry and makes it
 // the entry's active tab.
 func (s *tuiState) openTerminalTabEntry(entry tuiTreeEntry) (string, error) {
-	switch entry.kind {
-	case tuiTreeEntryNode:
-		if !nodeAutoStartsSession(entry.node) {
-			return "", errors.New("selected node is not running; start it before opening a terminal tab")
-		}
-		sessionKey, err := s.sessions.OpenNodeTab(entry.node)
-		if err != nil {
-			return "", fmt.Errorf("start shell for %s: %w", entry.node.Slug, err)
-		}
-		s.setActiveTab(entry.key(), sessionKey)
-		return sessionKey, nil
-	default:
+	if !entry.valid() {
 		return "", errors.New("select a node to open a terminal tab")
 	}
+	if !nodeIsRunning(entry.node) {
+		return "", errors.New("selected node is not running; start it before opening a terminal tab")
+	}
+	sessionKey, err := s.sessions.OpenNodeTab(entry.node)
+	if err != nil {
+		return "", fmt.Errorf("start shell for %s: %w", entry.node.Slug, err)
+	}
+	s.setActiveTab(entry.key(), sessionKey)
+	return sessionKey, nil
 }
 
 // openHostTerminalTabEntry opens a fresh host shell tab for a node and makes
 // it active. Host shells are ordinary node-scoped tabs: they participate in
 // the same switching, closing, and refresh behavior as guest shell tabs.
 func (s *tuiState) openHostTerminalTabEntry(entry tuiTreeEntry) (string, error) {
-	if entry.kind != tuiTreeEntryNode {
+	if !entry.valid() {
 		return "", errors.New("select a node to open a host terminal tab")
 	}
 	sessionKey, err := s.sessions.OpenNodeHostTab(entry.node)
@@ -491,14 +377,13 @@ func (s *tuiState) toggleFocus() error {
 	return s.focusTerminal()
 }
 
-func (s *tuiState) toggleTreePaneMode() error {
+func (s *tuiState) toggleTreePaneMode() {
 	if s.treePaneMode == tuiTreePaneModeTerminal {
 		s.treePaneMode = tuiTreePaneModeInfo
-		return nil
+		return
 	}
 
 	s.treePaneMode = tuiTreePaneModeTerminal
-	return nil
 }
 
 func (s *tuiState) visibleEntries(height int) []tuiTreeEntry {
@@ -551,7 +436,7 @@ func (s *tuiState) viewportStart(height int) int {
 }
 
 func (s *tuiState) activeNode() (Node, bool) {
-	if entry := s.selectedEntry(); entry.kind == tuiTreeEntryNode {
+	if entry := s.selectedEntry(); entry.valid() {
 		return entry.node, true
 	}
 
@@ -564,47 +449,16 @@ func (s *tuiState) activeNode() (Node, bool) {
 	return node, ok
 }
 
-func (s *tuiState) activeProject() (Project, bool) {
-	entry := s.selectedEntry()
-	switch entry.kind {
-	case tuiTreeEntryProject:
-		return entry.project, true
-	case tuiTreeEntryNode:
-		return entry.project, true
-	}
-
-	if target, err := terminal.ParseTargetKey(s.activeTerminalTargetKey()); err == nil && target.Kind == terminal.TargetProject {
-		project, ok := s.projectsByID[target.ID]
-		return project, ok
-	}
-	if node, ok := s.activeNode(); ok {
-		project, found := s.projectsByID[node.ProjectID]
-		return project, found
-	}
-
-	return Project{}, false
-}
-
-func (s *tuiState) replaceTree(tree []ProjectTreeNode, preferredKey string) error {
+func (s *tuiState) replaceNodes(nodes []Node, preferredKey string) error {
 	selectedKey := preferredKey
 	if selectedKey == "" {
 		selectedKey = s.selectedEntry().key()
 	}
-	expanded := cloneExpandedState(s.expanded)
-	s.tree = append([]ProjectTreeNode(nil), tree...)
-	s.expanded = expanded
-	s.projectsByID = map[string]Project{}
-	s.nodesByID = map[string]Node{}
-	s.indexTree(tree)
+	s.nodes = append([]Node(nil), nodes...)
+	s.indexNodes()
 	s.rebuildEntries()
 
 	if selectedKey != "" {
-		if index := s.findEntryByKey(selectedKey); index >= 0 {
-			return s.selectIndex(index)
-		}
-		if s.expandToKey(selectedKey) {
-			s.rebuildEntries()
-		}
 		if index := s.findEntryByKey(selectedKey); index >= 0 {
 			return s.selectIndex(index)
 		}
@@ -627,7 +481,7 @@ func (s *tuiState) activeTerminalTargetKey() string {
 	if s.focus == tuiFocusTerminal && s.terminalTarget != "" {
 		return s.terminalTarget
 	}
-	if entry := s.selectedEntry(); entry.kind == tuiTreeEntryProject || entry.kind == tuiTreeEntryNode {
+	if entry := s.selectedEntry(); entry.valid() {
 		return entry.key()
 	}
 	return s.terminalTarget
@@ -648,111 +502,42 @@ func (s *tuiState) entryForKey(key string) (tuiTreeEntry, bool) {
 		return s.entries[index], true
 	}
 	target, err := terminal.ParseTargetKey(key)
-	if err != nil {
+	if err != nil || target.Kind != terminal.TargetNode {
 		return tuiTreeEntry{}, false
 	}
-	switch target.Kind {
-	case terminal.TargetProject:
-		project, ok := s.projectsByID[target.ID]
-		if !ok {
-			return tuiTreeEntry{}, false
-		}
-		return tuiTreeEntry{kind: tuiTreeEntryProject, project: project}, true
-	case terminal.TargetNode:
-		node, ok := s.nodesByID[target.ID]
-		if !ok {
-			return tuiTreeEntry{}, false
-		}
-		project := s.projectsByID[node.ProjectID]
-		return tuiTreeEntry{kind: tuiTreeEntryNode, project: project, node: node, parentProjectID: node.ProjectID}, true
-	default:
+	node, ok := s.nodesByID[target.ID]
+	if !ok {
 		return tuiTreeEntry{}, false
 	}
+	return tuiTreeEntry{node: node}, true
 }
 
 func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
-	if entry.kind == tuiTreeEntryProject {
-		return []tuiActionSpec{
-			{ID: tuiActionProjectCreate, Label: "Add Project", Hotkey: 'a'},
-			{ID: tuiActionEnvironmentConfigManage, Label: "Env Configs", Hotkey: 'g'},
-			{ID: tuiActionProjectCreateNode, Label: "Create Node", Hotkey: 'n'},
-			{ID: tuiActionProjectUpdate, Label: "Update Project", Hotkey: 'u'},
-			{ID: tuiActionProjectDelete, Label: "Delete Project", Hotkey: 'x'},
-		}
-	}
-
 	actions := []tuiActionSpec{
 		{ID: tuiActionNodeCreate, Label: "Create Node", Hotkey: 'n'},
 		{ID: tuiActionConfigurationManage, Label: "Configurations", Hotkey: 'a'},
 		{ID: tuiActionEnvironmentConfigManage, Label: "Environments", Hotkey: 'g'},
 	}
-	if entry.kind == tuiTreeEntryNode && entry.node.ProjectID != "" {
-		actions = []tuiActionSpec{
-			{ID: tuiActionProjectCreate, Label: "Add Project", Hotkey: 'a'},
-			{ID: tuiActionEnvironmentConfigManage, Label: "Env Configs", Hotkey: 'g'},
-		}
-	}
 
-	switch entry.kind {
-	case tuiTreeEntryNode:
-		if nodeAutoStartsSession(entry.node) {
-			actions = append(actions, tuiActionSpec{ID: tuiActionNodeStop, Label: "Stop Node", Hotkey: 's'})
-		} else {
-			actions = append(actions, tuiActionSpec{ID: tuiActionNodeStart, Label: "Start Node", Hotkey: 's'})
-		}
-		actions = append(actions,
-			tuiActionSpec{ID: tuiActionNodeDelete, Label: "Delete Node", Hotkey: 'd'},
-			tuiActionSpec{ID: tuiActionNodeClone, Label: "Clone Node", Hotkey: 'c'},
-		)
-		return actions
-	default:
+	if !entry.valid() {
 		return actions
 	}
+
+	if nodeIsRunning(entry.node) {
+		actions = append(actions, tuiActionSpec{ID: tuiActionNodeStop, Label: "Stop Node", Hotkey: 's'})
+	} else {
+		actions = append(actions, tuiActionSpec{ID: tuiActionNodeStart, Label: "Start Node", Hotkey: 's'})
+	}
+	actions = append(actions,
+		tuiActionSpec{ID: tuiActionNodeDelete, Label: "Delete Node", Hotkey: 'd'},
+		tuiActionSpec{ID: tuiActionNodeClone, Label: "Clone Node", Hotkey: 'c'},
+	)
+	return actions
 }
 
-func nodeAutoStartsSession(node Node) bool {
-	return nodeVMStatus(node) == "running" || node.Status == NodeStatusRunning
-}
-
-func cloneExpandedState(source map[string]bool) map[string]bool {
-	if len(source) == 0 {
-		return map[string]bool{}
+func nodeIsRunning(node Node) bool {
+	if observation := node.LastRuntimeObservation; observation != nil && observation.Status == ObservationRunning {
+		return true
 	}
-
-	target := make(map[string]bool, len(source))
-	for key, value := range source {
-		target[key] = value
-	}
-	return target
-}
-
-func (s *tuiState) expandToKey(key string) bool {
-	projectIDs, ok := projectLineageForKey(s.tree, key, nil)
-	if !ok {
-		return false
-	}
-
-	for _, projectID := range projectIDs {
-		s.expanded[projectID] = true
-	}
-	return true
-}
-
-func projectLineageForKey(nodes []ProjectTreeNode, key string, path []string) ([]string, bool) {
-	for _, projectNode := range nodes {
-		nextPath := append(append([]string(nil), path...), projectNode.Project.ID)
-		if key == terminal.ProjectTarget(projectNode.Project.ID).String() {
-			return nextPath, true
-		}
-		for _, childNode := range projectNode.Nodes {
-			if key == terminal.NodeTarget(childNode.ID).String() {
-				return nextPath, true
-			}
-		}
-		if lineage, ok := projectLineageForKey(projectNode.Children, key, nextPath); ok {
-			return lineage, true
-		}
-	}
-
-	return nil, false
+	return node.Status == NodeStatusRunning
 }

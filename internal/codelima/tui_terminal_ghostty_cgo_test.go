@@ -377,7 +377,6 @@ func TestCloseKillsGrandchildProcesses(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
 			if err != nil {
@@ -943,7 +942,6 @@ func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1084,7 +1082,6 @@ func TestGhosttyMouseEncoderMatchesLegacyCommonSequences(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
 			if err != nil {

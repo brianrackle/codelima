@@ -32,7 +32,7 @@ func newTUIVaxisTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTermi
 		switch event := event.(type) {
 		case term.EventClosed:
 			terminal.closeOnce.Do(func() { close(terminal.closed) })
-			postEvent(tuiTerminalClosedEvent{TargetKey: targetKey, Err: event.Error})
+			postEvent(tuiTerminalClosedEvent{SessionKey: targetKey, Err: event.Error})
 		case term.EventPanic:
 			postEvent(tuiTerminalErrorEvent{TargetKey: targetKey, Err: error(event)})
 		default:

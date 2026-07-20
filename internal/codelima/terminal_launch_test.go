@@ -13,7 +13,7 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 // expectedSelfExecutable mirrors how the Service resolves the codelima binary
@@ -50,24 +50,24 @@ func TestTerminalLaunchSpecNodeShell(t *testing.T) {
 	}
 }
 
-func TestTerminalLaunchSpecProjectHostShell(t *testing.T) {
+func TestTerminalLaunchSpecNodeHostShell(t *testing.T) {
 	t.Parallel()
 
 	service, workspace := newTestService(t)
 
-	spec, err := service.TerminalLaunchSpec(terminal.ProjectTarget("proj-abc"), terminal.ProjectHostShell, workspace)
+	spec, err := service.TerminalLaunchSpec(terminal.NodeTarget("node-abc"), terminal.NodeHostShell, workspace)
 	if err != nil {
-		t.Fatalf("TerminalLaunchSpec(ProjectHostShell) error = %v", err)
+		t.Fatalf("TerminalLaunchSpec(NodeHostShell) error = %v", err)
 	}
 
 	if got, want := strings.Join(spec.Argv, " "), strings.Join(interactiveShellLaunchCommand(), " "); got != want {
-		t.Fatalf("project argv = %q, want %q", got, want)
+		t.Fatalf("host argv = %q, want %q", got, want)
 	}
 	if spec.Dir != workspace {
-		t.Fatalf("project dir = %q, want %q", spec.Dir, workspace)
+		t.Fatalf("host dir = %q, want %q", spec.Dir, workspace)
 	}
 	if len(spec.Env) == 0 {
-		t.Fatalf("expected project launch env to be populated")
+		t.Fatalf("expected host launch env to be populated")
 	}
 }
 
@@ -87,9 +87,9 @@ func TestTerminalLaunchSpecErrors(t *testing.T) {
 		workspace string
 	}{
 		{"empty node id", terminal.NodeTarget(""), terminal.NodeShell, ""},
-		{"missing workspace path", terminal.ProjectTarget("p"), terminal.ProjectHostShell, ""},
-		{"non-existent workspace dir", terminal.ProjectTarget("p"), terminal.ProjectHostShell, missingDir},
-		{"workspace is a file", terminal.ProjectTarget("p"), terminal.ProjectHostShell, filePath},
+		{"missing directory path", terminal.NodeTarget("n"), terminal.NodeHostShell, ""},
+		{"non-existent directory", terminal.NodeTarget("n"), terminal.NodeHostShell, missingDir},
+		{"directory is a file", terminal.NodeTarget("n"), terminal.NodeHostShell, filePath},
 	}
 
 	for _, tc := range cases {
@@ -109,21 +109,21 @@ func TestTerminalLaunchSpecErrors(t *testing.T) {
 	}
 }
 
-// TestOpenTabsSpawnExactlyLaunchSpec pins the 2.2 contract: OpenProjectTab and
-// OpenNodeTab spawn precisely the argv/dir the Service's TerminalLaunchSpec
+// TestOpenTabsSpawnExactlyLaunchSpec pins the 2.2 contract: OpenNodeTab and
+// OpenNodeHostTab spawn precisely the argv/dir the Service's TerminalLaunchSpec
 // returns — no second command-building path in the store.
 func TestOpenTabsSpawnExactlyLaunchSpec(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	store := newTUISessionStore(ctx, service, func(vaxis.Event) {})
 
-	original := newSessionTUITerminal
 	var term *fakeTUITerminal
-	newSessionTUITerminal = func(string, func(vaxis.Event)) tuiTerminal {
+	store.newTerminal = func(string, func(vaxis.Event)) tuiTerminal {
 		term = newFakeTUITerminal()
 		return term
 	}
-	defer func() { newSessionTUITerminal = original }()
 
 	// Node tab spawns exactly the node LaunchSpec.
 	nodeSpec, err := service.TerminalLaunchSpec(terminal.NodeTarget("node-x"), terminal.NodeShell, "")
@@ -146,23 +146,23 @@ func TestOpenTabsSpawnExactlyLaunchSpec(t *testing.T) {
 		t.Fatalf("node startCmd.Dir = %q, want %q", term.startCmd.Dir, nodeSpec.Dir)
 	}
 
-	// Project tab spawns exactly the project LaunchSpec.
+	// Node host tab spawns exactly the node host-shell LaunchSpec.
 	term = nil
-	projSpec, err := service.TerminalLaunchSpec(terminal.ProjectTarget("proj-x"), terminal.ProjectHostShell, workspace)
+	hostSpec, err := service.TerminalLaunchSpec(terminal.NodeTarget("node-y"), terminal.NodeHostShell, workspace)
 	if err != nil {
-		t.Fatalf("TerminalLaunchSpec(project) error = %v", err)
+		t.Fatalf("TerminalLaunchSpec(node host) error = %v", err)
 	}
-	if _, err := store.OpenProjectTab(Project{ID: "proj-x", Slug: "proj-x", WorkspacePath: workspace}); err != nil {
-		t.Fatalf("OpenProjectTab() error = %v", err)
+	if _, err := store.OpenNodeHostTab(Node{ID: "node-y", Slug: "node-y", DirectoryPath: workspace}); err != nil {
+		t.Fatalf("OpenNodeHostTab() error = %v", err)
 	}
 	if term == nil || term.startCmd == nil {
-		t.Fatal("expected OpenProjectTab to start a terminal")
+		t.Fatal("expected OpenNodeHostTab to start a terminal")
 	}
-	if !reflect.DeepEqual(term.startCmd.Args, projSpec.Argv) {
-		t.Fatalf("project startCmd.Args = %#v, want %#v", term.startCmd.Args, projSpec.Argv)
+	if !reflect.DeepEqual(term.startCmd.Args, hostSpec.Argv) {
+		t.Fatalf("host startCmd.Args = %#v, want %#v", term.startCmd.Args, hostSpec.Argv)
 	}
-	if term.startCmd.Dir != projSpec.Dir {
-		t.Fatalf("project startCmd.Dir = %q, want %q", term.startCmd.Dir, projSpec.Dir)
+	if term.startCmd.Dir != hostSpec.Dir {
+		t.Fatalf("host startCmd.Dir = %q, want %q", term.startCmd.Dir, hostSpec.Dir)
 	}
 }
 

@@ -122,7 +122,7 @@ func (s *Store) EnsureLayout() error {
 		return err
 	}
 
-	return s.seedAndRepair(time.Now().UTC())
+	return s.seedAndRepair(time.Now().UTC(), true)
 }
 
 // ensureDirectories creates the directory skeleton only. It is idempotent,
@@ -143,6 +143,7 @@ func (s *Store) ensureDirectories() error {
 		filepath.Join(s.cfg.MetadataRoot, "_index", "environments", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "configurations", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance"),
+		filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-slug"),
 		filepath.Join(s.cfg.MetadataRoot, "environments"),
 		filepath.Join(s.cfg.MetadataRoot, "configurations"),
 		filepath.Join(s.cfg.MetadataRoot, "nodes"),
@@ -157,12 +158,33 @@ func (s *Store) ensureDirectories() error {
 	return nil
 }
 
+// seedRevision versions the seed-and-repair pass. Bump it whenever the
+// built-in profiles/environments/default configuration, the config refresh
+// rules, or the node-file format change so existing homes re-run the full
+// pass exactly once instead of on every mutating command.
+const seedRevision = "1"
+
+func (s *Store) seedVersionPath() string {
+	return filepath.Join(s.cfg.MetadataRoot, "_config", "seed.version")
+}
+
+func (s *Store) seedVersionCurrent() bool {
+	data, err := os.ReadFile(s.seedVersionPath())
+	return err == nil && strings.TrimSpace(string(data)) == seedRevision
+}
+
 // seedAndRepair writes the global config when missing or stale, seeds built-in
 // agent profiles, environments, and the default configuration, and refreshes
-// node metadata files. Callers must hold the environments, configurations,
-// and nodes locks (Store keeps no locking of
-// its own — lock discipline lives at the Service operation level).
-func (s *Store) seedAndRepair(now time.Time) error {
+// node metadata files. The pass is versioned: once a home is stamped with the
+// current seedRevision it is skipped, so ordinary mutating commands stop
+// re-reading every node file. force (doctor --repair) always runs it.
+// Callers must hold the environments, configurations, and nodes locks (Store
+// keeps no locking of its own — lock discipline lives at the Service
+// operation level).
+func (s *Store) seedAndRepair(now time.Time, force bool) error {
+	if !force && s.seedVersionCurrent() {
+		return nil
+	}
 	if err := s.ensureConfigFile(); err != nil {
 		return err
 	}
@@ -185,7 +207,11 @@ func (s *Store) seedAndRepair(now time.Time) error {
 		return err
 	}
 
-	return s.ensureNodeMetadataFiles()
+	if err := s.ensureNodeMetadataFiles(); err != nil {
+		return err
+	}
+
+	return atomicWriteFile(s.seedVersionPath(), []byte(seedRevision+"\n"), 0o644)
 }
 
 func (s *Store) ensureConfigFile() error {
@@ -238,15 +264,15 @@ func (s *Store) ensureNodeMetadataFiles() error {
 		}
 		node := wire.node()
 
-		defaults := s.cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
-		if node.ProjectID != "" {
-			project, err := s.ProjectByID(node.ProjectID)
-			if err != nil {
+		// The full pass already has the node in hand: backfill the by-slug
+		// index for homes created before it existed.
+		if node.DeletedAt == nil && node.Status != NodeStatusTerminated && !exists(s.nodeSlugIndexPath(node.Slug)) {
+			if err := atomicWriteFile(s.nodeSlugIndexPath(node.Slug), []byte(node.ID+"\n"), 0o644); err != nil {
 				return err
 			}
-			defaults = project.RuntimeCommands.ApplyDefaults(defaults)
 		}
 
+		defaults := s.cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
 		if !nodeFileNeedsRefresh(data, node, defaults) {
 			continue
 		}
@@ -295,8 +321,7 @@ func (s *Store) ensureBuiltInEnvironmentConfigs(createdAt time.Time) error {
 			continue
 		}
 
-		var appErr *AppError
-		if !As(err, &appErr) || appErr.Category != "NotFound" {
+		if !IsNotFound(err) {
 			return err
 		}
 
@@ -330,34 +355,6 @@ func (s *Store) configPath() string {
 
 func (s *Store) agentProfilePath(name string) string {
 	return filepath.Join(s.cfg.AgentProfilesDir, name+".yaml")
-}
-
-func (s *Store) projectDir(projectID string) string {
-	return filepath.Join(s.cfg.MetadataRoot, "projects", projectID)
-}
-
-func (s *Store) projectPath(projectID string) string {
-	return filepath.Join(s.projectDir(projectID), "project.yaml")
-}
-
-func (s *Store) projectEventsPath(projectID string) string {
-	return filepath.Join(s.projectDir(projectID), "events.jsonl")
-}
-
-func (s *Store) projectSnapshotsDir(projectID string) string {
-	return filepath.Join(s.projectDir(projectID), "snapshots")
-}
-
-func (s *Store) snapshotDir(projectID, snapshotID string) string {
-	return filepath.Join(s.projectSnapshotsDir(projectID), snapshotID)
-}
-
-func (s *Store) snapshotManifestPath(projectID, snapshotID string) string {
-	return filepath.Join(s.snapshotDir(projectID, snapshotID), "manifest.json")
-}
-
-func (s *Store) snapshotTreePath(projectID, snapshotID string) string {
-	return filepath.Join(s.snapshotDir(projectID, snapshotID), "tree")
 }
 
 func (s *Store) nodeDir(nodeID string) string {
@@ -407,12 +404,26 @@ func (s *Store) incompleteNodeMetadata(nodeID string) (IncompleteNodeMetadata, e
 	return item, nil
 }
 
-func (s *Store) projectSlugIndexPath(slug string) string {
-	return filepath.Join(s.cfg.MetadataRoot, "_index", "projects", "by-slug", slug)
-}
-
 func (s *Store) nodeInstanceIndexPath(instanceName string) string {
 	return filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance", instanceName)
+}
+
+func (s *Store) nodeSlugIndexPath(slug string) string {
+	return filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-slug", slug)
+}
+
+// maintainNodeSlugIndex keeps _index/nodes/by-slug consistent with a saved
+// node: live nodes claim their slug entry, renames drop the previous entry,
+// and terminated/deleted nodes release theirs so the slug can be reused.
+func (s *Store) maintainNodeSlugIndex(node Node, previous *Node) error {
+	if previous != nil && previous.Slug != node.Slug {
+		_ = os.Remove(s.nodeSlugIndexPath(previous.Slug))
+	}
+	if node.DeletedAt != nil || node.Status == NodeStatusTerminated {
+		_ = os.Remove(s.nodeSlugIndexPath(node.Slug))
+		return nil
+	}
+	return atomicWriteFile(s.nodeSlugIndexPath(node.Slug), []byte(node.ID+"\n"), 0o644)
 }
 
 func (s *Store) LoadAgentProfile(name string) (AgentProfile, error) {
@@ -429,244 +440,6 @@ func (s *Store) LoadAgentProfile(name string) (AgentProfile, error) {
 	return profile, nil
 }
 
-func (s *Store) SaveProject(project Project) error {
-	if err := ensureDir(s.projectDir(project.ID)); err != nil {
-		return err
-	}
-	if err := ensureDir(filepath.Dir(s.projectSlugIndexPath(project.Slug))); err != nil {
-		return err
-	}
-
-	var previous *Project
-	if loaded, err := s.ProjectByID(project.ID); err == nil {
-		previous = &loaded
-	}
-
-	if err := writeProjectFile(s.projectPath(project.ID), project, s.cfg.RuntimeCommands); err != nil {
-		return err
-	}
-
-	if err := ensureDir(s.projectSnapshotsDir(project.ID)); err != nil {
-		return err
-	}
-
-	if previous != nil && previous.Slug != project.Slug {
-		_ = os.Remove(s.projectSlugIndexPath(previous.Slug))
-	}
-
-	if project.DeletedAt == nil {
-		if err := atomicWriteFile(s.projectSlugIndexPath(project.Slug), []byte(project.ID+"\n"), 0o644); err != nil {
-			return err
-		}
-	} else {
-		_ = os.Remove(s.projectSlugIndexPath(project.Slug))
-	}
-
-	return nil
-}
-
-func (s *Store) SaveSnapshot(projectID string, manifest SnapshotManifest) error {
-	snapshotDir := s.snapshotDir(projectID, manifest.ID)
-	if err := ensureDir(snapshotDir); err != nil {
-		return err
-	}
-
-	return writeJSONFile(s.snapshotManifestPath(projectID, manifest.ID), manifest)
-}
-
-func (s *Store) ProjectByID(projectID string) (Project, error) {
-	var project Project
-	path := s.projectPath(projectID)
-	if err := readYAMLFile(path, &project); err != nil {
-		if os.IsNotExist(err) {
-			return Project{}, notFound("project not found", map[string]any{"id": projectID})
-		}
-
-		return Project{}, metadataCorruption("failed to load project", err, map[string]any{"path": path})
-	}
-
-	return project, nil
-}
-
-func (s *Store) ProjectByIDOrSlug(value string) (Project, error) {
-	if exists(s.projectPath(value)) {
-		return s.ProjectByID(value)
-	}
-
-	indexPath := s.projectSlugIndexPath(value)
-	if exists(indexPath) {
-		data, err := os.ReadFile(indexPath)
-		if err != nil {
-			return Project{}, metadataCorruption("failed to read project slug index", err, map[string]any{"path": indexPath})
-		}
-
-		return s.ProjectByID(strings.TrimSpace(string(data)))
-	}
-
-	projects, err := s.ListProjects(false)
-	if err != nil {
-		return Project{}, err
-	}
-
-	for _, project := range projects {
-		if project.Slug == value {
-			return project, nil
-		}
-	}
-
-	projects, err = s.ListProjects(true)
-	if err != nil {
-		return Project{}, err
-	}
-
-	var deletedMatch *Project
-	for _, project := range projects {
-		if project.Slug == value {
-			projectCopy := project
-			deletedMatch = &projectCopy
-		}
-	}
-
-	if deletedMatch != nil {
-		return *deletedMatch, nil
-	}
-
-	return Project{}, notFound("project not found", map[string]any{"query": value})
-}
-
-func (s *Store) ProjectByWorkspacePath(workspacePath string) (Project, bool, error) {
-	projects, err := s.ListProjects(true)
-	if err != nil {
-		return Project{}, false, err
-	}
-
-	for _, project := range projects {
-		if filepath.Clean(project.WorkspacePath) == filepath.Clean(workspacePath) && project.DeletedAt == nil {
-			return project, true, nil
-		}
-	}
-
-	return Project{}, false, nil
-}
-
-func (s *Store) ListProjects(includeDeleted bool) ([]Project, error) {
-	root := filepath.Join(s.cfg.MetadataRoot, "projects")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []Project{}, nil
-		}
-		return nil, err
-	}
-
-	projects := []Project{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		project, err := s.ProjectByID(entry.Name())
-		if err != nil {
-			return nil, err
-		}
-
-		if project.DeletedAt != nil && !includeDeleted {
-			continue
-		}
-
-		projects = append(projects, project)
-	}
-
-	sort.Slice(projects, func(i, j int) bool {
-		return projects[i].CreatedAt.Before(projects[j].CreatedAt)
-	})
-
-	return projects, nil
-}
-
-func (s *Store) ProjectChildren(projectID string, includeDeleted bool) ([]Project, error) {
-	projects, err := s.ListProjects(includeDeleted)
-	if err != nil {
-		return nil, err
-	}
-
-	children := []Project{}
-	for _, project := range projects {
-		if project.ParentProjectID == projectID {
-			children = append(children, project)
-		}
-	}
-
-	return children, nil
-}
-
-func (s *Store) LoadSnapshot(projectID, snapshotID string) (SnapshotManifest, error) {
-	var manifest SnapshotManifest
-	path := s.snapshotManifestPath(projectID, snapshotID)
-	if err := readJSONFile(path, &manifest); err != nil {
-		if os.IsNotExist(err) {
-			return SnapshotManifest{}, notFound("snapshot not found", map[string]any{"project_id": projectID, "snapshot_id": snapshotID})
-		}
-
-		return SnapshotManifest{}, metadataCorruption("failed to load snapshot manifest", err, map[string]any{"path": path})
-	}
-
-	return manifest, nil
-}
-
-func (s *Store) FindSnapshot(snapshotID string) (SnapshotManifest, error) {
-	projects, err := s.ListProjects(true)
-	if err != nil {
-		return SnapshotManifest{}, err
-	}
-
-	for _, project := range projects {
-		manifest, err := s.LoadSnapshot(project.ID, snapshotID)
-		if err == nil {
-			return manifest, nil
-		}
-
-		var appErr *AppError
-		if !As(err, &appErr) || appErr.Category != "NotFound" {
-			return SnapshotManifest{}, err
-		}
-	}
-
-	return SnapshotManifest{}, notFound("snapshot not found", map[string]any{"snapshot_id": snapshotID})
-}
-
-func (s *Store) LatestSnapshot(projectID string) (SnapshotManifest, error) {
-	snapshotsDir := s.projectSnapshotsDir(projectID)
-	entries, err := os.ReadDir(snapshotsDir)
-	if err != nil {
-		return SnapshotManifest{}, err
-	}
-
-	var latest SnapshotManifest
-	found := false
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		manifest, err := s.LoadSnapshot(projectID, entry.Name())
-		if err != nil {
-			return SnapshotManifest{}, err
-		}
-
-		if !found || manifest.CreatedAt.After(latest.CreatedAt) {
-			latest = manifest
-			found = true
-		}
-	}
-
-	if !found {
-		return SnapshotManifest{}, notFound("project has no snapshots", map[string]any{"project_id": projectID})
-	}
-
-	return latest, nil
-}
-
 func (s *Store) SaveNode(node Node, bootstrap BootstrapState) error {
 	if err := ensureDir(s.nodeDir(node.ID)); err != nil {
 		return err
@@ -678,14 +451,6 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState) error {
 	}
 
 	defaults := s.cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
-	if node.ProjectID != "" {
-		project, err := s.ProjectByID(node.ProjectID)
-		if err != nil {
-			return err
-		}
-		defaults = project.RuntimeCommands.ApplyDefaults(defaults)
-	}
-
 	if err := writeNodeFile(s.nodePath(node.ID), node, defaults); err != nil {
 		return err
 	}
@@ -716,7 +481,7 @@ func (s *Store) SaveNode(node Node, bootstrap BootstrapState) error {
 		_ = os.Remove(s.nodeInstanceIndexPath(node.SandboxName))
 	}
 
-	return nil
+	return s.maintainNodeSlugIndex(node, previous)
 }
 
 func (s *Store) NodeByID(nodeID string) (Node, error) {
@@ -736,6 +501,19 @@ func (s *Store) NodeByID(nodeID string) (Node, error) {
 func (s *Store) NodeByIDOrSlug(value string) (Node, error) {
 	if exists(s.nodePath(value)) {
 		return s.NodeByID(value)
+	}
+
+	// The by-slug index resolves live slugs without scanning every node file;
+	// the full scans below remain as the fallback for homes whose index has
+	// not been rebuilt yet (doctor reports those as warnings).
+	if indexPath := s.nodeSlugIndexPath(value); exists(indexPath) {
+		data, err := os.ReadFile(indexPath)
+		if err != nil {
+			return Node{}, metadataCorruption("failed to read node slug index", err, map[string]any{"path": indexPath})
+		}
+		if node, err := s.NodeByID(strings.TrimSpace(string(data))); err == nil {
+			return node, nil
+		}
 	}
 
 	nodes, err := s.ListNodes(false)
@@ -885,52 +663,12 @@ func (s *Store) RemoveIncompleteNodeMetadata(items []IncompleteNodeMetadata) err
 	return nil
 }
 
-func (s *Store) ProjectNodes(projectID string, includeDeleted bool) ([]Node, error) {
-	nodes, err := s.ListNodes(includeDeleted)
-	if err != nil {
-		return nil, err
-	}
-
-	projectNodes := []Node{}
-	for _, node := range nodes {
-		if node.ProjectID == projectID {
-			projectNodes = append(projectNodes, node)
-		}
-	}
-
-	return projectNodes, nil
-}
-
-func (s *Store) AppendProjectEvent(projectID string, event Event) error {
-	return appendEvent(s.projectEventsPath(projectID), event)
-}
-
 func (s *Store) AppendNodeEvent(nodeID string, event Event) error {
 	return appendEvent(s.nodeEventsPath(nodeID), event)
 }
 
 func (s *Store) NodeEvents(nodeID string) ([]Event, error) {
 	return readEvents(s.nodeEventsPath(nodeID))
-}
-
-func (s *Store) ProjectEvents(projectID string) ([]Event, error) {
-	return readEvents(s.projectEventsPath(projectID))
-}
-
-func (s *Store) MissingProjectIndexes() ([]string, error) {
-	projects, err := s.ListProjects(false)
-	if err != nil {
-		return nil, err
-	}
-
-	missing := []string{}
-	for _, project := range projects {
-		if !exists(s.projectSlugIndexPath(project.Slug)) {
-			missing = append(missing, fmt.Sprintf("project slug index missing for %s", project.Slug))
-		}
-	}
-
-	return missing, nil
 }
 
 func (s *Store) MissingNodeIndexes() ([]string, error) {

@@ -3,6 +3,7 @@ package codelima
 import (
 	"bytes"
 	"context"
+	"flag"
 	"os"
 	"strings"
 	"testing"
@@ -42,9 +43,94 @@ func TestDispatchRejectsRemovedProjectAndConfigGroups(t *testing.T) {
 	}
 }
 
+func TestDispatchKeepsMissingAndUnknownCommandMessages(t *testing.T) {
+	service, _ := newTestService(t)
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"node"}, "missing node command"},
+		{[]string{"node", "bogus"}, "unknown node command"},
+		{[]string{"environment"}, "missing environment command"},
+		{[]string{"environment", "bogus"}, "unknown environment command"},
+		{[]string{"configuration"}, "missing configuration command"},
+		{[]string{"configuration", "bogus"}, "unknown configuration command"},
+		{[]string{"daemon"}, "missing daemon command"},
+		{[]string{"daemon", "bogus"}, "unknown daemon command"},
+		{[]string{"terminal"}, "missing terminal command"},
+		{[]string{"terminal", "bogus"}, "unknown terminal command"},
+		{[]string{"settings", "bogus"}, "unknown settings command"},
+		{[]string{"shell"}, "shell requires <node>"},
+		{[]string{"node", "shell"}, "node shell requires <node>"},
+		{[]string{"node", "show"}, "node show requires <node>"},
+		{[]string{"terminal", "open"}, "terminal open requires <target>"},
+	}
+	for _, tc := range cases {
+		if _, err := dispatch(context.Background(), service, tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("dispatch(%v) error = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+}
+
+func TestRunGroupHelpPrintsCommandTable(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"--home", t.TempDir(), "node", "--help"}, strings.NewReader(""), &stdout, &stderr); code != ExitSuccess {
+		t.Fatalf("Run(node --help) code = %d, stderr=%s", code, stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{"codelima node <command>", "Commands:", "cleanup-incomplete", "clone a node"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("group help missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestRunCommandHelpPrintsFlagUsage(t *testing.T) {
+	for _, helpFlag := range []string{"--help", "-h"} {
+		var stdout, stderr bytes.Buffer
+		if code := Run(context.Background(), []string{"--home", t.TempDir(), "node", "create", helpFlag}, strings.NewReader(""), &stdout, &stderr); code != ExitSuccess {
+			t.Fatalf("Run(node create %s) code = %d, stderr=%s", helpFlag, code, stderr.String())
+		}
+		text := stdout.String()
+		for _, want := range []string{"codelima node create [flags]", "-slug", "unique lowercase identifier for the new node"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("command help missing %q:\n%s", want, text)
+			}
+		}
+	}
+}
+
+func TestCommandTableCoversEveryGroupAndHelp(t *testing.T) {
+	for i := range cliGroups {
+		group := &cliGroups[i]
+		commands := commandsForGroup(group.Name)
+		if len(commands) == 0 {
+			t.Fatalf("group %q has no commands", group.Name)
+		}
+		if text := groupHelp(group); !strings.Contains(text, "Usage:") {
+			t.Fatalf("group %q help = %q", group.Name, text)
+		}
+		for _, cmd := range commands {
+			if cmd.Summary == "" {
+				t.Fatalf("command %q has no summary", cmd.fullName())
+			}
+			newCommandFlagSet(cmd).VisitAll(func(f *flag.Flag) {
+				if f.Usage == "" {
+					t.Fatalf("flag --%s on %q has no usage string", f.Name, cmd.fullName())
+				}
+			})
+		}
+	}
+	for _, cmd := range cliCommands {
+		if findCLIGroup(cmd.Group) == nil {
+			t.Fatalf("command %q references unknown group", cmd.fullName())
+		}
+	}
+}
+
 func TestConfigurationCLIUsesHumanResourceSizes(t *testing.T) {
 	service, _ := newTestService(t)
-	createdAny, err := dispatchConfiguration(service, []string{"create", "--slug", "large", "--vcpus", "8", "--memory", "8GiB", "--disk", "40GiB", "--environment", "codex"})
+	createdAny, err := dispatchConfiguration(context.Background(), service, []string{"create", "--slug", "large", "--vcpus", "8", "--memory", "8GiB", "--disk", "40GiB", "--environment", "codex"})
 	if err != nil {
 		t.Fatalf("configuration create error = %v", err)
 	}
@@ -52,13 +138,21 @@ func TestConfigurationCLIUsesHumanResourceSizes(t *testing.T) {
 	if created.VCPUs != 8 || created.MemoryMiB != 8192 || created.DiskMiB != 40960 || len(created.Environments) != 1 || created.Environments[0] != "codex" {
 		t.Fatalf("unexpected configuration: %+v", created)
 	}
-	clonedAny, err := dispatchConfiguration(service, []string{"clone", "large", "--slug", "large-copy"})
+	clonedAny, err := dispatchConfiguration(context.Background(), service, []string{"clone", "large", "--slug", "large-copy"})
 	if err != nil {
 		t.Fatalf("configuration clone error = %v", err)
 	}
 	cloned := clonedAny.(Configuration)
 	if cloned.ID == created.ID || cloned.MemoryMiB != created.MemoryMiB {
 		t.Fatalf("clone did not copy configuration: %+v", cloned)
+	}
+	// The positional target may also trail the flags (fs.Arg(0) fallback).
+	updatedAny, err := dispatchConfiguration(context.Background(), service, []string{"update", "--vcpus", "4", "large"})
+	if err != nil {
+		t.Fatalf("configuration update error = %v", err)
+	}
+	if updated := updatedAny.(Configuration); updated.VCPUs != 4 || updated.Slug != "large" {
+		t.Fatalf("trailing positional update failed: %+v", updated)
 	}
 }
 

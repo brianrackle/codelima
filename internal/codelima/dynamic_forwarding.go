@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -252,7 +252,10 @@ type dynamicForwardingRoute struct {
 	seenAt       time.Time
 }
 
-func newDynamicForwardingRoute(node Node, port int, peer forwardingPeer, seenAt time.Time) *dynamicForwardingRoute {
+func newDynamicForwardingRoute(node Node, port int, peer forwardingPeer, seenAt time.Time, logger *slog.Logger) *dynamicForwardingRoute {
+	if logger == nil {
+		logger = discardLogger()
+	}
 	route := &dynamicForwardingRoute{
 		key:          dynamicRouteKey{node: strings.ToLower(node.SandboxName), port: port},
 		nodeID:       node.ID,
@@ -278,7 +281,7 @@ func newDynamicForwardingRoute(node Node, port int, peer forwardingPeer, seenAt 
 		},
 		Transport: route.transport,
 		ErrorHandler: func(writer http.ResponseWriter, _ *http.Request, err error) {
-			log.Printf("dynamic forwarding request failed node=%s port=%d: %v", route.key.node, route.key.port, err)
+			logger.Warn("dynamic forwarding request failed", "node", route.key.node, "port", route.key.port, "error", err.Error())
 			http.Error(writer, "codelima could not reach the node service", http.StatusBadGateway)
 		},
 	}
@@ -317,6 +320,7 @@ type dynamicForwarder struct {
 	factory  forwardingPeerFactory
 	interval time.Duration
 	listen   func(string, string) (net.Listener, error)
+	logger   *slog.Logger
 
 	mu       sync.RWMutex
 	wg       sync.WaitGroup
@@ -335,6 +339,8 @@ type dynamicForwarder struct {
 
 func newDynamicForwarder(service *Service, runtime SandboxSSHRuntime) *dynamicForwarder {
 	return &dynamicForwarder{
+		logger: service.log(),
+
 		service: service, factory: sshForwardingPeerFactory{runtime: runtime}, interval: forwardingPollInterval,
 		listen: net.Listen, peers: map[string]forwardingPeer{}, failures: map[string]int{},
 		routes: map[dynamicRouteKey]*dynamicForwardingRoute{}, known: map[string]bool{}, servers: map[int]*dynamicPortServer{},
@@ -392,17 +398,22 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 	}
 	running := map[string]Node{}
 	for _, node := range nodes {
-		if node.LastRuntimeObservation != nil && strings.EqualFold(node.LastRuntimeObservation.Status, "running") {
+		if node.LastRuntimeObservation != nil && node.LastRuntimeObservation.Status == ObservationRunning {
 			running[node.ID] = node
 		}
 	}
 
+	// Collect peers to close under the lock, close them outside it:
+	// peer.Close tears down an SSH connection, and ServeHTTP read-locks this
+	// mutex, so a slow teardown must not stall proxied requests
+	// (reconcileServers already uses the same pattern for listeners).
+	var closing []forwardingPeer
 	f.mu.Lock()
 	for nodeID, peer := range f.peers {
 		if _, ok := running[nodeID]; ok {
 			continue
 		}
-		_ = peer.Close()
+		closing = append(closing, peer)
 		delete(f.peers, nodeID)
 		delete(f.failures, nodeID)
 		f.removeNodeRoutesLocked(nodeID)
@@ -412,6 +423,9 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 		f.known[strings.ToLower(node.SandboxName)] = true
 	}
 	f.mu.Unlock()
+	for _, peer := range closing {
+		_ = peer.Close()
+	}
 
 	for nodeID, node := range running {
 		f.mu.RLock()
@@ -428,7 +442,7 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 			f.peers[nodeID] = peer
 			f.failures[nodeID] = 0
 			f.mu.Unlock()
-			log.Printf("dynamic forwarding peer connected node=%s", node.SandboxName)
+			f.log().Info("dynamic forwarding peer connected", "node", node.SandboxName)
 		}
 		discoveryCtx, cancelDiscovery := context.WithTimeout(ctx, 10*time.Second)
 		ports, discoverErr := peer.Discover(discoveryCtx)
@@ -447,16 +461,19 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 
 func (f *dynamicForwarder) handleDiscoveryFailure(node Node, peer forwardingPeer, err error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.failures[node.ID]++
 	f.lastErr = err.Error()
 	if f.failures[node.ID] < 2 {
+		f.mu.Unlock()
 		return
 	}
-	_ = peer.Close()
 	delete(f.peers, node.ID)
 	delete(f.failures, node.ID)
 	f.removeNodeRoutesLocked(node.ID)
+	f.mu.Unlock()
+	// Close outside the lock: ServeHTTP read-locks it and SSH teardown can be
+	// slow.
+	_ = peer.Close()
 }
 
 func (f *dynamicForwarder) replaceNodeRoutes(node Node, peer forwardingPeer, ports []int) {
@@ -472,14 +489,14 @@ func (f *dynamicForwarder) replaceNodeRoutes(node Node, peer forwardingPeer, por
 			route.seenAt = now
 			continue
 		}
-		f.routes[key] = newDynamicForwardingRoute(node, port, peer, now)
-		log.Printf("dynamic forwarding route added url=http://%s.localhost:%d", key.node, port)
+		f.routes[key] = newDynamicForwardingRoute(node, port, peer, now, f.logger)
+		f.log().Info("dynamic forwarding route added", "url", fmt.Sprintf("http://%s.localhost:%d", key.node, port))
 	}
 	for key, route := range f.routes {
 		if route.nodeID == node.ID && !wanted[key] {
 			route.close()
 			delete(f.routes, key)
-			log.Printf("dynamic forwarding route removed url=http://%s.localhost:%d", key.node, key.port)
+			f.log().Info("dynamic forwarding route removed", "url", fmt.Sprintf("http://%s.localhost:%d", key.node, key.port))
 		}
 	}
 }
@@ -504,7 +521,7 @@ func (f *dynamicForwarder) reconcileServers() {
 		if wanted[port] && server.status == "serving" {
 			if _, ok := f.routes[dynamicRouteKey{node: server.defaultNode, port: port}]; !ok {
 				server.defaultNode = f.firstClaimantLocked(port)
-				log.Printf("dynamic forwarding generic route claimed url=http://localhost:%d node=%s", port, server.defaultNode)
+				f.log().Info("dynamic forwarding generic route claimed", "port", port, "node", server.defaultNode)
 			}
 			continue
 		}
@@ -533,8 +550,8 @@ func (f *dynamicForwarder) reconcileServers() {
 				f.recordError(serveErr)
 			}
 		}()
-		log.Printf("dynamic forwarding listener serving address=%s", listener.Addr())
-		log.Printf("dynamic forwarding generic route claimed url=http://localhost:%d node=%s", port, defaultNode)
+		f.log().Info("dynamic forwarding listener serving", "address", listener.Addr().String())
+		f.log().Info("dynamic forwarding generic route claimed", "port", port, "node", defaultNode)
 	}
 	f.mu.Unlock()
 	for _, server := range closing {
@@ -566,7 +583,7 @@ func (f *dynamicForwarder) recordError(err error) {
 	f.mu.Lock()
 	f.lastErr = err.Error()
 	f.mu.Unlock()
-	log.Printf("dynamic forwarding: %v", err)
+	f.log().Warn("dynamic forwarding error", "error", err.Error())
 }
 
 type dynamicForwardingHandler struct {
@@ -687,4 +704,13 @@ func (f *dynamicForwarder) Close() error {
 		closeErr = errors.Join(closeErr, peer.Close())
 	}
 	return closeErr
+}
+
+// log returns the forwarder logger, tolerating test-constructed forwarders
+// that never set one.
+func (f *dynamicForwarder) log() *slog.Logger {
+	if f != nil && f.logger != nil {
+		return f.logger
+	}
+	return discardLogger()
 }

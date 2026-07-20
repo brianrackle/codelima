@@ -7,7 +7,7 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 ## Priorities
 
 1: Fix bug where host CPU is pinned at 100% per CodeLima process.
-2 (was 0.4): Fix issue: resizing window often causes terminal contents to clear. option + ` with codex or raw terminal causes whole terminal to clear so the previous content is no longer visible and only a fresh prompt is shown.
+2 (was 0.4): Fix issue: resizing window often causes terminal contents to clear. option + ` with codex or raw terminal causes whole terminal to clear so the previous content is no longer visible and only a fresh prompt is shown. Also fix the bug where a disconnected client loses its open terminal tabs.
 3 (was 0.10): support kitty graphics protocol so I can get those sweet codex pets.
 4 (was 0.11) [partially complete]: bring in and wire up the latest libghostty improvements as demonstrated in https://github.com/ghostty-org/ghostling — Ghostling-pinned libghostty-vt and focus encoder are wired; full interactive QA remains in TODO.md
 5 (was 0.12): support CodeLima node renaming through the command line, including an explicit microsandbox rename/recreate policy

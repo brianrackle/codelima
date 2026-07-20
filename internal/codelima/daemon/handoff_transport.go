@@ -1,78 +1,91 @@
-package codelima
+package daemon
 
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"time"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
 	"golang.org/x/sys/unix"
 )
 
-const maxHandoffFDsPerFrame = 64
+// ErrHandoffTransportUnsupported marks a handoff-listen failure caused by the
+// platform lacking the required socket transport. The daemon.update handler
+// tags its RPC error with the handoff_transport_unsupported field when the
+// cause wraps this sentinel, so clients discriminate on the typed field
+// instead of the error text.
+var ErrHandoffTransportUnsupported = errors.New("handoff transport unsupported")
 
-type handoffFraming uint8
+// MaxHandoffFDsPerFrame bounds how many descriptors one handoff frame may
+// carry. The sender batches terminal PTYs to this size and the receiver
+// allocates its ancillary-data buffer from the same constant, so the two sides
+// cannot drift apart.
+const MaxHandoffFDsPerFrame = 64
+
+type HandoffFraming uint8
 
 const (
-	handoffFramingLegacyPacket handoffFraming = iota
-	handoffFramingLengthPrefixed
+	HandoffFramingLegacyPacket HandoffFraming = iota
+	HandoffFramingLengthPrefixed
 )
 
-type handoffConnection struct {
+type HandoffConnection struct {
 	conn    *net.UnixConn
-	framing handoffFraming
+	Framing HandoffFraming
 }
 
-func newHandoffConnection(conn *net.UnixConn, framing handoffFraming) *handoffConnection {
-	return &handoffConnection{conn: conn, framing: framing}
+func NewHandoffConnection(conn *net.UnixConn, framing HandoffFraming) *HandoffConnection {
+	return &HandoffConnection{conn: conn, Framing: framing}
 }
 
-func (c *handoffConnection) Close() error {
+func (c *HandoffConnection) Close() error {
 	if c == nil || c.conn == nil {
 		return nil
 	}
 	return c.conn.Close()
 }
 
-// listenHandoff uses SOCK_STREAM because Darwin does not implement Unix
+// ListenHandoff uses SOCK_STREAM because Darwin does not implement Unix
 // SOCK_SEQPACKET. SCM_RIGHTS works on Unix streams on both Darwin and Linux;
 // explicit length framing supplies the message boundaries streams lack.
-func listenHandoff(path string) (*net.UnixListener, error) {
+func ListenHandoff(path string) (*net.UnixListener, error) {
 	if os.Getenv("CODELIMA_HANDOFF_FORCE_UNSUPPORTED_TRANSPORT") == "1" {
-		return nil, fmt.Errorf("listen unixpacket %s: socket: protocol not supported", path)
+		// The message keeps the legacy "unixpacket ... protocol not supported"
+		// text so pre-typed-field clients still recognize the condition.
+		return nil, fmt.Errorf("listen unixpacket %s: socket: protocol not supported: %w", path, ErrHandoffTransportUnsupported)
 	}
 	return net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 }
 
-// dialHandoff prefers the portable framed stream. The unixpacket fallback is
+// DialHandoff prefers the portable framed stream. The unixpacket fallback is
 // importer-only compatibility with the immediately previous Linux daemon,
 // whose listener and packet framing are already fixed in the running process.
-func dialHandoff(path string) (*handoffConnection, error) {
+func DialHandoff(path string) (*HandoffConnection, error) {
 	conn, streamErr := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
 	if streamErr == nil {
-		return newHandoffConnection(conn, handoffFramingLengthPrefixed), nil
+		return NewHandoffConnection(conn, HandoffFramingLengthPrefixed), nil
 	}
 	legacy, legacyErr := net.DialUnix("unixpacket", nil, &net.UnixAddr{Name: path, Net: "unixpacket"})
 	if legacyErr == nil {
-		return newHandoffConnection(legacy, handoffFramingLegacyPacket), nil
+		return NewHandoffConnection(legacy, HandoffFramingLegacyPacket), nil
 	}
-	return nil, fmt.Errorf("dial handoff stream: %w (legacy unixpacket: %v)", streamErr, legacyErr)
+	return nil, fmt.Errorf("dial handoff stream: %w (legacy unixpacket: %w)", streamErr, legacyErr)
 }
 
-func (c *handoffConnection) writeJSON(value any, fds []int) error {
+func (c *HandoffConnection) WriteJSON(value any, fds []int) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if len(data) == 0 || len(data) > daemon.MaxMessageSize {
-		return fmt.Errorf("handoff message size %d is outside 1..%d", len(data), daemon.MaxMessageSize)
+	if len(data) == 0 || len(data) > MaxMessageSize {
+		return fmt.Errorf("handoff message size %d is outside 1..%d", len(data), MaxMessageSize)
 	}
 	payload := data
-	if c.framing == handoffFramingLengthPrefixed {
+	if c.Framing == HandoffFramingLengthPrefixed {
 		payload = make([]byte, 4+len(data))
 		binary.BigEndian.PutUint32(payload[:4], uint32(len(data)))
 		copy(payload[4:], data)
@@ -86,7 +99,7 @@ func (c *handoffConnection) writeJSON(value any, fds []int) error {
 	if err != nil {
 		return err
 	}
-	if c.framing == handoffFramingLegacyPacket {
+	if c.Framing == HandoffFramingLegacyPacket {
 		if n != len(payload) {
 			return io.ErrShortWrite
 		}
@@ -105,52 +118,52 @@ func (c *handoffConnection) writeJSON(value any, fds []int) error {
 	return nil
 }
 
-func (c *handoffConnection) readMessage() (daemon.HandoffMessage, []int, error) {
+func (c *HandoffConnection) ReadMessage() (HandoffMessage, []int, error) {
 	data, fds, err := c.readPayload()
 	if err != nil {
-		return daemon.HandoffMessage{}, nil, err
+		return HandoffMessage{}, nil, err
 	}
-	var message daemon.HandoffMessage
+	var message HandoffMessage
 	if err := json.Unmarshal(data, &message); err != nil {
-		closeHandoffFDs(fds)
-		return daemon.HandoffMessage{}, nil, err
+		CloseHandoffFDs(fds)
+		return HandoffMessage{}, nil, err
 	}
 	return message, fds, nil
 }
 
-func (c *handoffConnection) readControlMessage() (daemon.HandoffMessage, error) {
-	message, fds, err := c.readMessage()
+func (c *HandoffConnection) ReadControlMessage() (HandoffMessage, error) {
+	message, fds, err := c.ReadMessage()
 	if err != nil {
-		return daemon.HandoffMessage{}, err
+		return HandoffMessage{}, err
 	}
 	if len(fds) != 0 {
-		closeHandoffFDs(fds)
-		return daemon.HandoffMessage{}, fmt.Errorf("handoff control message unexpectedly carried descriptors")
+		CloseHandoffFDs(fds)
+		return HandoffMessage{}, fmt.Errorf("handoff control message unexpectedly carried descriptors")
 	}
 	return message, nil
 }
 
-func (c *handoffConnection) readManifest() (daemon.HandoffManifest, error) {
+func (c *HandoffConnection) ReadManifest() (HandoffManifest, error) {
 	data, fds, err := c.readPayload()
 	if err != nil {
-		return daemon.HandoffManifest{}, err
+		return HandoffManifest{}, err
 	}
 	if len(fds) != 0 {
-		closeHandoffFDs(fds)
-		return daemon.HandoffManifest{}, fmt.Errorf("handoff manifest unexpectedly carried descriptors")
+		CloseHandoffFDs(fds)
+		return HandoffManifest{}, fmt.Errorf("handoff manifest unexpectedly carried descriptors")
 	}
-	var manifest daemon.HandoffManifest
+	var manifest HandoffManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return daemon.HandoffManifest{}, err
+		return HandoffManifest{}, err
 	}
 	return manifest, nil
 }
 
-func (c *handoffConnection) readPayload() ([]byte, []int, error) {
+func (c *HandoffConnection) readPayload() ([]byte, []int, error) {
 	_ = c.conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	if c.framing == handoffFramingLegacyPacket {
-		data := make([]byte, daemon.MaxMessageSize)
-		oob := make([]byte, unix.CmsgSpace(maxHandoffFDsPerFrame*4))
+	if c.Framing == HandoffFramingLegacyPacket {
+		data := make([]byte, MaxMessageSize)
+		oob := make([]byte, unix.CmsgSpace(MaxHandoffFDsPerFrame*4))
 		n, oobn, flags, _, err := c.conn.ReadMsgUnix(data, oob)
 		if err != nil {
 			return nil, nil, err
@@ -160,7 +173,7 @@ func (c *handoffConnection) readPayload() ([]byte, []int, error) {
 			return nil, nil, parseErr
 		}
 		if flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 {
-			closeHandoffFDs(fds)
+			CloseHandoffFDs(fds)
 			return nil, nil, fmt.Errorf("truncated legacy handoff packet")
 		}
 		return data[:n], fds, nil
@@ -172,42 +185,42 @@ func (c *handoffConnection) readPayload() ([]byte, []int, error) {
 		return nil, nil, err
 	}
 	size := binary.BigEndian.Uint32(header)
-	if size == 0 || size > daemon.MaxMessageSize {
-		closeHandoffFDs(fds)
+	if size == 0 || size > MaxMessageSize {
+		CloseHandoffFDs(fds)
 		return nil, nil, fmt.Errorf("invalid handoff frame size %d", size)
 	}
 	data := make([]byte, int(size))
 	bodyFDs, err := c.readExact(data)
 	fds = append(fds, bodyFDs...)
 	if err != nil {
-		closeHandoffFDs(fds)
+		CloseHandoffFDs(fds)
 		return nil, nil, err
 	}
 	return data, fds, nil
 }
 
-func (c *handoffConnection) readExact(target []byte) ([]int, error) {
+func (c *HandoffConnection) readExact(target []byte) ([]int, error) {
 	var fds []int
 	for offset := 0; offset < len(target); {
-		oob := make([]byte, unix.CmsgSpace(maxHandoffFDsPerFrame*4))
+		oob := make([]byte, unix.CmsgSpace(MaxHandoffFDsPerFrame*4))
 		n, oobn, flags, _, err := c.conn.ReadMsgUnix(target[offset:], oob)
 		if err != nil {
-			closeHandoffFDs(fds)
+			CloseHandoffFDs(fds)
 			return nil, err
 		}
 		values, parseErr := parseHandoffFDs(oob[:oobn])
 		if parseErr != nil {
-			closeHandoffFDs(fds)
+			CloseHandoffFDs(fds)
 			return nil, parseErr
 		}
 		if flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 {
-			closeHandoffFDs(values)
-			closeHandoffFDs(fds)
+			CloseHandoffFDs(values)
+			CloseHandoffFDs(fds)
 			return nil, fmt.Errorf("truncated handoff stream frame")
 		}
 		fds = append(fds, values...)
 		if n == 0 {
-			closeHandoffFDs(fds)
+			CloseHandoffFDs(fds)
 			return nil, io.ErrUnexpectedEOF
 		}
 		offset += n
@@ -227,7 +240,7 @@ func parseHandoffFDs(oob []byte) ([]int, error) {
 	for _, message := range messages {
 		values, err := unix.ParseUnixRights(&message)
 		if err != nil {
-			closeHandoffFDs(fds)
+			CloseHandoffFDs(fds)
 			return nil, err
 		}
 		fds = append(fds, values...)
@@ -235,7 +248,9 @@ func parseHandoffFDs(oob []byte) ([]int, error) {
 	return fds, nil
 }
 
-func closeHandoffFDs(fds []int) {
+// CloseHandoffFDs closes every descriptor in fds, ignoring errors. Callers use
+// it to reject frames whose descriptors must not leak.
+func CloseHandoffFDs(fds []int) {
 	for _, fd := range fds {
 		_ = unix.Close(fd)
 	}

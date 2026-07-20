@@ -1,19 +1,42 @@
 package codelima
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
 
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+)
+
+// Process exit codes alias the daemon wire error codes so the CLI and the
+// daemon protocol can never disagree on what a code means.
 const (
 	ExitSuccess               = 0
-	ExitInvalidArgument       = 2
-	ExitDependencyUnavailable = 3
-	ExitNotFound              = 4
-	ExitPreconditionFailed    = 5
-	ExitExternalFailure       = 6
-	ExitInternalFailure       = 7
+	ExitInvalidArgument       = daemon.CodeInvalidArgument
+	ExitDependencyUnavailable = daemon.CodeDependencyUnavailable
+	ExitNotFound              = daemon.CodeNotFound
+	ExitPreconditionFailed    = daemon.CodePreconditionFailed
+	ExitExternalFailure       = daemon.CodeExternalFailure
+	ExitInternalFailure       = daemon.CodeInternalFailure
+)
+
+// ErrorCategory is the closed set of AppError classifications. It doubles as
+// the RPC error category on the daemon wire, so renaming a value is a protocol
+// change.
+type ErrorCategory string
+
+const (
+	CategoryInvalidArgument       ErrorCategory = "InvalidArgument"
+	CategoryNotFound              ErrorCategory = "NotFound"
+	CategoryPreconditionFailed    ErrorCategory = "PreconditionFailed"
+	CategoryUnsupportedFeature    ErrorCategory = "UnsupportedFeature"
+	CategoryDependencyUnavailable ErrorCategory = "DependencyUnavailable"
+	CategoryExternalCommandFailed ErrorCategory = "ExternalCommandFailed"
+	CategoryMetadataCorruption    ErrorCategory = "MetadataCorruption"
+	CategoryInternal              ErrorCategory = "Internal"
 )
 
 type AppError struct {
-	Category string         `json:"category"`
+	Category ErrorCategory  `json:"category"`
 	Message  string         `json:"message"`
 	Code     int            `json:"code"`
 	Fields   map[string]any `json:"fields,omitempty"`
@@ -40,7 +63,7 @@ func (e *AppError) Unwrap() error {
 	return e.Err
 }
 
-func newAppError(category, message string, code int, err error, fields map[string]any) error {
+func newAppError(category ErrorCategory, message string, code int, err error, fields map[string]any) error {
 	return &AppError{
 		Category: category,
 		Message:  message,
@@ -51,31 +74,38 @@ func newAppError(category, message string, code int, err error, fields map[strin
 }
 
 func invalidArgument(message string, fields map[string]any) error {
-	return newAppError("InvalidArgument", message, ExitInvalidArgument, nil, fields)
+	return newAppError(CategoryInvalidArgument, message, ExitInvalidArgument, nil, fields)
 }
 
 func notFound(message string, fields map[string]any) error {
-	return newAppError("NotFound", message, ExitNotFound, nil, fields)
+	return newAppError(CategoryNotFound, message, ExitNotFound, nil, fields)
 }
 
 func preconditionFailed(message string, fields map[string]any) error {
-	return newAppError("PreconditionFailed", message, ExitPreconditionFailed, nil, fields)
+	return newAppError(CategoryPreconditionFailed, message, ExitPreconditionFailed, nil, fields)
 }
 
 func unsupportedFeature(message string, fields map[string]any) error {
-	return newAppError("UnsupportedFeature", message, ExitPreconditionFailed, nil, fields)
+	return newAppError(CategoryUnsupportedFeature, message, ExitPreconditionFailed, nil, fields)
 }
 
 func dependencyUnavailable(message string, err error, fields map[string]any) error {
-	return newAppError("DependencyUnavailable", message, ExitDependencyUnavailable, err, fields)
+	return newAppError(CategoryDependencyUnavailable, message, ExitDependencyUnavailable, err, fields)
 }
 
 func externalCommandFailed(message string, err error, fields map[string]any) error {
-	return newAppError("ExternalCommandFailed", message, ExitExternalFailure, err, fields)
+	return newAppError(CategoryExternalCommandFailed, message, ExitExternalFailure, err, fields)
 }
 
 func metadataCorruption(message string, err error, fields map[string]any) error {
-	return newAppError("MetadataCorruption", message, ExitInternalFailure, err, fields)
+	return newAppError(CategoryMetadataCorruption, message, ExitInternalFailure, err, fields)
+}
+
+// IsNotFound reports whether err is an AppError classified NotFound. Callers
+// use it instead of comparing Category strings by hand.
+func IsNotFound(err error) bool {
+	var appErr *AppError
+	return errors.As(err, &appErr) && appErr.Category == CategoryNotFound
 }
 
 func exitCodeForError(err error) int {
@@ -84,7 +114,7 @@ func exitCodeForError(err error) int {
 	}
 
 	var appErr *AppError
-	if ok := As(err, &appErr); ok {
+	if errors.As(err, &appErr) {
 		return appErr.Code
 	}
 

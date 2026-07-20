@@ -3,10 +3,16 @@ run:
 
 linters:
   enable:
+    - copyloopvar
     - errcheck
+    - errorlint
+    - gocritic
     - govet
     - ineffassign
+    - misspell
+    - sloglint
     - staticcheck
+    - unparam
     - unused
 
 issues:

@@ -11,17 +11,16 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type tuiSession struct {
 	key        string
 	target     string
-	kind       tuiTreeEntryKind
+	shellKind  terminal.TerminalKind
 	label      string
-	project    Project
 	node       Node
 	terminalID terminal.TerminalID
 }
@@ -38,6 +37,10 @@ type tuiSessionStore struct {
 	registry    *terminal.TerminalRuntimeRegistry[tuiTerminal]
 	events      *daemonclient.Client
 	eventCancel context.CancelFunc
+	// newTerminal builds the terminal backend for locally spawned tabs. It is
+	// a per-store field (defaulting to newTUITerminal) rather than a package
+	// variable so tests can swap in fakes without racing parallel tests.
+	newTerminal func(key string, post func(vaxis.Event)) tuiTerminal
 
 	preferredCols int
 	preferredRows int
@@ -45,12 +48,13 @@ type tuiSessionStore struct {
 
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
 	store := &tuiSessionStore{
-		ctx:       ctx,
-		service:   service,
-		postEvent: postEvent,
-		sessions:  map[string]*tuiSession{},
-		targets:   map[terminal.TargetKey]*terminal.TargetTerminalState{},
-		registry:  terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
+		ctx:         ctx,
+		service:     service,
+		postEvent:   postEvent,
+		sessions:    map[string]*tuiSession{},
+		targets:     map[terminal.TargetKey]*terminal.TargetTerminalState{},
+		registry:    terminal.NewTerminalRuntimeRegistry[tuiTerminal](),
+		newTerminal: newTUITerminal,
 	}
 	if service != nil && service.daemonClient != nil {
 		if err := store.restoreDaemonSessions(); err != nil {
@@ -105,7 +109,7 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		}
 	case "terminal.closed":
 		if sessionKey != "" && s.postEvent != nil {
-			s.postEvent(tuiTerminalClosedEvent{TargetKey: sessionKey})
+			s.postEvent(tuiTerminalClosedEvent{SessionKey: sessionKey})
 		}
 	case "daemon.shutdown":
 		if s.postEvent != nil {
@@ -113,8 +117,6 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		}
 	}
 }
-
-var newSessionTUITerminal = newTUITerminal
 
 func (s *tuiSessionStore) HasSession(sessionKey string) bool {
 	_, ok := s.sessions[sessionKey]
@@ -191,30 +193,6 @@ func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {
 	s.preferredRows = rows
 }
 
-func (s *tuiSessionStore) OpenProjectTab(project Project) (string, error) {
-	target := terminal.ProjectTarget(project.ID)
-	targetKey := target.String()
-	s.ClearSessionError(targetKey)
-
-	spec, err := s.service.TerminalLaunchSpec(target, terminal.ProjectHostShell, project.WorkspacePath)
-	if err != nil {
-		s.setSessionError(targetKey, err)
-		return "", err
-	}
-
-	key, err := s.launchTabFromSpec(targetKey, spec, &tuiSession{
-		kind:    tuiTreeEntryProject,
-		label:   project.Slug,
-		project: project,
-	}, nil)
-	if err != nil {
-		s.setSessionError(targetKey, err)
-		return "", err
-	}
-	s.service.log().Debug("terminal opened", "kind", "project", "target", targetKey, "session", key)
-	return key, nil
-}
-
 func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	target := terminal.NodeTarget(node.ID)
 	targetKey := target.String()
@@ -227,9 +205,9 @@ func (s *tuiSessionStore) OpenNodeTab(node Node) (string, error) {
 	}
 
 	key, err := s.launchTabFromSpec(targetKey, spec, &tuiSession{
-		kind:  tuiTreeEntryNode,
-		label: node.Slug,
-		node:  node,
+		shellKind: terminal.NodeShell,
+		label:     node.Slug,
+		node:      node,
 	}, func(startErr error) error {
 		return nodeTabStartError(spec.Argv[0], startErr)
 	})
@@ -251,7 +229,7 @@ func (s *tuiSessionStore) OpenNodeHostTab(node Node) (string, error) {
 		return "", err
 	}
 	key, err := s.launchTabFromSpec(targetKey, spec, &tuiSession{
-		kind: tuiTreeEntryProject, label: node.Slug + " host", node: node,
+		shellKind: terminal.NodeHostShell, label: node.Slug + " host", node: node,
 	}, nil)
 	if err != nil {
 		s.setSessionError(targetKey, err)
@@ -270,10 +248,7 @@ func (s *tuiSessionStore) OpenNodeHostTab(node Node) (string, error) {
 // wrapStartErr, when non-nil, decorates a Start failure before it is returned.
 func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, session *tuiSession, wrapStartErr func(error) error) (string, error) {
 	if s.service.daemonClient != nil {
-		kind := terminal.NodeHostShell.String()
-		if session.kind == tuiTreeEntryNode {
-			kind = terminal.NodeShell.String()
-		}
+		kind := session.shellKind.String()
 		var state daemon.TerminalState
 		err := s.service.daemonClient.Call(s.ctx, "terminal.open", map[string]any{
 			"target": targetKey,
@@ -307,7 +282,7 @@ func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, s
 	command.Dir = spec.Dir
 
 	key := s.nextSessionKey(targetKey)
-	term := newSessionTUITerminal(key, s.postEvent)
+	term := s.newTerminal(key, s.postEvent)
 	if s.preferredCols > 0 && s.preferredRows > 0 {
 		term.Resize(s.preferredCols, s.preferredRows)
 	}
@@ -336,18 +311,18 @@ func (s *tuiSessionStore) restoreDaemonSessions() error {
 		if key == "" {
 			key = state.Target + "#" + state.TerminalID
 		}
-		kind := tuiTreeEntryNode
+		shellKind := terminal.NodeShell
 		session := &tuiSession{key: key, target: state.Target, label: state.Label, terminalID: terminal.TerminalID(state.TerminalID)}
 		target, err := terminal.ParseTargetKey(state.Target)
 		if err == nil && target.Kind == terminal.TargetNode {
 			if state.Kind == terminal.NodeHostShell.String() {
-				kind = tuiTreeEntryProject
+				shellKind = terminal.NodeHostShell
 			}
 			if node, nodeErr := s.service.store.NodeByID(target.ID); nodeErr == nil {
 				session.node = node
 			}
 		}
-		session.kind = kind
+		session.shellKind = shellKind
 		remote := newDaemonTUITerminal(s.service.daemonClient, state.TerminalID, s.postEvent)
 		if _, ok := s.registry.Register(session.terminalID, remote); !ok {
 			remote.Detach()
@@ -384,8 +359,8 @@ func (s *tuiSessionStore) putSession(session *tuiSession) {
 	s.sessions[session.key] = session
 }
 
-func (s *tuiSessionStore) Session(targetKey string) (*tuiSession, bool) {
-	session, ok := s.sessions[targetKey]
+func (s *tuiSessionStore) Session(sessionKey string) (*tuiSession, bool) {
+	session, ok := s.sessions[sessionKey]
 	return session, ok
 }
 

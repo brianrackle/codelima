@@ -95,7 +95,6 @@ func TestDynamicForwardingHandlerRoutesSamePortByNodeHost(t *testing.T) {
 	t.Parallel()
 	upstreams := map[string]*httptest.Server{}
 	for _, node := range []string{"one", "two"} {
-		node := node
 		upstreams[node] = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("X-Original-Host", request.Host)
 			_, _ = writer.Write([]byte(node))
@@ -110,7 +109,7 @@ func TestDynamicForwardingHandlerRoutesSamePortByNodeHost(t *testing.T) {
 		address := strings.TrimPrefix(upstreams[node].URL, "http://")
 		peer := &dialAddressPeer{address: address}
 		metadata := Node{ID: node, SandboxName: node}
-		forwarder.routes[dynamicRouteKey{node: node, port: 8080}] = newDynamicForwardingRoute(metadata, 8080, peer, time.Now())
+		forwarder.routes[dynamicRouteKey{node: node, port: 8080}] = newDynamicForwardingRoute(metadata, 8080, peer, time.Now(), nil)
 	}
 	handler := &dynamicForwardingHandler{forwarder: forwarder, port: 8080}
 
@@ -137,7 +136,6 @@ func TestDynamicForwardingHandlerRoutesGenericLocalhostToFirstActiveClaim(t *tes
 	port := reserveTCPPort(t)
 	upstreams := map[string]*httptest.Server{}
 	for _, node := range []string{"first", "second"} {
-		node := node
 		upstreams[node] = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("X-Original-Host", request.Host)
 			_, _ = writer.Write([]byte(node))
@@ -158,7 +156,7 @@ func TestDynamicForwardingHandlerRoutesGenericLocalhostToFirstActiveClaim(t *tes
 		peer := &dialAddressPeer{address: strings.TrimPrefix(upstreams[node].URL, "http://")}
 		metadata := Node{ID: node, SandboxName: node}
 		key := dynamicRouteKey{node: node, port: port}
-		forwarder.routes[key] = newDynamicForwardingRoute(metadata, port, peer, firstSeen.Add(time.Duration(offset)*time.Millisecond))
+		forwarder.routes[key] = newDynamicForwardingRoute(metadata, port, peer, firstSeen.Add(time.Duration(offset)*time.Millisecond), nil)
 	}
 	forwarder.reconcileServers()
 	defer func() { _ = forwarder.Close() }()
@@ -187,7 +185,7 @@ func TestDynamicForwardingHandlerReturnsBadGatewayWhenTunnelFails(t *testing.T) 
 	t.Parallel()
 	forwarder := &dynamicForwarder{routes: map[dynamicRouteKey]*dynamicForwardingRoute{}, known: map[string]bool{"node": true}}
 	forwarder.routes[dynamicRouteKey{node: "node", port: 8080}] = newDynamicForwardingRoute(
-		Node{ID: "node", SandboxName: "node"}, 8080, failingForwardingPeer{}, time.Now(),
+		Node{ID: "node", SandboxName: "node"}, 8080, failingForwardingPeer{}, time.Now(), nil,
 	)
 	assertForwardingStatus(t, &dynamicForwardingHandler{forwarder: forwarder, port: 8080}, "node.localhost:8080", http.StatusBadGateway)
 }
@@ -208,7 +206,7 @@ func TestDynamicForwardingRouteFallsBackToIPv6GuestLoopback(t *testing.T) {
 		servers: map[int]*dynamicPortServer{5173: {port: 5173, defaultNode: "node", status: "serving"}},
 	}
 	forwarder.routes[dynamicRouteKey{node: "node", port: 5173}] = newDynamicForwardingRoute(
-		Node{ID: "node", SandboxName: "node"}, 5173, peer, time.Now(),
+		Node{ID: "node", SandboxName: "node"}, 5173, peer, time.Now(), nil,
 	)
 
 	assertForwardingResponse(t, &dynamicForwardingHandler{forwarder: forwarder, port: 5173}, "node.localhost:5173", "ipv6-loopback")
@@ -238,7 +236,7 @@ func TestDynamicForwardingHandlerPassesHTTPUpgrade(t *testing.T) {
 	defer upstream.Close()
 	peer := &dialAddressPeer{address: strings.TrimPrefix(upstream.URL, "http://")}
 	forwarder := &dynamicForwarder{routes: map[dynamicRouteKey]*dynamicForwardingRoute{}, known: map[string]bool{"node": true}}
-	forwarder.routes[dynamicRouteKey{node: "node", port: 8080}] = newDynamicForwardingRoute(Node{ID: "node", SandboxName: "node"}, 8080, peer, time.Now())
+	forwarder.routes[dynamicRouteKey{node: "node", port: 8080}] = newDynamicForwardingRoute(Node{ID: "node", SandboxName: "node"}, 8080, peer, time.Now(), nil)
 	server := httptest.NewServer(&dynamicForwardingHandler{forwarder: forwarder, port: 8080})
 	defer server.Close()
 
@@ -285,14 +283,14 @@ func TestLoadOrCreateForwardingSignerIsIdempotentAndPrivate(t *testing.T) {
 
 func TestDynamicForwarderReconcilesRoutesListenersAndStoppedNodes(t *testing.T) {
 	service, _ := newTestService(t)
-	project := saveForwardingTestNode(t, service, "test-node", "running")
+	node := saveForwardingTestNode(t, service, "test-node", "running")
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = writer.Write([]byte("from-node"))
 	}))
 	defer upstream.Close()
 	port := reserveTCPPort(t)
 	peer := &controllableForwardingPeer{ports: []int{port}, address: strings.TrimPrefix(upstream.URL, "http://")}
-	factory := &fakeForwardingPeerFactory{peers: map[string]*controllableForwardingPeer{project.SandboxName: peer}}
+	factory := &fakeForwardingPeerFactory{peers: map[string]*controllableForwardingPeer{node.SandboxName: peer}}
 	forwarder := newTestDynamicForwarder(service, factory)
 	forwarder.reconcile(context.Background())
 	defer func() { _ = forwarder.Close() }()
@@ -325,7 +323,7 @@ func TestDynamicForwarderReconcilesRoutesListenersAndStoppedNodes(t *testing.T) 
 
 	fake := service.sandbox.(*fakeSandbox)
 	fake.mu.Lock()
-	fake.observations[project.SandboxName] = RuntimeObservation{Name: project.SandboxName, Exists: true, Status: "stopped"}
+	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: "stopped"}
 	fake.mu.Unlock()
 	forwarder.reconcile(context.Background())
 	peer.mu.Lock()
@@ -392,13 +390,9 @@ func TestDynamicForwarderRetriesKeyAuthorizationWithoutBlockingDaemon(t *testing
 	t.Fatal("forwarder did not recover after authorization retry")
 }
 
-func saveForwardingTestNode(t *testing.T, service *Service, sandboxName, status string) Node {
+func saveForwardingTestNode(t *testing.T, service *Service, sandboxName string, status ObservationStatus) Node {
 	t.Helper()
-	project := Project{ID: newID(), Slug: "forwarding-project", WorkspacePath: t.TempDir(), CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	if err := service.store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
-	}
-	node := Node{ID: newID(), Slug: sandboxName, ProjectID: project.ID, SandboxName: sandboxName, Status: "created", LifecycleState: "created", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	node := Node{ID: newID(), Slug: sandboxName, DirectoryPath: t.TempDir(), SandboxName: sandboxName, Status: "created", LifecycleState: "created", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
 		t.Fatalf("SaveNode() error = %v", err)
 	}

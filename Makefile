@@ -31,7 +31,7 @@ export CC
 .PHONY: init ghostty-vt gopls fmt lint test test-race test-integration build run tui smoke package package-formula verify clean
 
 PACKAGE_VERSION ?= 0.0.0-dev
-VERSION_LDFLAGS := -X github.com/brianrackle/test_lima/internal/codelima.Version=$(PACKAGE_VERSION)
+VERSION_LDFLAGS := -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION)
 RELEASE_TAG ?= v$(PACKAGE_VERSION)
 RELEASE_REPO ?= brianrackle/codelima
 DIST_DIR ?= $(CURDIR)/dist

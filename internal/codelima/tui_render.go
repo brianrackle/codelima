@@ -9,6 +9,8 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/widgets/border"
+
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 // tuiMessageLogDefaultCap bounds the message ring; older entries are evicted.
@@ -103,13 +105,13 @@ func newTUIMessagesView(messages []tuiMessage) *tuiMessagesView {
 }
 
 // Update processes one event and reports whether the view should close.
-func (v *tuiMessagesView) Update(event vaxis.Event) (closed bool) {
+func (v *tuiMessagesView) Update(event vaxis.Event) (done bool, err error) {
 	key, ok := event.(vaxis.Key)
 	if !ok {
-		return false
+		return false, nil
 	}
 	if isOverlayCancelKey(key) {
-		return true
+		return true, nil
 	}
 	switch {
 	case key.MatchString("Up"), key.MatchString("k"):
@@ -126,7 +128,11 @@ func (v *tuiMessagesView) Update(event vaxis.Event) (closed bool) {
 	case key.MatchString("End"), key.MatchString("G"):
 		v.pinToBottom = true
 	}
-	return false
+	return false, nil
+}
+
+func (v *tuiMessagesView) FooterHint() string {
+	return "Up/Down scroll   PgUp/PgDn page   g/G top/bottom   Esc close   Ctrl+c quit"
 }
 
 func (v *tuiMessagesView) pageStep() int {
@@ -155,7 +161,7 @@ func (v *tuiMessagesView) clampScroll() {
 	}
 }
 
-func (v *tuiMessagesView) Draw(win vaxis.Window, headerStyle, mutedStyle vaxis.Style) {
+func (v *tuiMessagesView) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style) {
 	body := border.All(win, mutedStyle)
 	body.Println(0, vaxis.Segment{Text: fmt.Sprintf("Messages (%d)", len(v.messages)), Style: headerStyle})
 
@@ -210,11 +216,10 @@ func tuiMessageLevelStyle(level slog.Level, base vaxis.Style) vaxis.Style {
 	return base
 }
 
-// pushMessage is the single nil-safe entry point for recording a non-status
-// message into the ring at its true level. Explicit seams (operation results in
+// pushMessage is the single nil-safe entry point for recording a message into
+// the ring at its true level. Explicit seams (operation results in
 // retainOperationMessages, refresh failures in finishDataRefresh) route through
-// it; transient footer statuses are mirrored separately, at info level, by
-// captureStatusMessage.
+// it; transient footer statuses reach it through setStatus.
 func (a *vaxisTUIApp) pushMessage(level slog.Level, text string) {
 	if a == nil || a.messages == nil {
 		return
@@ -222,26 +227,20 @@ func (a *vaxisTUIApp) pushMessage(level slog.Level, text string) {
 	a.messages.Append(level, text)
 }
 
-// captureStatusMessage mirrors transient footer status changes into the durable
-// message ring. It runs on every draw so any code path that sets a.status (there
-// are ~40) is retained without threading a setter through all of them. Clearing
-// the status to "" records nothing and re-arms capture for the next message; a
-// caller that has already recorded a message at its true level sets
-// lastCapturedStatus to suppress a duplicate info-level capture here.
-func (a *vaxisTUIApp) captureStatusMessage() {
-	if a == nil || a.messages == nil {
-		return
-	}
-	text := strings.TrimSpace(a.status)
-	if text == "" {
-		a.lastCapturedStatus = ""
-		return
-	}
-	if text == a.lastCapturedStatus {
-		return
-	}
-	a.lastCapturedStatus = text
-	a.messages.Append(slog.LevelInfo, a.status)
+// setStatus sets the transient footer status and records it in the message
+// ring at the given level (error paths use slog.LevelError, successes
+// slog.LevelInfo). The footer renders statuses at warn level or above in the
+// error style; info statuses render in the normal muted style.
+func (a *vaxisTUIApp) setStatus(level slog.Level, text string) {
+	a.status = text
+	a.statusLevel = level
+	a.pushMessage(level, text)
+}
+
+// clearStatus clears the transient footer status; nothing is recorded.
+func (a *vaxisTUIApp) clearStatus() {
+	a.status = ""
+	a.statusLevel = slog.LevelInfo
 }
 
 func (a *vaxisTUIApp) openMessagesView() {
@@ -249,7 +248,7 @@ func (a *vaxisTUIApp) openMessagesView() {
 	if a.messages != nil {
 		entries = a.messages.Entries()
 	}
-	a.messagesView = newTUIMessagesView(entries)
+	a.overlay = newTUIMessagesView(entries)
 }
 
 type tuiRect struct {
@@ -325,7 +324,7 @@ func (a *vaxisTUIApp) terminalLinkTargetAt(mouse vaxis.Mouse) (string, bool) {
 	}
 
 	entry := a.mouseTerminalEntry()
-	if entry.kind != tuiTreeEntryProject && entry.kind != tuiTreeEntryNode {
+	if !entry.valid() {
 		return "", false
 	}
 
@@ -382,7 +381,7 @@ func (a *vaxisTUIApp) printLinkifiedLine(win vaxis.Window, row int, text string,
 }
 
 func (a *vaxisTUIApp) rightPaneOverrideActive() bool {
-	return a.menu != nil || a.dialog != nil || a.selector != nil || a.messagesView != nil
+	return a.overlay != nil
 }
 
 func (a *vaxisTUIApp) hostTerminalTabActive() bool {
@@ -393,7 +392,7 @@ func (a *vaxisTUIApp) hostTerminalTabActive() bool {
 		return false
 	}
 	session, ok := a.sessions.Session(a.state.activeSessionKey())
-	return ok && session.kind == tuiTreeEntryProject && session.node.ID != ""
+	return ok && session.shellKind == terminal.NodeHostShell && session.node.ID != ""
 }
 
 func (a *vaxisTUIApp) effectiveLayoutFocus() tuiFocus {
@@ -410,34 +409,30 @@ func (a *vaxisTUIApp) rightPaneShowsInfo() bool {
 }
 
 func (a *vaxisTUIApp) currentPaneTabs(entry tuiTreeEntry) string {
-	switch entry.kind {
-	case tuiTreeEntryProject, tuiTreeEntryNode:
-		if a.rightPaneShowsInfo() {
-			return "[Info] Terminal"
-		}
-		return "Info [Terminal]"
-	default:
+	if !entry.valid() {
 		return ""
 	}
+	if a.rightPaneShowsInfo() {
+		return "[Info] Terminal"
+	}
+	return "Info [Terminal]"
 }
 
 func (a *vaxisTUIApp) currentPaneTabSegments(entry tuiTreeEntry, activeStyle, inactiveStyle vaxis.Style) []vaxis.Segment {
-	segments := []vaxis.Segment{}
-	switch entry.kind {
-	case tuiTreeEntryProject, tuiTreeEntryNode:
-		if a.rightPaneShowsInfo() {
-			segments = append(segments,
-				vaxis.Segment{Text: "[Info]", Style: activeStyle},
-				vaxis.Segment{Text: " Terminal", Style: inactiveStyle},
-			)
-		} else {
-			segments = append(segments,
-				vaxis.Segment{Text: "Info ", Style: inactiveStyle},
-				vaxis.Segment{Text: "[Terminal]", Style: activeStyle},
-			)
-		}
-	default:
+	if !entry.valid() {
 		return nil
+	}
+	segments := []vaxis.Segment{}
+	if a.rightPaneShowsInfo() {
+		segments = append(segments,
+			vaxis.Segment{Text: "[Info]", Style: activeStyle},
+			vaxis.Segment{Text: " Terminal", Style: inactiveStyle},
+		)
+	} else {
+		segments = append(segments,
+			vaxis.Segment{Text: "Info ", Style: inactiveStyle},
+			vaxis.Segment{Text: "[Terminal]", Style: activeStyle},
+		)
 	}
 
 	if a.sessions == nil {
@@ -495,7 +490,7 @@ func terminalTabLabel(session *tuiSession, index, total int) string {
 	if label == "" {
 		label = strings.TrimSpace(session.key)
 	}
-	if session.kind == tuiTreeEntryProject && label != "" {
+	if session.shellKind == terminal.NodeHostShell && label != "" {
 		label = "host:" + label
 	}
 	if total > 1 {
@@ -505,48 +500,28 @@ func terminalTabLabel(session *tuiSession, index, total int) string {
 }
 
 func (a *vaxisTUIApp) drawRightPane(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
-	switch {
-	case a.messagesView != nil:
-		a.messagesView.Draw(win, headerStyle, mutedStyle)
-	case a.selector != nil:
-		a.selector.Draw(win, headerStyle, mutedStyle)
-	case a.dialog != nil:
-		a.dialog.Draw(win, headerStyle, mutedStyle, errorStyle)
-	case a.menu != nil:
-		a.menu.Draw(win, headerStyle, mutedStyle)
-	default:
-		if a.rightPaneShowsInfo() {
-			a.drawDetails(win, entry, headerStyle, mutedStyle)
-			return
-		}
-		a.drawTerminalSurface(win, entry, headerStyle, mutedStyle, errorStyle)
+	if a.overlay != nil {
+		a.overlay.Draw(win, headerStyle, mutedStyle, errorStyle)
+		return
 	}
+	if a.rightPaneShowsInfo() {
+		a.drawDetails(win, entry, headerStyle, mutedStyle)
+		return
+	}
+	a.drawTerminalSurface(win, entry, headerStyle, mutedStyle, errorStyle)
 }
 
 func (a *vaxisTUIApp) activePaneFooter(entry tuiTreeEntry, focus tuiFocus) string {
-	switch {
-	case a.messagesView != nil:
-		return "Up/Down scroll   PgUp/PgDn page   g/G top/bottom   Esc close   Ctrl+c quit"
-	case a.selector != nil:
-		if a.selector.Multi {
-			return "Up/Down move   Space toggle   Enter confirm   Ctrl+u clear   Esc cancel   Ctrl+c quit"
-		}
-		return "Up/Down move   Enter confirm   Esc cancel   Ctrl+c quit"
-	case a.dialog != nil:
-		return "Tab/Up/Down move   Enter submit/open   Right choose   Ctrl+s submit   Esc cancel   Ctrl+c quit"
-	case a.menu != nil:
-		return "Press a key to choose   Esc cancel   Ctrl+c quit"
-	default:
-		return renderFooter(focus, a.state.treePaneMode, entry)
+	if a.overlay != nil {
+		return a.overlay.FooterHint()
 	}
+	return renderFooter(focus, a.state.treePaneMode, entry)
 }
 
 func (a *vaxisTUIApp) draw() {
 	if a.vx == nil {
 		return
 	}
-
-	a.captureStatusMessage()
 
 	window := a.vx.Window()
 	window.Clear()
@@ -582,7 +557,7 @@ func (a *vaxisTUIApp) draw() {
 	}
 
 	headerSegments := []vaxis.Segment{{Text: "CodeLima", Style: headerStyle}}
-	if entry.kind == tuiTreeEntryNode {
+	if entry.valid() {
 		headerSegments = append(headerSegments,
 			vaxis.Segment{Text: "  Node: " + entry.node.Slug, Style: headerStyle},
 			vaxis.Segment{Text: "  Configuration: " + entry.node.ConfigurationSlug, Style: headerStyle},
@@ -641,7 +616,11 @@ func (a *vaxisTUIApp) draw() {
 	footerStyle := mutedStyle
 	if a.status != "" {
 		footer = a.status
-		footerStyle = errorStyle
+		// Only warnings and errors render in the error style; success
+		// statuses keep the normal footer style.
+		if a.statusLevel >= slog.LevelWarn {
+			footerStyle = errorStyle
+		}
 	}
 	window.Println(height-1, vaxis.Segment{Text: footer, Style: footerStyle})
 
@@ -694,7 +673,7 @@ func tuiMutedStyle() vaxis.Style {
 }
 
 func (a *vaxisTUIApp) operationDisplayStatus(entry tuiTreeEntry) string {
-	if entry.kind != tuiTreeEntryNode {
+	if !entry.valid() {
 		return ""
 	}
 
@@ -712,7 +691,7 @@ func (a *vaxisTUIApp) operationDisplayStatus(entry tuiTreeEntry) string {
 }
 
 func (a *vaxisTUIApp) nodeStatusText(node Node) string {
-	if operationStatus := a.operationDisplayStatus(tuiTreeEntry{kind: tuiTreeEntryNode, node: node}); operationStatus != "" {
+	if operationStatus := a.operationDisplayStatus(tuiTreeEntry{node: node}); operationStatus != "" {
 		return operationStatus
 	}
 	return nodeVMStatus(node)
@@ -720,7 +699,7 @@ func (a *vaxisTUIApp) nodeStatusText(node Node) string {
 
 func (a *vaxisTUIApp) treeEntryLabel(entry tuiTreeEntry) string {
 	status := ""
-	if entry.kind == tuiTreeEntryNode {
+	if entry.valid() {
 		status = a.nodeStatusText(entry.node)
 		if root := strings.TrimSpace(a.treeWorkspaceRoot); root != "" && entry.node.DirectoryPath != "" {
 			if relative, err := filepath.Rel(root, entry.node.DirectoryPath); err == nil && pathWithinRoot(root, entry.node.DirectoryPath) {
@@ -743,8 +722,8 @@ func (a *vaxisTUIApp) backgroundOperationSummary() string {
 }
 
 func (a *vaxisTUIApp) entryOperations(entry tuiTreeEntry) []*tuiOperationState {
-	if entry.kind == "" || len(a.operationOrder) == 0 {
-		return a.globalOperations()
+	if !entry.valid() || len(a.operationOrder) == 0 {
+		return nil
 	}
 
 	entryKey := entry.key()
@@ -761,18 +740,6 @@ func (a *vaxisTUIApp) entryOperations(entry tuiTreeEntry) []*tuiOperationState {
 	return operations
 }
 
-func (a *vaxisTUIApp) globalOperations() []*tuiOperationState {
-	operations := make([]*tuiOperationState, 0, len(a.operationOrder))
-	for _, operationID := range a.operationOrder {
-		operation := a.operations[operationID]
-		if operation == nil || !containsString(operation.EntryKeys, "projects") {
-			continue
-		}
-		operations = append(operations, operation)
-	}
-	return operations
-}
-
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -784,41 +751,8 @@ func containsString(values []string, want string) bool {
 
 func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle vaxis.Style) {
 	row := 0
-	switch entry.kind {
-	case tuiTreeEntryProject:
-		win.Println(row, vaxis.Segment{Text: "Project controls", Style: headerStyle})
-		row++
-		win.Println(row, vaxis.Segment{Text: "Slug: " + entry.project.Slug})
-		row++
-		a.printLinkifiedLine(win, row, "Workspace: "+entry.project.WorkspacePath, vaxis.Style{})
-		row++
-		projectPath := ""
-		if a.service != nil && a.service.store != nil {
-			projectPath = a.service.store.projectPath(entry.project.ID)
-		}
-		if projectPath != "" {
-			a.printLinkifiedLine(win, row, "Project file: "+projectPath, vaxis.Style{})
-			row++
-		}
-		row++
-		if len(entry.project.EnvironmentConfigs) == 0 {
-			win.Println(row, vaxis.Segment{Text: "Environment configs: none", Style: mutedStyle})
-			row++
-		} else {
-			win.Println(row, vaxis.Segment{Text: "Environment configs: " + commaSeparatedValues(entry.project.EnvironmentConfigs), Style: mutedStyle})
-			row++
-		}
-		if len(entry.project.RuntimeCommands.Bootstrap) == 0 {
-			win.Println(row, vaxis.Segment{Text: "Project bootstrap commands: none", Style: mutedStyle})
-		} else {
-			win.Println(row, vaxis.Segment{Text: "Project bootstrap commands: configured", Style: mutedStyle})
-		}
-		row++
-		row++
-		win.Println(row, vaxis.Segment{Text: "Create nodes, update the project binding, or edit the project file directly for advanced settings such as microsandbox command overrides.", Style: mutedStyle})
-		row++
-		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
-	case tuiTreeEntryNode:
+	switch {
+	case entry.valid():
 		win.Println(row, vaxis.Segment{Text: "Node controls", Style: headerStyle})
 		row++
 		win.Println(row, vaxis.Segment{Text: "Slug: " + entry.node.Slug})
@@ -844,7 +778,7 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Resources: %d CPU, %d MiB memory, %d MiB disk", entry.node.VCPUs, entry.node.MemoryMiB, entry.node.DiskMiB), Style: mutedStyle})
 		row++
 		row++
-		if nodeAutoStartsSession(entry.node) {
+		if nodeIsRunning(entry.node) {
 			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to open a terminal tab or %s to focus its terminal.", terminalTabOpenFooterHint, terminalViewToggleTextHint), Style: mutedStyle})
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node before opening its terminal tabs.", Style: mutedStyle})
@@ -853,14 +787,14 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
 	default:
 		win.Println(0, vaxis.Segment{Text: "Press [n] to create a node or [a] to manage configurations.", Style: mutedStyle})
-		_ = a.drawEntryOperations(win, 2, entry, headerStyle, mutedStyle)
+		a.drawEntryOperations(win, 2, entry, headerStyle, mutedStyle)
 	}
 }
 
-func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTreeEntry, headerStyle, mutedStyle vaxis.Style) int {
+func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTreeEntry, headerStyle, mutedStyle vaxis.Style) {
 	operations := a.entryOperations(entry)
 	if len(operations) == 0 {
-		return row
+		return
 	}
 
 	win.Println(row, vaxis.Segment{Text: "Background tasks", Style: headerStyle})
@@ -873,7 +807,6 @@ func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTr
 			row++
 		}
 	}
-	return row
 }
 
 func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
@@ -883,23 +816,8 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 	}
 
 	row := 0
-	switch entry.kind {
-	case tuiTreeEntryProject:
-		a.printLinkifiedLine(win, row, "Workspace: "+entry.project.WorkspacePath, vaxis.Style{})
-		row += 2
-		if err := a.sessions.SessionError(entry.key()); err != nil {
-			win.Println(row, vaxis.Segment{Text: "Unable to start the local workspace shell.", Style: errorStyle})
-			row++
-			win.Println(row, vaxis.Segment{Text: err.Error(), Style: mutedStyle})
-			row++
-		} else {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to open a workspace terminal tab.", terminalTabOpenFooterHint), Style: mutedStyle})
-			row++
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to show project info.", infoViewToggleFooterHint), Style: mutedStyle})
-		}
-		row++
-		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
-	case tuiTreeEntryNode:
+	switch {
+	case entry.valid():
 		win.Println(row, vaxis.Segment{Text: "Status: " + a.nodeStatusText(entry.node), Style: headerStyle})
 		row += 2
 		if err := a.sessions.SessionError(entry.key()); err != nil {
@@ -907,7 +825,7 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 			row++
 			win.Println(row, vaxis.Segment{Text: err.Error(), Style: mutedStyle})
 			row++
-		} else if nodeAutoStartsSession(entry.node) {
+		} else if nodeIsRunning(entry.node) {
 			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("No terminal tab is open. Press %s to open one.", terminalTabOpenFooterHint), Style: mutedStyle})
 			row++
 		} else {
@@ -917,10 +835,8 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to show node info.", infoViewToggleFooterHint), Style: mutedStyle})
 		row++
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
-	case "":
-		win.Println(0, vaxis.Segment{Text: "Select a node in the list.", Style: mutedStyle})
 	default:
-		a.drawDetails(win, entry, headerStyle, mutedStyle)
+		win.Println(0, vaxis.Segment{Text: "Select a node in the list.", Style: mutedStyle})
 	}
 }
 
@@ -962,7 +878,7 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 			terminalTabPrevFooterHint + "/" + terminalTabNextFooterHint + " switch tab",
 			terminalTabCloseFooterHint + " close tab",
 		}
-		if entry.kind == tuiTreeEntryNode || entry.kind == tuiTreeEntryProject {
+		if entry.valid() {
 			parts = append(parts, hostTerminalTabOpenFooterHint+" host tab")
 		}
 		parts = append(parts, "q quit")
@@ -970,9 +886,9 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 	}
 
 	parts := make([]string, 0, 12)
-	if entry.kind != "" {
-		parts = append(parts, "Up/Down move", "Left/Right collapse")
-		if entry.kind == tuiTreeEntryProject || (entry.kind == tuiTreeEntryNode && nodeAutoStartsSession(entry.node)) {
+	if entry.valid() {
+		parts = append(parts, "Up/Down move")
+		if nodeIsRunning(entry.node) {
 			parts = append(parts, terminalViewToggleFooterHint+" shell focus")
 			parts = append(parts, terminalTabOpenFooterHint+" new tab")
 		}
@@ -983,9 +899,7 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 		} else {
 			parts = append(parts, infoViewToggleFooterHint+" terminal")
 		}
-		if entry.kind == tuiTreeEntryNode {
-			parts = append(parts, hostTerminalTabOpenFooterHint+" host tab")
-		}
+		parts = append(parts, hostTerminalTabOpenFooterHint+" host tab")
 	}
 
 	for _, action := range availableTUIActions(entry) {
@@ -996,33 +910,21 @@ func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) 
 }
 
 func tuiEntryLabelWithStatus(entry tuiTreeEntry, statusOverride string) string {
-	indent := strings.Repeat("  ", entry.depth)
-	switch entry.kind {
-	case tuiTreeEntryProject:
-		marker := "▶"
-		if entry.expanded {
-			marker = "▼"
-		}
-		if !entry.hasChildren {
-			marker = "•"
-		}
-		return indent + marker + " " + entry.project.Slug
-	case tuiTreeEntryNode:
-		status := statusOverride
-		if strings.TrimSpace(status) == "" {
-			status = nodeVMStatus(entry.node)
-		}
-		status = strings.ToUpper(status)
-		configuration := entry.node.ConfigurationSlug
-		if configuration == "" {
-			configuration = DefaultConfigurationSlug
-		}
-		directory := entry.node.DirectoryPath
-		if directory != "" {
-			directory = filepath.Clean(directory)
-		}
-		return indent + "• " + entry.node.Slug + "  [" + configuration + "]  " + directory + "  " + status
-	default:
+	if !entry.valid() {
 		return ""
 	}
+	status := statusOverride
+	if strings.TrimSpace(status) == "" {
+		status = nodeVMStatus(entry.node)
+	}
+	status = strings.ToUpper(status)
+	configuration := entry.node.ConfigurationSlug
+	if configuration == "" {
+		configuration = DefaultConfigurationSlug
+	}
+	directory := entry.node.DirectoryPath
+	if directory != "" {
+		directory = filepath.Clean(directory)
+	}
+	return "• " + entry.node.Slug + "  [" + configuration + "]  " + directory + "  " + status
 }

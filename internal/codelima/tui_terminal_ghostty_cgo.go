@@ -331,6 +331,7 @@ func newGhosttyKeyEncoder() (*ghosttyKeyEncoder, error) {
 	}
 
 	var encoder C.GhosttyKeyEncoder
+	//nolint:gocritic // dupSubExpr false positive: gocritic misreads the cgo-typed nil comparison
 	if result := C.ghostty_bridge_key_encoder_new(&encoder); result != C.GHOSTTY_SUCCESS || encoder == nil {
 		return nil, fmt.Errorf("create ghostty key encoder: %d", int(result))
 	}
@@ -355,6 +356,7 @@ func newGhosttyMouseEncoder() (*ghosttyMouseEncoder, error) {
 	}
 
 	var encoder C.GhosttyMouseEncoder
+	//nolint:gocritic // dupSubExpr false positive: gocritic misreads the cgo-typed nil comparison
 	if result := C.ghostty_bridge_mouse_encoder_new(&encoder); result != C.GHOSTTY_SUCCESS || encoder == nil {
 		return nil, fmt.Errorf("create ghostty mouse encoder: %d", int(result))
 	}
@@ -581,7 +583,7 @@ func encodeTUITerminalKeyWithGhostty(
 		}
 	}
 
-	return encodeTUITerminalKey(key, applicationKeypad, cursorKeysApplication)
+	return encodeTUITerminalKey(key, cursorKeysApplication)
 }
 
 func encodeTUITerminalMouseWithGhostty(
@@ -1248,7 +1250,8 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	if cmd.Env != nil {
 		env = cmd.Env
 	}
-	cmd.Env = append(env, "TERM="+tuiEmbeddedTermEnv)
+	env = append(env, "TERM="+tuiEmbeddedTermEnv)
+	cmd.Env = env
 
 	winsize := pty.Winsize{
 		Cols: uint16(t.cols),
@@ -1459,13 +1462,6 @@ func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
 	// new child output and discard stale pulls (ADR 63).
 	t.generation++
 	t.invalidateLocked()
-}
-
-func (t *ghosttyTUITerminal) drainResponsesLocked() {
-	withGhosttyStderrSuppressed(func() struct{} {
-		t.drainResponsesLockedRaw()
-		return struct{}{}
-	})
 }
 
 func (t *ghosttyTUITerminal) drainResponsesLockedRaw() {
@@ -2411,7 +2407,7 @@ func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 		mouseEncoder.Close()
 	}
 	if postEvent && t.postEvent != nil {
-		t.postEvent(tuiTerminalClosedEvent{TargetKey: t.targetKey, Err: err})
+		t.postEvent(tuiTerminalClosedEvent{SessionKey: t.targetKey, Err: err})
 	}
 }
 

@@ -1,5 +1,7 @@
 package codelima
 
+import "context"
+
 type EnvironmentConfigCreateInput struct {
 	Slug              string
 	BootstrapCommands []string
@@ -10,18 +12,16 @@ type EnvironmentConfigUpdateInput struct {
 	ClearBootstrapCommands bool
 }
 
-func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (EnvironmentConfig, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) EnvironmentConfigCreate(ctx context.Context, input EnvironmentConfigCreateInput) (EnvironmentConfig, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	if input.Slug == "" {
 		return EnvironmentConfig{}, invalidArgument("environment slug is required", nil)
@@ -47,34 +47,32 @@ func (s *Service) EnvironmentConfigCreate(input EnvironmentConfigCreateInput) (E
 	return config, nil
 }
 
-func (s *Service) EnvironmentConfigList(includeDeleted bool) ([]EnvironmentConfig, error) {
-	if err := s.EnsureReady(false); err != nil {
+func (s *Service) EnvironmentConfigList(ctx context.Context, includeDeleted bool) ([]EnvironmentConfig, error) {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return nil, err
 	}
 
 	return s.store.ListEnvironmentConfigs(includeDeleted)
 }
 
-func (s *Service) EnvironmentConfigShow(value string) (EnvironmentConfig, error) {
-	if err := s.EnsureReady(false); err != nil {
+func (s *Service) EnvironmentConfigShow(ctx context.Context, value string) (EnvironmentConfig, error) {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
 	return s.store.EnvironmentConfigByIDOrSlug(value)
 }
 
-func (s *Service) EnvironmentConfigUpdate(value string, input EnvironmentConfigUpdateInput) (EnvironmentConfig, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) EnvironmentConfigUpdate(ctx context.Context, value string, input EnvironmentConfigUpdateInput) (EnvironmentConfig, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	config, err := s.store.EnvironmentConfigByIDOrSlug(value)
 	if err != nil {
@@ -95,18 +93,16 @@ func (s *Service) EnvironmentConfigUpdate(value string, input EnvironmentConfigU
 	return config, nil
 }
 
-func (s *Service) EnvironmentConfigDelete(value string) (EnvironmentConfig, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) EnvironmentConfigDelete(ctx context.Context, value string) (EnvironmentConfig, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments", "configurations")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments, lockConfigurations)
 	if err != nil {
 		return EnvironmentConfig{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	config, err := s.store.EnvironmentConfigByIDOrSlug(value)
 	if err != nil {
@@ -125,20 +121,6 @@ func (s *Service) EnvironmentConfigDelete(value string) (EnvironmentConfig, erro
 			}
 		}
 	}
-	// Pre-v3 source compatibility for tests and in-process callers. Schema-v3
-	// homes never create project metadata and the public project command is gone.
-	projects, err := s.store.ListProjects(false)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
-	for _, project := range projects {
-		for _, slug := range project.EnvironmentConfigs {
-			if slug == config.Slug {
-				return EnvironmentConfig{}, preconditionFailed("environment is assigned to a legacy project", map[string]any{"environment": config.Slug, "project_id": project.ID})
-			}
-		}
-	}
-
 	now := s.now()
 	config.DeletedAt = &now
 	config.UpdatedAt = now

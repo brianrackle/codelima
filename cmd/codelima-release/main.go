@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/brianrackle/test_lima/internal/release"
+	"github.com/brianrackle/codelima/internal/release"
 )
 
 type stringSlice []string

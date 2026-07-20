@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/brianrackle/test_lima/internal/codelima"
+	"github.com/brianrackle/codelima/internal/codelima"
 )
 
 func main() {

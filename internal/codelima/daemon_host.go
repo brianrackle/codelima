@@ -16,9 +16,9 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 	"golang.org/x/sys/unix"
 )
 
@@ -97,7 +97,7 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 			IncludeDeleted bool `json:"include_deleted"`
 		}
 		_ = json.Unmarshal(raw, &params)
-		return h.service.ConfigurationList(params.IncludeDeleted)
+		return h.service.ConfigurationList(ctx, params.IncludeDeleted)
 	case "node.list":
 		var params struct {
 			IncludeDeleted bool `json:"include_deleted"`
@@ -288,7 +288,7 @@ type terminalIDParams struct {
 	TerminalID string `json:"terminal_id"`
 }
 
-func (h *daemonHost) open(_ context.Context, params terminalOpenParams, terminalID string) (daemon.TerminalState, error) {
+func (h *daemonHost) open(ctx context.Context, params terminalOpenParams, terminalID string) (daemon.TerminalState, error) {
 	target, err := terminal.ParseTargetKey(params.Target)
 	if err != nil {
 		return daemon.TerminalState{}, daemon.Error("InvalidArgument", err.Error(), ExitInvalidArgument, nil)
@@ -297,7 +297,7 @@ func (h *daemonHost) open(_ context.Context, params terminalOpenParams, terminal
 	workspace := ""
 	switch params.Kind {
 	case "node-host-shell", "host":
-		node, nodeErr := h.service.nodeTerminalMetadata(target.ID)
+		node, nodeErr := h.service.nodeTerminalMetadata(ctx, target.ID)
 		if nodeErr != nil {
 			return daemon.TerminalState{}, toDaemonError(nodeErr)
 		}
@@ -307,7 +307,7 @@ func (h *daemonHost) open(_ context.Context, params terminalOpenParams, terminal
 		}
 	case "node-shell", "node":
 		kind = terminal.NodeShell
-		node, nodeErr := h.service.nodeTerminalMetadata(target.ID)
+		node, nodeErr := h.service.nodeTerminalMetadata(ctx, target.ID)
 		if nodeErr != nil {
 			return daemon.TerminalState{}, toDaemonError(nodeErr)
 		}
@@ -624,7 +624,7 @@ func toDaemonError(err error) error {
 	}
 	var appErr *AppError
 	if errors.As(err, &appErr) {
-		return daemon.Error(appErr.Category, appErr.Message, appErr.Code, appErr.Fields)
+		return daemon.Error(string(appErr.Category), appErr.Message, appErr.Code, appErr.Fields)
 	}
 	var rpcErr *daemon.RPCError
 	if errors.As(err, &rpcErr) {
@@ -634,7 +634,7 @@ func toDaemonError(err error) error {
 }
 
 func runDaemon(ctx context.Context, service *Service) error {
-	if err := service.ensureReadyForWrite(); err != nil {
+	if err := service.ensureReadyForWrite(ctx); err != nil {
 		return err
 	}
 	host := newDaemonHost(service)
@@ -654,7 +654,7 @@ func runDaemon(ctx context.Context, service *Service) error {
 }
 
 func startDaemon(ctx context.Context, service *Service) (daemon.Status, error) {
-	if err := service.ensureReadyForWrite(); err != nil {
+	if err := service.ensureReadyForWrite(ctx); err != nil {
 		return daemon.Status{}, err
 	}
 	if status, err := daemonclient.Ping(ctx, service.cfg.MetadataRoot, Version); err == nil && status.Running {
@@ -698,9 +698,12 @@ func startDaemon(ctx context.Context, service *Service) (daemon.Status, error) {
 		select {
 		case waitErr := <-waitCh:
 			return daemon.Status{}, externalCommandFailed("daemon exited before becoming ready", waitErr, nil)
-		default:
+		case <-ctx.Done():
+			_ = command.Process.Kill()
+			<-waitCh
+			return daemon.Status{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 	_ = command.Process.Kill()
 	<-waitCh
@@ -760,7 +763,7 @@ func stopDaemon(ctx context.Context, service *Service) (map[string]bool, error) 
 func fromDaemonError(err error) error {
 	var rpcErr *daemon.RPCError
 	if errors.As(err, &rpcErr) {
-		return newAppError(rpcErr.Category, rpcErr.Message, rpcErr.Code, nil, rpcErr.Fields)
+		return newAppError(ErrorCategory(rpcErr.Category), rpcErr.Message, rpcErr.Code, nil, rpcErr.Fields)
 	}
 	return err
 }
@@ -789,7 +792,7 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	}
 	h.mu.RUnlock()
 	quiesced := make([]quiescedTerminal, 0, len(entries))
-	rollback := func(cause error, prepared bool, process *os.Process) (map[string]any, error) {
+	rollback := func(cause error, prepared bool, process *os.Process) error {
 		if process != nil {
 			_ = process.Kill()
 			_, _ = process.Wait()
@@ -804,16 +807,20 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 			_ = item.term.RollbackHandoff()
 		}
 		h.broadcast("daemon.update_failed", map[string]string{"error": cause.Error()})
-		return nil, daemon.Error("ExternalCommandFailed", "daemon live update failed: "+cause.Error(), ExitExternalFailure, nil)
+		var fields map[string]any
+		if errors.Is(cause, daemon.ErrHandoffTransportUnsupported) {
+			fields = map[string]any{"handoff_transport_unsupported": true}
+		}
+		return daemon.Error("ExternalCommandFailed", "daemon live update failed: "+cause.Error(), ExitExternalFailure, fields)
 	}
 	for _, entry := range entries {
 		term, ok := entry.term.(handoffDaemonTerminal)
 		if !ok {
-			return rollback(errors.New("terminal backend does not support live handoff"), false, nil)
+			return nil, rollback(errors.New("terminal backend does not support live handoff"), false, nil)
 		}
 		state := term.BeginHandoff()
 		if state.Err != nil {
-			return rollback(state.Err, false, nil)
+			return nil, rollback(state.Err, false, nil)
 		}
 		quiesced = append(quiesced, quiescedTerminal{id: entry.state.TerminalID, entry: entry, term: term, state: state})
 	}
@@ -821,82 +828,82 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	token := strings.ReplaceAll(newID(), "-", "")
 	handoffPath := filepath.Join(daemon.HomePaths(h.service.cfg.MetadataRoot).Dir, fmt.Sprintf("handoff-%d.sock", os.Getpid()))
 	_ = os.Remove(handoffPath)
-	listener, err := listenHandoff(handoffPath)
+	listener, err := daemon.ListenHandoff(handoffPath)
 	if err != nil {
-		return rollback(err, false, nil)
+		return nil, rollback(err, false, nil)
 	}
 	defer func() { _ = listener.Close(); _ = os.Remove(handoffPath) }()
 	_ = os.Chmod(handoffPath, 0o600)
 	logPath := filepath.Join(daemon.HomePaths(h.service.cfg.MetadataRoot).Dir, "daemon-import.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		return rollback(err, false, nil)
+		return nil, rollback(err, false, nil)
 	}
 	command := exec.Command(binaryPath, "--home", h.service.cfg.MetadataRoot, "daemon", "import", "--handoff", handoffPath, "--token", token)
 	command.Stdout, command.Stderr = logFile, logFile
 	command.Env = os.Environ()
 	if err := command.Start(); err != nil {
 		_ = logFile.Close()
-		return rollback(err, false, nil)
+		return nil, rollback(err, false, nil)
 	}
 	_ = logFile.Close()
 	process := command.Process
 	_ = listener.SetDeadline(time.Now().Add(30 * time.Second))
 	conn, err := listener.AcceptUnix()
 	if err != nil {
-		return rollback(err, false, process)
+		return nil, rollback(err, false, process)
 	}
 	defer func() { _ = conn.Close() }()
 	if err := daemon.RequireSameUserPeer(conn); err != nil {
-		return rollback(err, false, process)
+		return nil, rollback(err, false, process)
 	}
-	peer := newHandoffConnection(conn, handoffFramingLengthPrefixed)
-	message, err := peer.readControlMessage()
+	peer := daemon.NewHandoffConnection(conn, daemon.HandoffFramingLengthPrefixed)
+	message, err := peer.ReadControlMessage()
 	if err != nil || message.Type != "hello" || message.Token != token {
 		if err == nil {
 			err = errors.New("invalid handoff authentication")
 		}
-		return rollback(err, false, process)
+		return nil, rollback(err, false, process)
 	}
 	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
 	for _, item := range quiesced {
 		manifest.Runtimes = append(manifest.Runtimes, daemon.HandoffRuntime{TerminalID: item.id, ChildPID: item.state.ChildPID, Cols: item.state.Cols, Rows: item.state.Rows, Replay: item.state.Replay})
 	}
-	if err := peer.writeJSON(manifest, nil); err != nil {
-		return rollback(err, false, process)
+	if err := peer.WriteJSON(manifest, nil); err != nil {
+		return nil, rollback(err, false, process)
 	}
-	for start := 0; start < len(quiesced); start += 64 {
-		end := min(start+64, len(quiesced))
+	for start := 0; start < len(quiesced); start += daemon.MaxHandoffFDsPerFrame {
+		end := min(start+daemon.MaxHandoffFDsPerFrame, len(quiesced))
 		ids := make([]string, 0, end-start)
 		fds := make([]int, 0, end-start)
 		for _, item := range quiesced[start:end] {
 			ids = append(ids, item.id)
 			fds = append(fds, int(item.state.PTY.Fd()))
 		}
-		if err := peer.writeJSON(daemon.HandoffMessage{Type: "fds", TerminalIDs: ids}, fds); err != nil {
-			return rollback(err, false, process)
+		if err := peer.WriteJSON(daemon.HandoffMessage{Type: "fds", TerminalIDs: ids}, fds); err != nil {
+			return nil, rollback(err, false, process)
 		}
 	}
-	message, err = peer.readControlMessage()
+	message, err = peer.ReadControlMessage()
 	if err != nil || message.Type != "ready" {
 		if err == nil {
 			err = errors.New(message.Error)
 		}
-		return rollback(err, false, process)
+		return nil, rollback(err, false, process)
 	}
 	if err := h.prepareReplacement(); err != nil {
-		return rollback(err, false, process)
+		return nil, rollback(err, false, process)
 	}
 	prepared := true
-	if err := peer.writeJSON(daemon.HandoffMessage{Type: "commit", Token: token}, nil); err != nil {
-		return rollback(err, prepared, process)
+	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "commit", Token: token}, nil); err != nil {
+		return nil, rollback(err, prepared, process)
 	}
-	message, err = peer.readControlMessage()
+	message, err = peer.ReadControlMessage()
 	if err != nil || message.Type != "committed" {
 		if err == nil {
 			err = errors.New(message.Error)
 		}
-		return rollback(err, prepared, process)
+		return nil, rollback(err, prepared, process)
 	}
 
 	h.mu.Lock()
@@ -917,24 +924,24 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	if handoffPath == "" || token == "" {
 		return invalidArgument("daemon import requires --handoff and --token", nil)
 	}
-	peer, err := dialHandoff(handoffPath)
+	peer, err := daemon.DialHandoff(handoffPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = peer.Close() }()
-	if err := peer.writeJSON(daemon.HandoffMessage{Type: "hello", Token: token}, nil); err != nil {
+	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "hello", Token: token}, nil); err != nil {
 		return err
 	}
-	manifest, err := peer.readManifest()
+	manifest, err := peer.ReadManifest()
 	if err != nil {
 		return err
 	}
 	wantHandoffVersion := daemon.HandoffVersion
-	if peer.framing == handoffFramingLegacyPacket {
+	if peer.Framing == daemon.HandoffFramingLegacyPacket {
 		wantHandoffVersion = daemon.LegacyHandoffVersion
 	}
 	if manifest.Version != wantHandoffVersion || manifest.Token != token || manifest.Session.Version != daemon.SessionVersion {
-		_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: "invalid handoff manifest"}, nil)
+		_ = peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: "invalid handoff manifest"}, nil)
 		return errors.New("invalid handoff manifest")
 	}
 	runtimeIDs := make(map[string]struct{}, len(manifest.Runtimes))
@@ -956,26 +963,26 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	}
 	defer closePendingFDs()
 	for len(fdsByID) < len(manifest.Runtimes) {
-		message, fds, readErr := peer.readMessage()
+		message, fds, readErr := peer.ReadMessage()
 		if readErr != nil {
 			return readErr
 		}
 		if message.Type != "fds" || len(message.TerminalIDs) != len(fds) {
-			closeHandoffFDs(fds)
+			daemon.CloseHandoffFDs(fds)
 			return errors.New("invalid handoff fd batch")
 		}
 		batchIDs := make(map[string]struct{}, len(message.TerminalIDs))
 		for _, id := range message.TerminalIDs {
 			if _, expected := runtimeIDs[id]; !expected {
-				closeHandoffFDs(fds)
+				daemon.CloseHandoffFDs(fds)
 				return errors.New("handoff fd batch names an unknown terminal")
 			}
 			if _, duplicate := fdsByID[id]; duplicate {
-				closeHandoffFDs(fds)
+				daemon.CloseHandoffFDs(fds)
 				return errors.New("handoff fd batch duplicates a terminal")
 			}
 			if _, duplicate := batchIDs[id]; duplicate {
-				closeHandoffFDs(fds)
+				daemon.CloseHandoffFDs(fds)
 				return errors.New("handoff fd batch duplicates a terminal")
 			}
 			batchIDs[id] = struct{}{}
@@ -1008,7 +1015,7 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 		if adoptErr != nil {
 			_ = ptyFile.Close()
 			releaseImported()
-			_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: adoptErr.Error()}, nil)
+			_ = peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: adoptErr.Error()}, nil)
 			return adoptErr
 		}
 		imported = append(imported, term.(handoffDaemonTerminal))
@@ -1016,14 +1023,14 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	}
 	if os.Getenv("CODELIMA_HANDOFF_FAIL_IMPORT") == "1" {
 		releaseImported()
-		_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: "injected import failure"}, nil)
+		_ = peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: "injected import failure"}, nil)
 		return errors.New("injected import failure")
 	}
-	if err := peer.writeJSON(daemon.HandoffMessage{Type: "ready"}, nil); err != nil {
+	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "ready"}, nil); err != nil {
 		releaseImported()
 		return err
 	}
-	message, err := peer.readControlMessage()
+	message, err := peer.ReadControlMessage()
 	if err != nil || message.Type != "commit" || message.Token != token {
 		releaseImported()
 		if err == nil {
@@ -1047,8 +1054,8 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	go func() { done <- server.Run(ctx) }()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, pingErr := daemonclient.Ping(context.Background(), service.cfg.MetadataRoot, Version); pingErr == nil {
-			if err := peer.writeJSON(daemon.HandoffMessage{Type: "committed", PID: os.Getpid()}, nil); err != nil {
+		if _, pingErr := daemonclient.Ping(ctx, service.cfg.MetadataRoot, Version); pingErr == nil {
+			if err := peer.WriteJSON(daemon.HandoffMessage{Type: "committed", PID: os.Getpid()}, nil); err != nil {
 				server.Stop()
 				return err
 			}
@@ -1057,11 +1064,13 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 		}
 		select {
 		case runErr := <-done:
-			_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: runErr.Error()}, nil)
+			_ = peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: runErr.Error()}, nil)
 			return runErr
-		default:
+		case <-ctx.Done():
+			server.Stop()
+			return ctx.Err()
+		case <-time.After(25 * time.Millisecond):
 		}
-		time.Sleep(25 * time.Millisecond)
 	}
 	server.Stop()
 	return errors.New("imported daemon did not become ready")

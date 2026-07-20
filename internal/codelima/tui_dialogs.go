@@ -3,11 +3,12 @@ package codelima
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 func commaSeparatedValues(values []string) string {
@@ -40,7 +41,7 @@ func environmentConfigSelectionSummary(values []string) string {
 }
 
 func (a *vaxisTUIApp) environmentConfigSelectorOptions() ([]tuiSelectorOption, error) {
-	configs, err := a.service.EnvironmentConfigList(false)
+	configs, err := a.service.EnvironmentConfigList(a.ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +71,9 @@ func (a *vaxisTUIApp) openEnvironmentConfigSelector(title string, description []
 	if multi && len(options) == 0 {
 		description = append(description, "No reusable environment configs configured. Press Enter to keep none assigned.")
 	}
-	a.selector = newTUISelector(title, description, options, current, multi, onSubmit)
+	selector := newTUISelector(title, description, options, current, multi, onSubmit)
+	selector.EmptyText = "No environment configs configured."
+	a.showSelector(selector)
 	return nil
 }
 
@@ -137,7 +140,7 @@ func moveCommand(commands []string, index int, delta int) []string {
 }
 
 func (a *vaxisTUIApp) reopenEnvironmentConfigCommandMenu(configID string) error {
-	config, err := a.service.EnvironmentConfigShow(configID)
+	config, err := a.service.EnvironmentConfigShow(a.ctx, configID)
 	if err != nil {
 		return err
 	}
@@ -145,71 +148,8 @@ func (a *vaxisTUIApp) reopenEnvironmentConfigCommandMenu(configID string) error 
 	return nil
 }
 
-func (a *vaxisTUIApp) openCreateProjectDialog() {
-	description := []string{
-		"Create a top-level project rooted at a host workspace.",
-		"Use project fork when you want a child project copied from an existing workspace snapshot.",
-		"Use the Environment Configs field to choose shared defaults for future nodes from the selector.",
-	}
-
-	dialog := newTUIDialog(
-		"Create Project",
-		"Create",
-		description,
-		[]tuiDialogField{
-			newTUIInputField("slug", "Project Slug", "", false),
-			newTUIInputField("workspace_path", "Workspace Path", "", true),
-			newTUISelectorField("environment_configs", "Environment Configs", "", false, nil),
-		},
-		func(values map[string]string) error {
-			title := "Creating project"
-			if values["slug"] != "" {
-				title += " " + values["slug"]
-			}
-			return a.startOperation(tuiOperationRequest{
-				Title:         title,
-				DisplayStatus: "creating",
-				ResourceKeys:  []string{"projects"},
-				EntryKeys:     []string{"projects"},
-				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-					project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-						Slug:               values["slug"],
-						WorkspacePath:      values["workspace_path"],
-						EnvironmentConfigs: parseCommaSeparatedValues(values["environment_configs"]),
-					})
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:       "created project " + project.Slug,
-						PreferredKey: terminal.ProjectTarget(project.ID).String(),
-						ReloadData:   true,
-					}, nil
-				},
-			})
-		},
-	)
-	dialog.Fields[2].Value = commaSeparatedValues([]string{})
-	dialog.Fields[2].Display = func(value string) string {
-		return environmentConfigSelectionSummary(parseCommaSeparatedValues(value))
-	}
-	dialog.Fields[2].Activate = func() error {
-		return a.openEnvironmentConfigSelector(
-			"Select Environment Configs",
-			[]string{"Choose reusable environment configs to assign shared defaults for future nodes in this project."},
-			parseCommaSeparatedValues(dialog.Fields[2].Value),
-			true,
-			func(values []string) error {
-				dialog.SetFieldValue("environment_configs", commaSeparatedValues(values))
-				return nil
-			},
-		)
-	}
-	a.dialog = dialog
-}
-
 func (a *vaxisTUIApp) openConfigurationsMenu() error {
-	configurations, err := a.service.ConfigurationList(false)
+	configurations, err := a.service.ConfigurationList(a.ctx, false)
 	if err != nil {
 		return err
 	}
@@ -223,12 +163,12 @@ func (a *vaxisTUIApp) openConfigurationsMenu() error {
 			return a.openManageConfigurationSelector(configurations[0].Slug)
 		}})
 	}
-	a.menu = &tuiMenu{Title: "Configurations", Description: description, Entries: entries}
+	a.overlay = &tuiMenu{Title: "Configurations", Description: description, Entries: entries}
 	return nil
 }
 
 func (a *vaxisTUIApp) openConfigurationSelector(current string, onSubmit func(string) error) error {
-	configurations, err := a.service.ConfigurationList(false)
+	configurations, err := a.service.ConfigurationList(a.ctx, false)
 	if err != nil {
 		return err
 	}
@@ -236,18 +176,20 @@ func (a *vaxisTUIApp) openConfigurationSelector(current string, onSubmit func(st
 	for _, configuration := range configurations {
 		options = append(options, tuiSelectorOption{Label: configuration.Slug, Value: configuration.Slug})
 	}
-	a.selector = newTUISelector("Select Configuration", nil, options, []string{coalesce(current, DefaultConfigurationSlug)}, false, func(values []string) error {
+	selector := newTUISelector("Select Configuration", nil, options, []string{coalesce(current, DefaultConfigurationSlug)}, false, func(values []string) error {
 		if len(values) != 1 {
 			return fmt.Errorf("select a configuration")
 		}
 		return onSubmit(values[0])
 	})
+	selector.EmptyText = "No configurations configured."
+	a.showSelector(selector)
 	return nil
 }
 
 func (a *vaxisTUIApp) openManageConfigurationSelector(current string) error {
 	return a.openConfigurationSelector(current, func(value string) error {
-		configuration, err := a.service.ConfigurationShow(value)
+		configuration, err := a.service.ConfigurationShow(a.ctx, value)
 		if err != nil {
 			return err
 		}
@@ -264,7 +206,7 @@ func (a *vaxisTUIApp) openConfigurationMenu(configuration Configuration) {
 	if configuration.Slug != DefaultConfigurationSlug {
 		entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Delete Configuration", Action: func() error { a.openDeleteConfigurationDialog(configuration); return nil }})
 	}
-	a.menu = &tuiMenu{
+	a.overlay = &tuiMenu{
 		Title: "Configuration: " + configuration.Slug,
 		Description: []string{
 			"Image: " + configuration.Image,
@@ -278,14 +220,14 @@ func (a *vaxisTUIApp) openConfigurationMenu(configuration Configuration) {
 }
 
 func (a *vaxisTUIApp) openCreateConfigurationDialog() {
-	a.dialog = newTUIDialog("Create Configuration", "Create", []string{"New configurations copy the current default configuration once."}, []tuiDialogField{
+	a.overlay = newTUIDialog("Create Configuration", "Create", []string{"New configurations copy the current default configuration once."}, []tuiDialogField{
 		newTUIInputField("slug", "Configuration Slug", "", true),
 	}, func(values map[string]string) error {
-		configuration, err := a.service.ConfigurationCreate(ConfigurationCreateInput{Slug: values["slug"]})
+		configuration, err := a.service.ConfigurationCreate(a.ctx, ConfigurationCreateInput{Slug: values["slug"]})
 		if err != nil {
 			return err
 		}
-		a.status = "created configuration " + configuration.Slug
+		a.setStatus(slog.LevelInfo, "created configuration "+configuration.Slug)
 		a.openConfigurationMenu(configuration)
 		return nil
 	})
@@ -314,14 +256,14 @@ func (a *vaxisTUIApp) openUpdateConfigurationDialog(configuration Configuration)
 			return fmt.Errorf("disk must be a positive MiB value")
 		}
 		image, agent, vcpus := values["image"], values["agent"], uint8(vcpus64)
-		updated, err := a.service.ConfigurationUpdate(configuration.ID, ConfigurationUpdateInput{
+		updated, err := a.service.ConfigurationUpdate(a.ctx, configuration.ID, ConfigurationUpdateInput{
 			Slug: values["slug"], Image: &image, AgentProfile: &agent,
 			Environments: parseCommaSeparatedValues(values["environments"]), VCPUs: &vcpus, MemoryMiB: &memory, DiskMiB: &disk,
 		})
 		if err != nil {
 			return err
 		}
-		a.status = "updated configuration " + updated.Slug
+		a.setStatus(slog.LevelInfo, "updated configuration "+updated.Slug)
 		a.openConfigurationMenu(updated)
 		return a.reloadData(a.state.selectedEntry().key())
 	})
@@ -332,30 +274,30 @@ func (a *vaxisTUIApp) openUpdateConfigurationDialog(configuration Configuration)
 			return nil
 		})
 	}
-	a.dialog = dialog
+	a.overlay = dialog
 }
 
 func (a *vaxisTUIApp) openCloneConfigurationDialog(configuration Configuration) {
-	a.dialog = newTUIDialog("Clone Configuration", "Clone", []string{"Copy this reusable configuration under a new slug."}, []tuiDialogField{
+	a.overlay = newTUIDialog("Clone Configuration", "Clone", []string{"Copy this reusable configuration under a new slug."}, []tuiDialogField{
 		newTUIInputField("slug", "New Configuration Slug", "", true),
 	}, func(values map[string]string) error {
-		cloned, err := a.service.ConfigurationClone(ConfigurationCloneInput{Source: configuration.ID, Slug: values["slug"]})
+		cloned, err := a.service.ConfigurationClone(a.ctx, ConfigurationCloneInput{Source: configuration.ID, Slug: values["slug"]})
 		if err != nil {
 			return err
 		}
-		a.status = "cloned configuration " + cloned.Slug
+		a.setStatus(slog.LevelInfo, "cloned configuration "+cloned.Slug)
 		a.openConfigurationMenu(cloned)
 		return nil
 	})
 }
 
 func (a *vaxisTUIApp) openDeleteConfigurationDialog(configuration Configuration) {
-	a.dialog = newTUIDialog("Delete Configuration", "Delete", []string{"Delete configuration " + configuration.Slug + ". Referenced configurations cannot be deleted."}, nil, func(map[string]string) error {
-		deleted, err := a.service.ConfigurationDelete(configuration.ID)
+	a.overlay = newTUIDialog("Delete Configuration", "Delete", []string{"Delete configuration " + configuration.Slug + ". Referenced configurations cannot be deleted."}, nil, func(map[string]string) error {
+		deleted, err := a.service.ConfigurationDelete(a.ctx, configuration.ID)
 		if err != nil {
 			return err
 		}
-		a.status = "deleted configuration " + deleted.Slug
+		a.setStatus(slog.LevelInfo, "deleted configuration "+deleted.Slug)
 		return a.reloadData(a.state.selectedEntry().key())
 	})
 }
@@ -418,32 +360,7 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 			},
 		)
 	}
-	a.dialog = dialog
-	return nil
-}
-
-func (a *vaxisTUIApp) openLegacyCreateNodeDialog(project Project) error {
-	dialog := newTUIDialog("Create Node", "Create", []string{"Selected project: " + project.Slug}, []tuiDialogField{
-		newTUIInputField("slug", "Node Slug", project.Slug+"-node", true),
-		newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, true, workspaceModeDisplay, nil),
-		newTUIInputField("runtime_commands_file", "Runtime Commands File (optional)", "", false),
-	}, func(values map[string]string) error {
-		runtimeCommands, err := loadOptionalRuntimeCommandsFile(values["runtime_commands_file"])
-		if err != nil {
-			return err
-		}
-		return a.startOperation(tuiOperationRequest{Title: "Creating node " + values["slug"], DisplayStatus: "creating", ResourceKeys: []string{terminal.ProjectTarget(project.ID).String()}, EntryKeys: []string{terminal.ProjectTarget(project.ID).String()}, Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-			node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: values["slug"], WorkspaceMode: values["workspace_mode"], RuntimeCommands: runtimeCommands})
-			if err != nil {
-				return tuiOperationResult{}, err
-			}
-			return tuiOperationResult{Status: "created node " + node.Slug, PreferredKey: terminal.NodeTarget(node.ID).String(), ReloadData: true, ShowTerminalPane: true}, nil
-		}})
-	})
-	dialog.Fields[1].Activate = func() error {
-		return a.openWorkspaceModeSelector(dialog.Fields[1].rawValue(), func(value string) error { dialog.SetFieldValue("workspace_mode", value); return nil })
-	}
-	a.dialog = dialog
+	a.overlay = dialog
 	return nil
 }
 
@@ -452,7 +369,7 @@ func (a *vaxisTUIApp) openWorkspaceModeSelector(current string, onSubmit func(va
 		{Label: workspaceModeDisplay(WorkspaceModeCopy), Value: WorkspaceModeCopy},
 		{Label: workspaceModeDisplay(WorkspaceModeMounted), Value: WorkspaceModeMounted},
 	}
-	a.selector = newTUISelector(
+	a.showSelector(newTUISelector(
 		"Workspace Mode",
 		nil,
 		options,
@@ -464,7 +381,7 @@ func (a *vaxisTUIApp) openWorkspaceModeSelector(current string, onSubmit func(va
 			}
 			return onSubmit(values[0])
 		},
-	)
+	))
 	return nil
 }
 
@@ -477,65 +394,8 @@ func workspaceModeDisplay(mode string) string {
 	}
 }
 
-func (a *vaxisTUIApp) openUpdateProjectDialog(project Project) {
-	dialog := newTUIDialog(
-		"Update Project",
-		"Update",
-		[]string{
-			"Update the selected project slug, workspace path, and assigned environment configs.",
-			"Edit the project file shown in the right pane when you need advanced per-project settings such as microsandbox command overrides.",
-		},
-		[]tuiDialogField{
-			newTUIInputField("slug", "Project Slug", project.Slug, true),
-			newTUIInputField("workspace_path", "Workspace Path", project.WorkspacePath, true),
-			newTUISelectorField("environment_configs", "Environment Configs", commaSeparatedValues(project.EnvironmentConfigs), false, nil),
-		},
-		func(values map[string]string) error {
-			slug := values["slug"]
-			workspacePath := values["workspace_path"]
-			return a.startOperation(tuiOperationRequest{
-				Title:         "Saving project " + project.Slug,
-				DisplayStatus: "updating",
-				ResourceKeys:  []string{terminal.ProjectTarget(project.ID).String()},
-				EntryKeys:     []string{terminal.ProjectTarget(project.ID).String()},
-				Run: func(_ context.Context, service *Service) (tuiOperationResult, error) {
-					updated, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
-						Slug:               &slug,
-						WorkspacePath:      &workspacePath,
-						EnvironmentConfigs: parseCommaSeparatedValues(values["environment_configs"]),
-					})
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:       "updated project " + updated.Slug,
-						PreferredKey: terminal.ProjectTarget(updated.ID).String(),
-						ReloadData:   true,
-					}, nil
-				},
-			})
-		},
-	)
-	dialog.Fields[2].Display = func(value string) string {
-		return environmentConfigSelectionSummary(parseCommaSeparatedValues(value))
-	}
-	dialog.Fields[2].Activate = func() error {
-		return a.openEnvironmentConfigSelector(
-			"Select Environment Configs",
-			[]string{"Choose reusable environment configs to keep assigned to this project."},
-			parseCommaSeparatedValues(dialog.Fields[2].Value),
-			true,
-			func(values []string) error {
-				dialog.SetFieldValue("environment_configs", commaSeparatedValues(values))
-				return nil
-			},
-		)
-	}
-	a.dialog = dialog
-}
-
 func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
-	configs, err := a.service.EnvironmentConfigList(false)
+	configs, err := a.service.EnvironmentConfigList(a.ctx, false)
 	if err != nil {
 		return err
 	}
@@ -560,7 +420,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Config", Action: func() error { return a.openManageEnvironmentConfigDialog(configs[0].Slug) }})
 	}
 
-	a.menu = &tuiMenu{
+	a.overlay = &tuiMenu{
 		Title:       "Environment Configs",
 		Description: description,
 		Entries:     entries,
@@ -570,7 +430,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 }
 
 func (a *vaxisTUIApp) openCreateEnvironmentConfigDialog() {
-	a.dialog = newTUIDialog(
+	a.overlay = newTUIDialog(
 		"Create Environment Config",
 		"Create",
 		[]string{
@@ -581,13 +441,13 @@ func (a *vaxisTUIApp) openCreateEnvironmentConfigDialog() {
 			newTUIInputField("slug", "Config Slug", "", true),
 		},
 		func(values map[string]string) error {
-			config, err := a.service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+			config, err := a.service.EnvironmentConfigCreate(a.ctx, EnvironmentConfigCreateInput{
 				Slug: values["slug"],
 			})
 			if err != nil {
 				return err
 			}
-			a.status = "created environment config " + config.Slug
+			a.setStatus(slog.LevelInfo, "created environment config "+config.Slug)
 			a.openEnvironmentConfigCommandMenu(config)
 			return nil
 		},
@@ -608,7 +468,7 @@ func (a *vaxisTUIApp) openManageEnvironmentConfigDialog(defaultSlug string) erro
 			if len(values) == 0 {
 				return fmt.Errorf("select an environment config")
 			}
-			config, err := a.service.EnvironmentConfigShow(values[0])
+			config, err := a.service.EnvironmentConfigShow(a.ctx, values[0])
 			if err != nil {
 				return err
 			}
@@ -632,7 +492,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig)
 		description = append(description[:0], "No bootstrap commands configured.")
 	}
 
-	a.menu = &tuiMenu{
+	a.overlay = &tuiMenu{
 		Title:       "Environment Config: " + config.Slug,
 		Description: description,
 		Entries: []tuiMenuEntry{
@@ -646,7 +506,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig)
 }
 
 func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentConfig) {
-	a.dialog = newTUIDialog(
+	a.overlay = newTUIDialog(
 		"Add Environment Config Bootstrap Command",
 		"Add",
 		[]string{"Add a bootstrap command to the reusable environment config."},
@@ -655,11 +515,11 @@ func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentCo
 		},
 		func(values map[string]string) error {
 			commands := append(append([]string(nil), config.BootstrapCommands...), values["command"])
-			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{BootstrapCommands: commands})
+			updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{BootstrapCommands: commands})
 			if err != nil {
 				return err
 			}
-			a.status = "updated environment config " + updated.Slug
+			a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
 			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 		},
 	)
@@ -670,7 +530,7 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 		return fmt.Errorf("environment config %s has no commands", config.Slug)
 	}
 
-	a.selector = newTUISelector(
+	a.showSelector(newTUISelector(
 		"Remove Environment Config Bootstrap Commands",
 		[]string{"Choose one or more reusable environment config bootstrap commands to remove."},
 		commandSelectorOptions(config.BootstrapCommands),
@@ -690,25 +550,25 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 				description = append(description, fmt.Sprintf("%d. %s", index+1, config.BootstrapCommands[index]))
 			}
 
-			a.dialog = newTUIDialog(
+			a.overlay = newTUIDialog(
 				"Remove Environment Config Bootstrap Commands",
 				"Remove",
 				description,
 				nil,
 				func(map[string]string) error {
-					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+					updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{
 						BootstrapCommands: removeCommandsByIndex(config.BootstrapCommands, indices),
 					})
 					if err != nil {
 						return err
 					}
-					a.status = "updated environment config " + updated.Slug
+					a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				},
 			)
 			return nil
 		},
-	)
+	))
 
 	return nil
 }
@@ -718,7 +578,7 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 		return fmt.Errorf("environment config %s needs at least two commands to change order", config.Slug)
 	}
 
-	a.selector = newTUISelector(
+	a.showSelector(newTUISelector(
 		"Move Environment Config Bootstrap Command",
 		[]string{"Choose a reusable environment config bootstrap command to move up or down."},
 		commandSelectorOptions(config.BootstrapCommands),
@@ -738,52 +598,52 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 			entries := []tuiMenuEntry{}
 			if index > 0 {
 				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
-					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+					updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{
 						BootstrapCommands: moveCommand(config.BootstrapCommands, index, -1),
 					})
 					if err != nil {
 						return err
 					}
-					a.status = "updated environment config " + updated.Slug
+					a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				}})
 			}
 			if index < len(config.BootstrapCommands)-1 {
 				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
-					updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+					updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{
 						BootstrapCommands: moveCommand(config.BootstrapCommands, index, 1),
 					})
 					if err != nil {
 						return err
 					}
-					a.status = "updated environment config " + updated.Slug
+					a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				}})
 			}
 
-			a.menu = &tuiMenu{
+			a.overlay = &tuiMenu{
 				Title:       "Move Environment Config Bootstrap Command: " + command,
 				Description: []string{"Choose how to reposition the selected reusable environment config bootstrap command."},
 				Entries:     entries,
 			}
 			return nil
 		},
-	)
+	))
 	return nil
 }
 
 func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config EnvironmentConfig) {
-	a.dialog = newTUIDialog(
+	a.overlay = newTUIDialog(
 		"Clear Environment Config Bootstrap Commands",
 		"Clear",
 		[]string{"Remove all bootstrap commands from environment config " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
-			updated, err := a.service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{ClearBootstrapCommands: true})
+			updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{ClearBootstrapCommands: true})
 			if err != nil {
 				return err
 			}
-			a.status = "cleared environment config " + updated.Slug
+			a.setStatus(slog.LevelInfo, "cleared environment config "+updated.Slug)
 			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 		},
 	)
@@ -791,54 +651,24 @@ func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config Environmen
 
 func (a *vaxisTUIApp) openDeleteEnvironmentConfigDialog(config EnvironmentConfig) {
 	selectedKey := a.state.selectedEntry().key()
-	a.dialog = newTUIDialog(
+	a.overlay = newTUIDialog(
 		"Delete Environment Config",
 		"Delete",
 		[]string{"Delete reusable environment config " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
-			deleted, err := a.service.EnvironmentConfigDelete(config.ID)
+			deleted, err := a.service.EnvironmentConfigDelete(a.ctx, config.ID)
 			if err != nil {
 				return err
 			}
-			a.status = "deleted environment config " + deleted.Slug
+			a.setStatus(slog.LevelInfo, "deleted environment config "+deleted.Slug)
 			return a.reloadData(selectedKey)
 		},
 	)
 }
 
-func (a *vaxisTUIApp) openDeleteProjectDialog(project Project) {
-	a.dialog = newTUIDialog(
-		"Delete Project",
-		"Delete",
-		[]string{
-			"Delete project " + project.Slug + ".",
-			"This only succeeds if the project has no live nodes or child projects.",
-		},
-		nil,
-		func(_ map[string]string) error {
-			return a.startOperation(tuiOperationRequest{
-				Title:         "Deleting project " + project.Slug,
-				DisplayStatus: "deleting",
-				ResourceKeys:  []string{terminal.ProjectTarget(project.ID).String()},
-				EntryKeys:     []string{terminal.ProjectTarget(project.ID).String()},
-				Run: func(_ context.Context, service *Service) (tuiOperationResult, error) {
-					deleted, err := service.ProjectDelete(project.ID)
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:     "deleted project " + deleted.Slug,
-						ReloadData: true,
-					}, nil
-				},
-			})
-		},
-	)
-}
-
 func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
-	a.dialog = newTUIDialog(
+	a.overlay = newTUIDialog(
 		"Delete Node",
 		"Delete",
 		[]string{
@@ -870,11 +700,7 @@ func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
 
 func (a *vaxisTUIApp) openCloneNodeDialog(node Node) {
 	fields := []tuiDialogField{newTUIInputField("node_slug", "Cloned Node Slug", "", true)}
-	if node.ProjectID != "" {
-		fields[0] = newTUIInputField("node_slug", "Cloned Node Slug", node.Slug+"-clone", true)
-		fields = append(fields, newTUIInputField("runtime_commands_file", "Runtime Commands File (optional)", "", false))
-	}
-	a.dialog = newTUIDialog(
+	a.overlay = newTUIDialog(
 		"Clone Node",
 		"Clone",
 		[]string{
@@ -883,17 +709,13 @@ func (a *vaxisTUIApp) openCloneNodeDialog(node Node) {
 		},
 		fields,
 		func(values map[string]string) error {
-			runtimeCommands, err := loadOptionalRuntimeCommandsFile(values["runtime_commands_file"])
-			if err != nil {
-				return err
-			}
 			return a.startOperation(tuiOperationRequest{
 				Title:         "Cloning node " + node.Slug,
 				DisplayStatus: "cloning",
 				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String()},
 				EntryKeys:     []string{terminal.NodeTarget(node.ID).String()},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-					childNode, err := service.NodeClone(ctx, NodeCloneInput{SourceNode: node.ID, NodeSlug: values["node_slug"], RuntimeCommands: runtimeCommands})
+					childNode, err := service.NodeClone(ctx, NodeCloneInput{SourceNode: node.ID, NodeSlug: values["node_slug"]})
 					if err != nil {
 						return tuiOperationResult{}, err
 					}

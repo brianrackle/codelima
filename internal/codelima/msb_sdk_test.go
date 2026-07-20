@@ -215,9 +215,8 @@ func TestSDKSandboxClientTypedLifecycleAndOptions(t *testing.T) {
 	runtime.createSandbox = created
 	runtime.startSandbox = started
 	client := &SDKSandboxClient{RuntimeCommands: defaultRuntimeCommandTemplates(), runtime: runtime}
-	project := Project{DefaultImage: "image:12", WorkspacePath: "/host/work"}
 	node := Node{SandboxName: "demo", Image: "image:12", VCPUs: 4, MemoryMiB: 6144, DiskMiB: 32768, WorkspaceMode: WorkspaceModeMounted, WorkspaceMountPath: "/host/work", GuestWorkspacePath: "/workspace", Ports: []string{"8080:80"}, NetPolicy: &NetPolicy{Default: "deny"}}
-	if err := client.Create(context.Background(), project, node); err != nil {
+	if err := client.Create(context.Background(), node); err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	config := runtime.createdConfig
@@ -230,7 +229,7 @@ func TestSDKSandboxClientTypedLifecycleAndOptions(t *testing.T) {
 	if got := strings.Join(created.calls, ","); got != "stop,close" {
 		t.Fatalf("Create() ownership calls = %q", got)
 	}
-	if err := client.Start(context.Background(), project, node); err != nil {
+	if err := client.Start(context.Background(), node); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	if got := strings.Join(started.calls, ","); got != "detach" {
@@ -275,7 +274,7 @@ func TestSDKSandboxClientEnsuresPinnedRuntimeBeforeVersionCheck(t *testing.T) {
 
 func TestSDKSandboxClientRejectsInteractiveAttachWithoutProcessTTY(t *testing.T) {
 	client := &SDKSandboxClient{RuntimeCommands: defaultRuntimeCommandTemplates(), runtime: newFakeSDKRuntime()}
-	err := client.Shell(context.Background(), Project{}, Node{SandboxName: "demo"}, nil, "", true, ShellStreams{
+	err := client.Shell(context.Background(), Node{SandboxName: "demo"}, nil, "", true, ShellStreams{
 		Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard,
 	})
 	var appErr *AppError
@@ -307,7 +306,7 @@ func TestSDKSandboxClientCopyAttachAndStreamingExec(t *testing.T) {
 		{Kind: microsandbox.ExecEventExited, ExitCode: 0},
 		{Kind: microsandbox.ExecEventDone},
 	}}
-	if err := client.CopyToGuest(context.Background(), Project{}, node, source, "/guest/target", true); err != nil {
+	if err := client.CopyToGuest(context.Background(), node, source, "/guest/target", true); err != nil {
 		t.Fatalf("CopyToGuest() error = %v", err)
 	}
 	if sandbox.copySource != filepath.Join(source, "nested", "value.txt") || sandbox.copyTarget != "/guest/target/nested/value.txt" {
@@ -316,7 +315,7 @@ func TestSDKSandboxClientCopyAttachAndStreamingExec(t *testing.T) {
 	if got := strings.Join(sandbox.calls, ","); !strings.Contains(got, "mkdir:/guest/target") || !strings.Contains(got, "mkdir:/guest/target/nested") || !strings.Contains(got, "exec:ln -s README.md /guest/target/link") {
 		t.Fatalf("CopyToGuest() calls = %q", got)
 	}
-	if err := client.Shell(context.Background(), Project{}, node, []string{"/bin/bash", "-l"}, "/workspace/it's-here", true, ShellStreams{}); err != nil {
+	if err := client.Shell(context.Background(), node, []string{"/bin/bash", "-l"}, "/workspace/it's-here", true, ShellStreams{}); err != nil {
 		t.Fatalf("Shell(interactive) error = %v", err)
 	}
 	if !strings.Contains(sandbox.attachCommand, `cd -- '/workspace/it'"'"'s-here' && exec '/bin/bash' '-l'`) {
@@ -332,7 +331,7 @@ func TestSDKSandboxClientCopyAttachAndStreamingExec(t *testing.T) {
 	}}
 	sandbox.execHandle = execHandle
 	var stdout, stderr bytes.Buffer
-	if err := client.Shell(context.Background(), Project{}, node, []string{"sh", "-c", "cat"}, "/workspace", false, ShellStreams{Stdin: strings.NewReader("input"), Stdout: &stdout, Stderr: &stderr}); err != nil {
+	if err := client.Shell(context.Background(), node, []string{"sh", "-c", "cat"}, "/workspace", false, ShellStreams{Stdin: strings.NewReader("input"), Stdout: &stdout, Stderr: &stderr}); err != nil {
 		t.Fatalf("Shell(streaming) error = %v", err)
 	}
 	<-sink.closed
@@ -351,7 +350,7 @@ func TestSDKSandboxClientCloneCleanupAndSSHHelper(t *testing.T) {
 	target := &fakeSDKSandbox{}
 	runtime.createSandbox = target
 	client := &SDKSandboxClient{RuntimeCommands: defaultRuntimeCommandTemplates(), runtime: runtime}
-	if err := client.Clone(context.Background(), Project{DefaultImage: "image:12"}, Node{SandboxName: "source"}, Node{SandboxName: "target", Image: "image:12", VCPUs: 2, MemoryMiB: 4096, DiskMiB: 20480}); err != nil {
+	if err := client.Clone(context.Background(), Node{SandboxName: "source"}, Node{SandboxName: "target", Image: "image:12", VCPUs: 2, MemoryMiB: 4096, DiskMiB: 20480}); err != nil {
 		t.Fatalf("Clone() error = %v", err)
 	}
 	if got := strings.Join(sourceCalls, ","); got != "snapshot:source:clone-target" {

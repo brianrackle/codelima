@@ -25,15 +25,15 @@ type ShellStreams struct {
 
 type SandboxClient interface {
 	Version(ctx context.Context) (string, error)
-	ResolveCommands(project Project, node Node, kind runtimeCommandKind, values map[string]string) ([]string, error)
+	ResolveCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]string, error)
 	List(ctx context.Context) ([]RuntimeObservation, error)
-	Create(ctx context.Context, project Project, node Node) error
-	Start(ctx context.Context, project Project, node Node) error
-	Stop(ctx context.Context, project Project, node Node) error
-	Delete(ctx context.Context, project Project, node Node) error
-	Clone(ctx context.Context, project Project, sourceNode, targetNode Node) error
-	CopyToGuest(ctx context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error
-	Shell(ctx context.Context, project Project, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error
+	Create(ctx context.Context, node Node) error
+	Start(ctx context.Context, node Node) error
+	Stop(ctx context.Context, node Node) error
+	Delete(ctx context.Context, node Node) error
+	Clone(ctx context.Context, sourceNode, targetNode Node) error
+	CopyToGuest(ctx context.Context, node Node, sourcePath, targetPath string, recursive bool) error
+	Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error
 }
 
 type runtimeCommandKind string
@@ -66,7 +66,7 @@ func supportedRuntimeCommandKind(kind runtimeCommandKind) bool {
 	}
 }
 
-func resolveConfiguredRuntimeCommands(binary string, global RuntimeCommandTemplates, project Project, nodeCommands RuntimeCommandTemplates, kind runtimeCommandKind, values map[string]string) ([]string, error) {
+func resolveConfiguredRuntimeCommands(binary string, global RuntimeCommandTemplates, nodeCommands RuntimeCommandTemplates, kind runtimeCommandKind, values map[string]string) ([]string, error) {
 	if !supportedRuntimeCommandKind(kind) {
 		return nil, invalidArgument("unsupported runtime command kind", map[string]any{"kind": string(kind)})
 	}
@@ -78,7 +78,6 @@ func resolveConfiguredRuntimeCommands(binary string, global RuntimeCommandTempla
 
 	templates := defaultRuntimeCommandTemplates().templates(kind)
 	templates = applyDefaultCommandList(global.templates(kind), templates)
-	templates = applyDefaultCommandList(project.RuntimeCommands.templates(kind), templates)
 	templates = applyDefaultCommandList(nodeCommands.templates(kind), templates)
 
 	resolved := make([]string, 0, len(templates))

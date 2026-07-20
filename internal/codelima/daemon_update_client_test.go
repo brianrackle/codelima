@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 func TestDaemonUpdateDefaultsToCallerBinaryAndBridgesPreviousProtocol(t *testing.T) {

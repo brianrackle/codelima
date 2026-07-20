@@ -9,10 +9,10 @@ import (
 func TestEncodeTUITerminalKeyUsesCursorMode(t *testing.T) {
 	t.Parallel()
 
-	if got := encodeTUITerminalKey(vaxis.Key{Keycode: vaxis.KeyUp}, false, false); got != "\x1b[A" {
+	if got := encodeTUITerminalKey(vaxis.Key{Keycode: vaxis.KeyUp}, false); got != "\x1b[A" {
 		t.Fatalf("expected normal cursor up sequence, got %q", got)
 	}
-	if got := encodeTUITerminalKey(vaxis.Key{Keycode: vaxis.KeyUp}, false, true); got != "\x1bOA" {
+	if got := encodeTUITerminalKey(vaxis.Key{Keycode: vaxis.KeyUp}, true); got != "\x1bOA" {
 		t.Fatalf("expected application cursor up sequence, got %q", got)
 	}
 }
@@ -23,7 +23,7 @@ func TestEncodeTUITerminalKeyEncodesCtrlC(t *testing.T) {
 	got := encodeTUITerminalKey(vaxis.Key{
 		Keycode:   'c',
 		Modifiers: vaxis.ModCtrl,
-	}, false, false)
+	}, false)
 	if got != "\x03" {
 		t.Fatalf("expected Ctrl+C to encode as ETX, got %q", got)
 	}
@@ -36,7 +36,7 @@ func TestEncodeTUITerminalPasteKeyPreservesNewlinesWithoutSubmitting(t *testing.
 		Text:      "one\ntwo\r\nthree",
 		Keycode:   '\n',
 		EventType: vaxis.EventPaste,
-	}, false, false)
+	}, false)
 	if got != "one\ntwo\nthree" {
 		t.Fatalf("expected pasted newlines to remain line feeds, got %q", got)
 	}
@@ -50,7 +50,7 @@ func TestEncodeTUITerminalPasteKeyRecoversCtrlDecodedNewline(t *testing.T) {
 		Keycode:   'j',
 		Modifiers: vaxis.ModCtrl,
 		EventType: vaxis.EventPaste,
-	}, false, false)
+	}, false)
 	if got != "\n" {
 		t.Fatalf("expected pasted Ctrl+J to encode as line feed, got %q", got)
 	}
@@ -59,7 +59,7 @@ func TestEncodeTUITerminalPasteKeyRecoversCtrlDecodedNewline(t *testing.T) {
 		Keycode:   '@',
 		Modifiers: vaxis.ModCtrl,
 		EventType: vaxis.EventPaste,
-	}, false, false)
+	}, false)
 	if got != "\x00" {
 		t.Fatalf("expected pasted Ctrl+@ to encode as NUL, got %q", got)
 	}

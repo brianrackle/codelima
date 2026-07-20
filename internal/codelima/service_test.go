@@ -19,12 +19,11 @@ type fakeSandbox struct {
 	mu           sync.Mutex
 	observations map[string]RuntimeObservation
 	calls        []string
-	invocations  []string
 	shellCalls   []fakeShellCall
 	copyCalls    []fakeCopyCall
 	createErr    error
 	failCommand  string
-	cloneStatus  string
+	cloneStatus  ObservationStatus
 	listCalls    int
 	listErr      error
 	createGate   *fakeSandboxGate
@@ -57,7 +56,6 @@ func newFakeSandbox() *fakeSandbox {
 	return &fakeSandbox{
 		observations: map[string]RuntimeObservation{},
 		calls:        []string{},
-		invocations:  []string{},
 		shellCalls:   []fakeShellCall{},
 		copyCalls:    []fakeCopyCall{},
 		cloneStatus:  "stopped",
@@ -83,23 +81,20 @@ func (g *fakeSandboxGate) block(call string) {
 	}
 }
 
-// recordCall appends bookkeeping entries under the fake's mutex so tests may
+// recordCall appends a bookkeeping record under the fake's mutex so tests may
 // exercise Service reads and mutations concurrently under -race.
-func (f *fakeSandbox) recordCall(call string, invocationPrefix string, invocations []string) {
+func (f *fakeSandbox) recordCall(call string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, call)
-	for _, invocation := range invocations {
-		f.invocations = append(f.invocations, invocationPrefix+invocation)
-	}
 }
 
 func (f *fakeSandbox) Version(context.Context) (string, error) {
 	return requiredMicrosandboxVersion, nil
 }
 
-func (f *fakeSandbox) ResolveCommands(project Project, node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
-	return resolveConfiguredRuntimeCommands("msb", legacyMSBCommandTemplates(), project, node.RuntimeCommands, kind, values)
+func (f *fakeSandbox) ResolveCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
+	return resolveConfiguredRuntimeCommands("", RuntimeCommandTemplates{}, node.RuntimeCommands, kind, values)
 }
 
 func (f *fakeSandbox) List(_ context.Context) ([]RuntimeObservation, error) {
@@ -116,16 +111,8 @@ func (f *fakeSandbox) List(_ context.Context) ([]RuntimeObservation, error) {
 	return observations, nil
 }
 
-func (f *fakeSandbox) Create(_ context.Context, project Project, node Node) error {
-	values, err := runtimeNodeValues(project, node)
-	if err != nil {
-		return err
-	}
-	commands, err := f.ResolveCommands(project, node, runtimeCommandCreate, values)
-	f.recordCall("create:"+node.SandboxName, "create:", commands)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) Create(_ context.Context, node Node) error {
+	f.recordCall("create " + node.SandboxName)
 	if f.createErr != nil {
 		return f.createErr
 	}
@@ -136,14 +123,8 @@ func (f *fakeSandbox) Create(_ context.Context, project Project, node Node) erro
 	return nil
 }
 
-func (f *fakeSandbox) Start(_ context.Context, project Project, node Node) error {
-	commands, err := f.ResolveCommands(project, node, runtimeCommandStart, map[string]string{
-		"sandbox_name": shellQuote(node.SandboxName),
-	})
-	f.recordCall("start:"+node.SandboxName, "start:", commands)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) Start(_ context.Context, node Node) error {
+	f.recordCall("start " + node.SandboxName)
 	f.startGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -155,14 +136,8 @@ func (f *fakeSandbox) Start(_ context.Context, project Project, node Node) error
 	return nil
 }
 
-func (f *fakeSandbox) Stop(_ context.Context, project Project, node Node) error {
-	commands, err := f.ResolveCommands(project, node, runtimeCommandStop, map[string]string{
-		"sandbox_name": shellQuote(node.SandboxName),
-	})
-	f.recordCall("stop:"+node.SandboxName, "stop:", commands)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) Stop(_ context.Context, node Node) error {
+	f.recordCall("stop " + node.SandboxName)
 	f.stopGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -174,14 +149,8 @@ func (f *fakeSandbox) Stop(_ context.Context, project Project, node Node) error 
 	return nil
 }
 
-func (f *fakeSandbox) Delete(_ context.Context, project Project, node Node) error {
-	commands, err := f.ResolveCommands(project, node, runtimeCommandDelete, map[string]string{
-		"sandbox_name": shellQuote(node.SandboxName),
-	})
-	f.recordCall("delete:"+node.SandboxName, "delete:", commands)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) Delete(_ context.Context, node Node) error {
+	f.recordCall("delete " + node.SandboxName)
 	f.deleteGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -189,40 +158,21 @@ func (f *fakeSandbox) Delete(_ context.Context, project Project, node Node) erro
 	return nil
 }
 
-func (f *fakeSandbox) Clone(_ context.Context, project Project, sourceNode, targetNode Node) error {
-	values, err := runtimeNodeValues(project, targetNode)
-	if err != nil {
-		return err
-	}
-	values["source_sandbox"] = shellQuote(sourceNode.SandboxName)
-	values["snapshot_name"] = shellQuote(cloneSnapshotName(targetNode.SandboxName))
-	commands, err := f.ResolveCommands(project, targetNode, runtimeCommandClone, values)
-	f.recordCall("clone:"+sourceNode.SandboxName+"->"+targetNode.SandboxName, "clone:", commands)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) Clone(_ context.Context, sourceNode, targetNode Node) error {
+	f.recordCall("clone " + sourceNode.SandboxName + " " + targetNode.SandboxName)
 	f.cloneGate.block(targetNode.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	status := f.cloneStatus
-	if strings.TrimSpace(status) == "" {
-		status = "stopped"
+	if strings.TrimSpace(string(status)) == "" {
+		status = ObservationStopped
 	}
 	f.observations[targetNode.SandboxName] = RuntimeObservation{Name: targetNode.SandboxName, Exists: true, Status: status, Dir: "/fake/" + targetNode.SandboxName}
 	return nil
 }
 
-func (f *fakeSandbox) CopyToGuest(_ context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
-	commands, err := f.ResolveCommands(project, node, runtimeCommandCopy, map[string]string{
-		"source_path":  shellQuote(sourcePath),
-		"target_path":  shellQuote(targetPath),
-		"sandbox_name": shellQuote(node.SandboxName),
-		"copy_target":  shellQuote(node.SandboxName + ":" + targetPath),
-	})
-	f.recordCall("copy:"+node.SandboxName+":"+sourcePath+"->"+targetPath, "copy:", commands)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) CopyToGuest(_ context.Context, node Node, sourcePath, targetPath string, recursive bool) error {
+	f.recordCall("copy " + node.SandboxName + " " + sourcePath + " " + targetPath)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.copyCalls = append(f.copyCalls, fakeCopyCall{
@@ -234,30 +184,8 @@ func (f *fakeSandbox) CopyToGuest(_ context.Context, project Project, node Node,
 	return nil
 }
 
-func (f *fakeSandbox) Shell(_ context.Context, project Project, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
-	workdirFlag := ""
-	if workdir != "" {
-		workdirFlag = prefixedShellFragment("--workdir", shellQuote(workdir))
-	}
-	kind := runtimeCommandShellExec
-	values := map[string]string{
-		"sandbox_name": shellQuote(node.SandboxName),
-		"workdir":      shellQuote(workdir),
-		"workdir_flag": workdirFlag,
-		"command_args": shellCommandArgsFragment(command),
-	}
-	if interactive {
-		kind = runtimeCommandShellLogin
-		if len(command) == 0 {
-			command = []string{"/bin/bash"}
-		}
-		values["login_command"] = shellArgsFragment(command)
-	}
-	resolved, err := f.ResolveCommands(project, node, kind, values)
-	f.recordCall("shell:"+node.SandboxName+":"+strings.Join(command, " "), "shell:", resolved)
-	if err != nil {
-		return err
-	}
+func (f *fakeSandbox) Shell(_ context.Context, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
+	f.recordCall("shell " + node.SandboxName + " " + strings.Join(command, " "))
 	f.mu.Lock()
 	f.shellCalls = append(f.shellCalls, fakeShellCall{
 		instanceName: node.SandboxName,
@@ -273,91 +201,15 @@ func (f *fakeSandbox) Shell(_ context.Context, project Project, node Node, comma
 	return nil
 }
 
-func TestProjectCreateSkipsInitialSnapshotAndForkCapturesBaseSnapshot(t *testing.T) {
+func TestEnvironmentConfigMetadataMutationsDoNotRequireMicrosandbox(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	if !exists(service.store.projectPath(project.ID)) {
-		t.Fatalf("expected project metadata to be written")
-	}
-
-	if _, err := service.store.LatestSnapshot(project.ID); err == nil {
-		t.Fatalf("expected project create to skip the initial snapshot")
-	} else {
-		var appErr *AppError
-		if !As(err, &appErr) {
-			t.Fatalf("expected AppError when snapshot is missing, got %T", err)
-		}
-		if appErr.Category != "NotFound" {
-			t.Fatalf("expected NotFound when snapshot is missing, got %q", appErr.Category)
-		}
-	}
-
-	childWorkspace := filepath.Join(t.TempDir(), "child")
-	child, err := service.ProjectFork(ctx, ProjectForkInput{
-		SourceProject: project.ID,
-		Slug:          "child",
-		WorkspacePath: childWorkspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectFork() error = %v", err)
-	}
-
-	if child.ParentProjectID != project.ID {
-		t.Fatalf("expected child parent project to be %q, got %q", project.ID, child.ParentProjectID)
-	}
-
-	content, err := os.ReadFile(filepath.Join(childWorkspace, "README.md"))
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-
-	if string(content) != "hello\n" {
-		t.Fatalf("expected forked workspace content to match source, got %q", string(content))
-	}
-}
-
-func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireMicrosandbox(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+	service, _ := newTestService(t)
 
 	fake := service.sandbox.(*fakeSandbox)
 	fake.listErr = errors.New("sandbox should not be queried for metadata-only mutations")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	newWorkspace := filepath.Join(t.TempDir(), "moved-workspace")
-	if err := os.MkdirAll(newWorkspace, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-
-	if _, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
-		WorkspacePath: &newWorkspace,
-	}); err != nil {
-		t.Fatalf("ProjectUpdate() error = %v", err)
-	}
-
-	config, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+	config, err := service.EnvironmentConfigCreate(context.Background(), EnvironmentConfigCreateInput{
 		Slug:              "shared-dev",
 		BootstrapCommands: []string{"./script/setup"},
 	})
@@ -365,13 +217,13 @@ func TestProjectAndEnvironmentConfigMetadataMutationsDoNotRequireMicrosandbox(t 
 		t.Fatalf("EnvironmentConfigCreate() error = %v", err)
 	}
 
-	if _, err := service.EnvironmentConfigUpdate(config.ID, EnvironmentConfigUpdateInput{
+	if _, err := service.EnvironmentConfigUpdate(context.Background(), config.ID, EnvironmentConfigUpdateInput{
 		BootstrapCommands: []string{"./script/setup", "direnv allow"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigUpdate() error = %v", err)
 	}
 
-	if _, err := service.EnvironmentConfigDelete(config.ID); err != nil {
+	if _, err := service.EnvironmentConfigDelete(context.Background(), config.ID); err != nil {
 		t.Fatalf("EnvironmentConfigDelete() error = %v", err)
 	}
 
@@ -388,17 +240,17 @@ func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:              "root",
-		WorkspacePath:     workspace,
+	if _, err := service.ConfigurationCreate(context.Background(), ConfigurationCreateInput{
+		Slug:              "setup",
+		Environments:      []string{},
 		BootstrapCommands: []string{"./script/setup"},
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
+	}); err != nil {
+		t.Fatalf("ConfigurationCreate() error = %v", err)
 	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project:       project.ID,
+		Configuration: "setup",
+		Directory:     workspace,
 		Slug:          "root-node",
 		WorkspaceMode: WorkspaceModeCopy,
 	})
@@ -410,14 +262,8 @@ func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 		t.Fatalf("expected sandbox instance name to match node slug, got %q", node.SandboxName)
 	}
 
-	if !containsPrefix(service.sandbox.(*fakeSandbox).calls, "create:"+node.SandboxName) {
-		t.Fatalf("expected msb create delegation")
-	}
-	if !containsSubstring(service.sandbox.(*fakeSandbox).invocations, "create:'msb' create --name '"+node.SandboxName+"' --cpus 2 --memory 4G --init auto --shell /bin/bash") {
-		t.Fatalf("expected create invocation to include resource flags, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
-	}
-	if containsSubstring(service.sandbox.(*fakeSandbox).invocations, "--mount-dir") {
-		t.Fatalf("expected copy-mode create to omit mount flags, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "create "+node.SandboxName) {
+		t.Fatalf("expected sandbox create delegation")
 	}
 
 	node, err = service.NodeStart(ctx, node.ID)
@@ -429,11 +275,11 @@ func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 		t.Fatalf("expected running status, got %q", node.Status)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell:"+node.SandboxName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell "+node.SandboxName+" sh -lc cd "+quoted(workspace)+" && ./script/setup") {
 		t.Fatalf("expected setup command delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "copy:"+node.SandboxName+":"+workspace+"->"+workspace) {
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "copy "+node.SandboxName+" "+workspace+" "+workspace) {
 		t.Fatalf("expected workspace copy delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
@@ -466,20 +312,10 @@ func TestNodeLifecycleDefaultsToMountedWorkspaceAndSkipsCopy(t *testing.T) {
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:              "root",
-		WorkspacePath:     workspace,
-		BootstrapCommands: []string{"./script/setup"},
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "mounted-node",
+		Directory: workspace,
+		Slug:      "mounted-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -494,9 +330,6 @@ func TestNodeLifecycleDefaultsToMountedWorkspaceAndSkipsCopy(t *testing.T) {
 	if node.GuestWorkspacePath != workspace {
 		t.Fatalf("expected mounted node guest workspace path %q, got %q", workspace, node.GuestWorkspacePath)
 	}
-	if !containsSubstring(service.sandbox.(*fakeSandbox).invocations, "--mount-dir '"+workspace+":"+workspace+"'") {
-		t.Fatalf("expected mounted create to pass a writable directory mount, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
-	}
 
 	node, err = service.NodeStart(ctx, node.ID)
 	if err != nil {
@@ -506,7 +339,7 @@ func TestNodeLifecycleDefaultsToMountedWorkspaceAndSkipsCopy(t *testing.T) {
 	if !node.WorkspaceSeeded {
 		t.Fatalf("expected mounted node start to mark workspace prepared")
 	}
-	if containsSubstring(service.sandbox.(*fakeSandbox).calls, "copy:"+node.SandboxName+":") {
+	if containsPrefix(service.sandbox.(*fakeSandbox).calls, "copy "+node.SandboxName+" ") {
 		t.Fatalf("expected mounted node to skip workspace copy, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
@@ -517,20 +350,10 @@ func TestNodeStartClearsCreatedLifecycleStateFromPersistedNodeMetadata(t *testin
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-	writeExecutable(t, filepath.Join(workspace, "script", "setup"), "#!/usr/bin/env sh\necho setup\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:              "root",
-		WorkspacePath:     workspace,
-		BootstrapCommands: []string{"./script/setup"},
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory: workspace,
+		Slug:      "root-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -564,26 +387,22 @@ func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	project.RuntimeCommands.WorkspaceSeedPrepare = []string{"echo preparing {{sandbox_name}} {{target_path}} {{target_parent}}"}
-	if err := service.store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject(custom workspace seed prepare command) error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project:       project.ID,
+		Directory:     workspace,
 		Slug:          "root-node",
 		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.RuntimeCommands.WorkspaceSeedPrepare = []string{"echo preparing {{sandbox_name}} {{target_path}} {{target_parent}}"}
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(custom workspace seed prepare command) error = %v", err)
 	}
 
 	if _, err := service.NodeStart(ctx, node.ID); err != nil {
@@ -613,17 +432,9 @@ func TestNodeCreateCleansUpPartialMetadataWhenSandboxCreateFails(t *testing.T) {
 	service.sandbox.(*fakeSandbox).createErr = errors.New("forced create failure")
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	if _, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "broken-node",
+		Directory: workspace,
+		Slug:      "broken-node",
 	}); err == nil {
 		t.Fatalf("expected NodeCreate() to fail when sandbox create fails")
 	}
@@ -634,78 +445,6 @@ func TestNodeCreateCleansUpPartialMetadataWhenSandboxCreateFails(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected failed node create to remove partial metadata, found %d entries", len(entries))
-	}
-}
-
-func TestProjectScopedRuntimeCommandsApplyToNodeLifecycle(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	project.RuntimeCommands = RuntimeCommandTemplates{
-		Create:    []string{"{{binary}} create --name {{sandbox_name}} --cpus 8 --memory 16G --init auto --shell /bin/bash{{mount_flags}}{{port_flags}}{{net_flags}} {{image}}"},
-		Start:     []string{"{{binary}} start {{sandbox_name}} --debug"},
-		Stop:      []string{"{{binary}} stop {{sandbox_name}} --timeout 30"},
-		Delete:    []string{"{{binary}} rm -f {{sandbox_name}}"},
-		Clone:     []string{"{{binary}} snapshot create custom-{{sandbox_name}} --from {{source_sandbox}} --force"},
-		Copy:      []string{"{{binary}} copy {{source_path}} {{copy_target}} --quiet"},
-		ShellExec: []string{"{{binary}} exec{{workdir_flag}} {{sandbox_name}}{{command_args}} --debug"},
-	}
-	if err := service.store.SaveProject(project); err != nil {
-		t.Fatalf("SaveProject(custom commands) error = %v", err)
-	}
-
-	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project:       project.ID,
-		Slug:          "root-node",
-		WorkspaceMode: WorkspaceModeCopy,
-	})
-	if err != nil {
-		t.Fatalf("NodeCreate() error = %v", err)
-	}
-
-	if _, err := service.NodeStart(ctx, node.ID); err != nil {
-		t.Fatalf("NodeStart() error = %v", err)
-	}
-
-	childNode, err := service.NodeClone(ctx, NodeCloneInput{
-		SourceNode: node.ID,
-		NodeSlug:   "root-node-clone",
-	})
-	if err != nil {
-		t.Fatalf("NodeClone() error = %v", err)
-	}
-
-	if _, err := service.NodeDelete(ctx, childNode.ID); err != nil {
-		t.Fatalf("NodeDelete() error = %v", err)
-	}
-
-	invocations := service.sandbox.(*fakeSandbox).invocations
-	for _, expected := range []string{
-		"create:'msb' create --name ",
-		"--cpus 8 --memory 16G --init auto",
-		"start:'msb' start '" + node.SandboxName + "' --debug",
-		"stop:'msb' stop '" + node.SandboxName + "' --timeout 30",
-		"clone:'msb' snapshot create custom-'" + childNode.SandboxName + "' --from '" + node.SandboxName + "' --force",
-		"copy:'msb' copy ",
-		"--quiet",
-		"shell:'msb' exec --workdir ",
-		"--debug",
-		"delete:'msb' rm -f '" + childNode.SandboxName + "'",
-	} {
-		if !containsSubstring(invocations, expected) {
-			t.Fatalf("expected invocation containing %q, got %v", expected, invocations)
-		}
 	}
 }
 
@@ -723,17 +462,9 @@ func TestPartialNodeDirectoriesDoNotBlockHealthyNodeOperations(t *testing.T) {
 		t.Fatalf("WriteFile(partial template) error = %v", err)
 	}
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "healthy-node",
+		Directory: workspace,
+		Slug:      "healthy-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -754,14 +485,6 @@ func TestPartialNodeDirectoriesDoNotBlockHealthyNodeOperations(t *testing.T) {
 	if node.Status != NodeStatusRunning {
 		t.Fatalf("expected healthy node to reach running state, got %q", node.Status)
 	}
-
-	tree, err := service.ProjectTree(ctx, "", false)
-	if err != nil {
-		t.Fatalf("ProjectTree() error = %v", err)
-	}
-	if len(tree) != 1 || len(tree[0].Nodes) != 1 || tree[0].Nodes[0].ID != node.ID {
-		t.Fatalf("expected project tree to include only the healthy node, got %#v", tree)
-	}
 }
 
 func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
@@ -771,24 +494,16 @@ func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	firstNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "first-node",
+		Directory: workspace,
+		Slug:      "first-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate(first) error = %v", err)
 	}
 	secondNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "second-node",
+		Directory: workspace,
+		Slug:      "second-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate(second) error = %v", err)
@@ -877,71 +592,6 @@ func TestNodeListReconcilesRuntimeStatusInBatch(t *testing.T) {
 	}
 }
 
-func TestProjectTreeReconcilesRuntimeStatusInBatch(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
-	})
-	if err != nil {
-		t.Fatalf("NodeCreate() error = %v", err)
-	}
-
-	bootstrap, err := service.store.LoadBootstrapState(node.ID)
-	if err != nil {
-		t.Fatalf("LoadBootstrapState() error = %v", err)
-	}
-	node.Status = NodeStatusStopped
-	node.LastRuntimeObservation = &RuntimeObservation{
-		Name:   node.SandboxName,
-		Exists: true,
-		Status: "stopped",
-	}
-	node.UpdatedAt = service.now()
-	if err := service.store.SaveNode(node, bootstrap); err != nil {
-		t.Fatalf("SaveNode() error = %v", err)
-	}
-
-	fake := service.sandbox.(*fakeSandbox)
-	fake.observations[node.SandboxName] = RuntimeObservation{
-		Name:   node.SandboxName,
-		Exists: true,
-		Status: "running",
-		Dir:    "/fake/" + node.SandboxName,
-	}
-	fake.listCalls = 0
-
-	tree, err := service.ProjectTree(ctx, "", false)
-	if err != nil {
-		t.Fatalf("ProjectTree() error = %v", err)
-	}
-	if fake.listCalls != 1 {
-		t.Fatalf("expected ProjectTree to reconcile with one sandbox.List call, got %d", fake.listCalls)
-	}
-	if len(tree) != 1 || len(tree[0].Nodes) != 1 {
-		t.Fatalf("expected one root project with one node, got %#v", tree)
-	}
-	if got := tree[0].Nodes[0].Status; got != NodeStatusRunning {
-		t.Fatalf("expected tree node status to reconcile to running, got %q", got)
-	}
-	if got := tree[0].Nodes[0].LastRuntimeObservation; got == nil || got.Status != "running" {
-		t.Fatalf("expected tree node runtime observation to reconcile to running, got %#v", got)
-	}
-}
-
 func TestDoctorReportsIncompleteNodeMetadataDirectories(t *testing.T) {
 	t.Parallel()
 
@@ -955,7 +605,7 @@ func TestDoctorReportsIncompleteNodeMetadataDirectories(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(partialDir, "instance.sandbox.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(template) error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(partialDir, "sandbox.ref"), []byte("project-node-12345678\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(partialDir, "sandbox.ref"), []byte("partial-node-12345678\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(instance ref) error = %v", err)
 	}
 
@@ -968,7 +618,7 @@ func TestDoctorReportsIncompleteNodeMetadataDirectories(t *testing.T) {
 	if !strings.Contains(warningText, "incomplete node metadata directory") {
 		t.Fatalf("expected doctor warning for incomplete node metadata, got %q", warningText)
 	}
-	if !strings.Contains(warningText, "project-node-12345678") {
+	if !strings.Contains(warningText, "partial-node-12345678") {
 		t.Fatalf("expected doctor warning to include instance name, got %q", warningText)
 	}
 	if !strings.Contains(warningText, "node cleanup-incomplete --apply") {
@@ -983,17 +633,9 @@ func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	healthyNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "healthy-node",
+		Directory: workspace,
+		Slug:      "healthy-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1006,7 +648,7 @@ func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(partialDir, "instance.sandbox.yaml"), []byte("arch: aarch64\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(template) error = %v", err)
 	}
-	instanceName := "partial-project-partial-node-12345678"
+	instanceName := "partial-node-12345678"
 	if err := os.WriteFile(filepath.Join(partialDir, "sandbox.ref"), []byte(instanceName+"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(instance ref) error = %v", err)
 	}
@@ -1014,7 +656,7 @@ func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
 		t.Fatalf("WriteFile(instance index) error = %v", err)
 	}
 
-	dryRun, err := service.NodeCleanupIncomplete(false)
+	dryRun, err := service.NodeCleanupIncomplete(context.Background(), false)
 	if err != nil {
 		t.Fatalf("NodeCleanupIncomplete(false) error = %v", err)
 	}
@@ -1031,7 +673,7 @@ func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
 		t.Fatalf("expected dry-run to leave instance index in place")
 	}
 
-	applied, err := service.NodeCleanupIncomplete(true)
+	applied, err := service.NodeCleanupIncomplete(context.Background(), true)
 	if err != nil {
 		t.Fatalf("NodeCleanupIncomplete(true) error = %v", err)
 	}
@@ -1057,22 +699,14 @@ func TestNodeCleanupIncompleteDryRunAndApply(t *testing.T) {
 	}
 }
 
-func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
+func TestNodeCloneCreatesSiblingNode(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "root-node"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "root-node"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
@@ -1085,12 +719,12 @@ func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 		t.Fatalf("NodeClone() error = %v", err)
 	}
 
-	if childNode.ProjectID != project.ID {
-		t.Fatalf("expected child node project id %q, got %q", project.ID, childNode.ProjectID)
-	}
-
 	if childNode.ParentNodeID != node.ID {
 		t.Fatalf("expected child node parent id %q, got %q", node.ID, childNode.ParentNodeID)
+	}
+
+	if childNode.ConfigurationID != node.ConfigurationID {
+		t.Fatalf("expected child node configuration id %q, got %q", node.ConfigurationID, childNode.ConfigurationID)
 	}
 
 	if childNode.SandboxName != "child-node" {
@@ -1101,20 +735,8 @@ func TestNodeCloneCreatesSiblingNodeInSameProject(t *testing.T) {
 		t.Fatalf("expected child node guest workspace path %q, got %q", workspace, childNode.GuestWorkspacePath)
 	}
 
-	if childNode.WorkspaceSeeded {
-		t.Fatalf("expected unstarted source clone to remain unseeded")
-	}
-
-	if !containsPrefix(service.sandbox.(*fakeSandbox).calls, "clone:"+node.SandboxName+"->"+childNode.SandboxName) {
-		t.Fatalf("expected msb clone delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
-	}
-
-	projects, err := service.ProjectList(false)
-	if err != nil {
-		t.Fatalf("ProjectList() error = %v", err)
-	}
-	if len(projects) != 1 {
-		t.Fatalf("expected clone to keep a single project, got %d", len(projects))
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "clone "+node.SandboxName+" "+childNode.SandboxName) {
+		t.Fatalf("expected sandbox clone delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
 
@@ -1125,16 +747,8 @@ func TestNodeClonePreservesMountedWorkspaceMode(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project:       project.ID,
+		Directory:     workspace,
 		Slug:          "root-node",
 		WorkspaceMode: WorkspaceModeMounted,
 	})
@@ -1161,58 +775,17 @@ func TestNodeClonePreservesMountedWorkspaceMode(t *testing.T) {
 	}
 }
 
-func TestNodeCloneRejectsAgentProfileOverride(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "root-node"})
-	if err != nil {
-		t.Fatalf("NodeCreate() error = %v", err)
-	}
-
-	_, err = service.NodeClone(ctx, NodeCloneInput{
-		SourceNode:   node.ID,
-		NodeSlug:     "child-node",
-		AgentProfile: "other-profile",
-	})
-	if err == nil {
-		t.Fatalf("expected NodeClone() to reject agent profile overrides")
-	}
-}
-
 func TestHomeWithLegacyPatchDirsStillLoads(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	service, workspace := newTestService(t)
-
-	if _, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "parent",
-		WorkspacePath: workspace,
-	}); err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
+	service, _ := newTestService(t)
 
 	// Simulate a home written by an older binary that still had the patch
 	// subsystem: a patch metadata directory and a by-status index ref.
 	home := service.cfg.MetadataRoot
 	writeFile(t, filepath.Join(home, "patches", "legacy-patch-id", "proposal.yaml"), "id: legacy-patch-id\nstatus: draft\n")
 	writeFile(t, filepath.Join(home, "_index", "patches", "by-status", "draft", "legacy-patch-id.ref"), "legacy-patch-id\n")
-
-	if _, err := service.ProjectList(false); err != nil {
-		t.Fatalf("ProjectList() error = %v", err)
-	}
 
 	if _, err := service.NodeList(ctx, false); err != nil {
 		t.Fatalf("NodeList() error = %v", err)
@@ -1237,17 +810,9 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory: workspace,
+		Slug:      "root-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1257,7 +822,7 @@ func TestDispatchShellAliasDelegatesToNodeShell(t *testing.T) {
 		t.Fatalf("dispatch(shell) error = %v", err)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell:"+node.SandboxName+":uname -a") {
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell "+node.SandboxName+" uname -a") {
 		t.Fatalf("expected shell alias delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
@@ -1287,24 +852,24 @@ func TestNodeCloneInheritsSourceNodeRuntimeCommandsByDefault(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
-		RuntimeCommands: RuntimeCommandTemplates{
-			Clone: []string{"{{binary}} snapshot create inherited-{{sandbox_name}} --from {{source_sandbox}} --force"},
-			Start: []string{"{{binary}} start {{sandbox_name}} --vm-type=vz"},
-		},
+		Directory:     workspace,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.RuntimeCommands = RuntimeCommandTemplates{
+		WorkspaceSeedPrepare: []string{"echo inherited-prepare {{target_path}}"},
+	}
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(custom guest commands) error = %v", err)
 	}
 
 	childNode, err := service.NodeClone(ctx, NodeCloneInput{
@@ -1315,25 +880,34 @@ func TestNodeCloneInheritsSourceNodeRuntimeCommandsByDefault(t *testing.T) {
 		t.Fatalf("NodeClone() error = %v", err)
 	}
 
-	if strings.Join(childNode.RuntimeCommands.Clone, "|") != strings.Join(node.RuntimeCommands.Clone, "|") {
-		t.Fatalf("expected cloned node to inherit clone command override %q, got %q", node.RuntimeCommands.Clone, childNode.RuntimeCommands.Clone)
+	if strings.Join(childNode.RuntimeCommands.WorkspaceSeedPrepare, "|") != strings.Join(node.RuntimeCommands.WorkspaceSeedPrepare, "|") {
+		t.Fatalf("expected cloned node to inherit workspace seed prepare override %q, got %q", node.RuntimeCommands.WorkspaceSeedPrepare, childNode.RuntimeCommands.WorkspaceSeedPrepare)
 	}
-	if strings.Join(childNode.RuntimeCommands.Start, "|") != strings.Join(node.RuntimeCommands.Start, "|") {
-		t.Fatalf("expected cloned node to inherit start command override %q, got %q", node.RuntimeCommands.Start, childNode.RuntimeCommands.Start)
+
+	stored, err := service.store.NodeByID(childNode.ID)
+	if err != nil {
+		t.Fatalf("NodeByID(child) error = %v", err)
 	}
-	if !containsSubstring(service.sandbox.(*fakeSandbox).invocations, "snapshot create inherited-") {
-		t.Fatalf("expected clone invocation to use inherited node-specific clone command override, invocations = %v", service.sandbox.(*fakeSandbox).invocations)
+	if strings.Join(stored.RuntimeCommands.WorkspaceSeedPrepare, "|") != strings.Join(node.RuntimeCommands.WorkspaceSeedPrepare, "|") {
+		t.Fatalf("expected persisted clone to keep inherited override, got %q", stored.RuntimeCommands.WorkspaceSeedPrepare)
+	}
+
+	if _, err := service.NodeStart(ctx, childNode.ID); err != nil {
+		t.Fatalf("NodeStart(child) error = %v", err)
+	}
+	if !containsSubstring(service.sandbox.(*fakeSandbox).calls, "echo inherited-prepare") {
+		t.Fatalf("expected cloned node start to use the inherited workspace seed prepare override, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
 
-func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
+func TestEnvironmentConfigLifecycleAndConfigurationResolution(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	config, err := service.EnvironmentConfigCreate(EnvironmentConfigCreateInput{
+	config, err := service.EnvironmentConfigCreate(context.Background(), EnvironmentConfigCreateInput{
 		Slug:              "shared-dev",
 		BootstrapCommands: []string{"./script/setup", "direnv allow"},
 	})
@@ -1345,7 +919,7 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 		t.Fatalf("expected created commands, got %q", got)
 	}
 
-	configs, err := service.EnvironmentConfigList(false)
+	configs, err := service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
@@ -1353,23 +927,23 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 		t.Fatalf("expected shared-dev to be listed, got %#v", configs)
 	}
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:               "root",
-		WorkspacePath:      workspace,
-		EnvironmentConfigs: []string{"shared-dev"},
-		BootstrapCommands:  []string{"make init"},
+	configuration, err := service.ConfigurationCreate(context.Background(), ConfigurationCreateInput{
+		Slug:              "root",
+		Environments:      []string{"shared-dev"},
+		BootstrapCommands: []string{"make init"},
 	})
 	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
+		t.Fatalf("ConfigurationCreate() error = %v", err)
 	}
 
-	if got := strings.Join(project.EnvironmentConfigs, "|"); got != "shared-dev" {
-		t.Fatalf("expected project environment configs to be assigned, got %q", got)
+	if got := strings.Join(configuration.Environments, "|"); got != "shared-dev" {
+		t.Fatalf("expected configuration environments to be assigned, got %q", got)
 	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Configuration: configuration.ID,
+		Directory:     workspace,
+		Slug:          "root-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate(root-node) error = %v", err)
@@ -1383,11 +957,11 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 		t.Fatalf("expected resolved bootstrap commands, got %q", got)
 	}
 
-	if _, err := service.EnvironmentConfigDelete("shared-dev"); err == nil {
+	if _, err := service.EnvironmentConfigDelete(context.Background(), "shared-dev"); err == nil {
 		t.Fatalf("expected delete to reject referenced environment config")
 	}
 
-	config, err = service.EnvironmentConfigUpdate("shared-dev", EnvironmentConfigUpdateInput{
+	config, err = service.EnvironmentConfigUpdate(context.Background(), "shared-dev", EnvironmentConfigUpdateInput{
 		BootstrapCommands: []string{"mise install"},
 	})
 	if err != nil {
@@ -1398,8 +972,9 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 	}
 
 	node, err = service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node-2",
+		Configuration: configuration.ID,
+		Directory:     workspace,
+		Slug:          "root-node-2",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate(root-node-2) error = %v", err)
@@ -1413,15 +988,15 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 		t.Fatalf("expected updated config commands to apply to future nodes, got %q", got)
 	}
 
-	project, err = service.ProjectUpdate(project.ID, ProjectUpdateInput{ClearEnvironmentConfigs: true})
+	configuration, err = service.ConfigurationUpdate(context.Background(), configuration.ID, ConfigurationUpdateInput{Environments: []string{}})
 	if err != nil {
-		t.Fatalf("ProjectUpdate(clear env configs) error = %v", err)
+		t.Fatalf("ConfigurationUpdate(clear environments) error = %v", err)
 	}
-	if len(project.EnvironmentConfigs) != 0 {
-		t.Fatalf("expected project environment configs to be cleared, got %v", project.EnvironmentConfigs)
+	if len(configuration.Environments) != 0 {
+		t.Fatalf("expected configuration environments to be cleared, got %v", configuration.Environments)
 	}
 
-	deleted, err := service.EnvironmentConfigDelete("shared-dev")
+	deleted, err := service.EnvironmentConfigDelete(context.Background(), "shared-dev")
 	if err != nil {
 		t.Fatalf("EnvironmentConfigDelete() error = %v", err)
 	}
@@ -1429,7 +1004,7 @@ func TestEnvironmentConfigLifecycleAndProjectResolution(t *testing.T) {
 		t.Fatalf("expected deleted environment config to be tombstoned")
 	}
 
-	configs, err = service.EnvironmentConfigList(false)
+	configs, err = service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
 	}
@@ -1445,11 +1020,11 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 
 	// Since work item 0.3, reads no longer seed: a mutating readiness check
 	// (what any mutating command runs) performs the built-in seeding.
-	if err := service.EnsureReady(true); err != nil {
+	if err := service.EnsureReady(context.Background(), true); err != nil {
 		t.Fatalf("EnsureReady(true) error = %v", err)
 	}
 
-	configs, err := service.EnvironmentConfigList(false)
+	configs, err := service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
@@ -1463,7 +1038,7 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 		"curl -fsSL https://claude.ai/install.sh | bash",
 	)
 
-	config, err := service.EnvironmentConfigShow("codex")
+	config, err := service.EnvironmentConfigShow(context.Background(), "codex")
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}
@@ -1471,17 +1046,17 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 		t.Fatalf("expected codex bootstrap to use the official standalone installer instead of npm, got %q", strings.Join(config.BootstrapCommands, "|"))
 	}
 
-	if _, err := service.EnvironmentConfigUpdate("codex", EnvironmentConfigUpdateInput{
+	if _, err := service.EnvironmentConfigUpdate(context.Background(), "codex", EnvironmentConfigUpdateInput{
 		BootstrapCommands: []string{"echo customized"},
 	}); err != nil {
 		t.Fatalf("EnvironmentConfigUpdate(codex) error = %v", err)
 	}
 
-	if err := service.EnsureReady(false); err != nil {
+	if err := service.EnsureReady(context.Background(), false); err != nil {
 		t.Fatalf("EnsureReady(false) error = %v", err)
 	}
 
-	config, err = service.EnvironmentConfigShow("codex")
+	config, err = service.EnvironmentConfigShow(context.Background(), "codex")
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}
@@ -1496,15 +1071,10 @@ func TestCodexEnvironmentBootstrapCannotCompleteWithoutCodexExecutable(t *testin
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:               "codex-project",
-		WorkspacePath:      workspace,
-		EnvironmentConfigs: []string{"codex"},
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "codex-node"})
+
+	// The default configuration includes the codex environment, whose final
+	// bootstrap command validates that the codex executable is installed.
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "codex-node"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
@@ -1534,26 +1104,26 @@ func TestDeletedBuiltInEnvironmentConfigIsNotRecreated(t *testing.T) {
 	t.Parallel()
 
 	service, _ := newTestService(t)
-	if err := service.EnsureReady(true); err != nil {
+	if err := service.EnsureReady(context.Background(), true); err != nil {
 		t.Fatalf("EnsureReady(true) error = %v", err)
 	}
-	defaultConfiguration, err := service.ConfigurationShow(DefaultConfigurationSlug)
+	defaultConfiguration, err := service.ConfigurationShow(context.Background(), DefaultConfigurationSlug)
 	if err != nil {
 		t.Fatalf("ConfigurationShow(default) error = %v", err)
 	}
-	if _, err := service.ConfigurationUpdate(defaultConfiguration.ID, ConfigurationUpdateInput{Environments: []string{}}); err != nil {
+	if _, err := service.ConfigurationUpdate(context.Background(), defaultConfiguration.ID, ConfigurationUpdateInput{Environments: []string{}}); err != nil {
 		t.Fatalf("ConfigurationUpdate(clear default environments) error = %v", err)
 	}
 
-	if _, err := service.EnvironmentConfigDelete("codex"); err != nil {
+	if _, err := service.EnvironmentConfigDelete(context.Background(), "codex"); err != nil {
 		t.Fatalf("EnvironmentConfigDelete(codex) error = %v", err)
 	}
 
-	if err := service.EnsureReady(false); err != nil {
+	if err := service.EnsureReady(context.Background(), false); err != nil {
 		t.Fatalf("EnsureReady(false) error = %v", err)
 	}
 
-	configs, err := service.EnvironmentConfigList(false)
+	configs, err := service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList(after delete) error = %v", err)
 	}
@@ -1569,17 +1139,9 @@ func TestShellUsesGuestWorkspacePathForInteractiveEntry(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory: workspace,
+		Slug:      "root-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1635,90 +1197,17 @@ func TestInteractiveShellLaunchCommandRepairsGNUSttyBeforeExec(t *testing.T) {
 	}
 }
 
-func TestProjectUpdateWorkspacePath(t *testing.T) {
+func TestNodeStartFailsWhenNodeDirectoryIsMissingBeforeSeed(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	newWorkspace := filepath.Join(t.TempDir(), "moved-workspace")
-	if err := os.MkdirAll(newWorkspace, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-
-	updated, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
-		WorkspacePath: &newWorkspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectUpdate() error = %v", err)
-	}
-
-	if updated.WorkspacePath != newWorkspace {
-		t.Fatalf("expected workspace path %q, got %q", newWorkspace, updated.WorkspacePath)
-	}
-}
-
-func TestProjectUpdateWorkspacePathRejectsLiveNodes(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	if _, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
-	}); err != nil {
-		t.Fatalf("NodeCreate() error = %v", err)
-	}
-
-	newWorkspace := filepath.Join(t.TempDir(), "moved-workspace")
-	if err := os.MkdirAll(newWorkspace, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-
-	if _, err := service.ProjectUpdate(project.ID, ProjectUpdateInput{
-		WorkspacePath: &newWorkspace,
-	}); err == nil {
-		t.Fatalf("expected ProjectUpdate() to reject workspace rebind while nodes are live")
-	}
-}
-
-func TestNodeStartFailsWhenProjectWorkspacePathIsMissingBeforeSeed(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory:     workspace,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1729,32 +1218,25 @@ func TestNodeStartFailsWhenProjectWorkspacePathIsMissingBeforeSeed(t *testing.T)
 	}
 
 	if _, err := service.NodeStart(ctx, node.ID); err == nil {
-		t.Fatalf("expected NodeStart() to fail when the registered workspace path is missing before the guest copy is seeded")
+		t.Fatalf("expected NodeStart() to fail when the node directory is missing before the guest copy is seeded")
 	}
 
 	if len(service.sandbox.(*fakeSandbox).shellCalls) != 0 {
-		t.Fatalf("expected guest workspace preparation to be skipped when workspace is missing")
+		t.Fatalf("expected guest workspace preparation to be skipped when the node directory is missing")
 	}
 }
 
-func TestShellAllowsSeededNodeWhenProjectWorkspacePathIsMissing(t *testing.T) {
+func TestShellAllowsSeededNodeWhenNodeDirectoryIsMissing(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	node, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory:     workspace,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1790,17 +1272,10 @@ func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	parentNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory:     workspace,
+		Slug:          "root-node",
+		WorkspaceMode: WorkspaceModeCopy,
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1840,15 +1315,15 @@ func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
 		t.Fatalf("expected cloned bootstrap state to remain completed")
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "stop:"+parentNode.SandboxName) {
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "stop "+parentNode.SandboxName) {
 		t.Fatalf("expected running source node to be stopped before clone, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "clone:"+parentNode.SandboxName+"->"+childNode.SandboxName) {
-		t.Fatalf("expected msb clone delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "clone "+parentNode.SandboxName+" "+childNode.SandboxName) {
+		t.Fatalf("expected sandbox clone delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "start:"+parentNode.SandboxName) {
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "start "+parentNode.SandboxName) {
 		t.Fatalf("expected running source node to be restarted after clone, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
@@ -1859,12 +1334,12 @@ func TestNodeCloneCyclesRunningSourceNodeAndPreservesGuestState(t *testing.T) {
 	}
 
 	newCalls := append([]string(nil), service.sandbox.(*fakeSandbox).calls[callsBeforeChildStart:]...)
-	if containsCall(newCalls, "copy:"+childNode.SandboxName+":"+workspace+"->"+workspace) {
+	if containsCall(newCalls, "copy "+childNode.SandboxName+" "+workspace+" "+workspace) {
 		t.Fatalf("expected cloned node start to avoid reseeding the guest workspace, calls = %v", newCalls)
 	}
 
-	if containsCall(newCalls, "shell:"+childNode.SandboxName+":sh -lc cd "+quoted(workspace)+" && ./script/setup") {
-		t.Fatalf("expected cloned node start to avoid rerunning setup, calls = %v", newCalls)
+	if containsSubstring(newCalls, "curl -fsSL") {
+		t.Fatalf("expected cloned node start to avoid rerunning bootstrap commands, calls = %v", newCalls)
 	}
 }
 
@@ -1876,17 +1351,9 @@ func TestNodeCloneStopsCloneWhenProviderLeavesItRunning(t *testing.T) {
 	service.sandbox.(*fakeSandbox).cloneStatus = "running"
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	parentNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "root-node",
+		Directory: workspace,
+		Slug:      "root-node",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
@@ -1909,7 +1376,7 @@ func TestNodeCloneStopsCloneWhenProviderLeavesItRunning(t *testing.T) {
 		t.Fatalf("expected cloned node to be normalized to stopped, got %q", childNode.Status)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "stop:"+childNode.SandboxName) {
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "stop "+childNode.SandboxName) {
 		t.Fatalf("expected running clone instance to be stopped, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
@@ -1921,17 +1388,9 @@ func TestNodeDeleteBySlugTargetsActiveNodeWhenDeletedNodeSharesSlug(t *testing.T
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
 	oldNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "design",
+		Directory: workspace,
+		Slug:      "design",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate(old) error = %v", err)
@@ -1947,8 +1406,8 @@ func TestNodeDeleteBySlugTargetsActiveNodeWhenDeletedNodeSharesSlug(t *testing.T
 	}
 
 	newNode, err := service.NodeCreate(ctx, NodeCreateInput{
-		Project: project.ID,
-		Slug:    "design",
+		Directory: workspace,
+		Slug:      "design",
 	})
 	if err != nil {
 		t.Fatalf("NodeCreate(new) error = %v", err)
@@ -1961,48 +1420,6 @@ func TestNodeDeleteBySlugTargetsActiveNodeWhenDeletedNodeSharesSlug(t *testing.T
 
 	if deletedNode.ID != newNode.ID {
 		t.Fatalf("expected delete by slug to target active node %q, got %q", newNode.ID, deletedNode.ID)
-	}
-}
-
-func TestProjectCreateAllowsSlugReuseAfterProjectDeleted(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: workspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate(initial) error = %v", err)
-	}
-
-	project, err = service.ProjectDelete(project.ID)
-	if err != nil {
-		t.Fatalf("ProjectDelete() error = %v", err)
-	}
-
-	if project.DeletedAt == nil {
-		t.Fatalf("expected deleted project to be tombstoned")
-	}
-
-	recreatedWorkspace := filepath.Join(t.TempDir(), "workspace-recreated")
-	if err := os.MkdirAll(recreatedWorkspace, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-
-	recreated, err := service.ProjectCreate(ctx, ProjectCreateInput{
-		Slug:          "root",
-		WorkspacePath: recreatedWorkspace,
-	})
-	if err != nil {
-		t.Fatalf("ProjectCreate(recreated) error = %v", err)
-	}
-
-	if recreated.ID == project.ID {
-		t.Fatalf("expected recreated project to get a new id")
 	}
 }
 
@@ -2215,16 +1632,16 @@ func TestFreshHomeSeedsSingleBuiltInEnvironmentConfigs(t *testing.T) {
 
 	service, _ := newTestService(t)
 
-	if err := service.EnsureReady(true); err != nil {
+	if err := service.EnsureReady(context.Background(), true); err != nil {
 		t.Fatalf("EnsureReady(true) error = %v", err)
 	}
 
 	// Repeated mutating readiness checks must stay idempotent.
-	if err := service.EnsureReady(true); err != nil {
+	if err := service.EnsureReady(context.Background(), true); err != nil {
 		t.Fatalf("EnsureReady(true, second) error = %v", err)
 	}
 
-	configs, err := service.EnvironmentConfigList(false)
+	configs, err := service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
@@ -2251,7 +1668,7 @@ func TestConcurrentSeedingDoesNotDuplicate(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			results <- service.EnsureReady(true)
+			results <- service.EnsureReady(context.Background(), true)
 		}()
 	}
 	close(start)
@@ -2263,7 +1680,7 @@ func TestConcurrentSeedingDoesNotDuplicate(t *testing.T) {
 		}
 	}
 
-	configs, err := service.EnvironmentConfigList(false)
+	configs, err := service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
@@ -2291,7 +1708,7 @@ func TestTUIStartupSeedsBuiltInEnvironmentConfigs(t *testing.T) {
 		t.Fatalf("expected TUI runner to run once, got %d", runner.calls)
 	}
 
-	configs, err := service.EnvironmentConfigList(false)
+	configs, err := service.EnvironmentConfigList(context.Background(), false)
 	if err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
@@ -2310,12 +1727,7 @@ func TestReadSurfacesDoNotWrite(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: "root", Slug: "worker"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "worker"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
@@ -2330,13 +1742,6 @@ func TestReadSurfacesDoNotWrite(t *testing.T) {
 	// (ADR 37 in-memory merge) without persisting anything.
 	fake := service.sandbox.(*fakeSandbox)
 	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: "stopped", Dir: "/fake/" + node.SandboxName}
-
-	if _, err := service.ProjectTree(ctx, "", false); err != nil {
-		t.Fatalf("ProjectTree() error = %v", err)
-	}
-	if _, err := service.ProjectTreeByWorkspaceRoot(ctx, workspace, false); err != nil {
-		t.Fatalf("ProjectTreeByWorkspaceRoot() error = %v", err)
-	}
 
 	nodes, err := service.NodeList(ctx, false)
 	if err != nil {
@@ -2354,25 +1759,22 @@ func TestReadSurfacesDoNotWrite(t *testing.T) {
 		t.Fatalf("expected NodeShow to merge the live stopped observation in memory, got %q", shown.Status)
 	}
 
-	if _, err := service.ProjectList(false); err != nil {
-		t.Fatalf("ProjectList() error = %v", err)
+	if _, err := service.ConfigurationList(context.Background(), false); err != nil {
+		t.Fatalf("ConfigurationList() error = %v", err)
 	}
-	if _, err := service.ProjectShow(project.ID); err != nil {
-		t.Fatalf("ProjectShow() error = %v", err)
-	}
-	if _, err := service.EnvironmentConfigList(false); err != nil {
+	if _, err := service.EnvironmentConfigList(context.Background(), false); err != nil {
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
-	if _, err := service.NodeLogs(node.ID); err != nil {
+	if _, err := service.NodeLogs(context.Background(), node.ID); err != nil {
 		t.Fatalf("NodeLogs() error = %v", err)
 	}
 	if _, err := service.Doctor(ctx, false); err != nil {
 		t.Fatalf("Doctor() error = %v", err)
 	}
 
-	// The TUI auto-refresh tick reloads the tree through this path.
-	if _, err := loadTUIProjectTree(ctx, service, ""); err != nil {
-		t.Fatalf("loadTUIProjectTree() error = %v", err)
+	// The TUI auto-refresh tick reloads the node list through this path.
+	if _, err := loadTUINodes(ctx, service, ""); err != nil {
+		t.Fatalf("loadTUINodes() error = %v", err)
 	}
 
 	after := snapshotHomeFiles(t, service.cfg.MetadataRoot)
@@ -2388,11 +1790,7 @@ func TestRefreshDoesNotRaceMutation(t *testing.T) {
 	service, workspace := newTestService(t)
 	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
 
-	if _, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace}); err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: "root", Slug: "worker"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "worker"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
@@ -2476,7 +1874,7 @@ type deleteFailingSandbox struct {
 	failInstances map[string]bool
 }
 
-func (f *deleteFailingSandbox) Delete(ctx context.Context, project Project, node Node) error {
+func (f *deleteFailingSandbox) Delete(ctx context.Context, node Node) error {
 	if f.failInstances[node.SandboxName] {
 		return externalCommandFailed(
 			"forced delete failure",
@@ -2484,7 +1882,7 @@ func (f *deleteFailingSandbox) Delete(ctx context.Context, project Project, node
 			map[string]any{"sandbox_name": node.SandboxName},
 		)
 	}
-	return f.fakeSandbox.Delete(ctx, project, node)
+	return f.fakeSandbox.Delete(ctx, node)
 }
 
 func seedObservation(fl *fakeSandbox, observation RuntimeObservation) {
@@ -2500,7 +1898,7 @@ func TestNodeCleanupIncompleteTearsDownLiveInstanceBeforeRemovingMetadata(t *tes
 	service, _ := newTestService(t)
 	fl := service.sandbox.(*fakeSandbox)
 
-	const instanceName = "orphan-project-orphan-node-abcd1234"
+	const instanceName = "orphan-node-abcd1234"
 	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "orphan-node")
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(partial node) error = %v", err)
@@ -2512,7 +1910,7 @@ func TestNodeCleanupIncompleteTearsDownLiveInstanceBeforeRemovingMetadata(t *tes
 	// The runtime instance named by the incomplete dir is still live.
 	seedObservation(fl, RuntimeObservation{Name: instanceName, Exists: true, Status: "running", Dir: "/fake/" + instanceName})
 
-	result, err := service.NodeCleanupIncomplete(true)
+	result, err := service.NodeCleanupIncomplete(context.Background(), true)
 	if err != nil {
 		t.Fatalf("NodeCleanupIncomplete(true) error = %v", err)
 	}
@@ -2527,7 +1925,7 @@ func TestNodeCleanupIncompleteTearsDownLiveInstanceBeforeRemovingMetadata(t *tes
 	if _, live := findObservation(observations, instanceName); live {
 		t.Fatalf("orphan bug: cleanup removed metadata but left runtime instance %q running", instanceName)
 	}
-	if !containsCall(fl.calls, "delete:"+instanceName) {
+	if !containsCall(fl.calls, "delete "+instanceName) {
 		t.Fatalf("expected cleanup to tear down the live instance via sandbox.Delete, calls = %v", fl.calls)
 	}
 
@@ -2545,7 +1943,7 @@ func TestNodeCleanupIncompleteKeepsDirectoryWhenTeardownFails(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	fl := service.sandbox.(*fakeSandbox)
-	const instanceName = "stuck-project-stuck-node-99887766"
+	const instanceName = "stuck-node-99887766"
 	service.sandbox = &deleteFailingSandbox{fakeSandbox: fl, failInstances: map[string]bool{instanceName: true}}
 
 	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "stuck-node")
@@ -2556,7 +1954,7 @@ func TestNodeCleanupIncompleteKeepsDirectoryWhenTeardownFails(t *testing.T) {
 	writeFile(t, service.store.nodeInstanceIndexPath(instanceName), "stuck-node\n")
 	seedObservation(fl, RuntimeObservation{Name: instanceName, Exists: true, Status: "running"})
 
-	_, err := service.NodeCleanupIncomplete(true)
+	_, err := service.NodeCleanupIncomplete(context.Background(), true)
 	if err == nil {
 		t.Fatalf("expected NodeCleanupIncomplete to fail when teardown fails")
 	}
@@ -2584,7 +1982,7 @@ func TestNodeCleanupIncompleteDryRunDoesNotTearDownLiveInstance(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	fl := service.sandbox.(*fakeSandbox)
-	const instanceName = "dry-project-dry-node-1a2b3c4d"
+	const instanceName = "dry-node-1a2b3c4d"
 
 	partialDir := filepath.Join(service.cfg.MetadataRoot, "nodes", "dry-node")
 	if err := os.MkdirAll(partialDir, 0o755); err != nil {
@@ -2593,7 +1991,7 @@ func TestNodeCleanupIncompleteDryRunDoesNotTearDownLiveInstance(t *testing.T) {
 	writeFile(t, filepath.Join(partialDir, "sandbox.ref"), instanceName+"\n")
 	seedObservation(fl, RuntimeObservation{Name: instanceName, Exists: true, Status: "running"})
 
-	result, err := service.NodeCleanupIncomplete(false)
+	result, err := service.NodeCleanupIncomplete(context.Background(), false)
 	if err != nil {
 		t.Fatalf("NodeCleanupIncomplete(false) error = %v", err)
 	}
@@ -2603,7 +2001,7 @@ func TestNodeCleanupIncompleteDryRunDoesNotTearDownLiveInstance(t *testing.T) {
 	if len(result.Items) != 1 || result.Items[0].NodeID != "dry-node" {
 		t.Fatalf("expected one incomplete item in dry-run, got %#v", result.Items)
 	}
-	if containsCall(fl.calls, "delete:"+instanceName) {
+	if containsCall(fl.calls, "delete "+instanceName) {
 		t.Fatalf("dry-run must not tear down the live instance, calls = %v", fl.calls)
 	}
 	if !exists(partialDir) {
@@ -2625,11 +2023,7 @@ func TestNodeDeleteTearsDownRunningInstance(t *testing.T) {
 	service, workspace := newTestService(t)
 	fl := service.sandbox.(*fakeSandbox)
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "runner"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "runner"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
@@ -2649,7 +2043,7 @@ func TestNodeDeleteTearsDownRunningInstance(t *testing.T) {
 	if deleted.Status != NodeStatusTerminated {
 		t.Fatalf("expected terminated status, got %q", deleted.Status)
 	}
-	if !containsCall(fl.calls, "delete:"+instanceName) {
+	if !containsCall(fl.calls, "delete "+instanceName) {
 		t.Fatalf("expected NodeDelete to delegate teardown to sandbox.Delete, calls = %v", fl.calls)
 	}
 	observations, err := fl.List(ctx)
@@ -2671,11 +2065,7 @@ func TestNodeDeleteLeavesNodeListableWhenTeardownFails(t *testing.T) {
 	service, workspace := newTestService(t)
 	fl := service.sandbox.(*fakeSandbox)
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "runner"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "runner"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}

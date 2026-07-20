@@ -60,8 +60,8 @@ type tuiOperationCompleteEvent struct {
 type tuiRefreshTickEvent struct{}
 
 type tuiRefreshCompleteEvent struct {
-	Tree []ProjectTreeNode
-	Err  error
+	Nodes []Node
+	Err   error
 }
 
 type tuiClipboardEvent struct {

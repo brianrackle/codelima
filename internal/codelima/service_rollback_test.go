@@ -20,11 +20,7 @@ func TestNodeStartRollbackLogsStoreFailure(t *testing.T) {
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "root-node"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "root-node"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
@@ -76,11 +72,7 @@ func TestNodeStartRollbackSilentWhenStoreHealthy(t *testing.T) {
 	ctx := context.Background()
 	service, workspace := newTestService(t)
 
-	project, err := service.ProjectCreate(ctx, ProjectCreateInput{Slug: "root", WorkspacePath: workspace})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
-	}
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Project: project.ID, Slug: "root-node"})
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "root-node"})
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}

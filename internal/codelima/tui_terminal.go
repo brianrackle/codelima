@@ -20,9 +20,11 @@ type tuiTerminal interface {
 	CapturesMouse() bool
 }
 
+// tuiTerminalClosedEvent reports that one terminal tab (session) closed;
+// SessionKey is the tab's session key ("<target>#<n>"), not a target key.
 type tuiTerminalClosedEvent struct {
-	TargetKey string
-	Err       error
+	SessionKey string
+	Err        error
 }
 
 type tuiTerminalErrorEvent struct {

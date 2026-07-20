@@ -65,7 +65,7 @@ func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperati
 		a.state.treePaneMode = tuiTreePaneModeTerminal
 	}
 	if result.Status != "" {
-		a.status = result.Status
+		a.setStatus(slog.LevelInfo, result.Status)
 	}
 	return nil
 }
@@ -140,14 +140,10 @@ func (a *vaxisTUIApp) finishOperation(event tuiOperationCompleteEvent) {
 	a.retainOperationMessages(operation, event)
 
 	if event.Err != nil {
-		a.status = event.Err.Error()
+		a.setStatus(slog.LevelError, event.Err.Error())
 	} else if err := a.applyOperationResult(a.resultSelectionKey(operation, event.Result), event.Result); err != nil {
-		a.status = err.Error()
+		a.setStatus(slog.LevelError, err.Error())
 	}
-
-	// The result was already recorded at its proper level above; suppress the
-	// draw-time info-level capture of the same status string.
-	a.lastCapturedStatus = strings.TrimSpace(a.status)
 }
 
 const tuiRetainedOperationOutputLines = 40

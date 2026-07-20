@@ -17,6 +17,24 @@ const (
 	// LegacyHandoffVersion is accepted only by a new importer connecting to
 	// the immediately previous Linux unixpacket transport.
 	LegacyHandoffVersion = 2
+
+	// ProtocolCompatFloor is the oldest daemon protocol that lifecycle
+	// management (stop during startup recovery, live update) may authenticate
+	// with using a persisted identity. Ordinary clients keep the exact
+	// current-version handshake.
+	ProtocolCompatFloor = 2
+)
+
+// Wire error codes. They double as codelima process exit codes: the parent
+// package aliases these values (see errors.go) so the CLI and the daemon
+// protocol can never disagree on what a code means.
+const (
+	CodeInvalidArgument       = 2
+	CodeDependencyUnavailable = 3
+	CodeNotFound              = 4
+	CodePreconditionFailed    = 5
+	CodeExternalFailure       = 6
+	CodeInternalFailure       = 7
 )
 
 type Request struct {
@@ -128,7 +146,7 @@ func AsRPCError(err error) *RPCError {
 	if errors.As(err, &rpcErr) {
 		return rpcErr
 	}
-	return &RPCError{Category: "Internal", Message: err.Error(), Code: 7}
+	return &RPCError{Category: "Internal", Message: err.Error(), Code: CodeInternalFailure}
 }
 
 type TerminalState struct {

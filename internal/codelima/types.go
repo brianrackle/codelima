@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	RuntimeVM        = "vm"
-	RuntimeContainer = "container"
+	RuntimeVM = "vm"
 
 	ProviderMicrosandbox = "microsandbox"
 
@@ -18,19 +17,36 @@ const (
 	WorkspaceModeMounted = "mounted"
 	DefaultWorkspaceMode = WorkspaceModeMounted
 
-	NodeStatusCreated      = "created"
-	NodeStatusProvisioning = "provisioning"
-	NodeStatusRegistering  = "registering"
-	NodeStatusRunning      = "running"
-	NodeStatusStopped      = "stopped"
-	NodeStatusFailed       = "failed"
-	NodeStatusTerminating  = "terminating"
-	NodeStatusTerminated   = "terminated"
-
 	DefaultConfigurationSlug = "default"
 	DefaultVCPUs             = uint8(2)
 	DefaultMemoryMiB         = uint32(4 * 1024)
 	DefaultDiskMiB           = uint32(20 * 1024)
+)
+
+// NodeStatus is the CodeLima-owned durable lifecycle state persisted in
+// node.yaml. It is a distinct type from ObservationStatus: the two vocabularies
+// overlap textually ("running") but mean different things — durable intent
+// versus a transient runtime sighting — and must not be compared directly.
+type NodeStatus string
+
+const (
+	NodeStatusCreated      NodeStatus = "created"
+	NodeStatusProvisioning NodeStatus = "provisioning"
+	NodeStatusRegistering  NodeStatus = "registering"
+	NodeStatusRunning      NodeStatus = "running"
+	NodeStatusStopped      NodeStatus = "stopped"
+	NodeStatusFailed       NodeStatus = "failed"
+	NodeStatusTerminating  NodeStatus = "terminating"
+	NodeStatusTerminated   NodeStatus = "terminated"
+)
+
+// ObservationStatus is what the sandbox runtime reported for an instance the
+// last time it was listed. It is never persisted as node lifecycle.
+type ObservationStatus string
+
+const (
+	ObservationRunning ObservationStatus = "running"
+	ObservationStopped ObservationStatus = "stopped"
 )
 
 type RuntimeCommandTemplates struct {
@@ -72,24 +88,6 @@ type Configuration struct {
 	DeletedAt         *time.Time `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
-type Project struct {
-	ID                 string                  `json:"id" yaml:"id"`
-	Slug               string                  `json:"slug" yaml:"slug"`
-	WorkspacePath      string                  `json:"workspace_path" yaml:"workspace_path"`
-	ParentProjectID    string                  `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
-	ForkBaseSnapshotID string                  `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
-	AgentProfileName   string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
-	EnvironmentConfigs []string                `json:"environment_configs" yaml:"environment_configs"`
-	DefaultRuntime     string                  `json:"default_runtime" yaml:"default_runtime"`
-	DefaultProvider    string                  `json:"default_provider" yaml:"default_provider"`
-	DefaultImage       string                  `json:"default_image" yaml:"default_image"`
-	DefaultPorts       []string                `json:"default_ports,omitempty" yaml:"default_ports,omitempty"`
-	RuntimeCommands    RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
-	CreatedAt          time.Time               `json:"created_at" yaml:"created_at"`
-	UpdatedAt          time.Time               `json:"updated_at" yaml:"updated_at"`
-	DeletedAt          *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-}
-
 type EnvironmentConfig struct {
 	ID                string     `json:"id" yaml:"id"`
 	Slug              string     `json:"slug" yaml:"slug"`
@@ -105,22 +103,19 @@ type EnvironmentConfig struct {
 type Environment = EnvironmentConfig
 
 type RuntimeObservation struct {
-	Name     string `json:"name,omitempty" yaml:"name,omitempty"`
-	Exists   bool   `json:"exists" yaml:"exists"`
-	Status   string `json:"status,omitempty" yaml:"status,omitempty"`
-	Dir      string `json:"dir,omitempty" yaml:"dir,omitempty"`
-	Hostname string `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	Name     string            `json:"name,omitempty" yaml:"name,omitempty"`
+	Exists   bool              `json:"exists" yaml:"exists"`
+	Status   ObservationStatus `json:"status,omitempty" yaml:"status,omitempty"`
+	Dir      string            `json:"dir,omitempty" yaml:"dir,omitempty"`
+	Hostname string            `json:"hostname,omitempty" yaml:"hostname,omitempty"`
 }
 
 type Node struct {
-	ID                string `json:"id" yaml:"id"`
-	Slug              string `json:"slug" yaml:"slug"`
-	ConfigurationID   string `json:"configuration_id" yaml:"configuration_id"`
-	ConfigurationSlug string `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
-	DirectoryPath     string `json:"directory_path" yaml:"directory_path"`
-	// ProjectID is retained only for source compatibility with pre-v3 internal
-	// tests and is never populated or serialized for v3 nodes.
-	ProjectID              string                  `json:"-" yaml:"-"`
+	ID                     string                  `json:"id" yaml:"id"`
+	Slug                   string                  `json:"slug" yaml:"slug"`
+	ConfigurationID        string                  `json:"configuration_id" yaml:"configuration_id"`
+	ConfigurationSlug      string                  `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
+	DirectoryPath          string                  `json:"directory_path" yaml:"directory_path"`
 	ParentNodeID           string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
 	Runtime                string                  `json:"runtime" yaml:"runtime"`
 	Provider               string                  `json:"provider" yaml:"provider"`
@@ -132,8 +127,8 @@ type Node struct {
 	Environments           []string                `json:"environments" yaml:"environments"`
 	Ports                  []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
 	NetPolicy              *NetPolicy              `json:"net_policy,omitempty" yaml:"net_policy,omitempty"`
-	Status                 string                  `json:"status" yaml:"status"`
-	LifecycleState         string                  `json:"-" yaml:"-"`
+	Status                 NodeStatus              `json:"status" yaml:"status"`
+	LifecycleState         NodeStatus              `json:"-" yaml:"-"`
 	AgentProfileName       string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
 	RuntimeCommands        RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
 	BootstrapCommands      []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
@@ -155,7 +150,6 @@ type nodeFileWire struct {
 	Slug                 string                  `json:"slug" yaml:"slug"`
 	ConfigurationID      string                  `json:"configuration_id" yaml:"configuration_id"`
 	DirectoryPath        string                  `json:"directory_path" yaml:"directory_path"`
-	ProjectID            string                  `json:"project_id,omitempty" yaml:"project_id,omitempty"`
 	ParentNodeID         string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
 	Runtime              string                  `json:"runtime" yaml:"runtime"`
 	Provider             string                  `json:"provider" yaml:"provider"`
@@ -167,8 +161,8 @@ type nodeFileWire struct {
 	Environments         []string                `json:"environments" yaml:"environments"`
 	Ports                []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
 	NetPolicy            *NetPolicy              `json:"net_policy,omitempty" yaml:"net_policy,omitempty"`
-	LifecycleState       string                  `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
-	Status               string                  `json:"status,omitempty" yaml:"status,omitempty"`
+	LifecycleState       NodeStatus              `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
+	Status               NodeStatus              `json:"status,omitempty" yaml:"status,omitempty"`
 	AgentProfileName     string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
 	RuntimeCommands      RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
 	BootstrapCommands    []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
@@ -183,22 +177,22 @@ type nodeFileWire struct {
 	DeletedAt            *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
 }
 
-func normalizeNodeLifecycleState(state string) string {
-	switch strings.TrimSpace(strings.ToLower(state)) {
+func normalizeNodeLifecycleState(state NodeStatus) NodeStatus {
+	switch NodeStatus(strings.TrimSpace(strings.ToLower(string(state)))) {
 	case NodeStatusCreated,
 		NodeStatusProvisioning,
 		NodeStatusRegistering,
 		NodeStatusFailed,
 		NodeStatusTerminating,
 		NodeStatusTerminated:
-		return strings.TrimSpace(strings.ToLower(state))
+		return NodeStatus(strings.TrimSpace(strings.ToLower(string(state))))
 	default:
 		return ""
 	}
 }
 
-func legacyNodeStatus(state string) string {
-	switch strings.TrimSpace(strings.ToLower(state)) {
+func legacyNodeStatus(state NodeStatus) NodeStatus {
+	switch NodeStatus(strings.TrimSpace(strings.ToLower(string(state)))) {
 	case NodeStatusCreated,
 		NodeStatusProvisioning,
 		NodeStatusRegistering,
@@ -207,13 +201,13 @@ func legacyNodeStatus(state string) string {
 		NodeStatusFailed,
 		NodeStatusTerminating,
 		NodeStatusTerminated:
-		return strings.TrimSpace(strings.ToLower(state))
+		return NodeStatus(strings.TrimSpace(strings.ToLower(string(state))))
 	default:
 		return ""
 	}
 }
 
-func nodeLifecycleState(node Node) string {
+func nodeLifecycleState(node Node) NodeStatus {
 	if state := normalizeNodeLifecycleState(node.Status); state != "" {
 		return state
 	}
@@ -231,7 +225,6 @@ func newNodeFileWire(node Node) nodeFileWire {
 		Slug:                 node.Slug,
 		ConfigurationID:      node.ConfigurationID,
 		DirectoryPath:        node.DirectoryPath,
-		ProjectID:            node.ProjectID,
 		ParentNodeID:         node.ParentNodeID,
 		Runtime:              node.Runtime,
 		Provider:             node.Provider,
@@ -276,7 +269,6 @@ func (w nodeFileWire) node() Node {
 		Slug:                 w.Slug,
 		ConfigurationID:      w.ConfigurationID,
 		DirectoryPath:        w.DirectoryPath,
-		ProjectID:            w.ProjectID,
 		ParentNodeID:         w.ParentNodeID,
 		Runtime:              w.Runtime,
 		Provider:             w.Provider,
@@ -338,27 +330,6 @@ type AgentProfile struct {
 	Environment       map[string]string `json:"environment,omitempty" yaml:"environment,omitempty"`
 }
 
-type SnapshotManifest struct {
-	ID            string          `json:"id" yaml:"id"`
-	ProjectID     string          `json:"project_id" yaml:"project_id"`
-	Kind          string          `json:"kind" yaml:"kind"`
-	CreatedAt     time.Time       `json:"created_at" yaml:"created_at"`
-	WorkspacePath string          `json:"workspace_path" yaml:"workspace_path"`
-	EntryCount    int             `json:"entry_count" yaml:"entry_count"`
-	TotalBytes    int64           `json:"total_bytes" yaml:"total_bytes"`
-	Entries       []SnapshotEntry `json:"entries" yaml:"entries"`
-	TreeRoot      string          `json:"tree_root" yaml:"tree_root"`
-}
-
-type SnapshotEntry struct {
-	Path       string `json:"path" yaml:"path"`
-	Type       string `json:"type" yaml:"type"`
-	Mode       uint32 `json:"mode" yaml:"mode"`
-	Size       int64  `json:"size,omitempty" yaml:"size,omitempty"`
-	SHA256     string `json:"sha256,omitempty" yaml:"sha256,omitempty"`
-	LinkTarget string `json:"link_target,omitempty" yaml:"link_target,omitempty"`
-}
-
 type DoctorReport struct {
 	Checks   []DoctorCheck `json:"checks"`
 	Warnings []string      `json:"warnings"`
@@ -381,106 +352,6 @@ type IncompleteNodeMetadata struct {
 type IncompleteNodeCleanupResult struct {
 	DryRun bool                     `json:"dry_run" yaml:"dry_run"`
 	Items  []IncompleteNodeMetadata `json:"items" yaml:"items"`
-}
-
-type ProjectTreeNode struct {
-	Project  Project           `json:"project"`
-	Nodes    []Node            `json:"nodes,omitempty"`
-	Children []ProjectTreeNode `json:"children"`
-}
-
-type projectWire struct {
-	ID                  string                  `json:"id" yaml:"id"`
-	Slug                string                  `json:"slug" yaml:"slug"`
-	WorkspacePath       string                  `json:"workspace_path" yaml:"workspace_path"`
-	ParentProjectID     string                  `json:"parent_project_id,omitempty" yaml:"parent_project_id,omitempty"`
-	ForkBaseSnapshotID  string                  `json:"fork_base_snapshot_id,omitempty" yaml:"fork_base_snapshot_id,omitempty"`
-	AgentProfileName    string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
-	EnvironmentConfigs  []string                `json:"environment_configs" yaml:"environment_configs"`
-	EnvironmentCommands []string                `json:"environment_commands,omitempty" yaml:"environment_commands,omitempty"`
-	SetupCommands       []string                `json:"setup_commands,omitempty" yaml:"setup_commands,omitempty"`
-	DefaultRuntime      string                  `json:"default_runtime" yaml:"default_runtime"`
-	DefaultProvider     string                  `json:"default_provider" yaml:"default_provider"`
-	DefaultImage        string                  `json:"default_image" yaml:"default_image"`
-	DefaultPorts        []string                `json:"default_ports,omitempty" yaml:"default_ports,omitempty"`
-	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
-	CreatedAt           time.Time               `json:"created_at" yaml:"created_at"`
-	UpdatedAt           time.Time               `json:"updated_at" yaml:"updated_at"`
-	DeletedAt           *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-}
-
-func (p Project) MarshalJSON() ([]byte, error) {
-	return json.Marshal(newProjectWire(p))
-}
-
-func (p *Project) UnmarshalJSON(data []byte) error {
-	var wire projectWire
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
-	}
-
-	*p = wire.project()
-	return nil
-}
-
-func (p Project) MarshalYAML() (any, error) {
-	return newProjectWire(p), nil
-}
-
-func (p *Project) UnmarshalYAML(node *yaml.Node) error {
-	var wire projectWire
-	if err := node.Decode(&wire); err != nil {
-		return err
-	}
-
-	*p = wire.project()
-	return nil
-}
-
-func newProjectWire(project Project) projectWire {
-	return projectWire{
-		ID:                 project.ID,
-		Slug:               project.Slug,
-		WorkspacePath:      project.WorkspacePath,
-		ParentProjectID:    project.ParentProjectID,
-		ForkBaseSnapshotID: project.ForkBaseSnapshotID,
-		AgentProfileName:   project.AgentProfileName,
-		EnvironmentConfigs: append([]string(nil), project.EnvironmentConfigs...),
-		DefaultRuntime:     project.DefaultRuntime,
-		DefaultProvider:    project.DefaultProvider,
-		DefaultImage:       project.DefaultImage,
-		DefaultPorts:       append([]string(nil), project.DefaultPorts...),
-		RuntimeCommands:    project.RuntimeCommands,
-		CreatedAt:          project.CreatedAt,
-		UpdatedAt:          project.UpdatedAt,
-		DeletedAt:          project.DeletedAt,
-	}
-}
-
-func (w projectWire) project() Project {
-	project := Project{
-		ID:                 w.ID,
-		Slug:               w.Slug,
-		WorkspacePath:      w.WorkspacePath,
-		ParentProjectID:    w.ParentProjectID,
-		ForkBaseSnapshotID: w.ForkBaseSnapshotID,
-		AgentProfileName:   w.AgentProfileName,
-		EnvironmentConfigs: append([]string(nil), w.EnvironmentConfigs...),
-		DefaultRuntime:     w.DefaultRuntime,
-		DefaultProvider:    w.DefaultProvider,
-		DefaultImage:       w.DefaultImage,
-		DefaultPorts:       append([]string(nil), w.DefaultPorts...),
-		RuntimeCommands:    removeLegacyMSBCommandTemplates(w.RuntimeCommands),
-		CreatedAt:          w.CreatedAt,
-		UpdatedAt:          w.UpdatedAt,
-		DeletedAt:          w.DeletedAt,
-	}
-
-	if len(project.RuntimeCommands.Bootstrap) == 0 {
-		project.RuntimeCommands.Bootstrap = commandSliceWithLegacy(nil, w.EnvironmentCommands, w.SetupCommands)
-	}
-
-	return project
 }
 
 type bootstrapStateWire struct {

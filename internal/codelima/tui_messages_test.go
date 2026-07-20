@@ -8,8 +8,8 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 )
 
 func TestMessageLogAppendPreservesOrderAndLatest(t *testing.T) {
@@ -91,25 +91,37 @@ func TestMessageLogIgnoresEmptyMessages(t *testing.T) {
 	}
 }
 
-func TestCaptureStatusMessageMirrorsStatusIntoRing(t *testing.T) {
+func TestSetStatusMirrorsStatusIntoRingAtLevel(t *testing.T) {
 	t.Parallel()
 
 	app := &vaxisTUIApp{messages: newTUIMessageLog(10)}
 
-	app.status = "opened https://example"
-	app.captureStatusMessage()
-	app.status = "opened https://example" // unchanged status must not duplicate
-	app.captureStatusMessage()
+	// setStatus records into the ring at the given level and sets the footer.
+	app.setStatus(slog.LevelInfo, "opened https://example")
+	if app.status != "opened https://example" || app.statusLevel != slog.LevelInfo {
+		t.Fatalf("setStatus did not set footer status/level, got %q/%v", app.status, app.statusLevel)
+	}
 	if got := app.messages.Len(); got != 1 {
-		t.Fatalf("captureStatusMessage recorded %d entries for an unchanged status, want 1", got)
+		t.Fatalf("setStatus recorded %d ring entries, want 1", got)
 	}
 
-	app.status = "" // clearing records nothing and re-arms capture
-	app.captureStatusMessage()
-	app.status = "opened https://example"
-	app.captureStatusMessage()
+	// An error status records at error level.
+	app.setStatus(slog.LevelError, "something failed")
+	if app.statusLevel != slog.LevelError {
+		t.Fatalf("setStatus(error) level = %v, want error", app.statusLevel)
+	}
+	entries := app.messages.Entries()
+	if len(entries) != 2 || entries[1].Level != slog.LevelError {
+		t.Fatalf("expected the error status recorded at error level, got %+v", entries)
+	}
+
+	// clearStatus clears the footer and records nothing.
+	app.clearStatus()
+	if app.status != "" {
+		t.Fatalf("clearStatus did not clear the footer, got %q", app.status)
+	}
 	if got := app.messages.Len(); got != 2 {
-		t.Fatalf("re-setting a status after a clear should record again, Len() = %d, want 2", got)
+		t.Fatalf("clearStatus recorded a ring entry, Len() = %d, want 2", got)
 	}
 }
 
@@ -123,10 +135,8 @@ func TestMessagesViewOpensAndClosesViaKeys(t *testing.T) {
 	app := &vaxisTUIApp{state: state, messages: newTUIMessageLog(200)}
 	app.messages.Append(slog.LevelInfo, "hello world")
 
-	if _, err := app.handleKey(vaxis.Key{Text: "m", Keycode: 'm'}); err != nil {
-		t.Fatalf("handleKey(m) error = %v", err)
-	}
-	if app.messagesView == nil {
+	app.handleKey(vaxis.Key{Text: "m", Keycode: 'm'})
+	if app.activeMessagesView() == nil {
 		t.Fatal("expected 'm' to open the messages view")
 	}
 	if !app.rightPaneOverrideActive() {
@@ -136,7 +146,7 @@ func TestMessagesViewOpensAndClosesViaKeys(t *testing.T) {
 	if _, err := app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEsc}); err != nil {
 		t.Fatalf("handleEvent(Esc) error = %v", err)
 	}
-	if app.messagesView != nil {
+	if app.activeMessagesView() != nil {
 		t.Fatal("expected Esc to close the messages view")
 	}
 }
@@ -154,7 +164,7 @@ func TestMessagesViewRendersNewestAndScrolls(t *testing.T) {
 	render := func() string {
 		win := vx.Window()
 		win.Clear()
-		view.Draw(win, vaxis.Style{}, tuiMutedStyle())
+		view.Draw(win, vaxis.Style{}, tuiMutedStyle(), vaxis.Style{})
 		return renderedScreenText(t, vx, 40, 10)
 	}
 
@@ -168,7 +178,7 @@ func TestMessagesViewRendersNewestAndScrolls(t *testing.T) {
 	}
 
 	// Home jumps to the top: oldest shows, newest scrolls off.
-	view.Update(vaxis.Key{Text: "g", Keycode: 'g'})
+	_, _ = view.Update(vaxis.Key{Text: "g", Keycode: 'g'})
 	screen = render()
 	if !strings.Contains(screen, "msg-00") {
 		t.Fatalf("expected oldest message visible after Home, got:\n%s", screen)
@@ -181,11 +191,11 @@ func TestMessagesViewRendersNewestAndScrolls(t *testing.T) {
 	if view.scroll != 0 {
 		t.Fatalf("scroll after Home = %d, want 0", view.scroll)
 	}
-	view.Update(vaxis.Key{Keycode: vaxis.KeyDown})
+	_, _ = view.Update(vaxis.Key{Keycode: vaxis.KeyDown})
 	if view.scroll != 1 {
 		t.Fatalf("scroll after Down = %d, want 1", view.scroll)
 	}
-	view.Update(vaxis.Key{Keycode: vaxis.KeyUp})
+	_, _ = view.Update(vaxis.Key{Keycode: vaxis.KeyUp})
 	if view.scroll != 0 {
 		t.Fatalf("scroll after Up = %d, want 0", view.scroll)
 	}

@@ -30,11 +30,8 @@ type Config struct {
 	DefaultImage        string                  `json:"default_image" yaml:"default_image"`
 	DefaultPorts        []string                `json:"default_ports" yaml:"default_ports"`
 	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands" yaml:"runtime_commands"`
-	Snapshot            struct {
-		Excludes []string `json:"excludes" yaml:"excludes"`
-	} `json:"snapshot" yaml:"snapshot"`
-	AgentProfilesDir string `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
-	Daemon           struct {
+	AgentProfilesDir    string                  `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
+	Daemon              struct {
 		Autostart                       bool   `json:"autostart" yaml:"autostart"`
 		Restore                         string `json:"restore" yaml:"restore"`
 		VirtioFSReclaim                 bool   `json:"virtiofs_reclaim" yaml:"virtiofs_reclaim"`
@@ -50,7 +47,6 @@ func DefaultConfig(home string) Config {
 		DefaultPorts:        []string{},
 		RuntimeCommands:     defaultRuntimeCommandTemplates(),
 	}
-	cfg.Snapshot.Excludes = []string{".codelima", ".git"}
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
 	cfg.Daemon.Autostart = true
 	cfg.Daemon.Restore = "respawn"

@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 const maxResponseSize = 16 << 20
@@ -98,12 +99,9 @@ func (c *Client) callLocked(ctx context.Context, method string, params any, resu
 	if err := c.encoder.Encode(daemon.Request{ID: id, Method: method, Params: raw}); err != nil {
 		return err
 	}
-	line, err := c.reader.ReadBytes('\n')
+	line, err := readBoundedLine(c.reader, maxResponseSize)
 	if err != nil {
 		return err
-	}
-	if len(line) > maxResponseSize {
-		return fmt.Errorf("daemon response exceeds 16 MiB")
 	}
 	var response daemon.Response
 	if err := json.Unmarshal(line, &response); err != nil {
@@ -128,7 +126,7 @@ func (c *Client) NextEvent(ctx context.Context) (daemon.Event, error) {
 		deadline = value
 	}
 	_ = c.conn.SetReadDeadline(deadline)
-	line, err := c.reader.ReadBytes('\n')
+	line, err := readBoundedLine(c.reader, maxResponseSize)
 	if err != nil {
 		return daemon.Event{}, err
 	}
@@ -150,4 +148,24 @@ func Ping(ctx context.Context, home, version string) (daemon.Status, error) {
 		return daemon.Status{}, err
 	}
 	return status, nil
+}
+
+// readBoundedLine reads one newline-terminated frame without buffering more
+// than limit bytes: ReadBytes would slurp an arbitrarily large line into
+// memory before any size check could run.
+func readBoundedLine(reader *bufio.Reader, limit int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > limit {
+			return nil, fmt.Errorf("daemon frame exceeds %d bytes", limit)
+		}
+		if err == nil {
+			return line, nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return nil, err
+		}
+	}
 }

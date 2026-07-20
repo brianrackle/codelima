@@ -9,7 +9,7 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/widgets/term"
 
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type vaxisTUIRunner struct{}
@@ -19,30 +19,72 @@ func newTUIRunner() TUIRunner {
 }
 
 type vaxisTUIApp struct {
-	ctx                context.Context
-	service            *Service
-	vx                 *vaxis.Vaxis
-	postEvent          func(vaxis.Event)
-	treeWorkspaceRoot  string
-	openLink           func(string) error
-	screenHyperlinkAt  func(int, int) (string, bool)
-	state              *tuiState
-	sessions           *tuiSessionStore
-	operations         map[string]*tuiOperationState
-	operationOrder     []string
-	linkRegions        []tuiLinkRegion
-	terminalMouse      *tuiTerminalMouseGesture
-	dialog             *tuiDialog
-	menu               *tuiMenu
-	selector           *tuiSelector
-	messagesView       *tuiMessagesView
-	messages           *tuiMessageLog
-	lastCapturedStatus string
-	status             string
-	refreshInFlight    bool
-	clipboardPush      func(string) error
-	treeContentRect    tuiRect
-	terminalBodyRect   tuiRect
+	ctx               context.Context
+	service           *Service
+	vx                *vaxis.Vaxis
+	postEvent         func(vaxis.Event)
+	treeWorkspaceRoot string
+	openLink          func(string) error
+	screenHyperlinkAt func(int, int) (string, bool)
+	state             *tuiState
+	sessions          *tuiSessionStore
+	operations        map[string]*tuiOperationState
+	operationOrder    []string
+	linkRegions       []tuiLinkRegion
+	terminalMouse     *tuiTerminalMouseGesture
+	// overlay is the single active right-pane override (dialog, menu,
+	// selector, or messages view); nil means no overlay is showing.
+	overlay          tuiOverlay
+	messages         *tuiMessageLog
+	status           string
+	statusLevel      slog.Level
+	refreshInFlight  bool
+	clipboardPush    func(string) error
+	treeContentRect  tuiRect
+	terminalBodyRect tuiRect
+}
+
+// Typed views of the active overlay: nil when no overlay of that concrete
+// type is showing. Dialog flows and tests use these instead of per-type
+// fields.
+func (a *vaxisTUIApp) activeDialog() *tuiDialog {
+	dialog, _ := a.overlay.(*tuiDialog)
+	return dialog
+}
+
+func (a *vaxisTUIApp) activeMenu() *tuiMenu {
+	menu, _ := a.overlay.(*tuiMenu)
+	return menu
+}
+
+func (a *vaxisTUIApp) activeSelector() *tuiSelector {
+	selector, _ := a.overlay.(*tuiSelector)
+	return selector
+}
+
+func (a *vaxisTUIApp) activeMessagesView() *tuiMessagesView {
+	view, _ := a.overlay.(*tuiMessagesView)
+	return view
+}
+
+// showSelector displays a selector overlay. A selector opened while a dialog
+// is showing is a field picker: the dialog is recorded as the selector's
+// parent and restored when the selector is dismissed, preserving the old
+// behavior where a.selector stacked over a.dialog.
+func (a *vaxisTUIApp) showSelector(selector *tuiSelector) {
+	if dialog, ok := a.overlay.(*tuiDialog); ok {
+		selector.Parent = dialog
+	}
+	a.overlay = selector
+}
+
+// overlayParent returns the overlay to restore when overlay is dismissed:
+// the recorded parent for field-picker selectors, nil for everything else.
+func overlayParent(overlay tuiOverlay) tuiOverlay {
+	if selector, ok := overlay.(*tuiSelector); ok && selector.Parent != nil {
+		return selector.Parent
+	}
+	return nil
 }
 
 const (
@@ -67,7 +109,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		defer func() { _ = closeLog() }()
 	}
 
-	tree, err := loadTUIProjectTree(ctx, service, workspaceRoot)
+	nodes, err := loadTUINodes(ctx, service, workspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -81,7 +123,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	sessions := newTUISessionStore(ctx, service, vx.PostEvent)
 	defer sessions.Close()
 
-	state, err := newTUIState(tree, sessions)
+	state, err := newTUIState(nodes, sessions)
 	if err != nil {
 		return err
 	}
@@ -101,7 +143,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
 	sessions.SetPreferredTerminalSize(cols, rows)
 	if err := state.openInitialTerminalTab(); err != nil {
-		app.status = err.Error()
+		app.setStatus(slog.LevelError, err.Error())
 	}
 	app.syncSessionFocus()
 	app.draw()
@@ -146,14 +188,13 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	}
 }
 
-func loadTUIProjectTree(ctx context.Context, service *Service, workspaceRoot string) ([]ProjectTreeNode, error) {
-	nodes, err := service.NodeListByDirectoryRoot(ctx, workspaceRoot, false)
-	if err != nil {
-		return nil, err
-	}
-	return []ProjectTreeNode{{Project: Project{ID: "flat-nodes", Slug: "nodes"}, Nodes: nodes}}, nil
+func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) ([]Node, error) {
+	return service.NodeListByDirectoryRoot(ctx, workspaceRoot, false)
 }
 
+// serve() contract even while every current handler routes errors to status.
+//
+//nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
 	case tuiRefreshTickEvent:
@@ -165,9 +206,9 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiClipboardEvent:
 		if err := a.copyToHostClipboard(event.Text); err != nil {
-			a.status = err.Error()
+			a.setStatus(slog.LevelError, err.Error())
 		} else {
-			a.status = "synced VM clipboard to host clipboard"
+			a.setStatus(slog.LevelInfo, "synced VM clipboard to host clipboard")
 		}
 		a.draw()
 		return false, nil
@@ -184,7 +225,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case tuiTerminalErrorEvent:
-		a.status = event.Err.Error()
+		a.setStatus(slog.LevelError, event.Err.Error())
 		a.draw()
 		return false, nil
 	case vaxis.FocusIn:
@@ -193,56 +234,32 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		// before the next key or mouse event can mutate a terminal.
 		if a.service != nil && a.service.daemonClient != nil {
 			if err := takeTUIDaemonInput(a.ctx, a.service.daemonClient); err != nil {
-				a.status = fmt.Sprintf("reclaim terminal input ownership: %v", err)
+				a.setStatus(slog.LevelError, fmt.Sprintf("reclaim terminal input ownership: %v", err))
 			}
 		}
 		a.draw()
 		return false, nil
 	}
 
-	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && (a.dialog != nil || a.menu != nil || a.selector != nil || a.messagesView != nil) {
+	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && a.overlay != nil {
 		return true, nil
 	}
 
-	if a.messagesView != nil {
-		if a.messagesView.Update(event) {
-			a.messagesView = nil
-		}
-		a.draw()
-		return false, nil
-	}
-
-	if a.selector != nil {
-		completed, cancelled, err := a.selector.Update(event)
+	if a.overlay != nil {
+		overlay := a.overlay
+		done, err := overlay.Update(event)
 		if err != nil {
-			a.status = err.Error()
+			// Overlay Update errors are non-fatal: they surface in the footer
+			// status and dismiss the overlay. (Previously dialog errors aborted
+			// the whole TUI while selector/menu errors went to status; status
+			// is now the one policy.)
+			a.setStatus(slog.LevelError, err.Error())
 		}
-		if completed || cancelled || err != nil {
-			a.selector = nil
-		}
-		a.draw()
-		return false, nil
-	}
-
-	if a.dialog != nil {
-		completed, cancelled, err := a.dialog.Update(event)
-		if err != nil {
-			return false, err
-		}
-		if completed || cancelled {
-			a.dialog = nil
-		}
-		a.draw()
-		return false, nil
-	}
-
-	if a.menu != nil {
-		completed, cancelled, err := a.menu.Update(event)
-		if err != nil {
-			a.status = err.Error()
-		}
-		if completed || cancelled || err != nil {
-			a.menu = nil
+		// An overlay handler may have opened a replacement overlay (menus open
+		// selectors, selectors open confirmation dialogs); only dismiss when
+		// the dispatched overlay is still the active one.
+		if (done || err != nil) && a.overlay == overlay {
+			a.overlay = overlayParent(overlay)
 		}
 		a.draw()
 		return false, nil
@@ -254,13 +271,13 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 			a.forwardTerminalEvent(event)
 			return false, nil
 		}
-		quit, err := a.handleKey(event)
+		quit := a.handleKey(event)
 		a.draw()
-		return quit, err
+		return quit, nil
 	case vaxis.Mouse:
-		err := a.handleMouse(event)
+		a.handleMouse(event)
 		a.draw()
-		return false, err
+		return false, nil
 	case vaxis.PasteStartEvent:
 		a.forwardTerminalEvent(event)
 	case vaxis.PasteEndEvent:
@@ -286,16 +303,16 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 }
 
 func (a *vaxisTUIApp) handleTerminalClosed(event tuiTerminalClosedEvent) {
-	session, ok := a.sessions.Session(event.TargetKey)
+	session, ok := a.sessions.Session(event.SessionKey)
 	if !ok {
 		return
 	}
 
 	targetKey := session.target
 	keys := a.sessions.TargetSessionKeys(targetKey)
-	a.sessions.RemoveSession(event.TargetKey)
-	if a.state.activeTab(targetKey) == event.TargetKey {
-		if nextKey := nextActiveTerminalTabAfterClose(keys, event.TargetKey); nextKey != "" {
+	a.sessions.RemoveSession(event.SessionKey)
+	if a.state.activeTab(targetKey) == event.SessionKey {
+		if nextKey := nextActiveTerminalTabAfterClose(keys, event.SessionKey); nextKey != "" {
 			a.state.setActiveTab(targetKey, nextKey)
 		} else {
 			a.state.clearActiveTab(targetKey)
@@ -307,11 +324,13 @@ func (a *vaxisTUIApp) handleTerminalClosed(event tuiTerminalClosedEvent) {
 		a.state.focusTree()
 	}
 
+	level := slog.LevelInfo
 	message := fmt.Sprintf("shell exited for %s", session.label)
 	if event.Err != nil {
+		level = slog.LevelError
 		message = fmt.Sprintf("%s: %s", message, event.Err)
 	}
-	a.status = message
+	a.setStatus(level, message)
 	a.syncSessionFocus()
 }
 
@@ -323,15 +342,15 @@ func (a *vaxisTUIApp) openHyperlink(target string) error {
 }
 
 func (a *vaxisTUIApp) reloadData(preferredKey string) error {
-	tree, err := loadTUIProjectTree(a.ctx, a.service, a.treeWorkspaceRoot)
+	nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
 	if err != nil {
 		return err
 	}
-	return a.applyReloadedTree(tree, preferredKey)
+	return a.applyReloadedNodes(nodes, preferredKey)
 }
 
-func (a *vaxisTUIApp) applyReloadedTree(tree []ProjectTreeNode, preferredKey string) error {
-	if err := a.state.replaceTree(tree, preferredKey); err != nil {
+func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) error {
+	if err := a.state.replaceNodes(nodes, preferredKey); err != nil {
 		return err
 	}
 	a.sessions.PruneStaleSessions(a.targetKeyStillExists)
@@ -368,14 +387,14 @@ func (a *vaxisTUIApp) startDataRefresh() {
 
 	a.refreshInFlight = true
 	if a.postEvent == nil {
-		tree, err := loadTUIProjectTree(a.ctx, a.service, a.treeWorkspaceRoot)
-		a.finishDataRefresh(tuiRefreshCompleteEvent{Tree: tree, Err: err})
+		nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
+		a.finishDataRefresh(tuiRefreshCompleteEvent{Nodes: nodes, Err: err})
 		return
 	}
 
 	go func() {
-		tree, err := loadTUIProjectTree(a.ctx, a.service, a.treeWorkspaceRoot)
-		a.postEvent(tuiRefreshCompleteEvent{Tree: tree, Err: err})
+		nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
+		a.postEvent(tuiRefreshCompleteEvent{Nodes: nodes, Err: err})
 	}()
 }
 
@@ -395,9 +414,9 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		}
 		return
 	}
-	if err := a.applyReloadedTree(event.Tree, ""); err != nil && a.status == "" {
-		a.service.log().Warn("tui tree reload failed", "error", err.Error())
-		a.status = err.Error()
+	if err := a.applyReloadedNodes(event.Nodes, ""); err != nil && a.status == "" {
+		a.service.log().Warn("tui node reload failed", "error", err.Error())
+		a.setStatus(slog.LevelError, err.Error())
 	}
 }
 
@@ -434,7 +453,7 @@ func (a *vaxisTUIApp) terminalContextEntry() tuiTreeEntry {
 
 func (a *vaxisTUIApp) openTerminalTab() error {
 	entry := a.terminalContextEntry()
-	if entry.kind != tuiTreeEntryProject && entry.kind != tuiTreeEntryNode {
+	if !entry.valid() {
 		return fmt.Errorf("select a node to open a terminal tab")
 	}
 

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 type recordingDaemonCaller struct {

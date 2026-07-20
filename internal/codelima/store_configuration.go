@@ -24,11 +24,8 @@ func (s *Store) configurationSlugIndexPath(slug string) string {
 func (s *Store) ensureDefaultConfiguration(now time.Time) error {
 	if _, err := s.ConfigurationByIDOrSlug(DefaultConfigurationSlug); err == nil {
 		return nil
-	} else {
-		var appErr *AppError
-		if !As(err, &appErr) || appErr.Category != "NotFound" {
-			return err
-		}
+	} else if !IsNotFound(err) {
+		return err
 	}
 
 	return s.SaveConfiguration(Configuration{

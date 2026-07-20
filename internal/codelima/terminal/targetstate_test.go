@@ -71,7 +71,7 @@ func TestTargetTerminalStateOpenErrorIsTargetScoped(t *testing.T) {
 	}
 	sentinel := errors.New("workspace missing")
 	st.OpenError = sentinel
-	if st.OpenError != sentinel {
+	if !errors.Is(st.OpenError, sentinel) {
 		t.Fatalf("OpenError = %v, want the recorded error", st.OpenError)
 	}
 	// An error can exist with no tabs open.

@@ -10,8 +10,8 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 )
 
 func TestConnectTUIDaemonTakesInputFromExistingClient(t *testing.T) {

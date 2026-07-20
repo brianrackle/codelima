@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -14,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type Service struct {
@@ -42,55 +43,20 @@ type serviceReadiness struct {
 	directoriesErr  error
 }
 
-type ProjectCreateInput struct {
-	Slug               string
-	WorkspacePath      string
-	AgentProfile       string
-	EnvironmentConfigs []string
-	BootstrapCommands  []string
-	Image              string
-	DefaultPorts       []string
-}
-
-type ProjectUpdateInput struct {
-	Slug                    *string
-	WorkspacePath           *string
-	AgentProfile            *string
-	EnvironmentConfigs      []string
-	ClearEnvironmentConfigs bool
-	BootstrapCommands       []string
-	ClearBootstrap          bool
-	Image                   *string
-	DefaultPorts            []string
-	ClearDefaultPorts       bool
-}
-
-type ProjectForkInput struct {
-	SourceProject string
-	Slug          string
-	WorkspacePath string
-}
-
 type NodeCreateInput struct {
-	Configuration   string
-	Directory       string
-	Project         string
-	Slug            string
-	Runtime         string
-	Provider        string
-	AgentProfile    string
-	WorkspaceMode   string
-	Image           string
-	Ports           []string
-	NetPolicy       *NetPolicy
-	RuntimeCommands RuntimeCommandTemplates
+	Configuration string
+	Directory     string
+	Slug          string
+	Runtime       string
+	Provider      string
+	WorkspaceMode string
+	Ports         []string
+	NetPolicy     *NetPolicy
 }
 
 type NodeCloneInput struct {
-	SourceNode      string
-	NodeSlug        string
-	AgentProfile    string
-	RuntimeCommands RuntimeCommandTemplates
+	SourceNode string
+	NodeSlug   string
 }
 
 func NewService(cfg Config, sandbox SandboxClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
@@ -219,7 +185,7 @@ func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	// different from the per-tick unlocked writes work item 0.3 removed (ADR
 	// 57). The 2s auto-refresh path stays a pure read, and no runtime
 	// dependencies are validated: launching the TUI must work without msb.
-	if err := s.ensureReadyForWrite(); err != nil {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return err
 	}
 	if !s.localTerminals {
@@ -293,8 +259,8 @@ func takeTUIDaemonInput(ctx context.Context, client *daemonclient.Client) error 
 // environments/configurations/nodes locks and validates runtime dependencies.
 // Stale metadata (for example an old config.yaml) is therefore upgraded only
 // by mutating commands or `codelima doctor --repair`.
-func (s *Service) EnsureReady(mutating bool) error {
-	return s.ensureReady(context.Background(), mutating)
+func (s *Service) EnsureReady(ctx context.Context, mutating bool) error {
+	return s.ensureReady(ctx, mutating)
 }
 
 func (s *Service) ensureReady(ctx context.Context, mutating bool) error {
@@ -302,7 +268,7 @@ func (s *Service) ensureReady(ctx context.Context, mutating bool) error {
 		return s.ensureDirectories()
 	}
 
-	if err := s.ensureReadyForWrite(); err != nil {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return err
 	}
 
@@ -314,12 +280,12 @@ func (s *Service) ensureReady(ctx context.Context, mutating bool) error {
 // validation that EnsureReady(mutating=true) performs. Metadata-only mutations
 // (configuration and environment writes) call it directly so they keep
 // working without a usable Microsandbox runtime.
-func (s *Service) ensureReadyForWrite() error {
+func (s *Service) ensureReadyForWrite(ctx context.Context) error {
 	if err := s.ensureDirectories(); err != nil {
 		return err
 	}
 
-	return s.seedAndRepair()
+	return s.seedAndRepair(ctx, false)
 }
 
 func (s *Service) ensureDirectories() error {
@@ -335,16 +301,14 @@ func (s *Service) ensureDirectories() error {
 // keys, so the lock order stays deadlock-free). Holding the locks is what
 // keeps concurrent seeding from duplicating built-in environment configs
 // (TODO #20).
-func (s *Service) seedAndRepair() error {
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "environments", "configurations", "nodes")
+func (s *Service) seedAndRepair(ctx context.Context, force bool) error {
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments, lockConfigurations, lockNodes)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
-	return s.store.seedAndRepair(s.now())
+	return s.store.seedAndRepair(s.now(), force)
 }
 
 func (s *Service) validateDependencies(ctx context.Context) error {
@@ -379,7 +343,7 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 	}
 
 	if repair {
-		if err := s.seedAndRepair(); err != nil {
+		if err := s.seedAndRepair(ctx, true); err != nil {
 			return DoctorReport{}, err
 		}
 		report.Checks = append(report.Checks, DoctorCheck{Name: "repair", Status: "ok", Message: "seeded built-in metadata and repaired stale files"})
@@ -490,485 +454,12 @@ func (s *Service) ConfigSummary() map[string]any {
 	return s.cfg.Summary()
 }
 
-func (s *Service) ProjectCreate(ctx context.Context, input ProjectCreateInput) (Project, error) {
-	_ = ctx
-	if err := s.ensureReadyForWrite(); err != nil {
-		return Project{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects")
-	if err != nil {
-		return Project{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	workspacePath, err := s.resolveProjectWorkspacePath(input.WorkspacePath, "")
-	if err != nil {
-		return Project{}, err
-	}
-
-	slug := input.Slug
-	if slug == "" {
-		slug = slugify(filepath.Base(workspacePath))
-	}
-
-	if err := s.ensureUniqueProjectSlug(slug, ""); err != nil {
-		return Project{}, err
-	}
-
-	environmentConfigs, err := s.resolveEnvironmentConfigRefs(input.EnvironmentConfigs)
-	if err != nil {
-		return Project{}, err
-	}
-
-	now := s.now()
-	project := Project{
-		ID:                 newID(),
-		Slug:               slug,
-		WorkspacePath:      workspacePath,
-		AgentProfileName:   coalesce(input.AgentProfile, s.cfg.DefaultAgentProfile),
-		EnvironmentConfigs: environmentConfigs,
-		RuntimeCommands:    RuntimeCommandTemplates{Bootstrap: append([]string(nil), input.BootstrapCommands...)},
-		DefaultRuntime:     RuntimeVM,
-		DefaultProvider:    ProviderMicrosandbox,
-		DefaultImage:       coalesce(input.Image, s.cfg.DefaultImage),
-		DefaultPorts:       resolvePorts(input.DefaultPorts, nil, s.cfg.DefaultPorts),
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-
-	if err := s.store.SaveProject(project); err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.AppendProjectEvent(project.ID, Event{Timestamp: now, Type: "project.created"}); err != nil {
-		return Project{}, err
-	}
-
-	return project, nil
-}
-
-func (s *Service) ProjectList(includeDeleted bool) ([]Project, error) {
-	if err := s.EnsureReady(false); err != nil {
-		return nil, err
-	}
-
-	return s.store.ListProjects(includeDeleted)
-}
-
-func (s *Service) ProjectShow(value string) (Project, error) {
-	if err := s.EnsureReady(false); err != nil {
-		return Project{}, err
-	}
-
-	return s.store.ProjectByIDOrSlug(value)
-}
-
-func (s *Service) ProjectUpdate(value string, input ProjectUpdateInput) (Project, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
-		return Project{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "nodes")
-	if err != nil {
-		return Project{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	project, err := s.store.ProjectByIDOrSlug(value)
-	if err != nil {
-		return Project{}, err
-	}
-
-	if input.Slug != nil && *input.Slug != "" && *input.Slug != project.Slug {
-		if err := s.ensureUniqueProjectSlug(*input.Slug, project.ID); err != nil {
-			return Project{}, err
-		}
-
-		project.Slug = *input.Slug
-	}
-
-	if input.AgentProfile != nil {
-		project.AgentProfileName = *input.AgentProfile
-	}
-
-	if input.WorkspacePath != nil {
-		workspacePath, err := s.resolveProjectWorkspacePath(*input.WorkspacePath, project.ID)
-		if err != nil {
-			return Project{}, err
-		}
-
-		if filepath.Clean(workspacePath) != filepath.Clean(project.WorkspacePath) {
-			nodes, err := s.store.ProjectNodes(project.ID, false)
-			if err != nil {
-				return Project{}, err
-			}
-
-			for _, node := range nodes {
-				if node.Status != NodeStatusTerminated {
-					return Project{}, preconditionFailed("project workspace cannot be changed while nodes are live", map[string]any{"project_id": project.ID, "node_id": node.ID, "node_slug": node.Slug})
-				}
-			}
-
-			project.WorkspacePath = workspacePath
-		}
-	}
-
-	if input.ClearBootstrap {
-		project.RuntimeCommands.Bootstrap = []string{}
-	} else if input.BootstrapCommands != nil {
-		project.RuntimeCommands.Bootstrap = append([]string(nil), input.BootstrapCommands...)
-	}
-
-	if input.ClearEnvironmentConfigs {
-		project.EnvironmentConfigs = []string{}
-	} else if input.EnvironmentConfigs != nil {
-		environmentConfigs, err := s.resolveEnvironmentConfigRefs(input.EnvironmentConfigs)
-		if err != nil {
-			return Project{}, err
-		}
-		project.EnvironmentConfigs = environmentConfigs
-	}
-
-	if input.Image != nil {
-		project.DefaultImage = *input.Image
-	}
-	if input.ClearDefaultPorts {
-		project.DefaultPorts = []string{}
-	} else if input.DefaultPorts != nil {
-		if _, err := validatePorts(input.DefaultPorts); err != nil {
-			return Project{}, err
-		}
-		project.DefaultPorts = append([]string(nil), input.DefaultPorts...)
-	}
-
-	project.UpdatedAt = s.now()
-	if err := s.store.SaveProject(project); err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.AppendProjectEvent(project.ID, Event{Timestamp: project.UpdatedAt, Type: "project.updated"}); err != nil {
-		return Project{}, err
-	}
-
-	return project, nil
-}
-
-func (s *Service) ProjectDelete(value string) (Project, error) {
-	if err := s.EnsureReady(true); err != nil {
-		return Project{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects", "nodes")
-	if err != nil {
-		return Project{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	project, err := s.store.ProjectByIDOrSlug(value)
-	if err != nil {
-		return Project{}, err
-	}
-
-	nodes, err := s.store.ProjectNodes(project.ID, false)
-	if err != nil {
-		return Project{}, err
-	}
-
-	for _, node := range nodes {
-		if node.Status != NodeStatusTerminated {
-			return Project{}, preconditionFailed("project has live nodes", map[string]any{"node_id": node.ID})
-		}
-	}
-
-	children, err := s.store.ProjectChildren(project.ID, false)
-	if err != nil {
-		return Project{}, err
-	}
-
-	if len(children) > 0 {
-		return Project{}, preconditionFailed("project has live child projects", map[string]any{"child_count": len(children)})
-	}
-
-	now := s.now()
-	project.DeletedAt = &now
-	project.UpdatedAt = now
-	if err := s.store.SaveProject(project); err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.AppendProjectEvent(project.ID, Event{Timestamp: now, Type: "project.deleted"}); err != nil {
-		return Project{}, err
-	}
-
-	return project, nil
-}
-
-func (s *Service) ProjectTree(ctx context.Context, rootQuery string, includeDeleted bool) ([]ProjectTreeNode, error) {
-	projects, nodes, err := s.projectTreeData(ctx, includeDeleted)
-	if err != nil {
-		return nil, err
-	}
-
-	var roots []Project
-	if rootQuery != "" {
-		project, err := s.store.ProjectByIDOrSlug(rootQuery)
-		if err != nil {
-			return nil, err
-		}
-		roots = []Project{project}
-	} else {
-		roots = projectTreeTopLevelRoots(projects)
-	}
-
-	return buildProjectTree(projects, nodes, roots), nil
-}
-
-func (s *Service) ProjectTreeByWorkspaceRoot(ctx context.Context, workspaceRoot string, includeDeleted bool) ([]ProjectTreeNode, error) {
-	if strings.TrimSpace(workspaceRoot) == "" {
-		return s.ProjectTree(ctx, "", includeDeleted)
-	}
-
-	rootPath, err := canonicalPath(workspaceRoot)
-	if err != nil {
-		return nil, invalidArgument("workspace root must be resolvable", map[string]any{"path": workspaceRoot})
-	}
-
-	projects, nodes, err := s.projectTreeData(ctx, includeDeleted)
-	if err != nil {
-		return nil, err
-	}
-
-	filteredProjects := make([]Project, 0, len(projects))
-	includedProjects := map[string]bool{}
-	for _, project := range projects {
-		if !pathWithinRoot(rootPath, project.WorkspacePath) {
-			continue
-		}
-		filteredProjects = append(filteredProjects, project)
-		includedProjects[project.ID] = true
-	}
-
-	filteredNodes := make([]Node, 0, len(nodes))
-	for _, node := range nodes {
-		if includedProjects[node.ProjectID] {
-			filteredNodes = append(filteredNodes, node)
-		}
-	}
-
-	return buildProjectTree(filteredProjects, filteredNodes, projectTreeVisibleRoots(filteredProjects)), nil
-}
-
-func (s *Service) projectTreeData(ctx context.Context, includeDeleted bool) ([]Project, []Node, error) {
-	if err := s.EnsureReady(false); err != nil {
-		return nil, nil, err
-	}
-
-	projects, err := s.store.ListProjects(includeDeleted)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	nodes, err := s.store.ListNodes(includeDeleted)
-	if err != nil {
-		return nil, nil, err
-	}
-	nodes, err = s.reconcileNodes(ctx, nodes, false)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return projects, nodes, nil
-}
-
-func projectTreeTopLevelRoots(projects []Project) []Project {
-	roots := make([]Project, 0)
-	for _, project := range projects {
-		if project.ParentProjectID == "" {
-			roots = append(roots, project)
-		}
-	}
-	sort.Slice(roots, func(i, j int) bool {
-		return roots[i].Slug < roots[j].Slug
-	})
-
-	return roots
-}
-
-func projectTreeVisibleRoots(projects []Project) []Project {
-	projectMap := map[string]Project{}
-	for _, project := range projects {
-		projectMap[project.ID] = project
-	}
-
-	roots := make([]Project, 0)
-	for _, project := range projects {
-		if _, ok := projectMap[project.ParentProjectID]; !ok {
-			roots = append(roots, project)
-		}
-	}
-	sort.Slice(roots, func(i, j int) bool {
-		return roots[i].Slug < roots[j].Slug
-	})
-
-	return roots
-}
-
-func buildProjectTree(projects []Project, nodes []Node, roots []Project) []ProjectTreeNode {
-	childrenByParent := map[string][]Project{}
-	for _, project := range projects {
-		childrenByParent[project.ParentProjectID] = append(childrenByParent[project.ParentProjectID], project)
-	}
-
-	nodesByProject := map[string][]Node{}
-	for _, node := range nodes {
-		nodesByProject[node.ProjectID] = append(nodesByProject[node.ProjectID], node)
-	}
-
-	var build func(Project) ProjectTreeNode
-	build = func(project Project) ProjectTreeNode {
-		children := childrenByParent[project.ID]
-		sort.Slice(children, func(i, j int) bool {
-			return children[i].Slug < children[j].Slug
-		})
-
-		projectNodes := append([]Node(nil), nodesByProject[project.ID]...)
-		sort.Slice(projectNodes, func(i, j int) bool {
-			return projectNodes[i].Slug < projectNodes[j].Slug
-		})
-
-		node := ProjectTreeNode{Project: project, Nodes: projectNodes}
-		for _, child := range children {
-			node.Children = append(node.Children, build(child))
-		}
-		return node
-	}
-
-	result := make([]ProjectTreeNode, 0, len(roots))
-	for _, root := range roots {
-		result = append(result, build(root))
-	}
-
-	return result
-}
-
 func pathWithinRoot(rootPath, targetPath string) bool {
 	rel, err := filepath.Rel(rootPath, filepath.Clean(targetPath))
 	if err != nil {
 		return false
 	}
 	return rel == "." || rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
-}
-
-func (s *Service) ProjectFork(ctx context.Context, input ProjectForkInput) (Project, error) {
-	if err := s.ensureReady(ctx, true); err != nil {
-		return Project{}, err
-	}
-
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "projects")
-	if err != nil {
-		return Project{}, err
-	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
-
-	return s.projectForkUnlocked(ctx, input)
-}
-
-func (s *Service) projectForkUnlocked(ctx context.Context, input ProjectForkInput) (Project, error) {
-	source, err := s.store.ProjectByIDOrSlug(input.SourceProject)
-	if err != nil {
-		return Project{}, err
-	}
-
-	destinationPath, err := canonicalPath(input.WorkspacePath)
-	if err != nil {
-		return Project{}, invalidArgument("destination path must be resolvable", map[string]any{"path": input.WorkspacePath})
-	}
-
-	if exists(destinationPath) {
-		empty, err := directoryEmpty(destinationPath)
-		if err != nil {
-			return Project{}, err
-		}
-
-		if !empty {
-			return Project{}, preconditionFailed("destination workspace must be empty", map[string]any{"path": destinationPath})
-		}
-	}
-
-	if existing, found, err := s.store.ProjectByWorkspacePath(destinationPath); err != nil {
-		return Project{}, err
-	} else if found {
-		return Project{}, preconditionFailed("destination workspace is already registered", map[string]any{"project_id": existing.ID})
-	}
-
-	now := s.now()
-	baseSnapshotID := newID()
-	baseSnapshot, err := captureSnapshot(source, baseSnapshotID, "fork_base", s.store.snapshotTreePath(source.ID, baseSnapshotID), s.cfg.Snapshot.Excludes, now)
-	if err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.SaveSnapshot(source.ID, baseSnapshot); err != nil {
-		return Project{}, err
-	}
-
-	if err := materializeSnapshot(baseSnapshot, destinationPath); err != nil {
-		return Project{}, err
-	}
-
-	slug := input.Slug
-	if slug == "" {
-		slug = slugify(filepath.Base(destinationPath))
-	}
-
-	if err := s.ensureUniqueProjectSlug(slug, ""); err != nil {
-		return Project{}, err
-	}
-
-	child := Project{
-		ID:                 newID(),
-		Slug:               slug,
-		WorkspacePath:      destinationPath,
-		ParentProjectID:    source.ID,
-		ForkBaseSnapshotID: baseSnapshot.ID,
-		AgentProfileName:   source.AgentProfileName,
-		EnvironmentConfigs: append([]string(nil), source.EnvironmentConfigs...),
-		DefaultRuntime:     source.DefaultRuntime,
-		DefaultProvider:    source.DefaultProvider,
-		DefaultImage:       source.DefaultImage,
-		DefaultPorts:       append([]string(nil), source.DefaultPorts...),
-		RuntimeCommands:    source.RuntimeCommands,
-		CreatedAt:          now,
-		UpdatedAt:          now,
-	}
-
-	if err := s.store.SaveProject(child); err != nil {
-		return Project{}, err
-	}
-
-	// The forked workspace begins from the recorded immutable base snapshot.
-	forkManifest := baseSnapshot
-	forkManifest.ID = child.ForkBaseSnapshotID
-	forkManifest.ProjectID = source.ID
-
-	if err := s.store.AppendProjectEvent(source.ID, Event{Timestamp: now, Type: "project.forked", Fields: map[string]any{"child_project_id": child.ID}}); err != nil {
-		return Project{}, err
-	}
-
-	if err := s.store.AppendProjectEvent(child.ID, Event{Timestamp: now, Type: "project.created", Fields: map[string]any{"fork_base_snapshot_id": forkManifest.ID}}); err != nil {
-		return Project{}, err
-	}
-
-	return child, nil
 }
 
 func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
@@ -979,13 +470,11 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "nodes")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockNodes)
 	if err != nil {
 		return Node{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	if strings.TrimSpace(input.Slug) == "" {
 		return Node{}, invalidArgument("node slug is required", nil)
@@ -994,32 +483,14 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, invalidArgument("node slug must be a lowercase slug", map[string]any{"slug": input.Slug})
 	}
 
-	var configuration Configuration
-	var project Project
-	var directoryPath string
-	if input.Project != "" { // Pre-v3 internal compatibility; the public CLI has no project surface.
-		project, err = s.store.ProjectByIDOrSlug(input.Project)
-		if err != nil {
-			return Node{}, err
-		}
-		directoryPath = project.WorkspacePath
-		configuration = Configuration{
-			ID: project.ID, Slug: project.Slug, Image: project.DefaultImage,
-			AgentProfileName: project.AgentProfileName, Environments: project.EnvironmentConfigs,
-			BootstrapCommands: append([]string(nil), project.RuntimeCommands.Bootstrap...),
-			VCPUs:             DefaultVCPUs, MemoryMiB: DefaultMemoryMiB, DiskMiB: DefaultDiskMiB,
-		}
-	} else {
-		configurationRef := coalesce(input.Configuration, DefaultConfigurationSlug)
-		configuration, err = s.store.ConfigurationByIDOrSlug(configurationRef)
-		if err != nil {
-			return Node{}, err
-		}
-		directoryPath, err = s.resolveNodeDirectoryPath(input.Directory)
-		if err != nil {
-			return Node{}, err
-		}
-		project = runtimeProjectForNode(Node{DirectoryPath: directoryPath, Image: configuration.Image})
+	configurationRef := coalesce(input.Configuration, DefaultConfigurationSlug)
+	configuration, err := s.store.ConfigurationByIDOrSlug(configurationRef)
+	if err != nil {
+		return Node{}, err
+	}
+	directoryPath, err := s.resolveNodeDirectoryPath(input.Directory)
+	if err != nil {
+		return Node{}, err
 	}
 
 	runtime := coalesce(input.Runtime, RuntimeVM)
@@ -1033,9 +504,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	}
 
 	profileName := configuration.AgentProfileName
-	if input.Project != "" {
-		profileName = coalesce(input.AgentProfile, profileName, s.cfg.DefaultAgentProfile)
-	}
 	profile, err := s.store.LoadAgentProfile(profileName)
 	if err != nil {
 		return Node{}, err
@@ -1080,10 +548,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	}
 	image := configuration.Image
 	ports := resolvePorts(input.Ports, []string{})
-	if input.Project != "" {
-		image = coalesce(input.Image, configuration.Image, s.cfg.DefaultImage)
-		ports = resolvePorts(input.Ports, project.DefaultPorts, s.cfg.DefaultPorts)
-	}
 	if _, err := validatePorts(ports); err != nil {
 		return Node{}, err
 	}
@@ -1106,7 +570,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		NetPolicy:          cloneNetPolicy(input.NetPolicy),
 		Status:             NodeStatusCreated,
 		AgentProfileName:   profileName,
-		RuntimeCommands:    input.RuntimeCommands,
 		BootstrapCommands:  bootstrap.CombinedCommands(),
 		WorkspaceMode:      workspaceMode,
 		GuestWorkspacePath: guestWorkspacePath,
@@ -1116,10 +579,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		CreatedAt:          s.now(),
 		UpdatedAt:          s.now(),
 	}
-	if input.Project != "" {
-		node.ProjectID = project.ID
-		node.ConfigurationID = ""
-	}
 
 	cleanupNodeDir := true
 	cleanupInstance := false
@@ -1128,7 +587,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 			return
 		}
 		if cleanupInstance {
-			_ = s.sandbox.Delete(ctx, project, node)
+			_ = s.sandbox.Delete(ctx, node)
 		}
 		if cleanupNodeDir {
 			_ = os.RemoveAll(s.store.nodeDir(nodeID))
@@ -1136,7 +595,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	}()
 
 	s.logRuntime("create", node.ID)
-	if err := s.sandbox.Create(ctx, project, node); err != nil {
+	if err := s.sandbox.Create(ctx, node); err != nil {
 		return Node{}, err
 	}
 	cleanupInstance = true
@@ -1155,7 +614,7 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 }
 
 func (s *Service) NodeList(ctx context.Context, includeDeleted bool) ([]Node, error) {
-	if err := s.EnsureReady(false); err != nil {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return nil, err
 	}
 
@@ -1237,26 +696,24 @@ func (s *Service) hydrateConfigurationSlug(node *Node) error {
 	return nil
 }
 
-func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult, error) {
+func (s *Service) NodeCleanupIncomplete(ctx context.Context, apply bool) (IncompleteNodeCleanupResult, error) {
 	// A dry run only inspects the home, so it stays on the read tier and never
 	// requires a runtime backend. Applying can tear down live runtime instances,
 	// so it takes the full write-readiness path (seed/repair under locks plus
 	// runtime-dependency validation, which requires msb).
 	if apply {
-		if err := s.EnsureReady(true); err != nil {
+		if err := s.EnsureReady(ctx, true); err != nil {
 			return IncompleteNodeCleanupResult{}, err
 		}
-	} else if err := s.EnsureReady(false); err != nil {
+	} else if err := s.EnsureReady(ctx, false); err != nil {
 		return IncompleteNodeCleanupResult{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockNodes)
 	if err != nil {
 		return IncompleteNodeCleanupResult{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	items, err := s.store.IncompleteNodeMetadata()
 	if err != nil {
@@ -1274,7 +731,7 @@ func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult
 	// it (TODO #10). Tear the instance down first; only then is removing the
 	// metadata that references it safe. Dirs with no matching live instance keep
 	// the historical behavior of a straight metadata removal.
-	observations, err := s.sandbox.List(context.Background())
+	observations, err := s.sandbox.List(ctx)
 	if err != nil {
 		return IncompleteNodeCleanupResult{}, err
 	}
@@ -1283,7 +740,7 @@ func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult
 	for _, item := range items {
 		if instanceName := strings.TrimSpace(item.SandboxName); instanceName != "" {
 			if _, live := findObservation(observations, instanceName); live {
-				if delErr := s.sandbox.Delete(context.Background(), Project{}, Node{SandboxName: instanceName}); delErr != nil {
+				if delErr := s.sandbox.Delete(ctx, Node{SandboxName: instanceName}); delErr != nil {
 					// Leave the dir (and its ref) in place so a retry or a
 					// manual msb removal can still find the sandbox.
 					teardownFailures = append(teardownFailures, instanceName)
@@ -1309,7 +766,7 @@ func (s *Service) NodeCleanupIncomplete(apply bool) (IncompleteNodeCleanupResult
 }
 
 func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {
-	if err := s.EnsureReady(false); err != nil {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return Node{}, err
 	}
 
@@ -1333,8 +790,8 @@ func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {
 // terminal without reconciling live VM status. A host terminal must remain
 // available when Microsandbox is stopped or temporarily unavailable, and a
 // guest terminal's child command performs its own runtime checks.
-func (s *Service) nodeTerminalMetadata(value string) (Node, error) {
-	if err := s.EnsureReady(false); err != nil {
+func (s *Service) nodeTerminalMetadata(ctx context.Context, value string) (Node, error) {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return Node{}, err
 	}
 	return s.store.NodeByIDOrSlug(value)
@@ -1348,20 +805,13 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockNodes)
 	if err != nil {
 		return Node{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	node, err := s.store.NodeByIDOrSlug(value)
-	if err != nil {
-		return Node{}, err
-	}
-
-	project, err := s.runtimeProject(node)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1376,9 +826,9 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		return Node{}, err
 	}
 
-	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != "running" {
+	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != ObservationRunning {
 		s.logRuntime("start", node.ID)
-		if err := s.sandbox.Start(ctx, project, node); err != nil {
+		if err := s.sandbox.Start(ctx, node); err != nil {
 			return Node{}, err
 		}
 	}
@@ -1396,7 +846,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 
 	if !bootstrap.Completed {
 		if !node.WorkspaceSeeded {
-			if err := s.prepareGuestWorkspace(ctx, project, node); err != nil {
+			if err := s.prepareGuestWorkspace(ctx, node); err != nil {
 				node.Status = NodeStatusFailed
 				node.UpdatedAt = s.now()
 				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"directory_path": node.DirectoryPath, "error": err.Error()}})
@@ -1461,13 +911,11 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockNodes)
 	if err != nil {
 		return Node{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	node, err := s.store.NodeByIDOrSlug(value)
 	if err != nil {
@@ -1484,12 +932,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 		return Node{}, err
 	}
 
-	project, err := s.runtimeProject(node)
-	if err != nil {
-		return Node{}, err
-	}
-
-	if node.LastRuntimeObservation != nil && node.LastRuntimeObservation.Status != "running" {
+	if node.LastRuntimeObservation != nil && node.LastRuntimeObservation.Status != ObservationRunning {
 		node.Status = NodeStatusStopped
 		node.UpdatedAt = s.now()
 		if err := s.store.SaveNode(node, bootstrap); err != nil {
@@ -1502,7 +945,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 	}
 
 	s.logRuntime("stop", node.ID)
-	if err := s.sandbox.Stop(ctx, project, node); err != nil {
+	if err := s.sandbox.Stop(ctx, node); err != nil {
 		return Node{}, err
 	}
 
@@ -1534,13 +977,11 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockNodes)
 	if err != nil {
 		return Node{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	sourceNode, err := s.store.NodeByIDOrSlug(input.SourceNode)
 	if err != nil {
@@ -1555,23 +996,14 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		return Node{}, err
 	}
 
-	if input.AgentProfile != "" && input.AgentProfile != sourceNode.AgentProfileName {
-		return Node{}, preconditionFailed("node clone copies the source VM and does not support agent profile overrides", map[string]any{"source_node_id": sourceNode.ID, "agent_profile_name": input.AgentProfile})
-	}
-
-	sourceProject, err := s.runtimeProject(sourceNode)
-	if err != nil {
-		return Node{}, err
-	}
-
 	sourceBootstrap, err := s.store.LoadBootstrapState(sourceNode.ID)
 	if err != nil {
 		return Node{}, err
 	}
 
-	sourceWasRunning := sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == "running"
+	sourceWasRunning := sourceNode.LastRuntimeObservation != nil && sourceNode.LastRuntimeObservation.Status == ObservationRunning
 	if sourceWasRunning {
-		if err := s.sandbox.Stop(ctx, sourceProject, sourceNode); err != nil {
+		if err := s.sandbox.Stop(ctx, sourceNode); err != nil {
 			return Node{}, err
 		}
 	}
@@ -1580,7 +1012,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 			return
 		}
 
-		if restartErr := s.sandbox.Start(ctx, sourceProject, sourceNode); restartErr != nil {
+		if restartErr := s.sandbox.Start(ctx, sourceNode); restartErr != nil {
 			err = errors.Join(err, restartErr)
 			return
 		}
@@ -1618,7 +1050,6 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		ConfigurationID:      sourceNode.ConfigurationID,
 		ConfigurationSlug:    sourceNode.ConfigurationSlug,
 		DirectoryPath:        sourceNode.DirectoryPath,
-		ProjectID:            sourceNode.ProjectID,
 		ParentNodeID:         sourceNode.ID,
 		Runtime:              RuntimeVM,
 		Provider:             ProviderMicrosandbox,
@@ -1643,12 +1074,9 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),
 	}
-	if sourceNode.ProjectID != "" {
-		childNode.RuntimeCommands = input.RuntimeCommands.ApplyDefaults(sourceNode.RuntimeCommands)
-	}
 
 	s.logRuntime("clone", childNode.ID)
-	if err := s.sandbox.Clone(ctx, sourceProject, sourceNode, childNode); err != nil {
+	if err := s.sandbox.Clone(ctx, sourceNode, childNode); err != nil {
 		return Node{}, err
 	}
 
@@ -1656,8 +1084,8 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	if err != nil {
 		return Node{}, err
 	}
-	if reconciledChildNode.LastRuntimeObservation != nil && reconciledChildNode.LastRuntimeObservation.Status == "running" {
-		if err := s.sandbox.Stop(ctx, sourceProject, childNode); err != nil {
+	if reconciledChildNode.LastRuntimeObservation != nil && reconciledChildNode.LastRuntimeObservation.Status == ObservationRunning {
+		if err := s.sandbox.Stop(ctx, childNode); err != nil {
 			return Node{}, err
 		}
 		reconciledChildNode, err = s.reconcileNode(ctx, childNode, false)
@@ -1683,13 +1111,11 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 		return Node{}, err
 	}
 
-	lockSet, err := acquireLocks(s.cfg.MetadataRoot, "nodes")
+	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockNodes)
 	if err != nil {
 		return Node{}, err
 	}
-	defer func() {
-		_ = lockSet.Close()
-	}()
+	defer lockSet.release()
 
 	node, err := s.store.NodeByIDOrSlug(value)
 	if err != nil {
@@ -1711,12 +1137,7 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 		return Node{}, err
 	}
 
-	project, err := s.runtimeProject(node)
-	if err != nil {
-		return Node{}, err
-	}
-
-	if err := s.sandbox.Delete(ctx, project, node); err != nil {
+	if err := s.sandbox.Delete(ctx, node); err != nil {
 		return Node{}, err
 	}
 
@@ -1739,8 +1160,8 @@ func (s *Service) NodeStatus(ctx context.Context, value string) (Node, error) {
 	return s.NodeShow(ctx, value)
 }
 
-func (s *Service) NodeLogs(value string) ([]Event, error) {
-	if err := s.EnsureReady(false); err != nil {
+func (s *Service) NodeLogs(ctx context.Context, value string) ([]Event, error) {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return nil, err
 	}
 
@@ -1753,16 +1174,11 @@ func (s *Service) NodeLogs(value string) ([]Event, error) {
 }
 
 func (s *Service) Shell(ctx context.Context, value string, command []string) error {
-	if err := s.EnsureReady(false); err != nil {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return err
 	}
 
 	node, err := s.store.NodeByIDOrSlug(value)
-	if err != nil {
-		return err
-	}
-
-	project, err := s.runtimeProject(node)
 	if err != nil {
 		return err
 	}
@@ -1773,7 +1189,7 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 	if interactive {
 		command = interactiveShellLaunchCommand()
 	}
-	return s.sandbox.Shell(ctx, project, node, command, workdir, interactive, ShellStreams{
+	return s.sandbox.Shell(ctx, node, command, workdir, interactive, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
 		Stderr: s.stderr,
@@ -1872,21 +1288,6 @@ func (s *Service) ensureUniqueNodeSlug(slug string) error {
 	return nil
 }
 
-func (s *Service) ensureUniqueProjectSlug(slug, currentProjectID string) error {
-	projects, err := s.store.ListProjects(false)
-	if err != nil {
-		return err
-	}
-
-	for _, project := range projects {
-		if project.Slug == slug && project.ID != currentProjectID {
-			return preconditionFailed("project slug already exists", map[string]any{"slug": slug})
-		}
-	}
-
-	return nil
-}
-
 func (s *Service) ensureUniqueEnvironmentConfigSlug(slug, currentConfigID string) error {
 	configs, err := s.store.ListEnvironmentConfigs(false)
 	if err != nil {
@@ -1947,24 +1348,6 @@ func (s *Service) resolveConfigurationBootstrapCommands(configuration Configurat
 	}
 	commands = append(commands, configuration.BootstrapCommands...)
 	return commands, nil
-}
-
-func runtimeProjectForNode(node Node) Project {
-	return Project{
-		ID:              node.ConfigurationID,
-		Slug:            "configuration",
-		WorkspacePath:   node.DirectoryPath,
-		DefaultRuntime:  RuntimeVM,
-		DefaultProvider: ProviderMicrosandbox,
-		DefaultImage:    node.Image,
-	}
-}
-
-func (s *Service) runtimeProject(node Node) (Project, error) {
-	if node.ProjectID != "" {
-		return s.store.ProjectByID(node.ProjectID)
-	}
-	return runtimeProjectForNode(node), nil
 }
 
 func (s *Service) resolveNodeDirectoryPath(input string) (string, error) {
@@ -2032,17 +1415,12 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		return nil
 	}
 
-	project, err := s.runtimeProject(node)
-	if err != nil {
-		return err
-	}
-
 	workdir := s.nodeGuestWorkspacePath(node)
 	script := command
 	if workdir != "" {
 		script = fmt.Sprintf("cd %q && %s", workdir, command)
 	}
-	return s.sandbox.Shell(ctx, project, node, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+	return s.sandbox.Shell(ctx, node, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
 }
 
 func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, error) {
@@ -2054,18 +1432,12 @@ func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, 
 	reclaimed := 0
 	var reclaimErr error
 	for _, node := range nodes {
-		if nodeWorkspaceMode(node) != WorkspaceModeMounted || node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != NodeStatusRunning {
-			continue
-		}
-		project, projectErr := s.runtimeProject(node)
-		if projectErr != nil {
-			reclaimErr = errors.Join(reclaimErr, fmt.Errorf("resolve runtime project for mounted node %s: %w", node.Slug, projectErr))
+		if nodeWorkspaceMode(node) != WorkspaceModeMounted || node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != ObservationRunning {
 			continue
 		}
 		reclaimCtx, cancel := context.WithTimeout(ctx, guestFilesystemCacheReclaimTimeout)
 		shellErr := s.sandbox.Shell(
 			reclaimCtx,
-			project,
 			node,
 			[]string{"sh", "-c", "echo 2 > /proc/sys/vm/drop_caches"},
 			"",
@@ -2083,12 +1455,8 @@ func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, 
 	return reclaimed, reclaimErr
 }
 
-func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, node Node) error {
-	if node.ProjectID != "" {
-		if err := s.ensureProjectWorkspaceAvailable(project); err != nil {
-			return err
-		}
-	} else if err := ensureNodeDirectoryAvailable(node); err != nil {
+func (s *Service) prepareGuestWorkspace(ctx context.Context, node Node) error {
+	if err := ensureNodeDirectoryAvailable(node); err != nil {
 		return err
 	}
 
@@ -2096,29 +1464,26 @@ func (s *Service) prepareGuestWorkspace(ctx context.Context, project Project, no
 		return nil
 	}
 
-	return s.seedGuestWorkspace(ctx, project, node)
+	return s.seedGuestWorkspace(ctx, node)
 }
 
-func (s *Service) seedGuestWorkspace(ctx context.Context, project Project, node Node) error {
+func (s *Service) seedGuestWorkspace(ctx context.Context, node Node) error {
 	targetPath := s.nodeGuestWorkspacePath(node)
 	sourcePath := node.DirectoryPath
-	if sourcePath == "" {
-		sourcePath = project.WorkspacePath
-	}
-	prepareScript, err := s.resolveWorkspaceSeedPrepareCommand(project, node, sourcePath, targetPath)
+	prepareScript, err := s.resolveWorkspaceSeedPrepareCommand(node, sourcePath, targetPath)
 	if err != nil {
 		return err
 	}
 
-	if err := s.sandbox.Shell(ctx, project, node, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
+	if err := s.sandbox.Shell(ctx, node, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
 		return err
 	}
 
-	return s.sandbox.CopyToGuest(ctx, project, node, sourcePath, targetPath, true)
+	return s.sandbox.CopyToGuest(ctx, node, sourcePath, targetPath, true)
 }
 
-func (s *Service) resolveWorkspaceSeedPrepareCommand(project Project, node Node, sourcePath, targetPath string) (string, error) {
-	commands, err := s.sandbox.ResolveCommands(project, node, runtimeCommandWorkspaceSeedPrepare, map[string]string{
+func (s *Service) resolveWorkspaceSeedPrepareCommand(node Node, sourcePath, targetPath string) (string, error) {
+	commands, err := s.sandbox.ResolveCommands(node, runtimeCommandWorkspaceSeedPrepare, map[string]string{
 		"sandbox_name":  shellQuote(node.SandboxName),
 		"source_path":   shellQuote(sourcePath),
 		"target_path":   shellQuote(targetPath),
@@ -2139,6 +1504,13 @@ func normalizeShellCommand(command []string) []string {
 	return append([]string(nil), command...)
 }
 
+// interactiveShellScript is the login-shell bootstrap for managed terminals.
+// It lives in a real .sh file so it can be read and linted as shell; the
+// @INPUTRC_LINES@ token is replaced with quoted readline bindings at launch.
+//
+//go:embed embedded/interactive_shell.sh
+var interactiveShellScript string
+
 func interactiveShellLaunchCommand() []string {
 	shellInputRCLines := []string{
 		`"\e[27;2;13~": "\C-v\C-j"`,
@@ -2149,42 +1521,7 @@ func interactiveShellLaunchCommand() []string {
 		shellInputRCArgs = append(shellInputRCArgs, shellQuote(line))
 	}
 
-	// The INPUTRC customization needs a writable directory for its temp file.
-	// A read-only $HOME (mktemp: Read-only file system) must not fail the shell
-	// (TODO #18): probe $HOME first, fall back to the working-directory-rooted
-	// ./tmp and then $TMPDIR (defaulting to /tmp), and if nothing is writable,
-	// skip the customization entirely rather than aborting. All probes suppress
-	// their own stderr so a non-writable candidate never leaks an error.
-	script := strings.Join([]string{
-		`if [ -x /usr/bin/gnustty ] && /bin/stty --version 2>/dev/null | grep -qi 'uutils coreutils'; then`,
-		`  sudo -n ln -sf /usr/bin/gnustty /bin/stty >/dev/null 2>&1 || true`,
-		`  sudo -n ln -sf /usr/bin/gnustty /usr/bin/stty >/dev/null 2>&1 || true`,
-		`fi`,
-		`shell_inputrc=""`,
-		`if command -v mktemp >/dev/null 2>&1; then`,
-		`  for shell_inputrc_dir in "${HOME:-}" "${PWD:-}/tmp" "${TMPDIR:-/tmp}"; do`,
-		`    [ -n "${shell_inputrc_dir}" ] || continue`,
-		`    [ -d "${shell_inputrc_dir}" ] || continue`,
-		`    shell_inputrc="$(mktemp "${shell_inputrc_dir}/.codelima-inputrc.XXXXXX" 2>/dev/null)" || shell_inputrc=""`,
-		`    [ -n "${shell_inputrc}" ] && break`,
-		`  done`,
-		`fi`,
-		`if [ -n "${shell_inputrc}" ]; then`,
-		`  if [ -n "${HOME:-}" ] && [ -f "${HOME}/.inputrc" ]; then`,
-		`    cat "${HOME}/.inputrc" > "${shell_inputrc}"`,
-		`    printf '\n' >> "${shell_inputrc}"`,
-		`  fi`,
-		fmt.Sprintf(`  printf '%%s\n' %s >> "${shell_inputrc}"`, strings.Join(shellInputRCArgs, " ")),
-		`  export INPUTRC="${shell_inputrc}"`,
-		`fi`,
-		`"${SHELL:-/bin/bash}" -l`,
-		`status=$?`,
-		`if [ -n "${shell_inputrc}" ]; then`,
-		`  rm -f "${shell_inputrc}"`,
-		`fi`,
-		`exit "${status}"`,
-	}, "\n")
-
+	script := strings.ReplaceAll(interactiveShellScript, "@INPUTRC_LINES@", strings.Join(shellInputRCArgs, " "))
 	return []string{"sh", "-lc", script}
 }
 
@@ -2197,16 +1534,7 @@ func (s *Service) nodeGuestWorkspacePath(node Node) string {
 		return node.WorkspaceMountPath
 	}
 
-	if node.DirectoryPath != "" {
-		return node.DirectoryPath
-	}
-	if node.ProjectID != "" {
-		project, err := s.store.ProjectByID(node.ProjectID)
-		if err == nil {
-			return project.WorkspacePath
-		}
-	}
-	return ""
+	return node.DirectoryPath
 }
 
 func normalizeWorkspaceMode(mode string) string {
@@ -2228,47 +1556,6 @@ func nodeWorkspaceMode(node Node) string {
 		return WorkspaceModeMounted
 	}
 	return WorkspaceModeCopy
-}
-
-func (s *Service) resolveProjectWorkspacePath(input string, currentProjectID string) (string, error) {
-	workspacePath, err := canonicalPath(input)
-	if err != nil {
-		return "", invalidArgument("workspace path must be resolvable", map[string]any{"path": input})
-	}
-
-	info, err := os.Stat(workspacePath)
-	if err != nil {
-		return "", invalidArgument("workspace path must exist", map[string]any{"path": workspacePath})
-	}
-
-	if !info.IsDir() {
-		return "", invalidArgument("workspace path must be a directory", map[string]any{"path": workspacePath})
-	}
-
-	if strings.HasPrefix(workspacePath, s.cfg.MetadataRoot+string(os.PathSeparator)) {
-		return "", invalidArgument("workspace path must not be inside CODELIMA_HOME", map[string]any{"path": workspacePath})
-	}
-
-	if existing, found, err := s.store.ProjectByWorkspacePath(workspacePath); err != nil {
-		return "", err
-	} else if found && existing.ID != currentProjectID {
-		return "", preconditionFailed("workspace is already registered", map[string]any{"project_id": existing.ID, "workspace_path": workspacePath})
-	}
-
-	return workspacePath, nil
-}
-
-func (s *Service) ensureProjectWorkspaceAvailable(project Project) error {
-	info, err := os.Stat(project.WorkspacePath)
-	if err != nil {
-		return preconditionFailed("registered workspace path no longer exists on the host; update the project workspace before creating, starting, or shelling into nodes", map[string]any{"project_id": project.ID, "workspace_path": project.WorkspacePath})
-	}
-
-	if !info.IsDir() {
-		return preconditionFailed("registered workspace path is no longer a directory on the host; update the project workspace before creating, starting, or shelling into nodes", map[string]any{"project_id": project.ID, "workspace_path": project.WorkspacePath})
-	}
-
-	return nil
 }
 
 func (s *Service) reconcileNode(ctx context.Context, node Node, persist bool) (Node, error) {
@@ -2305,11 +1592,11 @@ func (s *Service) reconcileNodeWithObservations(node Node, observations []Runtim
 	if ok {
 		node.LastRuntimeObservation = &observation
 		switch observation.Status {
-		case "running":
+		case ObservationRunning:
 			if node.Status != NodeStatusFailed && node.Status != NodeStatusTerminating && node.Status != NodeStatusTerminated {
 				node.Status = NodeStatusRunning
 			}
-		case "stopped":
+		case ObservationStopped:
 			if node.Status != NodeStatusFailed && node.Status != NodeStatusTerminating && node.Status != NodeStatusTerminated {
 				node.Status = NodeStatusStopped
 			}

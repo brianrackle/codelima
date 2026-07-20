@@ -1,6 +1,7 @@
 package codelima
 
 import (
+	"context"
 	"strings"
 )
 
@@ -22,15 +23,15 @@ type ConfigurationCloneInput struct {
 	Slug   string
 }
 
-func (s *Service) ConfigurationCreate(input ConfigurationCreateInput) (Configuration, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) ConfigurationCreate(ctx context.Context, input ConfigurationCreateInput) (Configuration, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "environments")
+	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockEnvironments)
 	if err != nil {
 		return Configuration{}, err
 	}
-	defer func() { _ = locks.Close() }()
+	defer locks.release()
 
 	if strings.TrimSpace(input.Slug) == "" {
 		return Configuration{}, invalidArgument("configuration slug is required", nil)
@@ -58,15 +59,15 @@ func (s *Service) ConfigurationCreate(input ConfigurationCreateInput) (Configura
 	return configuration, nil
 }
 
-func (s *Service) ConfigurationClone(input ConfigurationCloneInput) (Configuration, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) ConfigurationClone(ctx context.Context, input ConfigurationCloneInput) (Configuration, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(s.cfg.MetadataRoot, "configurations")
+	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations)
 	if err != nil {
 		return Configuration{}, err
 	}
-	defer func() { _ = locks.Close() }()
+	defer locks.release()
 	if strings.TrimSpace(input.Slug) == "" {
 		return Configuration{}, invalidArgument("configuration clone requires --slug", nil)
 	}
@@ -90,29 +91,29 @@ func (s *Service) ConfigurationClone(input ConfigurationCloneInput) (Configurati
 	return cloned, nil
 }
 
-func (s *Service) ConfigurationList(includeDeleted bool) ([]Configuration, error) {
-	if err := s.EnsureReady(false); err != nil {
+func (s *Service) ConfigurationList(ctx context.Context, includeDeleted bool) ([]Configuration, error) {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return nil, err
 	}
 	return s.store.ListConfigurations(includeDeleted)
 }
 
-func (s *Service) ConfigurationShow(value string) (Configuration, error) {
-	if err := s.EnsureReady(false); err != nil {
+func (s *Service) ConfigurationShow(ctx context.Context, value string) (Configuration, error) {
+	if err := s.EnsureReady(ctx, false); err != nil {
 		return Configuration{}, err
 	}
 	return s.store.ConfigurationByIDOrSlug(value)
 }
 
-func (s *Service) ConfigurationUpdate(value string, input ConfigurationUpdateInput) (Configuration, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) ConfigurationUpdate(ctx context.Context, value string, input ConfigurationUpdateInput) (Configuration, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "environments")
+	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockEnvironments)
 	if err != nil {
 		return Configuration{}, err
 	}
-	defer func() { _ = locks.Close() }()
+	defer locks.release()
 	configuration, err := s.store.ConfigurationByIDOrSlug(value)
 	if err != nil {
 		return Configuration{}, err
@@ -136,15 +137,15 @@ func (s *Service) ConfigurationUpdate(value string, input ConfigurationUpdateInp
 	return configuration, nil
 }
 
-func (s *Service) ConfigurationDelete(value string) (Configuration, error) {
-	if err := s.ensureReadyForWrite(); err != nil {
+func (s *Service) ConfigurationDelete(ctx context.Context, value string) (Configuration, error) {
+	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(s.cfg.MetadataRoot, "configurations", "nodes")
+	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockNodes)
 	if err != nil {
 		return Configuration{}, err
 	}
-	defer func() { _ = locks.Close() }()
+	defer locks.release()
 	configuration, err := s.store.ConfigurationByIDOrSlug(value)
 	if err != nil {
 		return Configuration{}, err

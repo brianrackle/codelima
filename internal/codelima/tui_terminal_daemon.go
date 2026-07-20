@@ -11,8 +11,8 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 )
 
 // daemonTUITerminal is a client-side view of a daemon-owned terminal. The
@@ -25,6 +25,10 @@ type daemonRPCCaller interface {
 // Keep worst-case JSON escaping (six bytes for one control byte), request
 // metadata, and the newline delimiter comfortably below daemon.MaxMessageSize.
 const daemonTerminalPasteChunkBytes = daemon.MaxMessageSize / 16
+
+// daemonRPCTimeout bounds every fire-and-forget daemon terminal RPC issued by
+// this client-side view (resize, input, snapshot, focus, close).
+const daemonRPCTimeout = 2 * time.Second
 
 type daemonTUITerminal struct {
 	client     daemonRPCCaller
@@ -71,7 +75,7 @@ func (t *daemonTUITerminal) Resize(width, height int) {
 	if width == t.resizeCols && height == t.resizeRows {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
 	defer cancel()
 	if err := t.client.Call(ctx, "terminal.resize", map[string]any{"terminal_id": t.id, "cols": width, "rows": height}, nil); err == nil {
 		t.resizeCols, t.resizeRows = width, height
@@ -178,7 +182,7 @@ func (t *daemonTUITerminal) deliverInput() {
 			t.inputQueue = t.inputQueue[1:]
 			t.inputMu.Unlock()
 
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
 			err := t.client.Call(ctx, "terminal.send_event", request.params, nil)
 			cancel()
 			if err != nil {
@@ -269,7 +273,7 @@ func daemonCellStyle(cell daemon.SnapshotCell) vaxis.Style {
 
 func (t *daemonTUITerminal) Close() {
 	t.detach()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
 	defer cancel()
 	_ = t.client.Call(ctx, "terminal.close", map[string]string{"terminal_id": t.id}, nil)
 }
@@ -295,7 +299,7 @@ func (t *daemonTUITerminal) Focus() {
 	t.mu.Lock()
 	t.focused = true
 	t.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
 	defer cancel()
 	_ = t.client.Call(ctx, "terminal.focus", map[string]string{"terminal_id": t.id}, nil)
 }
@@ -347,7 +351,7 @@ func (t *daemonTUITerminal) poll() {
 		case <-t.stop:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
 			var snapshot daemon.Snapshot
 			err := t.client.Call(ctx, "terminal.snapshot", map[string]string{"terminal_id": t.id}, &snapshot)
 			cancel()
@@ -384,11 +388,7 @@ func daemonSnapshotText(snapshot daemon.Snapshot) string {
 			if grapheme == "" {
 				grapheme = " "
 			}
-			if r, _ := utf8.DecodeRuneInString(grapheme); r == utf8.RuneError && len(grapheme) > 1 {
-				line.WriteString(grapheme)
-			} else {
-				line.WriteString(grapheme)
-			}
+			line.WriteString(grapheme)
 		}
 		lines = append(lines, strings.TrimRight(line.String(), " "))
 	}

@@ -11,7 +11,7 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 type daemonPasteCall struct {

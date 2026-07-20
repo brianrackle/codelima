@@ -8,7 +8,6 @@ import (
 )
 
 func TestResolveSDKNodeConfigTranslatesMountPortsAndPolicy(t *testing.T) {
-	project := Project{WorkspacePath: "/host/work", DefaultImage: "image:12"}
 	node := Node{
 		SandboxName:        "demo-node",
 		Image:              "image:12",
@@ -21,7 +20,7 @@ func TestResolveSDKNodeConfigTranslatesMountPortsAndPolicy(t *testing.T) {
 		WorkspaceMountPath: "/host/work",
 		GuestWorkspacePath: "/workspace",
 	}
-	config, err := resolveSDKNodeConfig(project, node)
+	config, err := resolveSDKNodeConfig(node)
 	if err != nil {
 		t.Fatalf("resolveSDKNodeConfig() error = %v", err)
 	}
@@ -42,6 +41,18 @@ func TestResolveSDKNodeConfigTranslatesMountPortsAndPolicy(t *testing.T) {
 	}
 	if len(config.network.Rules) != 2 || config.network.Rules[0].Destination != "api.example.com" || config.network.Rules[1].Destination != "public" {
 		t.Fatalf("network rules = %#v", config.network.Rules)
+	}
+
+	// A mounted node without an explicit mount path falls back to the node's
+	// host directory for the host side of the bind mount.
+	node.WorkspaceMountPath = ""
+	node.DirectoryPath = "/host/dir"
+	fallback, err := resolveSDKNodeConfig(node)
+	if err != nil {
+		t.Fatalf("resolveSDKNodeConfig(directory fallback) error = %v", err)
+	}
+	if got := fallback.mounts["/workspace"].Bind; got != "/host/dir" {
+		t.Fatalf("directory fallback mount bind = %q", got)
 	}
 }
 
@@ -65,7 +76,7 @@ func TestMapSDKErrorCategories(t *testing.T) {
 	tests := []struct {
 		name     string
 		err      error
-		category string
+		category ErrorCategory
 	}{
 		{name: "not found", err: &microsandbox.Error{Kind: microsandbox.ErrSandboxNotFound}, category: "NotFound"},
 		{name: "already exists", err: &microsandbox.Error{Kind: microsandbox.ErrSandboxAlreadyExists}, category: "PreconditionFailed"},

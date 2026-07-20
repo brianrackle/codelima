@@ -1,7 +1,6 @@
 package codelima
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -69,14 +68,14 @@ func (c *SDKSandboxClient) Version(ctx context.Context) (string, error) {
 	return sdkVersion, nil
 }
 
-func (c *SDKSandboxClient) ResolveCommands(project Project, node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) ResolveCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return nil, err
 	}
 	if kind != runtimeCommandBootstrap && kind != runtimeCommandWorkspaceSeedPrepare {
 		return nil, preconditionFailed("microsandbox CLI command overrides are unavailable with the Go SDK", map[string]any{"kind": string(kind)})
 	}
-	return resolveConfiguredRuntimeCommands("", c.RuntimeCommands, project, node.RuntimeCommands, kind, values)
+	return resolveConfiguredRuntimeCommands("", c.RuntimeCommands, node.RuntimeCommands, kind, values)
 }
 
 func (c *SDKSandboxClient) List(ctx context.Context) ([]RuntimeObservation, error) {
@@ -87,7 +86,7 @@ func (c *SDKSandboxClient) List(ctx context.Context) ([]RuntimeObservation, erro
 	observations := make([]RuntimeObservation, 0, len(handles))
 	for _, handle := range handles {
 		observations = append(observations, RuntimeObservation{
-			Name: handle.Name(), Exists: true, Status: strings.ToLower(string(handle.Status())),
+			Name: handle.Name(), Exists: true, Status: ObservationStatus(strings.ToLower(string(handle.Status()))),
 		})
 	}
 	return observations, nil
@@ -104,14 +103,11 @@ type sdkNodeConfig struct {
 	network *microsandbox.NetworkConfig
 }
 
-func resolveSDKNodeConfig(project Project, node Node) (sdkNodeConfig, error) {
+func resolveSDKNodeConfig(node Node) (sdkNodeConfig, error) {
 	if err := validateSandboxName(node.SandboxName); err != nil {
 		return sdkNodeConfig{}, err
 	}
 	image := strings.TrimSpace(node.Image)
-	if image == "" {
-		image = strings.TrimSpace(project.DefaultImage)
-	}
 	if node.VCPUs == 0 || node.MemoryMiB == 0 || node.DiskMiB == 0 {
 		return sdkNodeConfig{}, invalidArgument("node vcpus, memory, and disk must be positive", map[string]any{"node": node.ID})
 	}
@@ -133,7 +129,7 @@ func resolveSDKNodeConfig(project Project, node Node) (sdkNodeConfig, error) {
 	if nodeWorkspaceMode(node) == WorkspaceModeMounted {
 		hostPath := strings.TrimSpace(node.WorkspaceMountPath)
 		if hostPath == "" {
-			hostPath = project.WorkspacePath
+			hostPath = node.DirectoryPath
 		}
 		guestPath := strings.TrimSpace(node.GuestWorkspacePath)
 		if hostPath == "" || guestPath == "" {
@@ -194,11 +190,11 @@ func sdkCreateOptions(config sdkNodeConfig, snapshot string) []microsandbox.Sand
 	return options
 }
 
-func (c *SDKSandboxClient) Create(ctx context.Context, project Project, node Node) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) Create(ctx context.Context, node Node) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return err
 	}
-	config, err := resolveSDKNodeConfig(project, node)
+	config, err := resolveSDKNodeConfig(node)
 	if err != nil {
 		return err
 	}
@@ -217,8 +213,8 @@ func (c *SDKSandboxClient) Create(ctx context.Context, project Project, node Nod
 	return nil
 }
 
-func (c *SDKSandboxClient) Start(ctx context.Context, project Project, node Node) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) Start(ctx context.Context, node Node) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return err
 	}
 	sandbox, err := c.sdk().StartDetached(ctx, node.SandboxName)
@@ -232,8 +228,8 @@ func (c *SDKSandboxClient) Start(ctx context.Context, project Project, node Node
 	return nil
 }
 
-func (c *SDKSandboxClient) Stop(ctx context.Context, project Project, node Node) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) Stop(ctx context.Context, node Node) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return err
 	}
 	handle, err := c.sdk().Get(ctx, node.SandboxName)
@@ -246,8 +242,8 @@ func (c *SDKSandboxClient) Stop(ctx context.Context, project Project, node Node)
 	return nil
 }
 
-func (c *SDKSandboxClient) Delete(ctx context.Context, project Project, node Node) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) Delete(ctx context.Context, node Node) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return err
 	}
 	handle, err := c.sdk().Get(ctx, node.SandboxName)
@@ -268,11 +264,11 @@ func (c *SDKSandboxClient) Delete(ctx context.Context, project Project, node Nod
 	return nil
 }
 
-func (c *SDKSandboxClient) Clone(ctx context.Context, project Project, sourceNode, targetNode Node) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, sourceNode.RuntimeCommands, targetNode.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) Clone(ctx context.Context, sourceNode, targetNode Node) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, sourceNode.RuntimeCommands, targetNode.RuntimeCommands); err != nil {
 		return err
 	}
-	config, err := resolveSDKNodeConfig(project, targetNode)
+	config, err := resolveSDKNodeConfig(targetNode)
 	if err != nil {
 		return err
 	}
@@ -284,7 +280,11 @@ func (c *SDKSandboxClient) Clone(ctx context.Context, project Project, sourceNod
 	if err := source.Snapshot(ctx, snapshotName); err != nil {
 		return mapSDKError("snapshot clone source", err, map[string]any{"source_sandbox": sourceNode.SandboxName, "snapshot": snapshotName})
 	}
-	defer func() { _ = c.sdk().RemoveSnapshot(context.Background(), snapshotName) }()
+	defer func() {
+		if removeErr := c.sdk().RemoveSnapshot(context.Background(), snapshotName); removeErr != nil {
+			packageLog().Warn("remove clone snapshot failed", "snapshot", snapshotName, "error", removeErr.Error())
+		}
+	}()
 	target, err := c.sdk().Create(ctx, config.name, sdkCreateOptions(config, snapshotName)...)
 	if err != nil {
 		return mapSDKError("create microsandbox clone", err, map[string]any{"source_sandbox": sourceNode.SandboxName, "sandbox_name": targetNode.SandboxName})
@@ -316,8 +316,8 @@ func cleanupFailedSDKSandbox(runtime sdkRuntime, name string, sandbox sdkSandbox
 	_ = handle.Remove(ctx)
 }
 
-func (c *SDKSandboxClient) CopyToGuest(ctx context.Context, project Project, node Node, sourcePath, targetPath string, recursive bool) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) CopyToGuest(ctx context.Context, node Node, sourcePath, targetPath string, recursive bool) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return err
 	}
 	sandbox, err := connectSDKSandbox(ctx, c.sdk(), node.SandboxName)
@@ -385,8 +385,8 @@ func (c *SDKSandboxClient) copyHostSymlink(ctx context.Context, sandbox sdkSandb
 	return c.runSDKExec(ctx, sandbox, sandboxName, []string{"ln", "-s", linkTarget, targetPath}, "", ShellStreams{})
 }
 
-func (c *SDKSandboxClient) Shell(ctx context.Context, project Project, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error {
-	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, project.RuntimeCommands, node.RuntimeCommands); err != nil {
+func (c *SDKSandboxClient) Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error {
+	if err := validateSDKRuntimeCommandTemplates(c.RuntimeCommands, node.RuntimeCommands); err != nil {
 		return err
 	}
 	if interactive {
@@ -454,6 +454,13 @@ func (c *SDKSandboxClient) runSDKExec(ctx context.Context, sandbox sdkSandbox, s
 			_, _ = io.Copy(sink, streams.Stdin)
 			_ = sink.Close()
 		}()
+		// Unblock the pump when the guest exits first: a closable stdin source
+		// (pipes in tests and internal callers) is closed on return so the
+		// goroutine does not sit in Read forever. The process stdin is left
+		// alone — the CLI owns it.
+		if closer, ok := streams.Stdin.(io.Closer); ok && streams.Stdin != os.Stdin {
+			defer func() { _ = closer.Close() }()
+		}
 	}
 
 	stdout := streams.Stdout
@@ -464,8 +471,10 @@ func (c *SDKSandboxClient) runSDKExec(ctx context.Context, sandbox sdkSandbox, s
 	if stderr == nil {
 		stderr = c.Stderr
 	}
-	var stderrCapture bytes.Buffer
-	stderr = sdkOutputWriter(&stderrCapture, stderr)
+	// Retain only the tail of guest stderr for error messages instead of
+	// buffering an unbounded stream in memory.
+	stderrCapture := newTailBuffer(sdkStderrCaptureLimit)
+	stderr = sdkOutputWriter(stderrCapture, stderr)
 	exitCode := -1
 	for {
 		event, recvErr := handle.Recv(ctx)
@@ -591,4 +600,30 @@ func sdkSSHServeWithRuntime(ctx context.Context, runtime sdkRuntime, sandboxName
 		return mapSDKError("serve microsandbox SSH connection", err, map[string]any{"sandbox_name": sandboxName})
 	}
 	return nil
+}
+
+// sdkStderrCaptureLimit bounds how much guest stderr is retained for the
+// exit-error message.
+const sdkStderrCaptureLimit = 8 * 1024
+
+// tailBuffer keeps the last capacity bytes written to it.
+type tailBuffer struct {
+	capacity int
+	data     []byte
+}
+
+func newTailBuffer(capacity int) *tailBuffer {
+	return &tailBuffer{capacity: capacity}
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.data = append(b.data, p...)
+	if len(b.data) > b.capacity {
+		b.data = append([]byte(nil), b.data[len(b.data)-b.capacity:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) Bytes() []byte {
+	return b.data
 }

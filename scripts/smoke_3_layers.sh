@@ -3,7 +3,7 @@ set -eu
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${CODELIMA_BIN:-$ROOT_DIR/bin/codelima}"
-FIXTURE="$ROOT_DIR/test-node-dir"
+FIXTURE="$ROOT_DIR/testdata/smoke-node-dir"
 
 if [ ! -x "$BIN" ]; then
   echo "build the CLI first with make build: $BIN" >&2

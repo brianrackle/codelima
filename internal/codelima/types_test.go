@@ -1,141 +1,11 @@
 package codelima
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
-
-func TestProjectMarshalsBootstrapCommandsAndReadsLegacySetupCommands(t *testing.T) {
-	t.Parallel()
-
-	project := Project{
-		ID:                 "project-1",
-		Slug:               "root",
-		WorkspacePath:      "/workspace/root",
-		EnvironmentConfigs: []string{"shared-dev", "lang-go"},
-		RuntimeCommands: RuntimeCommandTemplates{
-			Bootstrap: []string{"./script/setup", "direnv allow"},
-			Start:     []string{"{{binary}} start {{sandbox_name}} --vm-type=vz"},
-			ShellExec: []string{"{{binary}} shell{{workdir_flag}} {{sandbox_name}}{{command_args}}"},
-		},
-	}
-
-	yamlPayload, err := yaml.Marshal(project)
-	if err != nil {
-		t.Fatalf("yaml.Marshal(project) error = %v", err)
-	}
-
-	if strings.Contains(string(yamlPayload), "setup_commands:") {
-		t.Fatalf("expected yaml output to avoid setup_commands, got %s", string(yamlPayload))
-	}
-
-	if strings.Contains(string(yamlPayload), "environment_commands:") {
-		t.Fatalf("expected yaml output to avoid environment_commands, got %s", string(yamlPayload))
-	}
-
-	if !strings.Contains(string(yamlPayload), "environment_configs:") {
-		t.Fatalf("expected yaml output to include environment_configs, got %s", string(yamlPayload))
-	}
-
-	if !strings.Contains(string(yamlPayload), "runtime_commands:") {
-		t.Fatalf("expected yaml output to include runtime_commands, got %s", string(yamlPayload))
-	}
-
-	if !strings.Contains(string(yamlPayload), "bootstrap:") || !strings.Contains(string(yamlPayload), "./script/setup") {
-		t.Fatalf("expected yaml output to include bootstrap commands, got %s", string(yamlPayload))
-	}
-
-	if !strings.Contains(string(yamlPayload), "start:") || !strings.Contains(string(yamlPayload), "{{binary}} start {{sandbox_name}} --vm-type=vz") {
-		t.Fatalf("expected yaml output to include custom start command, got %s", string(yamlPayload))
-	}
-
-	jsonPayload, err := json.Marshal(project)
-	if err != nil {
-		t.Fatalf("json.Marshal(project) error = %v", err)
-	}
-
-	if strings.Contains(string(jsonPayload), "setup_commands") {
-		t.Fatalf("expected json output to avoid setup_commands, got %s", string(jsonPayload))
-	}
-
-	if strings.Contains(string(jsonPayload), "environment_commands") {
-		t.Fatalf("expected json output to avoid environment_commands, got %s", string(jsonPayload))
-	}
-
-	if !strings.Contains(string(jsonPayload), "bootstrap") {
-		t.Fatalf("expected json output to include bootstrap commands, got %s", string(jsonPayload))
-	}
-
-	if !strings.Contains(string(jsonPayload), "environment_configs") {
-		t.Fatalf("expected json output to include environment_configs, got %s", string(jsonPayload))
-	}
-
-	if !strings.Contains(string(jsonPayload), "runtime_commands") {
-		t.Fatalf("expected json output to include runtime_commands, got %s", string(jsonPayload))
-	}
-
-	var fromLegacyYAML Project
-	if err := yaml.Unmarshal([]byte(`
-id: project-1
-slug: root
-workspace_path: /workspace/root
-environment_configs:
-  - shared-dev
-  - lang-go
-setup_commands:
-  - ./script/setup
-  - direnv allow
-runtime_commands:
-  start:
-    - "{{binary}} start {{sandbox_name}} --vm-type=vz"
-  shell_exec:
-    - "{{binary}} shell{{workdir_flag}} {{sandbox_name}}{{command_args}}"
-`), &fromLegacyYAML); err != nil {
-		t.Fatalf("yaml.Unmarshal(legacy) error = %v", err)
-	}
-
-	if got := strings.Join(fromLegacyYAML.RuntimeCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
-		t.Fatalf("expected legacy yaml setup commands to load into bootstrap, got %q", got)
-	}
-
-	if got := strings.Join(fromLegacyYAML.EnvironmentConfigs, "|"); got != "shared-dev|lang-go" {
-		t.Fatalf("expected environment config refs to load from yaml, got %q", got)
-	}
-
-	if got := strings.Join(fromLegacyYAML.RuntimeCommands.Start, "|"); got != "{{binary}} start {{sandbox_name}} --vm-type=vz" {
-		t.Fatalf("expected sandbox start command to load from yaml, got %q", got)
-	}
-
-	var fromLegacyJSON Project
-	if err := json.Unmarshal([]byte(`{
-  "id": "project-1",
-  "slug": "root",
-  "workspace_path": "/workspace/root",
-  "environment_configs": ["shared-dev", "lang-go"],
-  "setup_commands": ["./script/setup", "direnv allow"],
-  "runtime_commands": {
-    "start": ["{{binary}} start {{sandbox_name}} --vm-type=vz"],
-    "shell_exec": ["{{binary}} exec{{workdir_flag}} {{sandbox_name}}{{command_args}}"]
-  }
-}`), &fromLegacyJSON); err != nil {
-		t.Fatalf("json.Unmarshal(legacy) error = %v", err)
-	}
-
-	if got := strings.Join(fromLegacyJSON.RuntimeCommands.Bootstrap, "|"); got != "./script/setup|direnv allow" {
-		t.Fatalf("expected legacy json setup commands to load into bootstrap, got %q", got)
-	}
-
-	if got := strings.Join(fromLegacyJSON.EnvironmentConfigs, "|"); got != "shared-dev|lang-go" {
-		t.Fatalf("expected environment config refs to load from json, got %q", got)
-	}
-
-	if got := len(fromLegacyJSON.RuntimeCommands.ShellExec); got != 0 {
-		t.Fatalf("expected exact legacy shell command to migrate away, got %v", fromLegacyJSON.RuntimeCommands.ShellExec)
-	}
-}
 
 func TestNodeMarshalsRuntimeCommandsWhenConfigured(t *testing.T) {
 	t.Parallel()
@@ -143,7 +13,6 @@ func TestNodeMarshalsRuntimeCommandsWhenConfigured(t *testing.T) {
 	node := Node{
 		ID:               "node-1",
 		Slug:             "root-node",
-		ProjectID:        "project-1",
 		Runtime:          RuntimeVM,
 		Provider:         ProviderMicrosandbox,
 		SandboxName:      "root-root-node-12345678",

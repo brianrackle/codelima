@@ -102,3 +102,69 @@ The suite's fundamentals are genuinely good — fakes behind real interfaces, in
 9. **CI hardening**: `-race` job, skip-accounting for the cgo suite, fix the parallel/global-seam race, integration `waitFor`, rename the module, `testdata/` (§8, §9).
 
 The through-line: you've already written down what correct looks like — in PATTERNS.MD, in ADRs, in careful comments. The remaining work is making the compiler, the package graph, and the type system enforce it so the documentation describes the structure instead of substituting for it.
+---
+
+# Implementation status (2026-07-20)
+
+All nine phases were implemented on branch `track-0-1-stabilization-and-identity`.
+Net diff: 79 files, +3,766 / −6,954 lines. Verification gates after every phase:
+`make build`, `make test` (only the two pre-existing root-environment failures:
+TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth's `#` prompt and
+TestAtomicWriteFileCleansUpTempOnReadOnlyDirFailure), `make test-integration`
+(all pass), `make lint` (clean with the expanded linter set), plus a
+`-race` spot-check of the touched concurrency paths.
+
+1. **Project/snapshot subsystem deleted** — Project type + wire mirror, all
+   Project CRUD/fork/tree, snapshot.go, `Node.ProjectID`, the fabricated
+   runtime Project, msb_legacy_test.go, the five permanently-skipped tests.
+   `SandboxClient` is node-only; the TUI is a flat node list; host tabs use a
+   typed `shellKind` instead of the tree-entry pun.
+2. **Package boundaries** — handoff framing + `MaxHandoffFDsPerFrame` live in
+   `daemon`; RPC error codes defined once in `daemon` and aliased as exit
+   codes; shared `internal/atomicfile` (daemon identity files now fsync);
+   daemon lifecycle moved from cli.go to daemon_lifecycle.go. The full
+   store/tui/sandbox package extraction remains future work.
+3. **Typed domain** — `NodeStatus` vs `ObservationStatus` (the compiler now
+   rejects the confusion the review found at the old service.go:2057), typed
+   `lockKey` + `LockSet.release()`, typed `ErrorCategory` + `IsNotFound`,
+   compat.go deleted, `unixpacket` sniff replaced by the typed
+   `handoff_transport_unsupported` RPC field (substring kept as a commented
+   legacy fallback).
+4. **Context end-to-end** — per-connection handler contexts in the daemon
+   server, ctx-aware start/import polls, ctx-cancellable flock, ctx threaded
+   through all mutating service methods and the daemon host's `open`.
+5. **Wire mirrors** — `RuntimeCommandTemplates` operations all drive off one
+   pointer field table; node-file staleness is decided by parsing YAML, not
+   substring-matching it. (The remaining Node/BootstrapState wire structs are
+   deliberate: file format ≠ API output; they are round-trip-tested.)
+6. **CLI layer** — table-driven commands (cli_command.go) with real per-flag
+   help, `<group> --help` / `<command> --help`, one shared positional/flag
+   parser replacing the seven hand-rolled copies, `withDaemonClient` for the
+   dial-defer-close ritual.
+7. **TUI consolidations** — one `tuiOverlay` interface (five disjunction sites
+   collapsed, unified non-fatal error policy), one key-binding table that also
+   derives the payload-key predicate, `setStatus(level)`/`clearStatus` with a
+   level-aware footer (successes are no longer styled as errors), the terminal
+   factory is a store field (package-var seam and its parallel-test hazard
+   gone), plus the dead-code/naming batch (Option-glyph constants,
+   `daemonRPCTimeout`, SessionKey renames, merged keymaps, selector
+   `EmptyText`).
+8. **Performance/reliability** — versioned seed/repair (mutating commands no
+   longer rescan every node file), node by-slug index with doctor-time
+   backfill, forwarder closes SSH peers outside the mutex and logs via
+   injected slog, bounded daemon-client frame reads, `runSDKExec` stdin-pump
+   and stderr-capture fixes, daemon `prepare()` unwind, Broadcast write
+   deadline, accept-loop backoff, deterministic `daemon.stop` (listeners close
+   before the response, fixing the start/stop race the faster seed path
+   exposed). The 50 ms full-grid terminal snapshot poll is NOT yet
+   event-driven — that protocol change is the main deferred item.
+9. **CI + hygiene** — module renamed `test_lima` → `codelima`, `-race` CI job,
+   +6 linters (all findings fixed), fixtures under `testdata/`, embedded
+   `interactive_shell.sh` via go:embed, `exists()` no longer treats permission
+   errors as absence.
+
+Deferred, in rough priority order: full package split (store/entity/tui/
+sandbox), event-driven terminal snapshots, journaled save+event writes,
+skip-guard env (`CODELIMA_TEST_REQUIRE_TERMINALS`) for the cgo suite, moving
+the test fault injectors from env vars to struct fields, splitting
+tui_terminal_ghostty_cgo.go by responsibility.

@@ -9,6 +9,18 @@ import (
 	"git.sr.ht/~rockorager/vaxis/widgets/textinput"
 )
 
+// tuiOverlay is the single active right-pane override (dialog, menu,
+// selector, or messages view). At most one overlay is visible at a time; the
+// app stores it in vaxisTUIApp.overlay. Update reports done=true when the
+// overlay should be dismissed. Update errors are NON-fatal: the app surfaces
+// them in the footer status and dismisses the overlay (the historical
+// selector/menu policy; dialog Update errors used to abort the whole TUI).
+type tuiOverlay interface {
+	Update(event vaxis.Event) (done bool, err error)
+	Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle vaxis.Style)
+	FooterHint() string
+}
+
 type tuiDialogField struct {
 	Key      string
 	Label    string
@@ -93,25 +105,25 @@ func (f *tuiDialogField) renderedValue() string {
 	return value
 }
 
-func (d *tuiDialog) Update(event vaxis.Event) (completed bool, cancelled bool, err error) {
+func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 	switch event := event.(type) {
 	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
 		if len(d.Fields) == 0 {
-			return false, false, nil
+			return false, nil
 		}
 		d.Fields[d.FieldIndex].Input.Update(event)
-		return false, false, nil
+		return false, nil
 	case vaxis.Key:
 		switch {
 		case isOverlayCancelKey(event):
-			return false, true, nil
+			return true, nil
 		case event.Matches('s', vaxis.ModCtrl):
 			return d.submit()
 		case event.MatchString("Tab"), event.MatchString("Down"):
 			if len(d.Fields) > 0 {
 				d.FieldIndex = (d.FieldIndex + 1) % len(d.Fields)
 			}
-			return false, false, nil
+			return false, nil
 		case event.MatchString("Up"):
 			if len(d.Fields) > 0 {
 				d.FieldIndex--
@@ -119,55 +131,59 @@ func (d *tuiDialog) Update(event vaxis.Event) (completed bool, cancelled bool, e
 					d.FieldIndex = len(d.Fields) - 1
 				}
 			}
-			return false, false, nil
+			return false, nil
 		case event.MatchString("Right"):
 			if len(d.Fields) == 0 || d.Fields[d.FieldIndex].Activate == nil {
-				return false, false, nil
+				return false, nil
 			}
 			d.Error = ""
 			if err := d.Fields[d.FieldIndex].Activate(); err != nil {
 				d.Error = err.Error()
 			}
-			return false, false, nil
+			return false, nil
 		case event.MatchString("Enter"):
 			if len(d.Fields) > 0 && d.Fields[d.FieldIndex].Activate != nil && d.Fields[d.FieldIndex].Input == nil {
 				d.Error = ""
 				if err := d.Fields[d.FieldIndex].Activate(); err != nil {
 					d.Error = err.Error()
 				}
-				return false, false, nil
+				return false, nil
 			}
 			return d.submit()
 		default:
 			if len(d.Fields) == 0 {
-				return false, false, nil
+				return false, nil
 			}
 			if d.Fields[d.FieldIndex].Input == nil {
-				return false, false, nil
+				return false, nil
 			}
 			d.Error = ""
 			d.Fields[d.FieldIndex].Input.Update(event)
-			return false, false, nil
+			return false, nil
 		}
 	default:
-		return false, false, nil
+		return false, nil
 	}
 }
 
-func (d *tuiDialog) submit() (completed bool, cancelled bool, err error) {
+func (d *tuiDialog) submit() (done bool, err error) {
 	values, validationErr := d.Values()
 	if validationErr != nil {
 		d.Error = validationErr.Error()
-		return false, false, nil
+		return false, nil
 	}
 	if d.OnSubmit == nil {
-		return true, false, nil
+		return true, nil
 	}
 	if err := d.OnSubmit(values); err != nil {
 		d.Error = err.Error()
-		return false, false, nil
+		return false, nil
 	}
-	return true, false, nil
+	return true, nil
+}
+
+func (d *tuiDialog) FooterHint() string {
+	return "Tab/Up/Down move   Enter submit/open   Right choose   Ctrl+s submit   Esc cancel   Ctrl+c quit"
 }
 
 func (d *tuiDialog) Values() (map[string]string, error) {
@@ -243,18 +259,18 @@ type tuiMenu struct {
 	Entries     []tuiMenuEntry
 }
 
-func (m *tuiMenu) Update(event vaxis.Event) (completed bool, cancelled bool, err error) {
+func (m *tuiMenu) Update(event vaxis.Event) (done bool, err error) {
 	key, ok := event.(vaxis.Key)
 	if !ok {
-		return false, false, nil
+		return false, nil
 	}
 	if isOverlayCancelKey(key) {
-		return false, true, nil
+		return true, nil
 	}
 
 	pressed := []rune(strings.ToLower(key.Text))
 	if len(pressed) == 0 {
-		return false, false, nil
+		return false, nil
 	}
 	for _, entry := range m.Entries {
 		if entry.Key != pressed[0] {
@@ -262,16 +278,20 @@ func (m *tuiMenu) Update(event vaxis.Event) (completed bool, cancelled bool, err
 		}
 		if entry.Action != nil {
 			if err := entry.Action(); err != nil {
-				return false, false, err
+				return false, err
 			}
 		}
-		return true, false, nil
+		return true, nil
 	}
 
-	return false, false, nil
+	return false, nil
 }
 
-func (m *tuiMenu) Draw(win vaxis.Window, headerStyle, mutedStyle vaxis.Style) {
+func (m *tuiMenu) FooterHint() string {
+	return "Press a key to choose   Esc cancel   Ctrl+c quit"
+}
+
+func (m *tuiMenu) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style) {
 	body := border.All(win, mutedStyle)
 	body.Println(0, vaxis.Segment{Text: m.Title, Style: headerStyle})
 
@@ -303,6 +323,14 @@ type tuiSelector struct {
 	Multi       bool
 	Selected    map[string]bool
 	OnSubmit    func(values []string) error
+	// EmptyText is rendered when Options is empty; callers supply the
+	// domain-appropriate wording (it used to be a hardcoded environment-config
+	// message regardless of what the selector listed).
+	EmptyText string
+	// Parent, when non-nil, is the overlay restored after this selector is
+	// dismissed. Field pickers opened from a dialog set it so the dialog
+	// reappears on completion or cancel (see vaxisTUIApp.showSelector).
+	Parent tuiOverlay
 }
 
 func newTUISelector(title string, description []string, options []tuiSelectorOption, selected []string, multi bool, onSubmit func(values []string) error) *tuiSelector {
@@ -329,28 +357,28 @@ func newTUISelector(title string, description []string, options []tuiSelectorOpt
 	return selector
 }
 
-func (s *tuiSelector) Update(event vaxis.Event) (completed bool, cancelled bool, err error) {
+func (s *tuiSelector) Update(event vaxis.Event) (done bool, err error) {
 	key, ok := event.(vaxis.Key)
 	if !ok {
-		return false, false, nil
+		return false, nil
 	}
 	if isOverlayCancelKey(key) {
-		return false, true, nil
+		return true, nil
 	}
 
 	switch {
 	case key.MatchString("Tab"), key.MatchString("Down"):
 		s.move(1)
-		return false, false, nil
+		return false, nil
 	case key.MatchString("Up"):
 		s.move(-1)
-		return false, false, nil
+		return false, nil
 	case s.Multi && key.Matches('u', vaxis.ModCtrl):
 		s.Selected = map[string]bool{}
-		return false, false, nil
+		return false, nil
 	case s.Multi && key.Text == " ":
 		s.toggleCurrent()
-		return false, false, nil
+		return false, nil
 	case key.MatchString("Enter"):
 		values := s.selectedValues()
 		if !s.Multi && len(values) == 0 && len(s.Options) > 0 {
@@ -358,12 +386,12 @@ func (s *tuiSelector) Update(event vaxis.Event) (completed bool, cancelled bool,
 		}
 		if s.OnSubmit != nil {
 			if err := s.OnSubmit(values); err != nil {
-				return false, false, err
+				return false, err
 			}
 		}
-		return true, false, nil
+		return true, nil
 	default:
-		return false, false, nil
+		return false, nil
 	}
 }
 
@@ -411,18 +439,14 @@ func (s *tuiSelector) selectedValues() []string {
 	return values
 }
 
-func (s *tuiSelector) Height() int {
-	height := 6 + len(s.Description) + len(s.Options)
-	if len(s.Options) == 0 {
-		height++
+func (s *tuiSelector) FooterHint() string {
+	if s.Multi {
+		return "Up/Down move   Space toggle   Enter confirm   Ctrl+u clear   Esc cancel   Ctrl+c quit"
 	}
-	if height > 18 {
-		return 18
-	}
-	return height
+	return "Up/Down move   Enter confirm   Esc cancel   Ctrl+c quit"
 }
 
-func (s *tuiSelector) Draw(win vaxis.Window, headerStyle, mutedStyle vaxis.Style) {
+func (s *tuiSelector) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style) {
 	body := border.All(win, mutedStyle)
 	body.Println(0, vaxis.Segment{Text: s.Title, Style: headerStyle})
 
@@ -446,7 +470,9 @@ func (s *tuiSelector) Draw(win vaxis.Window, headerStyle, mutedStyle vaxis.Style
 	}
 
 	if len(s.Options) == 0 {
-		body.Println(row, vaxis.Segment{Text: "No environment configs configured.", Style: mutedStyle})
+		if s.EmptyText != "" {
+			body.Println(row, vaxis.Segment{Text: s.EmptyText, Style: mutedStyle})
+		}
 	} else {
 		end := s.Scroll + visibleRows
 		if end > len(s.Options) {

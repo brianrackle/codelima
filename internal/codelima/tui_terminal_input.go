@@ -11,7 +11,7 @@ import (
 
 // These encoders intentionally match the Vaxis terminal widget behavior so the
 // Ghostty backend can preserve the existing shell input contract.
-func encodeTUITerminalKey(key vaxis.Key, applicationKeypad bool, cursorKeysApplication bool) string {
+func encodeTUITerminalKey(key vaxis.Key, cursorKeysApplication bool) string {
 	if key.EventType == vaxis.EventPaste {
 		return encodeTUITerminalPasteKey(key)
 	}
@@ -34,15 +34,11 @@ func encodeTUITerminalKey(key vaxis.Key, applicationKeypad bool, cursorKeysAppli
 			}
 		}
 
-		switch applicationKeypad {
-		case true:
-			if val, ok := tuiApplicationKeymap[key.Keycode]; ok {
-				return val
-			}
-		case false:
-			if val, ok := tuiNumericKeymap[key.Keycode]; ok {
-				return val
-			}
+		// Application and numeric keypad modes encode these keys identically
+		// today (the two hand-written maps were byte-identical), so one table
+		// serves both and applicationKeypad does not influence the encoding.
+		if val, ok := tuiKeypadKeymap[key.Keycode]; ok {
+			return val
 		}
 
 		if key.Keycode < unicode.MaxRune {
@@ -238,14 +234,7 @@ var tuiCursorKeysNormalMode = map[rune]string{
 	vaxis.KeyHome:  "\x1B[H",
 }
 
-var tuiNumericKeymap = map[rune]string{
-	vaxis.KeyInsert: "\x1B[2~",
-	vaxis.KeyDelete: "\x1B[3~",
-	vaxis.KeyPgUp:   "\x1B[5~",
-	vaxis.KeyPgDown: "\x1B[6~",
-}
-
-var tuiApplicationKeymap = map[rune]string{
+var tuiKeypadKeymap = map[rune]string{
 	vaxis.KeyInsert: "\x1B[2~",
 	vaxis.KeyDelete: "\x1B[3~",
 	vaxis.KeyPgUp:   "\x1B[5~",

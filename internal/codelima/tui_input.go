@@ -3,11 +3,12 @@ package codelima
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"git.sr.ht/~rockorager/vaxis"
 
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type tuiTerminalMouseGesture struct {
@@ -17,142 +18,111 @@ type tuiTerminalMouseGesture struct {
 	dragged   bool
 }
 
+// tuiKeyBinding pairs a key matcher with the app action it triggers.
+type tuiKeyBinding struct {
+	match func(vaxis.Key) bool
+	run   func(a *vaxisTUIApp) error
+}
+
+// tuiKeyBindings is THE table of terminal-scope shortcuts: handleKey
+// dispatches from it and isTUITerminalPayloadKey derives payload-ness from
+// the same entries, so the shortcut set and the payload predicate can never
+// drift apart.
+var tuiKeyBindings = []tuiKeyBinding{
+	{match: isHostTerminalTabOpenKey, run: (*vaxisTUIApp).openHostTerminalTab},
+	{match: isTerminalTabOpenKey, run: (*vaxisTUIApp).openTerminalTab},
+	{match: isTerminalTabNextKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(1) }},
+	{match: isTerminalTabPreviousKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(-1) }},
+	{match: isTerminalTabCloseKey, run: (*vaxisTUIApp).closeTerminalTab},
+	{match: isTerminalViewToggleKey, run: func(a *vaxisTUIApp) error { return a.state.toggleFocus() }},
+}
+
 // isTUITerminalPayloadKey reports whether a key is terminal input rather than
-// a CodeLima shortcut. Payload input is redrawn only after the daemon publishes
-// a fresh terminal snapshot; drawing immediately would repaint stale state.
+// a CodeLima shortcut: pasted input is always payload, and any key that
+// matches no entry in tuiKeyBindings is payload. Payload input is redrawn
+// only after the daemon publishes a fresh terminal snapshot; drawing
+// immediately would repaint stale state.
 func isTUITerminalPayloadKey(key vaxis.Key) bool {
 	if key.EventType == vaxis.EventPaste {
 		return true
 	}
-	return !isHostTerminalTabOpenKey(key) &&
-		!isTerminalTabOpenKey(key) &&
-		!isTerminalTabNextKey(key) &&
-		!isTerminalTabPreviousKey(key) &&
-		!isTerminalTabCloseKey(key) &&
-		!isTerminalViewToggleKey(key)
+	for _, binding := range tuiKeyBindings {
+		if binding.match(key) {
+			return false
+		}
+	}
+	return true
 }
 
-func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
+func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 	// Pasted text is terminal payload, never a TUI shortcut. Vaxis emits one
 	// EventPaste key per decoded input sequence between PasteStart/PasteEnd.
 	if key.EventType == vaxis.EventPaste {
 		if a.state.focus == tuiFocusTerminal {
 			a.forwardTerminalEvent(key)
 		}
-		return false, nil
+		return false
 	}
 
-	if isHostTerminalTabOpenKey(key) {
-		if err := a.openHostTerminalTab(); err != nil {
-			a.status = err.Error()
-			return false, nil
+	for _, binding := range tuiKeyBindings {
+		if !binding.match(key) {
+			continue
 		}
-		a.status = ""
-		a.syncSessionFocus()
-		return false, nil
-	}
-
-	if isTerminalTabOpenKey(key) {
-		if err := a.openTerminalTab(); err != nil {
-			a.status = err.Error()
-			return false, nil
+		if err := binding.run(a); err != nil {
+			a.setStatus(slog.LevelError, err.Error())
+			return false
 		}
-		a.status = ""
+		a.clearStatus()
 		a.syncSessionFocus()
-		return false, nil
+		return false
 	}
 
-	if isTerminalTabNextKey(key) {
-		if err := a.switchTerminalTab(1); err != nil {
-			a.status = err.Error()
-			return false, nil
-		}
-		a.status = ""
-		a.syncSessionFocus()
-		return false, nil
-	}
-
-	if isTerminalTabPreviousKey(key) {
-		if err := a.switchTerminalTab(-1); err != nil {
-			a.status = err.Error()
-			return false, nil
-		}
-		a.status = ""
-		a.syncSessionFocus()
-		return false, nil
-	}
-
-	if isTerminalTabCloseKey(key) {
-		if err := a.closeTerminalTab(); err != nil {
-			a.status = err.Error()
-			return false, nil
-		}
-		a.status = ""
-		a.syncSessionFocus()
-		return false, nil
-	}
-
-	if isTerminalViewToggleKey(key) {
-		if err := a.state.toggleFocus(); err != nil {
-			a.status = err.Error()
-			return false, nil
-		}
-		a.status = ""
-		a.syncSessionFocus()
-		return false, nil
-	}
-
+	// The info toggle is tree-scoped (in terminal focus a bare "i" is shell
+	// payload), so it stays outside the terminal-scope binding table.
 	if a.state.focus == tuiFocusTree && key.MatchString("i") {
-		if err := a.state.toggleTreePaneMode(); err != nil {
-			a.status = err.Error()
-			return false, nil
-		}
-		a.status = ""
+		a.state.toggleTreePaneMode()
+		a.clearStatus()
 		a.syncSessionFocus()
-		return false, nil
+		return false
 	}
 
 	if a.state.focus == tuiFocusTree && key.MatchString("m") {
 		a.openMessagesView()
-		return false, nil
+		return false
 	}
 
 	if a.state.focus == tuiFocusTerminal {
 		a.forwardTerminalEvent(key)
-		return false, nil
+		return false
 	}
 
 	if action, ok := a.matchAction(key); ok {
 		if err := a.performAction(action); err != nil {
-			a.status = err.Error()
-			return false, nil
+			a.setStatus(slog.LevelError, err.Error())
+			return false
 		}
-		return false, nil
+		return false
 	}
 
 	var err error
 	switch {
 	case key.MatchString("q"), isQuitKey(key):
-		return true, nil
+		return true
 	case key.MatchString("Up"):
 		err = a.state.moveSelection(-1)
 	case key.MatchString("Down"):
 		err = a.state.moveSelection(1)
-	case key.MatchString("Left"):
-		a.state.collapseSelection()
-	case key.MatchString("Right"):
-		a.state.expandSelection()
 	default:
-		return false, nil
+		return false
 	}
 
 	if err != nil {
-		a.status = err.Error()
+		a.setStatus(slog.LevelError, err.Error())
 	} else {
-		a.status = ""
+		a.clearStatus()
 	}
 	a.syncSessionFocus()
-	return false, nil
+	return false
 }
 
 func (a *vaxisTUIApp) matchAction(key vaxis.Key) (tuiActionSpec, bool) {
@@ -176,10 +146,6 @@ func (a *vaxisTUIApp) matchAction(key vaxis.Key) (tuiActionSpec, bool) {
 
 func (a *vaxisTUIApp) actionResourceKeys(action tuiActionSpec, entry tuiTreeEntry) []string {
 	switch action.ID {
-	case tuiActionProjectCreate:
-		return []string{"projects"}
-	case tuiActionProjectCreateNode, tuiActionProjectUpdate, tuiActionProjectDelete:
-		return []string{terminal.ProjectTarget(entry.project.ID).String()}
 	case tuiActionConfigurationManage:
 		return []string{"configurations"}
 	case tuiActionNodeCreate:
@@ -206,14 +172,6 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 		return err
 	}
 	switch action.ID {
-	case tuiActionProjectCreate:
-		a.openCreateProjectDialog()
-	case tuiActionProjectCreateNode:
-		return a.openLegacyCreateNodeDialog(entry.project)
-	case tuiActionProjectUpdate:
-		a.openUpdateProjectDialog(entry.project)
-	case tuiActionProjectDelete:
-		a.openDeleteProjectDialog(entry.project)
 	case tuiActionConfigurationManage:
 		return a.openConfigurationsMenu()
 	case tuiActionEnvironmentConfigManage:
@@ -266,15 +224,15 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 	return nil
 }
 
-func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
+func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
 		if target, ok := a.linkTargetAt(mouse.Col, mouse.Row); ok {
 			if err := a.openHyperlink(target); err != nil {
-				a.status = err.Error()
-				return nil
+				a.setStatus(slog.LevelError, err.Error())
+				return
 			}
-			a.status = "opened " + target
-			return nil
+			a.setStatus(slog.LevelInfo, "opened "+target)
+			return
 		}
 	}
 
@@ -282,47 +240,47 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 		a.cancelTerminalMouseGesture()
 		a.state.focusTree()
 		if err := a.state.selectTreeRow(mouse.Row-a.treeContentRect.row, a.treeContentRect.height); err != nil {
-			a.status = err.Error()
-			return nil
+			a.setStatus(slog.LevelError, err.Error())
+			return
 		}
-		a.status = ""
+		a.clearStatus()
 		a.syncSessionFocus()
-		return nil
+		return
 	}
 
 	if !a.terminalBodyRect.contains(mouse.Col, mouse.Row) {
 		if mouse.EventType == vaxis.EventRelease && mouse.Button == vaxis.MouseLeftButton {
 			a.cancelTerminalMouseGesture()
 		}
-		return nil
+		return
 	}
 
 	if a.state.focus != tuiFocusTerminal && a.state.treePaneMode != tuiTreePaneModeTerminal {
-		return nil
+		return
 	}
 
 	entry := a.mouseTerminalEntry()
-	if entry.kind != tuiTreeEntryProject && entry.kind != tuiTreeEntryNode {
-		return nil
+	if !entry.valid() {
+		return
 	}
 
 	sessionKey := a.state.activeSessionKey()
 	term, ok := a.sessions.SessionTerminal(sessionKey)
 	if !ok {
-		return nil
+		return
 	}
 
 	translated := a.terminalBodyRect.translateMouse(mouse)
 	if mouse.Button == vaxis.MouseWheelUp || mouse.Button == vaxis.MouseWheelDown {
 		a.forwardSessionEvent(sessionKey, translated)
-		return nil
+		return
 	}
 
 	if !term.CapturesMouse() {
 		if err := a.handleTerminalMouseGesture(sessionKey, mouse, translated); err != nil {
-			a.status = err.Error()
+			a.setStatus(slog.LevelError, err.Error())
 		}
-		return nil
+		return
 	}
 
 	a.cancelTerminalMouseGesture()
@@ -330,19 +288,18 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) error {
 		if a.state.focus == tuiFocusTerminal {
 			a.forwardSessionEvent(sessionKey, translated)
 		}
-		return nil
+		return
 	}
 
 	if a.state.focus != tuiFocusTerminal {
 		if err := a.state.focusTerminal(); err != nil {
-			a.status = err.Error()
-			return nil
+			a.setStatus(slog.LevelError, err.Error())
+			return
 		}
 		a.syncSessionFocus()
 	}
-	a.status = ""
+	a.clearStatus()
 	a.forwardSessionEvent(sessionKey, translated)
-	return nil
 }
 
 func (a *vaxisTUIApp) handleResize(event vaxis.Resize) {
@@ -397,7 +354,7 @@ func (a *vaxisTUIApp) handleTerminalMouseGesture(targetKey string, mouse vaxis.M
 			if err := a.openHyperlink(target); err != nil {
 				return err
 			}
-			a.status = "opened " + target
+			a.setStatus(slog.LevelInfo, "opened "+target)
 			return nil
 		}
 		if a.state.focus != tuiFocusTerminal {
@@ -406,7 +363,7 @@ func (a *vaxisTUIApp) handleTerminalMouseGesture(targetKey string, mouse vaxis.M
 			}
 			a.syncSessionFocus()
 		}
-		a.status = ""
+		a.clearStatus()
 	}
 	return nil
 }
@@ -444,6 +401,15 @@ func (a *vaxisTUIApp) cancelTerminalMouseGesture() {
 	a.terminalMouse = nil
 }
 
+// US-layout macOS Option-layer glyphs: terminals that do not encode the
+// Option/Alt modifier deliver the composed character the layout produces, so
+// the shortcuts also match these glyphs.
+const (
+	macOptionShiftTGlyph = "ˇ" // Option-Shift-t
+	macOptionTGlyph      = "†" // Option-t
+	macOptionWGlyph      = "∑" // Option-w
+)
+
 func isTerminalViewToggleKey(key vaxis.Key) bool {
 	if hasTerminalModifier(normalizedKeyModifiers(key.Modifiers), vaxis.ModShift) {
 		return false
@@ -465,11 +431,11 @@ func isHostTerminalTabOpenKey(key vaxis.Key) bool {
 	if modifiers != 0 && !hasTerminalModifier(modifiers, vaxis.ModShift) {
 		return false
 	}
-	return key.Text == "ˇ" || key.Keycode == 'ˇ'
+	return keyIsGlyph(key, macOptionShiftTGlyph)
 }
 
 func isTerminalTabOpenKey(key vaxis.Key) bool {
-	return keyMatchesOptionShortcut(key, 't', "†")
+	return keyMatchesOptionShortcut(key, 't', macOptionTGlyph)
 }
 
 func isTerminalTabNextKey(key vaxis.Key) bool {
@@ -483,7 +449,7 @@ func isTerminalTabPreviousKey(key vaxis.Key) bool {
 }
 
 func isTerminalTabCloseKey(key vaxis.Key) bool {
-	return keyMatchesOptionShortcut(key, 'w', "∑")
+	return keyMatchesOptionShortcut(key, 'w', macOptionWGlyph)
 }
 
 func keyMatchesOptionShortcut(key vaxis.Key, code rune, optionTexts ...string) bool {
@@ -496,15 +462,21 @@ func keyMatchesOptionShortcut(key vaxis.Key, code rune, optionTexts ...string) b
 		return false
 	}
 	for _, text := range optionTexts {
-		if key.Text == text {
-			return true
-		}
-		runes := []rune(text)
-		if len(runes) == 1 && key.Keycode == runes[0] {
+		if keyIsGlyph(key, text) {
 			return true
 		}
 	}
 	return false
+}
+
+// keyIsGlyph reports whether the key delivers the given single-glyph text,
+// either as decoded text or as the raw keycode.
+func keyIsGlyph(key vaxis.Key, glyph string) bool {
+	if key.Text == glyph {
+		return true
+	}
+	runes := []rune(glyph)
+	return len(runes) == 1 && key.Keycode == runes[0]
 }
 
 func keyMatchesTerminalModifier(key vaxis.Key, code rune) bool {

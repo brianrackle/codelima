@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brianrackle/test_lima/internal/codelima/daemon"
-	"github.com/brianrackle/test_lima/internal/codelima/daemonclient"
-	"github.com/brianrackle/test_lima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *testing.T) {
@@ -67,9 +67,17 @@ func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.
 	if err := service.ensureDirectories(); err != nil {
 		t.Fatal(err)
 	}
-	project, err := service.ProjectCreate(context.Background(), ProjectCreateInput{Slug: "daemon-test", WorkspacePath: workspace})
-	if err != nil {
-		t.Fatalf("ProjectCreate() error = %v", err)
+	node := Node{
+		ID:            newID(),
+		Slug:          "daemon-test",
+		SandboxName:   "daemon-test",
+		DirectoryPath: workspace,
+		Status:        NodeStatusStopped,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	}
+	if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
+		t.Fatalf("SaveNode() error = %v", err)
 	}
 	host := newDaemonHost(service)
 	server := daemon.NewServer(daemon.Config{Home: service.cfg.MetadataRoot, Version: Version, Handler: host})
@@ -84,7 +92,7 @@ func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.
 		t.Fatal(err)
 	}
 	var state daemon.TerminalState
-	err = owner.Call(context.Background(), "terminal.open", map[string]any{"target": "project:" + project.ID, "kind": "project-host-shell", "cols": 80, "rows": 24}, &state)
+	err = owner.Call(context.Background(), "terminal.open", map[string]any{"target": "node:" + node.ID, "kind": "node-host-shell", "cols": 80, "rows": 24}, &state)
 	if err != nil {
 		_ = owner.Close()
 		cancel()

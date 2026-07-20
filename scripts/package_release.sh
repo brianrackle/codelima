@@ -56,7 +56,7 @@ fi
 mkdir -p "$(dirname "$BUILD_BIN")" "$ROOT_DIR/bin" "$DIST_DIR"
 
 cd "$ROOT_DIR"
-"$GO_BIN" build -ldflags "-X github.com/brianrackle/test_lima/internal/codelima.Version=$VERSION" -o "$BUILD_BIN" ./cmd/codelima
+"$GO_BIN" build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=$VERSION" -o "$BUILD_BIN" ./cmd/codelima
 ln -sfn "$COMPAT_TARGET" "$COMPAT_BIN"
 "$GO_BIN" run ./cmd/codelima-release archive \
   --version "$VERSION" \

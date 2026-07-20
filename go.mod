@@ -1,4 +1,4 @@
-module github.com/brianrackle/test_lima
+module github.com/brianrackle/codelima
 
 go 1.24.1
 

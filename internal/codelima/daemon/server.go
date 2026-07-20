@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/brianrackle/codelima/internal/atomicfile"
 )
 
 type ClientContext struct {
@@ -38,20 +40,25 @@ type Config struct {
 }
 
 type Server struct {
-	cfg       Config
-	paths     Paths
-	identity  Identity
-	lock      *os.File
-	request   net.Listener
-	events    net.Listener
-	stop      chan struct{}
-	stopOnce  sync.Once
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	clients   map[string]*clientConn
-	input     string
-	accepting atomic.Bool
-	replaced  atomic.Bool
+	cfg      Config
+	paths    Paths
+	identity Identity
+	lock     *os.File
+	request  net.Listener
+	events   net.Listener
+	stop     chan struct{}
+	stopOnce sync.Once
+	wg       sync.WaitGroup
+	mu       sync.Mutex
+	clients  map[string]*clientConn
+	input    string
+	// baseCtx is derived from Run's context and cancelled when the server
+	// stops; every connection derives its handler context from it so in-flight
+	// handlers observe shutdown instead of running on a detached Background.
+	baseCtx    context.Context
+	baseCancel context.CancelFunc
+	accepting  atomic.Bool
+	replaced   atomic.Bool
 }
 
 type clientConn struct {
@@ -77,6 +84,8 @@ func (s *Server) Run(ctx context.Context) error {
 		return err
 	}
 	defer s.cleanup()
+	s.baseCtx, s.baseCancel = context.WithCancel(ctx)
+	defer s.baseCancel()
 	s.accepting.Store(true)
 	s.wg.Add(2)
 	go s.acceptLoop(s.request, false)
@@ -86,6 +95,7 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-s.stop:
 	}
 	s.accepting.Store(false)
+	s.baseCancel()
 	_ = s.request.Close()
 	_ = s.events.Close()
 	s.closeClients()
@@ -94,6 +104,21 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) Stop() { s.stopOnce.Do(func() { close(s.stop) }) }
+
+// stopAccepting closes the public listeners and removes their socket files so
+// new dials fail immediately, without touching existing connections. Run's
+// shutdown path tolerates the double close.
+func (s *Server) stopAccepting() {
+	s.accepting.Store(false)
+	if s.request != nil {
+		_ = s.request.Close()
+	}
+	if s.events != nil {
+		_ = s.events.Close()
+	}
+	_ = os.Remove(s.paths.Socket)
+	_ = os.Remove(s.paths.Client)
+}
 
 // PrepareReplacement releases only the public listeners and daemon lock. Live
 // client connections and the handler stay alive until the importing daemon has
@@ -162,7 +187,12 @@ func (s *Server) Broadcast(name string, data any) {
 	s.mu.Unlock()
 	for _, client := range clients {
 		client.writeMu.Lock()
+		// A bounded write deadline keeps one wedged subscriber from stalling
+		// event fan-out for everyone (Broadcast is called from terminal event
+		// callbacks). A deadline miss closes the laggard's connection.
+		_ = client.conn.SetWriteDeadline(time.Now().Add(broadcastWriteTimeout))
 		err := client.encoder.Encode(Event{Event: name, Data: data})
+		_ = client.conn.SetWriteDeadline(time.Time{})
 		client.writeMu.Unlock()
 		if err != nil {
 			_ = client.conn.Close()
@@ -170,7 +200,32 @@ func (s *Server) Broadcast(name string, data any) {
 	}
 }
 
-func (s *Server) prepare() error {
+// broadcastWriteTimeout bounds one subscriber's event write; socket buffers
+// absorb normal bursts, so hitting it means the client stopped reading.
+const broadcastWriteTimeout = 5 * time.Second
+
+func (s *Server) prepare() (err error) {
+	// Unwind every acquired resource when a later step fails: without this a
+	// listen or chmod failure leaked the held flock and open listeners.
+	defer func() {
+		if err == nil {
+			return
+		}
+		if s.events != nil {
+			_ = s.events.Close()
+			s.events = nil
+		}
+		if s.request != nil {
+			_ = s.request.Close()
+			s.request = nil
+		}
+		if s.lock != nil {
+			_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+			_ = s.lock.Close()
+			s.lock = nil
+		}
+	}()
+
 	for _, dir := range []string{s.paths.Dir, filepath.Dir(s.paths.Lock)} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
@@ -183,7 +238,7 @@ func (s *Server) prepare() error {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = lock.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return Error("PreconditionFailed", "daemon already running", 5, nil)
+			return Error("PreconditionFailed", "daemon already running", CodePreconditionFailed, nil)
 		}
 		return err
 	}
@@ -200,7 +255,6 @@ func (s *Server) prepare() error {
 	s.events, err = net.Listen("unix", s.paths.Client)
 	syscall.Umask(oldUmask)
 	if err != nil {
-		_ = s.request.Close()
 		return err
 	}
 	for _, path := range []string{s.paths.Socket, s.paths.Client} {
@@ -223,6 +277,9 @@ func (s *Server) acceptLoop(listener net.Listener, eventSocket bool) {
 			if !s.accepting.Load() {
 				return
 			}
+			// Back off on persistent accept errors (e.g. EMFILE) instead of
+			// spinning hot.
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 		if err := RequireSameUserPeer(conn); err != nil {
@@ -239,6 +296,11 @@ func (s *Server) acceptLoop(listener net.Listener, eventSocket bool) {
 
 func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 	defer func() { _ = conn.Close() }()
+	// Handlers run under a per-connection context: it ends when this client
+	// disconnects and is a child of the server context, so daemon shutdown
+	// cancels in-flight work instead of waiting on it.
+	connCtx, connCancel := context.WithCancel(s.baseCtx)
+	defer connCancel()
 	client := &clientConn{id: randomToken(), conn: conn, encoder: json.NewEncoder(conn)}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 64*1024), MaxMessageSize)
@@ -248,16 +310,16 @@ func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 	}
 	request, err := decodeRequest(scanner.Bytes())
 	if err != nil || request.Method != "hello" {
-		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "hello must be the first request", Code: 2}})
+		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "hello must be the first request", Code: CodeInvalidArgument}})
 		return
 	}
 	var hello HelloParams
 	if err := json.Unmarshal(request.Params, &hello); err != nil {
-		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "invalid hello params", Code: 2}})
+		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "invalid hello params", Code: CodeInvalidArgument}})
 		return
 	}
 	if hello.Version != s.cfg.Version || hello.Protocol != ProtocolVersion {
-		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "PreconditionFailed", Message: fmt.Sprintf("daemon version mismatch (daemon %s protocol %d, client %s protocol %d); restart the daemon", s.cfg.Version, ProtocolVersion, hello.Version, hello.Protocol), Code: 5}})
+		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "PreconditionFailed", Message: fmt.Sprintf("daemon version mismatch (daemon %s protocol %d, client %s protocol %d); restart the daemon", s.cfg.Version, ProtocolVersion, hello.Version, hello.Protocol), Code: CodePreconditionFailed}})
 		return
 	}
 	s.mu.Lock()
@@ -288,7 +350,7 @@ func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 			s.writeResponse(client, Response{Error: AsRPCError(err)})
 			continue
 		}
-		result, callErr := s.handle(context.Background(), client, request, eventSocket)
+		result, callErr := s.handle(connCtx, client, request, eventSocket)
 		if callErr != nil {
 			s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(callErr)})
 			continue
@@ -311,13 +373,19 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 		return s.status(), nil
 	case "daemon.stop":
 		s.Broadcast("daemon.shutdown", nil)
+		// Stop accepting BEFORE responding so a client that saw this response
+		// can never ping a daemon that still looks alive: the response rides
+		// the already-accepted connection, so closing the listeners here is
+		// safe, and the timed Stop only delays teardown of live connections
+		// until the reply has flushed.
+		s.stopAccepting()
 		time.AfterFunc(10*time.Millisecond, s.Stop)
 		return map[string]bool{"stopping": true}, nil
 	case "daemon.snapshot":
 		return s.cfg.Handler.Snapshot(ctx)
 	case "events.subscribe":
 		if !eventSocket {
-			return nil, Error("PreconditionFailed", "events.subscribe requires client.sock", 5, nil)
+			return nil, Error("PreconditionFailed", "events.subscribe requires client.sock", CodePreconditionFailed, nil)
 		}
 		return map[string]bool{"subscribed": true}, nil
 	case "input.takeover":
@@ -352,15 +420,18 @@ func (s *Server) status() Status {
 }
 
 func decodeRequest(data []byte) (Request, error) {
+	// serveConn's scanner already caps lines at MaxMessageSize (dropping the
+	// connection on overflow); this guard is defense-in-depth for direct
+	// callers.
 	if len(data) > MaxMessageSize {
-		return Request{}, Error("InvalidArgument", "daemon request exceeds 1 MiB", 2, nil)
+		return Request{}, Error("InvalidArgument", "daemon request exceeds 1 MiB", CodeInvalidArgument, nil)
 	}
 	var request Request
 	if err := json.Unmarshal(data, &request); err != nil {
-		return Request{}, Error("InvalidArgument", "invalid daemon request", 2, nil)
+		return Request{}, Error("InvalidArgument", "invalid daemon request", CodeInvalidArgument, nil)
 	}
 	if request.Method == "" {
-		return Request{}, Error("InvalidArgument", "daemon method is required", 2, nil)
+		return Request{}, Error("InvalidArgument", "daemon method is required", CodeInvalidArgument, nil)
 	}
 	return request, nil
 }
@@ -368,7 +439,7 @@ func decodeRequest(data []byte) (Request, error) {
 func (s *Server) writeResult(client *clientConn, id uint64, value any) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		s.writeResponse(client, Response{ID: id, Error: &RPCError{Category: "Internal", Message: err.Error(), Code: 7}})
+		s.writeResponse(client, Response{ID: id, Error: &RPCError{Category: "Internal", Message: err.Error(), Code: CodeInternalFailure}})
 		return
 	}
 	s.writeResponse(client, Response{ID: id, Result: data})
@@ -426,17 +497,9 @@ func writeJSONAtomic(path string, value any, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, append(data, '\n'), mode)
+	return atomicfile.WriteFile(path, append(data, '\n'), mode)
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".tmp-" + randomToken()
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return nil
+	return atomicfile.WriteFile(path, data, mode)
 }

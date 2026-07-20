@@ -2,23 +2,19 @@ package codelima
 
 import (
 	"slices"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	projectRuntimeCommandsComment         = "# Project-specific guest setup commands.\n# Omitted commands inherit from CODELIMA_HOME/_config/config.yaml and can still be overridden per node.\n"
-	projectRuntimeCommandsTemplateComment = "# Project-specific guest setup commands.\n# Uncomment entries below to override global guest command defaults.\n#\n"
-)
+const ()
 
 type runtimeCommandsExample struct {
 	RuntimeCommands RuntimeCommandTemplates `yaml:"runtime_commands"`
 }
 
 type runtimeCommandTemplateField struct {
-	key    string
-	values []string
+	key    runtimeCommandKind
+	values *[]string
 }
 
 func defaultRuntimeCommandTemplates() RuntimeCommandTemplates {
@@ -76,18 +72,25 @@ func legacyMSBCommandTemplates() RuntimeCommandTemplates {
 	}
 }
 
+// guestRuntimeCommandKinds are the only template kinds the Go SDK executes;
+// every other kind is a legacy CLI relic that is recognized (for removal) but
+// never run.
+func guestRuntimeCommandKind(kind runtimeCommandKind) bool {
+	return kind == runtimeCommandBootstrap || kind == runtimeCommandWorkspaceSeedPrepare
+}
+
 func validateSDKRuntimeCommandTemplates(templates ...RuntimeCommandTemplates) error {
 	legacy := legacyMSBCommandTemplates()
 	for _, template := range templates {
 		for _, field := range template.orderedFields() {
-			if field.key == "bootstrap" || field.key == "workspace_seed_prepare" || len(field.values) == 0 {
+			if guestRuntimeCommandKind(field.key) || len(*field.values) == 0 {
 				continue
 			}
-			if slices.Equal(field.values, legacy.templates(runtimeCommandKind(field.key))) {
+			if slices.Equal(*field.values, legacy.templates(field.key)) {
 				continue
 			}
 			return preconditionFailed("runtime command override is unavailable with the Microsandbox Go SDK", map[string]any{
-				"command": field.key,
+				"command": string(field.key),
 			})
 		}
 	}
@@ -96,115 +99,61 @@ func validateSDKRuntimeCommandTemplates(templates ...RuntimeCommandTemplates) er
 
 func removeLegacyMSBCommandTemplates(template RuntimeCommandTemplates) RuntimeCommandTemplates {
 	legacy := legacyMSBCommandTemplates()
-	if slices.Equal(template.Version, legacy.Version) {
-		template.Version = nil
-	}
-	if slices.Equal(template.List, legacy.List) {
-		template.List = nil
-	}
-	if slices.Equal(template.Create, legacy.Create) {
-		template.Create = nil
-	}
-	if slices.Equal(template.Start, legacy.Start) {
-		template.Start = nil
-	}
-	if slices.Equal(template.Stop, legacy.Stop) {
-		template.Stop = nil
-	}
-	if slices.Equal(template.Delete, legacy.Delete) {
-		template.Delete = nil
-	}
-	if slices.Equal(template.Clone, legacy.Clone) {
-		template.Clone = nil
-	}
-	if slices.Equal(template.Copy, legacy.Copy) {
-		template.Copy = nil
-	}
-	if slices.Equal(template.ShellExec, legacy.ShellExec) {
-		template.ShellExec = nil
-	}
-	if slices.Equal(template.ShellLogin, legacy.ShellLogin) {
-		template.ShellLogin = nil
+	for _, field := range template.orderedFields() {
+		if guestRuntimeCommandKind(field.key) {
+			continue
+		}
+		if slices.Equal(*field.values, legacy.templates(field.key)) {
+			*field.values = nil
+		}
 	}
 	return template
 }
 
 func (t RuntimeCommandTemplates) ApplyDefaults(defaults RuntimeCommandTemplates) RuntimeCommandTemplates {
-	t.Version = applyDefaultCommandList(t.Version, defaults.Version)
-	t.List = applyDefaultCommandList(t.List, defaults.List)
-	t.Create = applyDefaultCommandList(t.Create, defaults.Create)
-	t.Start = applyDefaultCommandList(t.Start, defaults.Start)
-	t.Stop = applyDefaultCommandList(t.Stop, defaults.Stop)
-	t.Delete = applyDefaultCommandList(t.Delete, defaults.Delete)
-	t.Clone = applyDefaultCommandList(t.Clone, defaults.Clone)
-	t.Bootstrap = applyDefaultCommandList(t.Bootstrap, defaults.Bootstrap)
-	t.WorkspaceSeedPrepare = applyDefaultCommandList(t.WorkspaceSeedPrepare, defaults.WorkspaceSeedPrepare)
-	t.Copy = applyDefaultCommandList(t.Copy, defaults.Copy)
-	t.ShellExec = applyDefaultCommandList(t.ShellExec, defaults.ShellExec)
-	t.ShellLogin = applyDefaultCommandList(t.ShellLogin, defaults.ShellLogin)
+	for _, field := range t.orderedFields() {
+		*field.values = applyDefaultCommandList(*field.values, defaults.templates(field.key))
+	}
 	return t
 }
 
 func (t RuntimeCommandTemplates) IsZero() bool {
-	return len(t.Version) == 0 &&
-		len(t.List) == 0 &&
-		len(t.Create) == 0 &&
-		len(t.Start) == 0 &&
-		len(t.Stop) == 0 &&
-		len(t.Delete) == 0 &&
-		len(t.Clone) == 0 &&
-		len(t.Bootstrap) == 0 &&
-		len(t.WorkspaceSeedPrepare) == 0 &&
-		len(t.Copy) == 0 &&
-		len(t.ShellExec) == 0 &&
-		len(t.ShellLogin) == 0
+	for _, field := range t.orderedFields() {
+		if len(*field.values) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (t RuntimeCommandTemplates) templates(kind runtimeCommandKind) []string {
-	switch kind {
-	case runtimeCommandVersion:
-		return copyCommandList(t.Version)
-	case runtimeCommandList:
-		return copyCommandList(t.List)
-	case runtimeCommandCreate:
-		return copyCommandList(t.Create)
-	case runtimeCommandStart:
-		return copyCommandList(t.Start)
-	case runtimeCommandStop:
-		return copyCommandList(t.Stop)
-	case runtimeCommandDelete:
-		return copyCommandList(t.Delete)
-	case runtimeCommandClone:
-		return copyCommandList(t.Clone)
-	case runtimeCommandBootstrap:
-		return copyCommandList(t.Bootstrap)
-	case runtimeCommandWorkspaceSeedPrepare:
-		return copyCommandList(t.WorkspaceSeedPrepare)
-	case runtimeCommandCopy:
-		return copyCommandList(t.Copy)
-	case runtimeCommandShellExec:
-		return copyCommandList(t.ShellExec)
-	case runtimeCommandShellLogin:
-		return copyCommandList(t.ShellLogin)
-	default:
-		return nil
+	for _, field := range t.orderedFields() {
+		if field.key == kind {
+			return copyCommandList(*field.values)
+		}
 	}
+	return nil
 }
 
-func (t RuntimeCommandTemplates) orderedFields() []runtimeCommandTemplateField {
+// orderedFields is the single field table every per-field operation iterates:
+// adding a template kind means adding one row here (plus the struct field and
+// its wire counterpart), not editing five hand-written functions. The values
+// are pointers into the receiver so table-driven mutation works; methods with
+// value receivers rely on that to update their own copy before returning it.
+func (t *RuntimeCommandTemplates) orderedFields() []runtimeCommandTemplateField {
 	return []runtimeCommandTemplateField{
-		{key: "version", values: t.Version},
-		{key: "list", values: t.List},
-		{key: "create", values: t.Create},
-		{key: "start", values: t.Start},
-		{key: "stop", values: t.Stop},
-		{key: "delete", values: t.Delete},
-		{key: "clone", values: t.Clone},
-		{key: "bootstrap", values: t.Bootstrap},
-		{key: "workspace_seed_prepare", values: t.WorkspaceSeedPrepare},
-		{key: "copy", values: t.Copy},
-		{key: "shell_exec", values: t.ShellExec},
-		{key: "shell_login", values: t.ShellLogin},
+		{key: runtimeCommandVersion, values: &t.Version},
+		{key: runtimeCommandList, values: &t.List},
+		{key: runtimeCommandCreate, values: &t.Create},
+		{key: runtimeCommandStart, values: &t.Start},
+		{key: runtimeCommandStop, values: &t.Stop},
+		{key: runtimeCommandDelete, values: &t.Delete},
+		{key: runtimeCommandClone, values: &t.Clone},
+		{key: runtimeCommandBootstrap, values: &t.Bootstrap},
+		{key: runtimeCommandWorkspaceSeedPrepare, values: &t.WorkspaceSeedPrepare},
+		{key: runtimeCommandCopy, values: &t.Copy},
+		{key: runtimeCommandShellExec, values: &t.ShellExec},
+		{key: runtimeCommandShellLogin, values: &t.ShellLogin},
 	}
 }
 
@@ -220,14 +169,6 @@ func loadRuntimeCommandsFile(path string) (RuntimeCommandTemplates, error) {
 	}
 
 	return commands, nil
-}
-
-func loadOptionalRuntimeCommandsFile(path string) (RuntimeCommandTemplates, error) {
-	if strings.TrimSpace(path) == "" {
-		return RuntimeCommandTemplates{}, nil
-	}
-
-	return loadRuntimeCommandsFile(path)
 }
 
 func configYAMLBytes(cfg Config) ([]byte, error) {
@@ -246,65 +187,9 @@ func configYAMLBytes(cfg Config) ([]byte, error) {
 	return yamlBytes(settings)
 }
 
-func projectYAMLBytes(project Project, defaults RuntimeCommandTemplates) ([]byte, error) {
-	data, err := yamlBytes(project)
-	if err != nil {
-		return nil, err
-	}
-
-	if project.RuntimeCommands.IsZero() {
-		commentedDefaults, err := projectRuntimeCommandsCommentBlock(defaults.ApplyDefaults(defaultRuntimeCommandTemplates()))
-		if err != nil {
-			return nil, err
-		}
-
-		return appendCommentBlock(data, commentedDefaults), nil
-	}
-
-	return insertCommentBeforeMarker(data, "runtime_commands:", projectRuntimeCommandsComment), nil
-}
-
 func nodeYAMLBytes(node Node, defaults RuntimeCommandTemplates) ([]byte, error) {
 	_ = defaults
 	return yamlBytes(newNodeFileWire(node))
-}
-
-func projectRuntimeCommandsCommentBlock(defaults RuntimeCommandTemplates) ([]byte, error) {
-	return runtimeCommandsCommentBlock(projectRuntimeCommandsTemplateComment, defaults)
-}
-
-func runtimeCommandsCommentBlock(header string, defaults RuntimeCommandTemplates) ([]byte, error) {
-	example, err := yamlBytes(runtimeCommandsExample{RuntimeCommands: defaults})
-	if err != nil {
-		return nil, err
-	}
-
-	lines := []string{strings.TrimRight(header, "\n")}
-	for line := range strings.SplitSeq(strings.TrimRight(string(example), "\n"), "\n") {
-		lines = append(lines, "# "+line)
-	}
-
-	return []byte(strings.Join(lines, "\n") + "\n"), nil
-}
-
-func insertCommentBeforeMarker(data []byte, marker string, comment string) []byte {
-	current := string(data)
-	index := strings.Index(current, marker)
-	if index < 0 {
-		return data
-	}
-
-	return []byte(current[:index] + comment + current[index:])
-}
-
-func appendCommentBlock(data []byte, commentBlock []byte) []byte {
-	current := strings.TrimRight(string(data), "\n")
-	comment := strings.TrimRight(string(commentBlock), "\n")
-	if current == "" {
-		return []byte(comment + "\n")
-	}
-
-	return []byte(current + "\n\n" + comment + "\n")
 }
 
 func configFileNeedsRefresh(data []byte) bool {
@@ -319,33 +204,40 @@ func configFileNeedsRefresh(data []byte) bool {
 	return yaml.Unmarshal(data, &stored) != nil || stored.Daemon.Autostart == nil || stored.Daemon.Restore == "" || stored.Daemon.VirtioFSReclaim == nil || stored.Daemon.VirtioFSReclaimThresholdPercent == 0
 }
 
-func nodeFileNeedsRefresh(data []byte, node Node, defaults RuntimeCommandTemplates) bool {
-	_ = defaults
-	current := string(data)
-	if containsUnsupportedRuntimeCommandYAML(current) {
+// nodeFileNeedsRefresh decides whether an on-disk node.yaml is stale by
+// PARSING it, not by substring-matching serialized text: field-order or
+// quoting changes in the YAML marshaler must not silently flip refresh
+// behavior. A file needs a rewrite when it still carries transient fields
+// (status, reconciliation state), when its persisted lifecycle_state disagrees
+// with the loaded node, or when its runtime_commands include legacy CLI kinds.
+func nodeFileNeedsRefresh(data []byte, node Node, _ RuntimeCommandTemplates) bool {
+	var stored struct {
+		Status                 *string        `yaml:"status"`
+		LastReconciledAt       *string        `yaml:"last_reconciled_at"`
+		LastRuntimeObservation map[string]any `yaml:"last_runtime_observation"`
+		LifecycleState         *NodeStatus    `yaml:"lifecycle_state"`
+		RuntimeCommands        map[string]any `yaml:"runtime_commands"`
+	}
+	if yaml.Unmarshal(data, &stored) != nil {
 		return true
 	}
+	if containsUnsupportedRuntimeCommandYAML(stored.RuntimeCommands) {
+		return true
+	}
+	if stored.Status != nil || stored.LastReconciledAt != nil || stored.LastRuntimeObservation != nil {
+		return true
+	}
+
 	persistedLifecycle := nodeLifecycleState(node)
-
-	if strings.Contains(current, "\nstatus:") || strings.Contains(current, "\nlast_reconciled_at:") || strings.Contains(current, "\nlast_runtime_observation:") {
-		return true
+	if persistedLifecycle == "" {
+		return stored.LifecycleState != nil
 	}
-	if persistedLifecycle != "" && !strings.Contains(current, "\nlifecycle_state: "+persistedLifecycle) {
-		return true
-	}
-	if persistedLifecycle == "" && strings.Contains(current, "\nlifecycle_state:") {
-		return true
-	}
-
-	return false
+	return stored.LifecycleState == nil || *stored.LifecycleState != persistedLifecycle
 }
 
-func containsUnsupportedRuntimeCommandYAML(data string) bool {
-	for _, field := range legacyMSBCommandTemplates().orderedFields() {
-		if field.key == "bootstrap" || field.key == "workspace_seed_prepare" {
-			continue
-		}
-		if strings.Contains(data, "\n  "+field.key+":") {
+func containsUnsupportedRuntimeCommandYAML(runtimeCommands map[string]any) bool {
+	for key := range runtimeCommands {
+		if !guestRuntimeCommandKind(runtimeCommandKind(key)) {
 			return true
 		}
 	}
@@ -354,15 +246,6 @@ func containsUnsupportedRuntimeCommandYAML(data string) bool {
 
 func writeConfigFile(path string, cfg Config) error {
 	data, err := configYAMLBytes(cfg)
-	if err != nil {
-		return err
-	}
-
-	return atomicWriteFile(path, data, 0o644)
-}
-
-func writeProjectFile(path string, project Project, defaults RuntimeCommandTemplates) error {
-	data, err := projectYAMLBytes(project, defaults)
 	if err != nil {
 		return err
 	}
