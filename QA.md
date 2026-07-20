@@ -227,6 +227,7 @@ Run in a real terminal:
 
 ```sh
 ./bin/codelima node start qa-v3-root
+./bin/codelima node start qa-v3-prefix
 ./bin/codelima "$QA_ROOT/work/root"
 ```
 
@@ -242,6 +243,14 @@ printf 'paste-two\n'
 Verify both lines appear promptly as one paste and neither command runs: the terminal must not print `paste-one` or `paste-two`. Press `Ctrl+c` to clear the pasted input.
 
 Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
+
+Leave both TUIs and all their terminal tabs idle for at least 30 seconds. In Activity Monitor, inspect every `codelima` process (the daemon and both TUI clients): none may remain near 100% CPU, and idle clients should settle near zero rather than consuming CPU in proportion to their open tab count. `msb` and the Virtual Machine Service are separate VM-runtime processes and are not part of this client/daemon idle assertion.
+
+While one TUI remains open, run `./bin/codelima --json daemon update` from the second real terminal. Confirm the open TUI reports that CodeLima was updated and must be reopened. Leave it at that message for at least 30 seconds and verify its `codelima` process remains idle instead of pinning a core on the closed event stream; then quit and reopen it before continuing.
+
+For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the same left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
+
+For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open through at least one two-second refresh, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
 
 Verify:
 
@@ -262,6 +271,11 @@ Verify:
 - the first terminal action after every window-focus takeover and after the idle interval succeeds without a broken pipe or `client is observe-only` error
 - multiline paste appears without character-by-character delay, preserves its newline, and executes nothing until Enter is pressed explicitly
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
+- idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
+- an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream
+- quitting and reopening the TUI preserves surviving per-node tab order
+- quitting and reopening two disjoint path-scoped TUIs preserves both tabs in each process
+- reopening after daemon update preserves wrapped line spacing at the captured terminal width
 
 Quit with `q`.
 

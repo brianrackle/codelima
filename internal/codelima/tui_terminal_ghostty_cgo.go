@@ -2503,8 +2503,15 @@ func adoptGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event), ptyF
 		return nil, err
 	}
 	term := base.(*ghosttyTUITerminal)
+	if cols <= 0 || rows <= 0 {
+		term.Close()
+		return nil, fmt.Errorf("adopt terminal with invalid geometry %dx%d", cols, rows)
+	}
+	// Construction initializes both the Go wrapper and Ghostty at 80x24. Resize
+	// the emulator itself before replaying output; changing only the wrapper
+	// fields makes snapshot rows use a different stride from Ghostty's cells.
+	term.Resize(cols, rows)
 	term.mu.Lock()
-	term.cols, term.rows = cols, rows
 	term.pty = ptyFile
 	term.childPID = childPID
 	term.ptyWriter = newGhosttyPTYWriter(ptyFile, waitGhosttyPTYWritable, nil)

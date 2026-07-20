@@ -391,7 +391,17 @@ func (h *daemonHost) list() []daemon.TerminalState {
 	for _, entry := range h.terminals {
 		states = append(states, entry.state)
 	}
+	slices.SortFunc(states, compareDaemonTerminalStateOrder)
 	return states
+}
+
+// compareDaemonTerminalStateOrder keeps every outward and persisted view of
+// tabs independent from the daemon's deliberately unordered runtime map.
+func compareDaemonTerminalStateOrder(left, right daemon.TerminalState) int {
+	if order := left.CreatedAt.Compare(right.CreatedAt); order != 0 {
+		return order
+	}
+	return strings.Compare(left.TerminalID, right.TerminalID)
 }
 
 func (h *daemonHost) Snapshot(context.Context) (any, error) {
@@ -519,13 +529,22 @@ func (h *daemonHost) restoreSession(ctx context.Context) error {
 			"version", session.Version,
 		)
 	}
+	slices.SortFunc(session.Terminals, compareDaemonTerminalStateOrder)
 	for _, state := range session.Terminals {
-		_, openErr := h.open(ctx, terminalOpenParams{Target: state.Target, Kind: state.Kind, Label: state.Label, Cols: state.Cols, Rows: state.Rows}, state.TerminalID)
+		restored, openErr := h.open(ctx, terminalOpenParams{Target: state.Target, Kind: state.Kind, Label: state.Label, Cols: state.Cols, Rows: state.Rows}, state.TerminalID)
 		if openErr != nil {
 			h.service.log().Error("daemon terminal restore failed", "terminal", state.TerminalID, "error", openErr.Error())
+			continue
+		}
+		if !state.CreatedAt.IsZero() {
+			h.mu.Lock()
+			if entry := h.terminals[restored.TerminalID]; entry != nil {
+				entry.state.CreatedAt = state.CreatedAt
+			}
+			h.mu.Unlock()
 		}
 	}
-	return nil
+	return h.persist()
 }
 
 // quarantineSession preserves unusable terminal restoration metadata beside

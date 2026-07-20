@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -853,6 +854,62 @@ func TestGhosttyTerminalHandoffTransfersPTYAndRollbackResumes(t *testing.T) {
 	rollback.SendInput([]byte("printf rollback-ok\\n\n"))
 	waitForCondition(t, 5*time.Second, func() bool { return strings.Contains(rollback.ReadRecent(ReadText).Text, "rollback-ok") }, "rollback output")
 	rollback.Close()
+}
+
+func TestGhosttyTerminalHandoffReplaysAtCapturedGeometry(t *testing.T) {
+	ptyFile, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open null PTY stand-in: %v", err)
+	}
+
+	const (
+		cols = 12
+		rows = 4
+	)
+	adopted, err := adoptGhosttyTUITerminal(
+		"handoff-geometry",
+		func(vaxis.Event) {},
+		ptyFile,
+		0,
+		cols,
+		rows,
+		[]byte("abcdefghijklmnop\r\nsecond"),
+	)
+	if err != nil {
+		_ = ptyFile.Close()
+		t.Fatalf("adoptGhosttyTUITerminal() error = %v", err)
+	}
+	t.Cleanup(adopted.Close)
+
+	result := adopted.Snapshot()
+	if result.Err != nil {
+		t.Fatalf("Snapshot() error = %v", result.Err)
+	}
+	if result.Snapshot.Cols != cols || result.Snapshot.Rows != rows {
+		t.Fatalf("snapshot geometry = %dx%d, want %dx%d", result.Snapshot.Cols, result.Snapshot.Rows, cols, rows)
+	}
+	lines := strings.Split(daemonSnapshotText(daemonSnapshot(result.Snapshot)), "\n")
+	want := []string{"abcdefghijkl", "mnop", "second", ""}
+	if !slices.Equal(lines, want) {
+		t.Fatalf("handoff replay lines = %#v, want %#v", lines, want)
+	}
+}
+
+func TestGhosttyTerminalHandoffRejectsInvalidGeometry(t *testing.T) {
+	ptyFile, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open null PTY stand-in: %v", err)
+	}
+	defer func() { _ = ptyFile.Close() }()
+
+	adopted, err := adoptGhosttyTUITerminal("handoff-invalid-geometry", func(vaxis.Event) {}, ptyFile, 0, 0, 24, nil)
+	if err == nil {
+		adopted.Close()
+		t.Fatal("adoptGhosttyTUITerminal() accepted zero columns")
+	}
+	if !strings.Contains(err.Error(), "invalid geometry 0x24") {
+		t.Fatalf("adoptGhosttyTUITerminal() error = %v", err)
+	}
 }
 
 func nonEmptyRenderedLines(text string) []string {

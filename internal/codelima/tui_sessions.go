@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
 	"path/filepath"
 	"syscall"
@@ -46,6 +47,38 @@ type tuiSessionStore struct {
 	preferredRows int
 }
 
+type daemonEventReader interface {
+	NextEvent(context.Context) (daemon.Event, error)
+}
+
+func runDaemonEventLoop(
+	ctx context.Context,
+	reader daemonEventReader,
+	handle func(daemon.Event),
+	reportError func(error),
+) {
+	for {
+		event, err := reader.NextEvent(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				continue
+			}
+			if reportError != nil {
+				reportError(err)
+			}
+			return
+		}
+		handle(event)
+		if event.Event == "daemon.shutdown" || event.Event == "daemon.update_committed" {
+			return
+		}
+	}
+}
+
 func newTUISessionStore(ctx context.Context, service *Service, postEvent func(vaxis.Event)) *tuiSessionStore {
 	store := &tuiSessionStore{
 		ctx:         ctx,
@@ -81,16 +114,12 @@ func (s *tuiSessionStore) startDaemonEvents() {
 	}
 	s.events, s.eventCancel = client, cancel
 	go func() {
-		for {
-			event, err := client.NextEvent(ctx)
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				continue
+		runDaemonEventLoop(ctx, client, s.handleDaemonEvent, func(err error) {
+			s.service.log().Error("daemon event stream disconnected", "error", err.Error())
+			if s.postEvent != nil {
+				s.postEvent(tuiTerminalErrorEvent{Err: fmt.Errorf("daemon event stream disconnected; quit and reopen CodeLima to reconnect: %w", err)})
 			}
-			s.handleDaemonEvent(event)
-		}
+		})
 	}()
 }
 
@@ -98,7 +127,12 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 	data, _ := event.Data.(map[string]any)
 	sessionKey, _ := data["tab_id"].(string)
 	switch event.Event {
-	case "terminal.dirty", "terminal.resized", "target.tabs_changed", "node.status_changed":
+	case "terminal.dirty", "terminal.resized":
+		terminalID, _ := data["terminal_id"].(string)
+		if terminalID != "" && s.postEvent != nil {
+			s.postEvent(tuiDaemonTerminalDirtyEvent{TerminalID: terminalID})
+		}
+	case "target.tabs_changed", "node.status_changed":
 		if s.postEvent != nil {
 			s.postEvent(vaxis.Redraw{})
 		}
@@ -114,6 +148,10 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 	case "daemon.shutdown":
 		if s.postEvent != nil {
 			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("codelima daemon stopped")})
+		}
+	case "daemon.update_committed":
+		if s.postEvent != nil {
+			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("codelima daemon updated; quit and reopen CodeLima to reconnect")})
 		}
 	}
 }
@@ -406,6 +444,30 @@ func (s *tuiSessionStore) SessionTerminal(sessionKey string) (tuiTerminal, bool)
 		return nil, false
 	}
 	return s.terminalFor(session)
+}
+
+type daemonSnapshotView interface {
+	markSnapshotDirty()
+	requestSnapshot()
+}
+
+// markDaemonTerminalDirty runs on the TUI event loop. Hidden tabs retain only
+// a dirty bit; the visible tab pulls a coalesced snapshot immediately. A hidden
+// tab catches up when Draw requests its pending snapshot after a tab switch.
+func (s *tuiSessionStore) markDaemonTerminalDirty(terminalID, activeSessionKey string) {
+	runtime, ok := s.registry.Lookup(terminal.TerminalID(terminalID))
+	if !ok {
+		return
+	}
+	view, ok := runtime.Backend.(daemonSnapshotView)
+	if !ok {
+		return
+	}
+	view.markSnapshotDirty()
+	active := s.sessions[activeSessionKey]
+	if active != nil && active.terminalID == runtime.ID {
+		view.requestSnapshot()
+	}
 }
 
 // SyncFocus focuses the terminal for activeSessionKey when focusActive is set

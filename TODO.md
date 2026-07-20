@@ -10,11 +10,15 @@ Problem:
 - ADR 87 makes terminal the default right-pane view for an initially selected running node while leaving stopped nodes info-first. Automated tests cover both startup defaults and the sticky `i` override; the real-terminal pass must confirm the running-node border shows `Info [Terminal]` without moving keyboard focus out of the node list.
 - macOS Option delivery depends on the emulator: if Ghostty is not configured with `macos-option-as-alt = true` and the Option glyph fallbacks (`†`, `ˇ`, `∑`) do not arrive, the tab keybindings cannot fire.
 - Daemon integration coverage proves that a second TUI takes input ownership and can open a terminal after several connection read-timeout intervals. Focus-handoff coverage also proves repeated first-to-second-to-first `FocusIn` transitions reclaim ownership before the next mutation, while revocation-event coverage proves routine handoffs stay out of the TUI footer. Paste coverage proves daemon-backed terminals batch semantic paste requests, preserve LF, retain bracket boundaries, avoid shortcut matching, and chunk large UTF-8 payloads safely. Input-queue coverage proves ordinary keys leave the UI loop without waiting for daemon RPC completion, stay ordered, and wait for fresh terminal state before redraw. A real two-terminal run still needs to confirm both TUIs repeatedly follow host-window focus without an ownership warning or observe-only error, verify multiline paste and responsive ordinary typing visually, and open a first guest or host tab after the 35-second QA idle interval.
+- ADRs 88 and 89 add automated unit and daemon-integration coverage for reconnect tab order and non-default-width handoff replay. The 2026-07-20 local QA run could not perform the matching interactive Flow 7 check because this Linux/aarch64 environment has no `/dev/kvm`; Microsandbox aborted the first VM before its agent relay became available.
+- ADR 91 adds an automated two-window regression proving a path-scoped refresh no longer closes tabs whose live nodes are outside that window's projection, while confirmed deletion still closes them. The matching disjoint-root, two-tabs-per-process restart flow still needs native interactive verification.
+- ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the Microsandbox-backed interactive flow.
 
 Suggested solution:
 
 - Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+w` adjacent-close steps, with and without `macos-option-as-alt`.
-- Launch the same path-scoped TUI from a second real terminal, repeatedly switch host focus in both directions, and verify each newly focused TUI can immediately open or control a guest/host tab without either window showing the ownership-revoked message. Paste the multiline QA sample and confirm it appears promptly without executing, type the ordinary-input sample quickly and confirm it keeps pace without reordering, then leave the final owner idle for at least 35 seconds and verify its next terminal action also succeeds.
+- Launch the same path-scoped TUI from a second real terminal, repeatedly switch host focus in both directions, and verify each newly focused TUI can immediately open or control a guest/host tab without either window showing the ownership-revoked message. Also launch two TUIs at disjoint directory roots, open two tabs in each, wait through refresh, quit and reopen both, and verify all four tabs survive. Paste the multiline QA sample and confirm it appears promptly without executing, type the ordinary-input sample quickly and confirm it keeps pace without reordering, then leave the final owner idle for at least 35 seconds and verify its next terminal action also succeeds.
+- Open guest/host/guest tabs with wrapped output, verify all idle CodeLima processes settle instead of pinning cores, live-update while one TUI remains open and verify that disconnected client also stays idle, then quit and reopen at the captured width to verify tab order and line boundaries remain intact.
 
 Advantages:
 
@@ -729,6 +733,11 @@ Problem:
   `GLIBC_2.39`. QA Flow 1's metadata checks pass, but the SDK cannot load, so
   node creation and runtime-backed Flows 2–8—including ADR 79's two-VM generic
   `localhost`/`127.0.0.1` claimant/transfer flow—cannot be rerun in this sandbox.
+- On 2026-07-20 the SDK and FFI loaded successfully, but `msb doctor` reported
+  `/dev/kvm` missing. QA Flow 1, the zero-terminal portion of Flow 5 (including
+  session quarantine and live update), and the Linux skip check from Flow 8
+  passed; the first Flow 2 node creation aborted before the agent relay became
+  available, so runtime-backed Flows 2–7 still require a KVM-capable host.
 - A native macOS trial exposed multi-second input echo while the TUI repeatedly
   redrew a daemon terminal. ADR 68 removes the draw/unchanged-resize/event
   feedback loop with client and daemon regression coverage; the native rerun
@@ -933,25 +942,22 @@ Advantages:
 
 Disadvantages:
 
-- Requires coordinated replacement of request, event, polling, and ownership
+- Requires coordinated replacement of request, event, snapshot-worker, and ownership
   state while terminal workers may still be draining.
 - Reconnection and shutdown can race, so lifecycle ownership needs a dedicated
   abstraction and race-detector coverage.
 
-### 33. Restore the repository-wide unit and integration test gates
+### 33. Restore the repository-wide unit test gate
 
 Problem:
 
-- Roadmap priority 5's focused running/stopped startup tests, formatting, lint,
-  and production build pass, but the wider dirty worktree is not fully green.
+- Focused CPU regressions, the race suite, formatting, lint, production build,
+  and `make test-integration` pass, but the ordinary unit suite is not fully
+  green.
 - `TestRefreshDoesNotRaceMutation` repeatedly reports `node not found` while
   `NodeList` runs concurrently with `NodeStop`/`NodeStart` (four failures in
   five isolated runs). This test and the node persistence paths were unchanged
   by priority 5.
-- `make test-integration` reaches the existing
-  `TestDaemonStartWaitsForPreviousDaemonShutdownLock` work and fails with
-  `PreconditionFailed: daemon already running`. Priority 5 does not change the
-  daemon lifecycle or integration harness.
 - Running the ordinary unit suite as root also invalidates two environment-
   sensitive assertions: a PTY prompt is `#` instead of `$`, and root can write
   through a read-only test directory. An unprivileged private-mount run avoids
@@ -962,9 +968,6 @@ Suggested solution:
 - Reproduce the refresh failure with filesystem tracing around `ListNodes` and
   `SaveNode`, then either take a read lock for the metadata snapshot or make
   enumeration tolerate a node that disappears after directory discovery.
-- Diagnose the daemon startup integration failure against ADR 86's lock-based
-  shutdown contract, ensuring the second start waits on the authoritative lock
-  instead of treating a shutting-down daemon as a stable owner.
 - Add a documented unprivileged test recipe or make the two permission/prompt
   tests explicitly skip only when the effective user is root, so `make test`
   has one reproducible contract in agent containers.
@@ -974,11 +977,35 @@ Advantages:
 - Restores a meaningful repository-wide green gate for future feature work.
 - Converts two environment-dependent false failures into an explicit test
   environment contract.
-- Exercises the metadata and daemon lifecycle concurrency guarantees directly.
+- Exercises the metadata concurrency guarantee directly.
 
 Disadvantages:
 
-- The refresh and daemon failures cross storage and lifecycle ownership and
-  should not be patched speculatively as part of the TUI pane-default change.
+- The refresh failure crosses storage ownership and should not be patched
+  speculatively as part of the terminal CPU change.
 - Making root-only skips too broad could hide real permission regressions, so
   any skip must be limited to assertions that POSIX root intentionally bypasses.
+
+### 34. Restore the active terminal tab when the TUI reopens
+
+Problem:
+
+- Daemon-owned terminal IDs and their creation order now survive TUI restart, daemon persistence, and live update.
+- The active tab remains front-end state, so a newly opened TUI selects the first surviving tab instead of the tab that was active when the prior TUI quit.
+- Multiple simultaneous TUIs can legitimately select different active tabs, so a single daemon-global active value would make the windows overwrite each other.
+
+Suggested solution:
+
+- Define whether active selection is persisted per TUI identity, per launch scope, or as a last-detached convenience hint that does not affect already connected clients.
+- Store the chosen hint separately from ordered daemon runtime state, validate that the referenced tab still exists on reconnect, and otherwise fall back to the first tab.
+- Add model, daemon-session, and multi-TUI tests before marking roadmap priority 7 complete.
+
+Advantages:
+
+- Completes the remaining visible state restoration in roadmap priority 7.
+- Returns operators to the tab they were using without changing terminal identity or order.
+
+Disadvantages:
+
+- Requires a durable front-end identity or explicit conflict semantics for simultaneous TUI windows.
+- Adds persistence for UI preference state that must be pruned when tabs close.

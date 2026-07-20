@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -254,6 +255,51 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		}
 		h.run(true, "terminal", "close", terminal.TerminalID)
 	})
+}
+
+func TestDaemonTerminalOrderSurvivesReconnectAndLiveHandoff(t *testing.T) {
+	h := newHarness(t)
+	nodeID := h.createNode()
+	h.run(true, "daemon", "start")
+
+	want := make([]string, 0, 5)
+	for range 5 {
+		var terminal struct {
+			TerminalID string `json:"terminal_id"`
+		}
+		if err := json.Unmarshal(h.json("terminal", "open", "node:"+nodeID, "--kind", "node-host-shell"), &terminal); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, terminal.TerminalID)
+	}
+
+	assertOrder := func(phase string) {
+		t.Helper()
+		var terminals []struct {
+			TerminalID string `json:"terminal_id"`
+		}
+		if err := json.Unmarshal(h.json("terminal", "list"), &terminals); err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, len(terminals))
+		for index, terminal := range terminals {
+			got[index] = terminal.TerminalID
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s terminal order = %v, want %v", phase, got, want)
+		}
+	}
+
+	// Each CLI list call uses a fresh daemon client, matching TUI reconnect.
+	for range 16 {
+		assertOrder("client reconnect")
+	}
+	h.run(true, "daemon", "update")
+	assertOrder("live handoff")
+
+	for _, terminalID := range want {
+		h.run(true, "terminal", "close", terminalID)
+	}
 }
 
 func TestDaemonUpdateRestartsAfterUnsupportedLegacyHandoffTransport(t *testing.T) {

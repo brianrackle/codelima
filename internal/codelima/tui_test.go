@@ -1993,6 +1993,94 @@ func TestTUIRefreshPreservesActiveHostTerminalTab(t *testing.T) {
 	}
 }
 
+func TestTUIRefreshPreservesDaemonTabsOutsideEachProcessScope(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	nodes := []Node{
+		{ID: "node-window-one", Slug: "window-one", SandboxName: "window-one", DirectoryPath: filepath.Join(workspace, "one"), Status: NodeStatusRunning},
+		{ID: "node-window-two", Slug: "window-two", SandboxName: "window-two", DirectoryPath: filepath.Join(workspace, "two"), Status: NodeStatusRunning},
+	}
+	for _, node := range nodes {
+		if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
+			t.Fatalf("SaveNode(%q) error = %v", node.ID, err)
+		}
+	}
+
+	for windowIndex, visibleNode := range nodes {
+		t.Run(visibleNode.Slug, func(t *testing.T) {
+			store := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+			state, err := newTUIState([]Node{visibleNode}, newSharedFakeTUISessionManager(store))
+			if err != nil {
+				t.Fatalf("newTUIState() error = %v", err)
+			}
+			app := &vaxisTUIApp{ctx: ctx, service: service, state: state, sessions: store}
+
+			terminals := make([]*fakeTUITerminal, 0, 4)
+			for _, node := range nodes {
+				for range 2 {
+					fake := newFakeTUITerminal()
+					putTestSession(store, nodeTargetKey(node.ID), &tuiSession{node: node}, fake)
+					terminals = append(terminals, fake)
+				}
+			}
+
+			if err := app.applyReloadedNodes([]Node{nodes[windowIndex]}, ""); err != nil {
+				t.Fatalf("applyReloadedNodes() error = %v", err)
+			}
+			for _, node := range nodes {
+				if got := len(store.TargetSessionKeys(nodeTargetKey(node.ID))); got != 2 {
+					t.Fatalf("tabs for %s after scoped refresh = %d, want 2", node.Slug, got)
+				}
+			}
+			for index, terminal := range terminals {
+				if terminal.closeCalls != 0 {
+					t.Fatalf("terminal %d Close() calls = %d, want 0", index, terminal.closeCalls)
+				}
+			}
+		})
+	}
+}
+
+func TestTUIRefreshClosesTabsForConfirmedDeletedNode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	deletedAt := time.Now().UTC()
+	node := Node{
+		ID:            "node-deleted-in-another-process",
+		Slug:          "deleted-in-another-process",
+		SandboxName:   "deleted-in-another-process",
+		DirectoryPath: workspace,
+		Status:        NodeStatusTerminated,
+		DeletedAt:     &deletedAt,
+	}
+	if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
+		t.Fatalf("SaveNode() error = %v", err)
+	}
+
+	store := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(nil, newSharedFakeTUISessionManager(store))
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	app := &vaxisTUIApp{ctx: ctx, service: service, state: state, sessions: store}
+	fake := newFakeTUITerminal()
+	key := putTestSession(store, nodeTargetKey(node.ID), &tuiSession{node: node}, fake)
+
+	if err := app.applyReloadedNodes(nil, ""); err != nil {
+		t.Fatalf("applyReloadedNodes() error = %v", err)
+	}
+	if store.HasSession(key) {
+		t.Fatalf("confirmed deleted node session %q was retained", key)
+	}
+	if fake.closeCalls != 1 {
+		t.Fatalf("terminal Close() calls = %d, want 1", fake.closeCalls)
+	}
+}
+
 func TestTUIHostTerminalTabUsesNormalSwitchAndCloseBehavior(t *testing.T) {
 	t.Parallel()
 

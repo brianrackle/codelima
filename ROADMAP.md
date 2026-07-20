@@ -6,13 +6,13 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 
 ## Priorities
 
-1: Fix bug where host CPU is pinned at 100% per CodeLima process.
+1 [complete locally]: eliminate per-tab idle snapshot polling and stop permanently closed daemon event streams after one reported error; active snapshots are dirty-event driven and hidden tabs defer full-grid pulls until visible (ADR 90; native Activity Monitor verification remains in TODO #0)
 2 (was 0.4): Fix issue: resizing window often causes terminal contents to clear. option + ` with codex or raw terminal causes whole terminal to clear so the previous content is no longer visible and only a fresh prompt is shown. Also fix the bug where a disconnected client loses its open terminal tabs.
 3 (was 0.10): support kitty graphics protocol so I can get those sweet codex pets.
 4 (was 0.11) [partially complete]: bring in and wire up the latest libghostty improvements as demonstrated in https://github.com/ghostty-org/ghostling — Ghostling-pinned libghostty-vt and focus encoder are wired; full interactive QA remains in TODO.md
 5 (was 0.12): support CodeLima node renaming through the command line, including an explicit microsandbox rename/recreate policy
 6 (was 0.15) [complete locally]: terminal is the default node view when the initially selected VM is running; stopped nodes remain info-first, and `i` remains sticky after startup (ADR 87; native interactive QA remains in TODO #0)
-7 (was 0.22): retain open terminal tabs and their live daemon terminal sessions when the user quits and reopens the TUI; reconnect surviving terminal IDs, restore per-node tab order and the active tab, and prune sessions that exited while the TUI was detached instead of creating replacement shells
+7 (was 0.22) [partially complete]: open daemon terminal sessions and surviving terminal IDs reconnect after the TUI reopens, exited sessions are absent, per-node creation order is preserved across TUI restart, daemon persistence, and live update, and disjoint path-scoped TUI processes no longer close one another's restored tabs (ADRs 88, 89, and 91); restoring the previously active tab remains in TODO #34
 8 (was 1): Configurable key bindings
    Plan: [KEY_BINDINGS_PLAN.md](/Users/brianrackle/personal/codelima/KEY_BINDINGS_PLAN.md)
 9 (was 3): Unmanaged localhost or SSH nodes [needs a new node-scoped design]

@@ -16,6 +16,43 @@ import (
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
+func TestDaemonTerminalListPreservesCreationOrder(t *testing.T) {
+	createdAt := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
+	host := &daemonHost{terminals: map[string]*daemonTerminalEntry{}}
+	want := []string{"term-0", "term-1", "term-2", "term-3", "term-4", "term-5", "term-6", "term-7", "term-8"}
+	for index := len(want) - 1; index >= 0; index-- {
+		id := want[index]
+		createdOffset := index
+		if id == "term-1" {
+			createdOffset = 0
+		}
+		host.terminals[id] = &daemonTerminalEntry{state: daemon.TerminalState{
+			TerminalID: id,
+			CreatedAt:  createdAt.Add(time.Duration(createdOffset) * time.Nanosecond),
+		}}
+	}
+
+	for range 64 {
+		states := host.list()
+		if len(states) != len(want) {
+			t.Fatalf("terminal.list returned %d tabs, want %d", len(states), len(want))
+		}
+		for index, state := range states {
+			if state.TerminalID != want[index] {
+				t.Fatalf("terminal.list order = %v, want creation order %v", terminalStateIDs(states), want)
+			}
+		}
+	}
+}
+
+func terminalStateIDs(states []daemon.TerminalState) []string {
+	ids := make([]string, len(states))
+	for index, state := range states {
+		ids[index] = state.TerminalID
+	}
+	return ids
+}
+
 func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *testing.T) {
 	service, workspace := newTestService(t)
 	fake := service.sandbox.(*fakeSandbox)

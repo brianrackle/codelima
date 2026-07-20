@@ -197,6 +197,9 @@ func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) (
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case tuiDaemonTerminalDirtyEvent:
+		a.sessions.markDaemonTerminalDirty(event.TerminalID, a.state.activeSessionKey())
+		return false, nil
 	case tuiRefreshTickEvent:
 		a.startDataRefresh()
 		return false, nil
@@ -359,9 +362,12 @@ func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) erro
 	return nil
 }
 
-// targetKeyStillExists reports whether targetKey resolves to a live node in the
-// current list. A key that does not parse as a target is treated as
-// still existing (left untouched), matching the prior prefix-switch default arm.
+// targetKeyStillExists reports whether targetKey resolves to a live node in
+// either this window's scoped list or the global node store. A path-scoped TUI
+// must not close daemon tabs merely because their nodes belong to another TUI
+// window's directory scope. Ambiguous store failures also retain tabs: only a
+// confirmed missing or deleted node is destructive. A key that does not parse
+// as a target is treated as still existing (left untouched).
 func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 	target, err := terminal.ParseTargetKey(targetKey)
 	if err != nil {
@@ -369,8 +375,17 @@ func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 	}
 	switch target.Kind {
 	case terminal.TargetNode:
-		_, ok := a.state.nodesByID[target.ID]
-		return ok
+		if _, ok := a.state.nodesByID[target.ID]; ok {
+			return true
+		}
+		if a.service == nil || a.service.store == nil {
+			return false
+		}
+		node, loadErr := a.service.store.NodeByID(target.ID)
+		if loadErr != nil {
+			return !IsNotFound(loadErr)
+		}
+		return node.DeletedAt == nil && node.Status != NodeStatusTerminated
 	case terminal.TargetProject:
 		// Project targets belong to the retired project-terminal model. Treat
 		// any restored bookkeeping for them as stale in schema v3.

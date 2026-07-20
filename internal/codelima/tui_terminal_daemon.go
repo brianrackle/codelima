@@ -12,7 +12,6 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
-	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 )
 
 // daemonTUITerminal is a client-side view of a daemon-owned terminal. The
@@ -30,37 +29,52 @@ const daemonTerminalPasteChunkBytes = daemon.MaxMessageSize / 16
 // this client-side view (resize, input, snapshot, focus, close).
 const daemonRPCTimeout = 2 * time.Second
 
+// Keep the established 20 FPS ceiling while terminal output is active, but
+// do not wake at all while the terminal is idle. Dirty notifications coalesce
+// behind this interval instead of every open tab owning a permanent ticker.
+const daemonTerminalSnapshotMinInterval = 50 * time.Millisecond
+
 type daemonTUITerminal struct {
-	client     daemonRPCCaller
-	id         string
-	postEvent  func(vaxis.Event)
-	mu         sync.RWMutex
-	inputMu    sync.Mutex
-	inputOnce  sync.Once
-	inputQueue []daemonTerminalInputRequest
-	inputWake  chan struct{}
-	inputDone  chan struct{}
-	pasting    bool
-	paste      strings.Builder
-	resizeMu   sync.Mutex
-	resizeCols int
-	resizeRows int
-	snapshot   daemon.Snapshot
-	text       string
-	focused    bool
-	closed     bool
-	stop       chan struct{}
-	stopOnce   sync.Once
-	generation uint64
+	client              daemonRPCCaller
+	id                  string
+	postEvent           func(vaxis.Event)
+	mu                  sync.RWMutex
+	inputMu             sync.Mutex
+	inputOnce           sync.Once
+	inputQueue          []daemonTerminalInputRequest
+	inputWake           chan struct{}
+	inputDone           chan struct{}
+	pasting             bool
+	paste               strings.Builder
+	resizeMu            sync.Mutex
+	resizeCols          int
+	resizeRows          int
+	snapshot            daemon.Snapshot
+	text                string
+	focused             bool
+	closed              bool
+	stop                chan struct{}
+	stopOnce            sync.Once
+	generation          uint64
+	snapshotWake        chan struct{}
+	snapshotVersion     uint64
+	snapshotReadVersion uint64
 }
 
 type daemonTerminalInputRequest struct {
 	params map[string]any
 }
 
-func newDaemonTUITerminal(client *daemonclient.Client, id string, postEvent func(vaxis.Event)) *daemonTUITerminal {
-	t := &daemonTUITerminal{client: client, id: id, postEvent: postEvent, stop: make(chan struct{})}
-	go t.poll()
+func newDaemonTUITerminal(client daemonRPCCaller, id string, postEvent func(vaxis.Event)) *daemonTUITerminal {
+	t := &daemonTUITerminal{
+		client:          client,
+		id:              id,
+		postEvent:       postEvent,
+		stop:            make(chan struct{}),
+		snapshotWake:    make(chan struct{}, 1),
+		snapshotVersion: 1,
+	}
+	go t.snapshotLoop()
 	return t
 }
 
@@ -206,6 +220,7 @@ func (t *daemonTUITerminal) deliverInput() {
 func (t *daemonTUITerminal) Draw(win vaxis.Window) {
 	width, height := win.Size()
 	t.Resize(width, height)
+	t.requestSnapshot()
 	t.mu.RLock()
 	snapshot := t.snapshot
 	focused := t.focused
@@ -343,30 +358,74 @@ func (t *daemonTUITerminal) isClosed() bool {
 	return t.closed
 }
 
-func (t *daemonTUITerminal) poll() {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
+func (t *daemonTUITerminal) markSnapshotDirty() {
+	t.mu.Lock()
+	if !t.closed {
+		t.snapshotVersion++
+	}
+	t.mu.Unlock()
+}
+
+func (t *daemonTUITerminal) requestSnapshot() {
+	t.mu.RLock()
+	dirty := !t.closed && t.snapshotVersion != t.snapshotReadVersion
+	wake := t.snapshotWake
+	t.mu.RUnlock()
+	if !dirty || wake == nil {
+		return
+	}
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+func (t *daemonTUITerminal) snapshotLoop() {
+	var lastSnapshot time.Time
 	for {
 		select {
 		case <-t.stop:
 			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
-			var snapshot daemon.Snapshot
-			err := t.client.Call(ctx, "terminal.snapshot", map[string]string{"terminal_id": t.id}, &snapshot)
-			cancel()
-			if err != nil {
-				continue
+		case <-t.snapshotWake:
+		}
+
+		if delay := time.Until(lastSnapshot.Add(daemonTerminalSnapshotMinInterval)); !lastSnapshot.IsZero() && delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-t.stop:
+				timer.Stop()
+				return
+			case <-timer.C:
 			}
-			t.mu.Lock()
-			changed := snapshot.Generation != t.generation || snapshot.Cols != t.snapshot.Cols || snapshot.Rows != t.snapshot.Rows
-			t.snapshot = snapshot
-			t.generation = snapshot.Generation
-			t.text = daemonSnapshotText(snapshot)
-			t.mu.Unlock()
-			if changed && t.postEvent != nil {
-				t.postEvent(vaxis.Redraw{})
-			}
+		}
+
+		t.mu.RLock()
+		dirty := !t.closed && t.snapshotVersion != t.snapshotReadVersion
+		requestedVersion := t.snapshotVersion
+		t.mu.RUnlock()
+		if !dirty {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
+		var snapshot daemon.Snapshot
+		err := t.client.Call(ctx, "terminal.snapshot", map[string]string{"terminal_id": t.id}, &snapshot)
+		cancel()
+		lastSnapshot = time.Now()
+		if err != nil {
+			continue
+		}
+		t.mu.Lock()
+		changed := snapshot.Generation != t.generation || snapshot.Cols != t.snapshot.Cols || snapshot.Rows != t.snapshot.Rows
+		t.snapshot = snapshot
+		t.generation = snapshot.Generation
+		t.text = daemonSnapshotText(snapshot)
+		if requestedVersion > t.snapshotReadVersion {
+			t.snapshotReadVersion = requestedVersion
+		}
+		t.mu.Unlock()
+		if changed && t.postEvent != nil {
+			t.postEvent(vaxis.Redraw{})
 		}
 	}
 }
