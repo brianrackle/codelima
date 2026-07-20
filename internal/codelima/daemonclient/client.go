@@ -16,8 +16,12 @@ import (
 const maxResponseSize = 16 << 20
 
 type Options struct {
-	Home      string
-	Version   string
+	Home    string
+	Version string
+	// Protocol overrides the current protocol only for daemon lifecycle
+	// compatibility during update and startup recovery. Ordinary callers must
+	// leave it at zero.
+	Protocol  int
 	WantInput bool
 	Events    bool
 	Timeout   time.Duration
@@ -38,6 +42,10 @@ func Dial(ctx context.Context, options Options) (*Client, error) {
 	if options.Timeout <= 0 {
 		options.Timeout = 5 * time.Second
 	}
+	protocol := options.Protocol
+	if protocol == 0 {
+		protocol = daemon.ProtocolVersion
+	}
 	paths := daemon.HomePaths(options.Home)
 	path := paths.Socket
 	if options.Events {
@@ -49,7 +57,7 @@ func Dial(ctx context.Context, options Options) (*Client, error) {
 		return nil, fmt.Errorf("daemon not running (codelima daemon start): %w", err)
 	}
 	client := &Client{conn: conn, encoder: json.NewEncoder(conn), reader: bufio.NewReaderSize(conn, 64*1024), timeout: options.Timeout, eventMode: options.Events}
-	if err := client.callLocked(ctx, "hello", daemon.HelloParams{Version: options.Version, Protocol: daemon.ProtocolVersion, Capabilities: []string{"terminal.snapshot", "events"}, WantInput: options.WantInput}, &client.Hello); err != nil {
+	if err := client.callLocked(ctx, "hello", daemon.HelloParams{Version: options.Version, Protocol: protocol, Capabilities: []string{"terminal.snapshot", "events"}, WantInput: options.WantInput}, &client.Hello); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}

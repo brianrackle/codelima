@@ -17,7 +17,31 @@ type tuiTerminalMouseGesture struct {
 	dragged   bool
 }
 
+// isTUITerminalPayloadKey reports whether a key is terminal input rather than
+// a CodeLima shortcut. Payload input is redrawn only after the daemon publishes
+// a fresh terminal snapshot; drawing immediately would repaint stale state.
+func isTUITerminalPayloadKey(key vaxis.Key) bool {
+	if key.EventType == vaxis.EventPaste {
+		return true
+	}
+	return !isHostTerminalTabOpenKey(key) &&
+		!isTerminalTabOpenKey(key) &&
+		!isTerminalTabNextKey(key) &&
+		!isTerminalTabPreviousKey(key) &&
+		!isTerminalTabCloseKey(key) &&
+		!isTerminalViewToggleKey(key)
+}
+
 func (a *vaxisTUIApp) handleKey(key vaxis.Key) (bool, error) {
+	// Pasted text is terminal payload, never a TUI shortcut. Vaxis emits one
+	// EventPaste key per decoded input sequence between PasteStart/PasteEnd.
+	if key.EventType == vaxis.EventPaste {
+		if a.state.focus == tuiFocusTerminal {
+			a.forwardTerminalEvent(key)
+		}
+		return false, nil
+	}
+
 	if isHostTerminalTabOpenKey(key) {
 		if err := a.openHostTerminalTab(); err != nil {
 			a.status = err.Error()

@@ -23,3 +23,4 @@ TUI-owned PTYs terminate when the TUI exits and cannot be reached by another CLI
 * Refined by [ADR 66](version_daemon_session_persistence_66.md)
 * Extended by [ADR 67](authenticated_scm_rights_daemon_handoff_67.md)
 * Refined by [ADR 68](edge_trigger_daemon_terminal_geometry_68.md)
+* Refined by [ADR 81](preserve_bracketed_paste_across_daemon_terminals_81.md)

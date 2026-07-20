@@ -39,7 +39,9 @@ func TestMessageLogAppendPreservesOrderAndLatest(t *testing.T) {
 	}
 }
 
-func TestDaemonInputRevokedEventOnlyNotifiesPreviousOwner(t *testing.T) {
+func TestDaemonInputRevokedEventIsSilentDuringFocusHandoff(t *testing.T) {
+	t.Parallel()
+
 	client := &daemonclient.Client{Hello: daemon.HelloResult{ClientID: "owner-client"}}
 	var events []vaxis.Event
 	store := &tuiSessionStore{
@@ -47,17 +49,9 @@ func TestDaemonInputRevokedEventOnlyNotifiesPreviousOwner(t *testing.T) {
 		postEvent: func(event vaxis.Event) { events = append(events, event) },
 	}
 
-	store.handleDaemonEvent(daemon.Event{Event: "input.revoked", Data: map[string]any{"client_id": "another-client"}})
-	if len(events) != 0 {
-		t.Fatalf("unrelated revocation posted %d events", len(events))
-	}
-
 	store.handleDaemonEvent(daemon.Event{Event: "input.revoked", Data: map[string]any{"client_id": "owner-client"}})
-	if len(events) != 1 {
-		t.Fatalf("owner revocation posted %d events, want 1", len(events))
-	}
-	if _, ok := events[0].(tuiTerminalErrorEvent); !ok {
-		t.Fatalf("revocation event = %T, want tuiTerminalErrorEvent", events[0])
+	if len(events) != 0 {
+		t.Fatalf("input revocation posted %d UI events, want none", len(events))
 	}
 }
 

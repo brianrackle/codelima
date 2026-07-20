@@ -1,6 +1,6 @@
 # Route dynamically discovered node HTTP ports through node.localhost
 
-Status: Accepted
+Status: Accepted; extended by ADR 79
 
 ## Context and Problem Statement
 
@@ -26,6 +26,8 @@ Chosen option: "daemon-owned `{node}.localhost` HTTP/WebSocket routing over SSH.
 
 Static published ports remain an explicit advanced escape hatch. Raw TCP, UDP, and local TLS termination are deferred because a shared loopback TCP connection does not carry the original DNS hostname and Microsandbox SSH forwarding is TCP-only.
 
+ADR 79 adds an ephemeral first-active claimant for generic `localhost:{port}` requests while retaining every node-specific route described here.
+
 ### Positive Consequences
 
 * Unplanned development servers become reachable without node recreation.
@@ -46,3 +48,4 @@ Static published ports remain an explicit advanced escape hatch. Raw TCP, UDP, a
 * Detailed contract: [Dynamic Node-Hostname Forwarding Specification](../plans/DYNAMIC_PORT_FORWARDING_SPEC.md)
 * Replaces the guessed-port convenience described by [ADR 55](replace_lima_with_microsandbox_as_sole_runtime_55.md)
 * Extends daemon ownership from [ADR 64](daemon_owned_terminal_runtimes_64.md)
+* Extended by [ADR 79](expose_first_claimant_on_generic_localhost_79.md)

@@ -263,17 +263,27 @@ func claimTUIDaemonInput(ctx context.Context, client *daemonclient.Client) (*dae
 	if client.Hello.InputOwner {
 		return client, nil
 	}
+	if err := takeTUIDaemonInput(ctx, client); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
+// takeTUIDaemonInput makes an already-connected interactive TUI authoritative.
+// Unlike claimTUIDaemonInput, it always sends the idempotent takeover request:
+// Hello describes connection-time ownership and becomes stale when another TUI
+// takes over later.
+func takeTUIDaemonInput(ctx context.Context, client *daemonclient.Client) error {
 	var result map[string]bool
 	if err := client.Call(ctx, "input.takeover", nil, &result); err != nil {
-		_ = client.Close()
-		return nil, fromDaemonError(err)
+		return fromDaemonError(err)
 	}
 	if !result["input_owner"] {
-		_ = client.Close()
-		return nil, preconditionFailed("daemon did not grant TUI input ownership", map[string]any{"client_id": client.Hello.ClientID})
+		return preconditionFailed("daemon did not grant TUI input ownership", map[string]any{"client_id": client.Hello.ClientID})
 	}
 	client.Hello.InputOwner = true
-	return client, nil
+	return nil
 }
 
 // EnsureReady prepares CODELIMA_HOME for an operation. Read surfaces call it

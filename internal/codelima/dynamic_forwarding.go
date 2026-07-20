@@ -243,16 +243,23 @@ type dynamicRouteKey struct {
 }
 
 type dynamicForwardingRoute struct {
-	key       dynamicRouteKey
-	nodeID    string
-	peer      forwardingPeer
-	transport *http.Transport
-	proxy     *httputil.ReverseProxy
-	seenAt    time.Time
+	key          dynamicRouteKey
+	nodeID       string
+	peer         forwardingPeer
+	transport    *http.Transport
+	proxy        *httputil.ReverseProxy
+	discoveredAt time.Time
+	seenAt       time.Time
 }
 
 func newDynamicForwardingRoute(node Node, port int, peer forwardingPeer, seenAt time.Time) *dynamicForwardingRoute {
-	route := &dynamicForwardingRoute{key: dynamicRouteKey{node: strings.ToLower(node.SandboxName), port: port}, nodeID: node.ID, peer: peer, seenAt: seenAt}
+	route := &dynamicForwardingRoute{
+		key:          dynamicRouteKey{node: strings.ToLower(node.SandboxName), port: port},
+		nodeID:       node.ID,
+		peer:         peer,
+		discoveredAt: seenAt,
+		seenAt:       seenAt,
+	}
 	route.transport = &http.Transport{
 		Proxy:                 nil,
 		MaxIdleConns:          100,
@@ -260,7 +267,7 @@ func newDynamicForwardingRoute(node Node, port int, peer forwardingPeer, seenAt 
 		IdleConnTimeout:       90 * time.Second,
 		ExpectContinueTimeout: time.Second,
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return route.peer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+			return dialGuestLoopback(ctx, route.peer, port)
 		},
 		ForceAttemptHTTP2: false,
 	}
@@ -278,14 +285,31 @@ func newDynamicForwardingRoute(node Node, port int, peer forwardingPeer, seenAt 
 	return route
 }
 
+func dialGuestLoopback(ctx context.Context, peer forwardingPeer, port int) (net.Conn, error) {
+	var dialErr error
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		address := net.JoinHostPort(host, strconv.Itoa(port))
+		connection, err := peer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			return connection, nil
+		}
+		dialErr = errors.Join(dialErr, fmt.Errorf("dial guest %s: %w", address, err))
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, dialErr
+}
+
 func (r *dynamicForwardingRoute) close() { r.transport.CloseIdleConnections() }
 
 type dynamicPortServer struct {
-	port     int
-	listener net.Listener
-	server   *http.Server
-	status   string
-	lastErr  string
+	port        int
+	listener    net.Listener
+	server      *http.Server
+	defaultNode string
+	status      string
+	lastErr     string
 }
 
 type dynamicForwarder struct {
@@ -478,6 +502,10 @@ func (f *dynamicForwarder) reconcileServers() {
 	}
 	for port, server := range f.servers {
 		if wanted[port] && server.status == "serving" {
+			if _, ok := f.routes[dynamicRouteKey{node: server.defaultNode, port: port}]; !ok {
+				server.defaultNode = f.firstClaimantLocked(port)
+				log.Printf("dynamic forwarding generic route claimed url=http://localhost:%d node=%s", port, server.defaultNode)
+			}
 			continue
 		}
 		if !wanted[port] {
@@ -498,18 +526,37 @@ func (f *dynamicForwarder) reconcileServers() {
 			continue
 		}
 		server := &http.Server{Handler: &dynamicForwardingHandler{forwarder: f, port: port}, ReadHeaderTimeout: 10 * time.Second}
-		f.servers[port] = &dynamicPortServer{port: port, listener: listener, server: server, status: "serving"}
+		defaultNode := f.firstClaimantLocked(port)
+		f.servers[port] = &dynamicPortServer{port: port, listener: listener, server: server, defaultNode: defaultNode, status: "serving"}
 		go func() {
 			if serveErr := server.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 				f.recordError(serveErr)
 			}
 		}()
 		log.Printf("dynamic forwarding listener serving address=%s", listener.Addr())
+		log.Printf("dynamic forwarding generic route claimed url=http://localhost:%d node=%s", port, defaultNode)
 	}
 	f.mu.Unlock()
 	for _, server := range closing {
 		_ = server.Close()
 	}
+}
+
+func (f *dynamicForwarder) firstClaimantLocked(port int) string {
+	var selected *dynamicForwardingRoute
+	for key, route := range f.routes {
+		if key.port != port {
+			continue
+		}
+		if selected == nil || route.discoveredAt.Before(selected.discoveredAt) ||
+			(route.discoveredAt.Equal(selected.discoveredAt) && route.key.node < selected.key.node) {
+			selected = route
+		}
+	}
+	if selected == nil {
+		return ""
+	}
+	return selected.key.node
 }
 
 func (f *dynamicForwarder) recordError(err error) {
@@ -529,11 +576,18 @@ type dynamicForwardingHandler struct {
 
 func (h *dynamicForwardingHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	nodeName, ok := nodeNameFromLocalhost(request.Host)
+	h.forwarder.mu.RLock()
+	if !ok && isGenericForwardingHost(request.Host) {
+		if server := h.forwarder.servers[h.port]; server != nil {
+			nodeName = server.defaultNode
+			ok = nodeName != ""
+		}
+	}
 	if !ok {
-		http.Error(writer, "request host must be {node}.localhost", http.StatusMisdirectedRequest)
+		h.forwarder.mu.RUnlock()
+		http.Error(writer, "request host must be localhost, 127.0.0.1, or {node}.localhost", http.StatusMisdirectedRequest)
 		return
 	}
-	h.forwarder.mu.RLock()
 	route := h.forwarder.routes[dynamicRouteKey{node: nodeName, port: h.port}]
 	known := h.forwarder.known[nodeName]
 	h.forwarder.mu.RUnlock()
@@ -548,7 +602,27 @@ func (h *dynamicForwardingHandler) ServeHTTP(writer http.ResponseWriter, request
 	route.proxy.ServeHTTP(writer, request)
 }
 
+func isGenericForwardingHost(hostport string) bool {
+	host, ok := forwardingHostname(hostport)
+	return ok && (host == "localhost" || host == "127.0.0.1")
+}
+
 func nodeNameFromLocalhost(hostport string) (string, bool) {
+	host, ok := forwardingHostname(hostport)
+	if !ok {
+		return "", false
+	}
+	if !strings.HasSuffix(host, ".localhost") {
+		return "", false
+	}
+	node := strings.TrimSuffix(host, ".localhost")
+	if node == "" || strings.Contains(node, ".") {
+		return "", false
+	}
+	return node, true
+}
+
+func forwardingHostname(hostport string) (string, bool) {
 	host := strings.TrimSpace(hostport)
 	if parsed, port, err := net.SplitHostPort(host); err == nil {
 		portNumber, parseErr := strconv.Atoi(port)
@@ -560,14 +634,10 @@ func nodeNameFromLocalhost(hostport string) (string, bool) {
 		return "", false
 	}
 	host = strings.TrimSuffix(strings.ToLower(strings.TrimSuffix(host, ".")), ".")
-	if !strings.HasSuffix(host, ".localhost") {
+	if host == "" {
 		return "", false
 	}
-	node := strings.TrimSuffix(host, ".localhost")
-	if node == "" || strings.Contains(node, ".") {
-		return "", false
-	}
-	return node, true
+	return host, true
 }
 
 func (f *dynamicForwarder) Snapshot() map[string]any {
@@ -584,7 +654,7 @@ func (f *dynamicForwarder) Snapshot() map[string]any {
 		if server.listener != nil {
 			address = server.listener.Addr().String()
 		}
-		ports = append(ports, map[string]any{"port": port, "address": address, "status": server.status, "error": server.lastErr})
+		ports = append(ports, map[string]any{"port": port, "address": address, "default_node": server.defaultNode, "status": server.status, "error": server.lastErr})
 	}
 	sort.Slice(ports, func(i, j int) bool { return ports[i]["port"].(int) < ports[j]["port"].(int) })
 	return map[string]any{"enabled": true, "authorized": f.prepared, "routes": routes, "ports": ports, "peers": len(f.peers), "last_error": f.lastErr, "last_poll_at": f.lastPoll}

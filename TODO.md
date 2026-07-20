@@ -7,13 +7,14 @@
 Problem:
 
 - Terminal tabs are node-scoped (`Option+t` opens guest tabs, `Option+Shift+t` opens host tabs, `Option+Left`/`Option+Right` switch, `Option+w` closes with adjacent focus, and TUI startup opens one default tab for the initial running node). Guest and host shells are different tab kinds on the same node target. Automated tests cover the model with fake sessions, but the real-PTY, real-Ghostty path still needs native macOS observation.
+- ADR 87 makes terminal the default right-pane view for an initially selected running node while leaving stopped nodes info-first. Automated tests cover both startup defaults and the sticky `i` override; the real-terminal pass must confirm the running-node border shows `Info [Terminal]` without moving keyboard focus out of the node list.
 - macOS Option delivery depends on the emulator: if Ghostty is not configured with `macos-option-as-alt = true` and the Option glyph fallbacks (`†`, `ˇ`, `∑`) do not arrive, the tab keybindings cannot fire.
-- Daemon integration coverage proves that a second TUI takes input ownership and can open a terminal after several connection read-timeout intervals. A real two-terminal run still needs to confirm the first TUI reports revocation and the second TUI can open its first guest or host tab after the 35-second QA idle interval.
+- Daemon integration coverage proves that a second TUI takes input ownership and can open a terminal after several connection read-timeout intervals. Focus-handoff coverage also proves repeated first-to-second-to-first `FocusIn` transitions reclaim ownership before the next mutation, while revocation-event coverage proves routine handoffs stay out of the TUI footer. Paste coverage proves daemon-backed terminals batch semantic paste requests, preserve LF, retain bracket boundaries, avoid shortcut matching, and chunk large UTF-8 payloads safely. Input-queue coverage proves ordinary keys leave the UI loop without waiting for daemon RPC completion, stay ordered, and wait for fresh terminal state before redraw. A real two-terminal run still needs to confirm both TUIs repeatedly follow host-window focus without an ownership warning or observe-only error, verify multiline paste and responsive ordinary typing visually, and open a first guest or host tab after the 35-second QA idle interval.
 
 Suggested solution:
 
 - Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+w` adjacent-close steps, with and without `macos-option-as-alt`.
-- Launch the same path-scoped TUI from a second real terminal, leave the new owner idle for at least 35 seconds, and verify its first guest/host terminal action succeeds while the original TUI shows the ownership-revoked message.
+- Launch the same path-scoped TUI from a second real terminal, repeatedly switch host focus in both directions, and verify each newly focused TUI can immediately open or control a guest/host tab without either window showing the ownership-revoked message. Paste the multiline QA sample and confirm it appears promptly without executing, type the ordinary-input sample quickly and confirm it keeps pace without reordering, then leave the final owner idle for at least 35 seconds and verify its next terminal action also succeeds.
 
 Advantages:
 
@@ -476,21 +477,21 @@ Disadvantages:
 
 ### 19. [superseded] Run the pre-schema-v3 info-first split-pane QA pass
 
-Resolution: superseded by schema-v3 `QA.md`, which covers the flat directory-scoped node list and node-scoped guest/host tabs. Native macOS keyboard and rendering qualification remains tracked once, in item 0.
+Resolution: superseded by schema-v3 `QA.md`, which covers the flat directory-scoped node list and node-scoped guest/host tabs. ADR 87 later supersedes ADR 40's info-first startup for running nodes. Native macOS keyboard and rendering qualification remains tracked once, in item 0.
 
 Problem:
 
 - The TUI now defaults the split pane to `[Info] Terminal` and defers terminal preview session startup until the operator toggles into terminal mode or focuses fullscreen terminal view.
 - Automated coverage now verifies the new default, the inverted tab order, sticky pane-mode behavior, and the affected mouse and node-action paths.
 - Automated coverage now verifies that clicking inside an active host tab preserves that tab instead of switching to the selected VM node's guest tab.
-- Automated coverage now verifies automatic tree refresh, multiline paste normalization, resize-time active-terminal resizing, TUI terminal tab keybinds, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 clipboard event dispatch.
+- Automated coverage now verifies automatic tree refresh, daemon-batched multiline paste with LF preservation and bracketed boundaries, resize-time active-terminal resizing, TUI terminal tab keybinds, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 clipboard event dispatch.
 - Automated coverage now verifies DECSET 1004 focus-report gating and focus gained/lost bytes through the Ghostty focus encoder path.
 - Automated coverage now verifies path-scoped TUI launch and refresh filtering, and that TUI node creation selects the new node, switches the split pane to terminal mode, and does not start a shell for a non-running node.
 - The full manual `QA.md` flows still need a human-run pass against a real terminal and Lima environment to confirm the updated startup path, fullscreen restoration, link handling, and node lifecycle interactions end to end.
 
 Suggested solution:
 
-- Run the complete `QA.md` verification set from a host terminal with Lima available, using the updated TUI flow that starts in info mode and toggles into terminal mode with `i`.
+- This historical info-first verification path is obsolete. Use current `QA.md` Flow 7, which checks terminal-first startup for a running node, info-first startup for a stopped node, and the sticky `i` override.
 - Confirm both project and node selections restore the expected pane mode after fullscreen terminal focus and that stopped-node terminal placeholders still behave correctly after the default change.
 - Confirm a fullscreen host tab stays active after a mouse click inside the terminal pane, then switches back to the selected VM node's guest tab with `Option+Left` or `Option+Right`.
 - Confirm the new TUI checks from `QA.md`: automatic tree refresh, multiline paste preservation, resize repainting, `Alt+t`/`Alt+Left`/`Alt+Right`/`Alt+w` terminal tab behavior, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 guest-to-host clipboard sync.
@@ -723,6 +724,11 @@ Problem:
   2026-07-10, including recursive copy after fixing the SDK's file-at-a-time
   copy semantic. The native rerun remains a release qualification rather than
   unfinished SDK implementation.
+- The available Linux/aarch64 sandbox on 2026-07-18 now provides glibc 2.36,
+  while the SDK 0.6.6 bundled `libmicrosandbox_go_ffi.so` references
+  `GLIBC_2.39`. QA Flow 1's metadata checks pass, but the SDK cannot load, so
+  node creation and runtime-backed Flows 2–8—including ADR 79's two-VM generic
+  `localhost`/`127.0.0.1` claimant/transfer flow—cannot be rerun in this sandbox.
 - A native macOS trial exposed multi-second input echo while the TUI repeatedly
   redrew a daemon terminal. ADR 68 removes the draw/unchanged-resize/event
   feedback loop with client and daemon regression coverage; the native rerun
@@ -737,6 +743,20 @@ Problem:
   virtualization process's descriptor count before and after reclamation, and
   confirm the default 20% trigger intervenes before the observed `ENFILE`
   failure under a large mounted-tree traversal.
+- Dynamic-forwarding unit coverage proves IPv4-to-IPv6 guest-loopback fallback,
+  but the native rerun must also bind a real guest HTTP server only to `::1`
+  and verify generic `localhost` and `127.0.0.1` plus `{node}.localhost` host routes through
+  the Microsandbox SSH `direct-tcpip` implementation.
+- No-argument live update now supplies the caller binary and protocol 3 rejects
+  stale protocol-2 semantic-paste clients. Native Linux qualification must
+  start the prior `unixpacket` daemon, invoke update from the protocol-3 binary
+  with no path, and verify legacy-import terminal continuity. Native macOS
+  qualification must verify that the same first update reports the one-time
+  `fallback: restart`, keeps VMs running, and restores terminal IDs, then that a
+  second update between framed-stream daemons reports `live_handoff: true` and
+  preserves the live terminal process. The first update must also complete when
+  legacy teardown lasts longer than five seconds, and an immediate subsequent
+  start must wait for daemon-lock release rather than exit before ready.
 
 Suggested solution:
 
@@ -744,7 +764,11 @@ Suggested solution:
   macOS/Apple Silicon and native Linux/KVM, including both login transports,
   full-screen agents, mouse, clipboard, latency, and abrupt terminal close.
 - Re-run lifecycle, mount, port, clone, daemon, and live-update QA on each host,
-  and verify writable-layer persistence after a physical reboot.
+  verify IPv4- and IPv6-loopback dynamic forwarding, and verify writable-layer
+  persistence after a physical reboot.
+- Run the schema-v3 QA matrix on a native host with glibc 2.39 or newer, or
+  obtain an SDK 0.6.6 ARM64 FFI build compatible with its documented minimum;
+  report the current 2.39 symbol dependency upstream if the latter is expected.
 - On macOS, run the pressure flow first at the QA-only 1% threshold and then at
   the production 20% threshold while watching host descriptor counts; adjust
   the default in a follow-up ADR if the native failure boundary leaves
@@ -758,11 +782,15 @@ Advantages:
   virtualization stacks.
 - Separates local implementation completion from release evidence that cannot
   be produced in a nested development guest.
+- Resolving the FFI baseline mismatch restores repeatable runtime QA on the
+  existing Linux/aarch64 sandbox instead of relying only on physical hosts.
 
 Disadvantages:
 
 - Requires two physical host environments and human terminal interaction.
 - Host reboot verification is unsuitable for ordinary CI.
+- Upgrading the sandbox libc changes its baseline, while rebuilding or fixing
+  the bundled SDK FFI is external to CodeLima.
 
 ### 29. Build and publish a smaller pre-baked default guest image
 
@@ -797,10 +825,10 @@ Disadvantages:
 
 Problem:
 
-- ADR 70 delivers automatic HTTP/WebSocket routes at
-  `{node}.localhost:{port}`, but raw TCP has no HTTP Host header, UDP is not
-  supported by the Microsandbox SSH seam, and direct TLS hides the hostname
-  until after connection establishment.
+- ADRs 70 and 79 deliver automatic HTTP/WebSocket routes at generic
+  `localhost:{port}` and explicit `{node}.localhost:{port}`, but raw TCP has no
+  HTTP Host header, UDP is not supported by the Microsandbox SSH seam, and
+  direct TLS hides the hostname until after connection establishment.
 - ADR 71 removed the former additive global `msb ssh authorize` mutation. The
   SDK helper now applies the per-home public key only to its per-sandbox SSH
   server, so there is no stale global authorization to revoke.
@@ -870,3 +898,87 @@ Disadvantages:
   non-interactive so the daemon cannot block on a password prompt.
 - A capability probe adds a guest round trip unless its result is cached per
   node runtime.
+
+### 32. Reconnect an open TUI after daemon live update
+
+Problem:
+
+- Live update preserves daemon-owned PTYs, but the old daemon's request and
+  event sockets close at commit. An already-open TUI retains those dead client
+  connections and must currently be quit and reopened before it can send more
+  terminal input.
+- Asynchronous terminal input failures are now surfaced in the TUI instead of
+  disappearing silently, but that diagnostic does not restore the connection.
+- Blindly replaying a failed terminal mutation is forbidden because the old
+  daemon may have applied it before the connection failure became observable.
+
+Suggested solution:
+
+- Treat `daemon.update_committed` followed by event-stream closure as a
+  reconnect signal. Redial and reclaim input, replace the shared request and
+  event clients, then reconcile existing daemon terminal IDs without creating
+  replacement shells.
+- Introduce a stable reconnecting client holder for daemon terminal adapters so
+  swapping the underlying connection does not require rebuilding every TUI
+  object. Never replay an RPC whose completion is ambiguous.
+- Add integration coverage with a TUI session attached across live handoff,
+  then send fresh input only after reconnection and verify the original PTY and
+  terminal ID remain active.
+
+Advantages:
+
+- Makes live update transparent to an active TUI as originally intended.
+- Preserves terminals while avoiding duplicate input after uncertain failures.
+- Removes the current quit-and-reopen recovery step.
+
+Disadvantages:
+
+- Requires coordinated replacement of request, event, polling, and ownership
+  state while terminal workers may still be draining.
+- Reconnection and shutdown can race, so lifecycle ownership needs a dedicated
+  abstraction and race-detector coverage.
+
+### 33. Restore the repository-wide unit and integration test gates
+
+Problem:
+
+- Roadmap priority 5's focused running/stopped startup tests, formatting, lint,
+  and production build pass, but the wider dirty worktree is not fully green.
+- `TestRefreshDoesNotRaceMutation` repeatedly reports `node not found` while
+  `NodeList` runs concurrently with `NodeStop`/`NodeStart` (four failures in
+  five isolated runs). This test and the node persistence paths were unchanged
+  by priority 5.
+- `make test-integration` reaches the existing
+  `TestDaemonStartWaitsForPreviousDaemonShutdownLock` work and fails with
+  `PreconditionFailed: daemon already running`. Priority 5 does not change the
+  daemon lifecycle or integration harness.
+- Running the ordinary unit suite as root also invalidates two environment-
+  sensitive assertions: a PTY prompt is `#` instead of `$`, and root can write
+  through a read-only test directory. An unprivileged private-mount run avoids
+  both and passes every package except the refresh race above.
+
+Suggested solution:
+
+- Reproduce the refresh failure with filesystem tracing around `ListNodes` and
+  `SaveNode`, then either take a read lock for the metadata snapshot or make
+  enumeration tolerate a node that disappears after directory discovery.
+- Diagnose the daemon startup integration failure against ADR 86's lock-based
+  shutdown contract, ensuring the second start waits on the authoritative lock
+  instead of treating a shutting-down daemon as a stable owner.
+- Add a documented unprivileged test recipe or make the two permission/prompt
+  tests explicitly skip only when the effective user is root, so `make test`
+  has one reproducible contract in agent containers.
+
+Advantages:
+
+- Restores a meaningful repository-wide green gate for future feature work.
+- Converts two environment-dependent false failures into an explicit test
+  environment contract.
+- Exercises the metadata and daemon lifecycle concurrency guarantees directly.
+
+Disadvantages:
+
+- The refresh and daemon failures cross storage and lifecycle ownership and
+  should not be patched speculatively as part of the TUI pane-default change.
+- Making root-only skips too broad could hide real permission regressions, so
+  any skip must be limited to assertions that POSIX root intentionally bypasses.

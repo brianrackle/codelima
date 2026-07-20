@@ -152,8 +152,16 @@ func newTUIState(tree []ProjectTreeNode, sessions tuiSessionManager) (*tuiState,
 	if err := state.selectIndex(initialSelection); err != nil {
 		return nil, err
 	}
+	state.treePaneMode = defaultTUITreePaneMode(state.selectedEntry())
 
 	return state, nil
+}
+
+func defaultTUITreePaneMode(entry tuiTreeEntry) tuiTreePaneMode {
+	if entry.kind == tuiTreeEntryNode && nodeAutoStartsSession(entry.node) {
+		return tuiTreePaneModeTerminal
+	}
+	return tuiTreePaneModeInfo
 }
 
 func (s *tuiState) indexTree(nodes []ProjectTreeNode) {
@@ -363,7 +371,7 @@ func (s *tuiState) ensureTargetTab(entry tuiTreeEntry) (string, error) {
 }
 
 // openInitialTerminalTab makes one terminal tab available for the initial
-// selection without changing tree focus or the info-first right pane mode.
+// running-node selection without changing tree focus or its default pane mode.
 func (s *tuiState) openInitialTerminalTab() error {
 	entry := s.selectedEntry()
 	if entry.kind != tuiTreeEntryNode {

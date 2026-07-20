@@ -69,7 +69,7 @@ func (s *tuiSessionStore) startDaemonEvents() {
 		s.service.log().Error("connect daemon event stream failed", "error", err.Error())
 		return
 	}
-	if err := client.Subscribe(ctx, []string{"terminal", "target", "node", "daemon", "input"}); err != nil {
+	if err := client.Subscribe(ctx, []string{"terminal", "target", "node", "daemon"}); err != nil {
 		_ = client.Close()
 		cancel()
 		s.service.log().Error("subscribe daemon events failed", "error", err.Error())
@@ -106,11 +106,6 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 	case "terminal.closed":
 		if sessionKey != "" && s.postEvent != nil {
 			s.postEvent(tuiTerminalClosedEvent{TargetKey: sessionKey})
-		}
-	case "input.revoked":
-		clientID, _ := data["client_id"].(string)
-		if s.postEvent != nil && s.service != nil && s.service.daemonClient != nil && clientID == s.service.daemonClient.Hello.ClientID {
-			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("terminal input ownership was taken by another client")})
 		}
 	case "daemon.shutdown":
 		if s.postEvent != nil {

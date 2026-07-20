@@ -187,6 +187,17 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.status = event.Err.Error()
 		a.draw()
 		return false, nil
+	case vaxis.FocusIn:
+		// A newer TUI can revoke this request connection while both windows stay
+		// open. Window focus is an explicit user handoff, so reclaim ownership
+		// before the next key or mouse event can mutate a terminal.
+		if a.service != nil && a.service.daemonClient != nil {
+			if err := takeTUIDaemonInput(a.ctx, a.service.daemonClient); err != nil {
+				a.status = fmt.Sprintf("reclaim terminal input ownership: %v", err)
+			}
+		}
+		a.draw()
+		return false, nil
 	}
 
 	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && (a.dialog != nil || a.menu != nil || a.selector != nil || a.messagesView != nil) {
@@ -239,6 +250,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 
 	switch event := event.(type) {
 	case vaxis.Key:
+		if a.state != nil && a.state.focus == tuiFocusTerminal && isTUITerminalPayloadKey(event) {
+			a.forwardTerminalEvent(event)
+			return false, nil
+		}
 		quit, err := a.handleKey(event)
 		a.draw()
 		return quit, err
@@ -248,10 +263,8 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, err
 	case vaxis.PasteStartEvent:
 		a.forwardTerminalEvent(event)
-		a.draw()
 	case vaxis.PasteEndEvent:
 		a.forwardTerminalEvent(event)
-		a.draw()
 	case vaxis.ColorThemeUpdate:
 		a.forwardTerminalEvent(event)
 		a.draw()

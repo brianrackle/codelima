@@ -27,10 +27,16 @@ What each target does:
 - `make verify`
   - runs `fmt`, `lint`, `test`, and `build`
 - `make test-race`
-  - runs every Go package with the race detector
+  - runs every Go package with the race detector serially by default
 - `make test-integration`
-  - builds the real CLI and exercises daemon lifecycle, stale recovery, PTY continuity across live update, and rollback after an injected import failure
+  - builds the real CLI and exercises daemon lifecycle, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
   - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path
+
+All test recipes run tests serially by default, avoiding filesystem-resource
+spikes on virtualized development hosts. Override `GO_TEST_PARALLEL` or
+`GO_RACE_TEST_PARALLEL` only after qualifying the host.
+
+The Microsandbox Go SDK requires cgo. Make enables cgo for every recipe, uses a host `cc` when present, and otherwise uses the managed Zig compiler. Zig is installed before Go-based development tools so `make init` also succeeds in minimal sandboxes without a system C compiler.
 
 Useful supporting targets:
 
@@ -48,7 +54,7 @@ The source checkout intentionally namespaces development binaries by the same pl
 
 Runtime-backed manual checks require a Microsandbox-capable host. CodeLima embeds the official Go SDK at `v0.6.6`; the SDK's `EnsureInstalled` path installs its matching `msb` and `libkrunfw` support files under `~/.microsandbox` when absent. CodeLima never shells out to that binary, and there is no CLI fallback. Release qualification must start from both a warm install and an empty SDK runtime cache. Keep `MSB_HOME` short enough for platform Unix-socket path limits.
 
-Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module over a hidden CodeLima helper process. The helper connects with the Go SDK, prepares a per-sandbox SDK SSH server, and serves it on stdin/stdout; it invokes neither `msb` nor host OpenSSH. Release qualification must verify `{node}.localhost` HTTP and Upgrade traffic on both native platforms, including two nodes sharing one guest port and a guest-loopback-only service.
+Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module over a hidden CodeLima helper process. The helper connects with the Go SDK, prepares a per-sandbox SDK SSH server, and serves it on stdin/stdout; it invokes neither `msb` nor host OpenSSH. Release qualification must verify generic `localhost` and `127.0.0.1` claimant selection, one-second bind retry and claimant transfer, and `{node}.localhost` HTTP and Upgrade traffic on both native platforms, including two nodes sharing one guest port and a guest-loopback-only service.
 
 ## Self-Hosted Development Metadata
 
@@ -168,7 +174,7 @@ Standard release flow:
 1. Ensure `make verify` passes locally.
 2. Ensure `make test-race` and `make test-integration` pass locally.
 3. Complete every flow in `QA.md`, including the native macOS and Linux microsandbox qualification and interactive TUI checks.
-4. Verify `daemon update` with the candidate packaged binary while a long-running terminal command is active.
+4. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
 5. Ensure the tap repo settings and token are configured.
 6. Create and push the release tag:
 

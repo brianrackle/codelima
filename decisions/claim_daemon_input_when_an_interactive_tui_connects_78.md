@@ -59,3 +59,4 @@ Chosen option: "Complete TUI connection setup by taking ownership whenever `hell
 
 * Refines [Keep authenticated daemon connections alive while idle](persistent_authenticated_daemon_connections_75.md)
 * Preserves [Exact-version JSON-lines daemon protocol](exact_version_json_lines_daemon_protocol_65.md)
+* Refined by [Reclaim daemon input when a TUI window gains focus](reclaim_daemon_input_when_a_tui_window_gains_focus_80.md)

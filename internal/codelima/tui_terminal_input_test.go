@@ -29,7 +29,7 @@ func TestEncodeTUITerminalKeyEncodesCtrlC(t *testing.T) {
 	}
 }
 
-func TestEncodeTUITerminalPasteKeyPreservesNewlinesAsCarriageReturns(t *testing.T) {
+func TestEncodeTUITerminalPasteKeyPreservesNewlinesWithoutSubmitting(t *testing.T) {
 	t.Parallel()
 
 	got := encodeTUITerminalKey(vaxis.Key{
@@ -37,8 +37,8 @@ func TestEncodeTUITerminalPasteKeyPreservesNewlinesAsCarriageReturns(t *testing.
 		Keycode:   '\n',
 		EventType: vaxis.EventPaste,
 	}, false, false)
-	if got != "one\rtwo\rthree" {
-		t.Fatalf("expected pasted newlines to become carriage returns, got %q", got)
+	if got != "one\ntwo\nthree" {
+		t.Fatalf("expected pasted newlines to remain line feeds, got %q", got)
 	}
 }
 
@@ -51,8 +51,8 @@ func TestEncodeTUITerminalPasteKeyRecoversCtrlDecodedNewline(t *testing.T) {
 		Modifiers: vaxis.ModCtrl,
 		EventType: vaxis.EventPaste,
 	}, false, false)
-	if got != "\r" {
-		t.Fatalf("expected pasted Ctrl+J to encode as carriage return, got %q", got)
+	if got != "\n" {
+		t.Fatalf("expected pasted Ctrl+J to encode as line feed, got %q", got)
 	}
 
 	got = encodeTUITerminalKey(vaxis.Key{

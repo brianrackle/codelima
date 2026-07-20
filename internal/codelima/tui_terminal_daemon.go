@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
@@ -21,11 +22,22 @@ type daemonRPCCaller interface {
 	Call(context.Context, string, any, any) error
 }
 
+// Keep worst-case JSON escaping (six bytes for one control byte), request
+// metadata, and the newline delimiter comfortably below daemon.MaxMessageSize.
+const daemonTerminalPasteChunkBytes = daemon.MaxMessageSize / 16
+
 type daemonTUITerminal struct {
 	client     daemonRPCCaller
 	id         string
 	postEvent  func(vaxis.Event)
 	mu         sync.RWMutex
+	inputMu    sync.Mutex
+	inputOnce  sync.Once
+	inputQueue []daemonTerminalInputRequest
+	inputWake  chan struct{}
+	inputDone  chan struct{}
+	pasting    bool
+	paste      strings.Builder
 	resizeMu   sync.Mutex
 	resizeCols int
 	resizeRows int
@@ -36,6 +48,10 @@ type daemonTUITerminal struct {
 	stop       chan struct{}
 	stopOnce   sync.Once
 	generation uint64
+}
+
+type daemonTerminalInputRequest struct {
+	params map[string]any
 }
 
 func newDaemonTUITerminal(client *daemonclient.Client, id string, postEvent func(vaxis.Event)) *daemonTUITerminal {
@@ -63,12 +79,31 @@ func (t *daemonTUITerminal) Resize(width, height int) {
 }
 
 func (t *daemonTUITerminal) Update(event vaxis.Event) {
+	t.inputMu.Lock()
+	defer t.inputMu.Unlock()
+
 	if t.isClosed() {
 		return
 	}
 	params := map[string]any{"terminal_id": t.id}
 	switch value := event.(type) {
+	case vaxis.PasteStartEvent:
+		t.pasting = true
+		t.paste.Reset()
+		return
+	case vaxis.PasteEndEvent:
+		t.finishPasteLocked()
+		return
 	case vaxis.Key:
+		if t.pasting && value.EventType == vaxis.EventPaste {
+			t.paste.WriteString(encodeTUITerminalPasteKey(value))
+			return
+		}
+		if t.pasting {
+			// Be defensive if a terminal fails to emit PasteEnd: preserve input
+			// ordering by committing the buffered paste before the next key.
+			t.finishPasteLocked()
+		}
 		params["type"] = "key"
 		params["keycode"] = value.Keycode
 		params["shifted_code"] = value.ShiftedCode
@@ -82,9 +117,86 @@ func (t *daemonTUITerminal) Update(event vaxis.Event) {
 	default:
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_ = t.client.Call(ctx, "terminal.send_event", params, nil)
+	t.enqueueInputLocked(params)
+}
+
+func (t *daemonTUITerminal) finishPasteLocked() {
+	if !t.pasting {
+		return
+	}
+	text := normalizeTUITerminalPasteText(t.paste.String())
+	t.pasting = false
+	t.paste.Reset()
+
+	for text != "" {
+		end := min(len(text), daemonTerminalPasteChunkBytes)
+		if end < len(text) {
+			for end > 0 && !utf8.RuneStart(text[end]) {
+				end--
+			}
+		}
+		chunk := text[:end]
+		text = text[end:]
+		t.enqueueInputLocked(map[string]any{
+			"terminal_id": t.id,
+			"type":        "paste",
+			"text":        chunk,
+		})
+	}
+}
+
+func (t *daemonTUITerminal) enqueueInputLocked(params map[string]any) {
+	t.inputOnce.Do(func() {
+		t.inputWake = make(chan struct{}, 1)
+		t.inputDone = make(chan struct{})
+		go t.deliverInput()
+	})
+	t.inputQueue = append(t.inputQueue, daemonTerminalInputRequest{params: params})
+	select {
+	case t.inputWake <- struct{}{}:
+	default:
+	}
+}
+
+func (t *daemonTUITerminal) deliverInput() {
+	defer close(t.inputDone)
+	inputFailed := false
+	for {
+		select {
+		case <-t.inputWake:
+		case <-t.stop:
+		}
+
+		for {
+			t.inputMu.Lock()
+			if len(t.inputQueue) == 0 {
+				t.inputMu.Unlock()
+				break
+			}
+			request := t.inputQueue[0]
+			t.inputQueue[0] = daemonTerminalInputRequest{}
+			t.inputQueue = t.inputQueue[1:]
+			t.inputMu.Unlock()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			err := t.client.Call(ctx, "terminal.send_event", request.params, nil)
+			cancel()
+			if err != nil {
+				if !inputFailed && t.postEvent != nil {
+					t.postEvent(tuiTerminalErrorEvent{Err: fmt.Errorf("send terminal input: %w", err)})
+				}
+				inputFailed = true
+			} else {
+				inputFailed = false
+			}
+		}
+
+		select {
+		case <-t.stop:
+			return
+		default:
+		}
+	}
 }
 
 func (t *daemonTUITerminal) Draw(win vaxis.Window) {
@@ -166,10 +278,16 @@ func (t *daemonTUITerminal) Detach() { t.detach() }
 
 func (t *daemonTUITerminal) detach() {
 	t.stopOnce.Do(func() {
+		t.inputMu.Lock()
 		t.mu.Lock()
 		t.closed = true
 		t.mu.Unlock()
 		close(t.stop)
+		inputDone := t.inputDone
+		t.inputMu.Unlock()
+		if inputDone != nil {
+			<-inputDone
+		}
 	})
 }
 

@@ -60,7 +60,7 @@ characterization suite unmodified.
 
 ## Track 4 — Live update
 
-Done. Authenticated `unixpacket` manifest + batched SCM_RIGHTS, commit and rollback (ADR 67); bounded nonblocking PTY polling; continuity and injected-failure integration tests.
+Done. Authenticated length-prefixed Unix-stream manifest + batched SCM_RIGHTS, commit and rollback (ADRs 67 and 85); lock-authoritative bounded shutdown/startup recovery (ADR 86); bounded nonblocking PTY polling; continuity, injected-failure rollback, descriptor-transfer, delayed legacy-Darwin restart-fallback, and shutdown-lock recovery integration tests.
 
 ## Dynamic node service forwarding
 
@@ -85,8 +85,15 @@ Done locally. ADR 72 removes the public project model and introduces reusable gl
 
 ## Track 6 — Experience
 
-All pending: 6.1 keybindings/prefix, 6.2 roadmap 0.15+0.4, 6.3 goto picker,
-6.4 theme fidelity (TODO #1), 6.5 kitty graphics, 6.6 split panes (last), 6.7 first-run polish.
+| Item | Status | Notes |
+|---|---|---|
+| 6.1 Keybindings/prefix | pending | |
+| 6.2 Roadmap 0.15 + 0.4 | partially complete | priority 5 / former 0.15 done in ADR 87; resize/focus clearing priority 1 / former 0.4 remains |
+| 6.3 Goto picker | pending | |
+| 6.4 Theme fidelity | pending | TODO #1 |
+| 6.5 Kitty graphics | pending | |
+| 6.6 Split panes | pending | last |
+| 6.7 First-run polish | pending | |
 
 ## Track 7 — Engineering system
 

@@ -195,6 +195,7 @@ type fakeTUITerminal struct {
 	termEnv       string
 	capturesMouse bool
 	events        []vaxis.Event
+	drawCalls     int
 	startCmd      *exec.Cmd
 	startErr      error
 	startCols     int
@@ -238,6 +239,7 @@ func (f *fakeTUITerminal) Update(event vaxis.Event) {
 }
 
 func (f *fakeTUITerminal) Draw(win vaxis.Window) {
+	f.drawCalls++
 	for row, line := range strings.Split(f.snapshot, "\n") {
 		win.Println(row, vaxis.Segment{Text: line})
 	}
@@ -869,8 +871,8 @@ func TestTUIDrawRendersPaneTabsInBorder(t *testing.T) {
 
 	app.draw()
 	rendered := renderedScreenText(t, vx, 100, 24)
-	if !strings.Contains(rendered, "[Info] Terminal") {
-		t.Fatalf("expected info-mode tabs in the pane border, got:\n%s", rendered)
+	if !strings.Contains(rendered, "Info [Terminal]") {
+		t.Fatalf("expected a running node to render terminal-mode tabs by default, got:\n%s", rendered)
 	}
 
 	if err := state.toggleTreePaneMode(); err != nil {
@@ -879,8 +881,8 @@ func TestTUIDrawRendersPaneTabsInBorder(t *testing.T) {
 	app.draw()
 
 	rendered = renderedScreenText(t, vx, 100, 24)
-	if !strings.Contains(rendered, "Info [Terminal]") {
-		t.Fatalf("expected terminal-mode tabs in the pane border, got:\n%s", rendered)
+	if !strings.Contains(rendered, "[Info] Terminal") {
+		t.Fatalf("expected info-mode tabs after toggling, got:\n%s", rendered)
 	}
 }
 
@@ -1373,11 +1375,12 @@ func TestTUIStateSelectionNeverOpensTerminalTabs(t *testing.T) {
 	if err := state.toggleTreePaneMode(); err != nil {
 		t.Fatalf("toggleTreePaneMode() error = %v", err)
 	}
-	if state.treePaneMode != tuiTreePaneModeTerminal {
-		t.Fatalf("expected terminal pane mode after toggling from info, got %q", state.treePaneMode)
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("expected info pane mode after toggling from the running-node default, got %q", state.treePaneMode)
 	}
 
-	// Visit every entry in both pane modes; nothing may open a session.
+	// Visit every entry after an explicit pane-mode choice; nothing may open a
+	// session or recompute the sticky mode from the selected entry.
 	for _, delta := range []int{1, 1, -2, 1, 1, -2} {
 		if err := state.moveSelection(delta); err != nil {
 			t.Fatalf("moveSelection(%d) error = %v", delta, err)
@@ -1434,8 +1437,8 @@ func TestTUIStateOpenInitialTerminalTab(t *testing.T) {
 	if state.focus != tuiFocusTree {
 		t.Fatalf("expected startup to keep tree focus, got %q", state.focus)
 	}
-	if state.treePaneMode != tuiTreePaneModeInfo {
-		t.Fatalf("expected startup to keep info pane mode, got %q", state.treePaneMode)
+	if state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("expected a running node to default to terminal pane mode, got %q", state.treePaneMode)
 	}
 
 	if err := state.openInitialTerminalTab(); err != nil {
@@ -1443,6 +1446,34 @@ func TestTUIStateOpenInitialTerminalTab(t *testing.T) {
 	}
 	if got := sessions.opened[targetKey]; got != 1 {
 		t.Fatalf("expected startup default tab to be created once, got %d opens", got)
+	}
+}
+
+func TestTUIStateDefaultsStoppedNodeToInfoWithoutOpeningTerminal(t *testing.T) {
+	t.Parallel()
+
+	tree := []ProjectTreeNode{{
+		Project: Project{ID: "flat-nodes", Slug: "nodes"},
+		Nodes: []Node{{
+			ID:     "node-stopped",
+			Slug:   "stopped-node",
+			Status: NodeStatusStopped,
+		}},
+	}}
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState(tree, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("expected a stopped node to default to info pane mode, got %q", state.treePaneMode)
+	}
+	if err := state.openInitialTerminalTab(); err != nil {
+		t.Fatalf("openInitialTerminalTab() error = %v", err)
+	}
+	if len(sessions.opened) != 0 {
+		t.Fatalf("expected a stopped node to open no terminal tabs, got %v", sessions.opened)
 	}
 }
 
@@ -2269,7 +2300,7 @@ func TestTUIDrawActiveHostTerminalTabRendersRedHeader(t *testing.T) {
 	}
 }
 
-func TestTUIForwardTerminalEventNormalizesPastedNewlines(t *testing.T) {
+func TestTUIForwardTerminalEventPreservesPastedNewlines(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2289,13 +2320,26 @@ func TestTUIForwardTerminalEventNormalizesPastedNewlines(t *testing.T) {
 		state:    state,
 		sessions: sessions,
 	}
+	targetKey := nodeTargetKey("node-root")
+	terminal := targetTestTerminal(t, sessions, targetKey)
+	beforeSessions := len(sessions.TargetSessionKeys(targetKey))
+	if quit, err := app.handleKey(vaxis.Key{Text: "†", Keycode: '†', EventType: vaxis.EventPaste}); err != nil || quit {
+		t.Fatalf("handleKey(pasted Option+t glyph) = (%v, %v), want (false, nil)", quit, err)
+	}
+	if got := len(sessions.TargetSessionKeys(targetKey)); got != beforeSessions {
+		t.Fatalf("pasted text triggered a terminal-tab keybinding: session count = %d, want %d", got, beforeSessions)
+	}
+	if len(terminal.events) != 1 {
+		t.Fatalf("pasted Option+t glyph forwarded %d events, want one", len(terminal.events))
+	}
+	terminal.events = nil
+
 	app.forwardTerminalEvent(vaxis.Key{
 		Text:      "one\ntwo\r\nthree",
 		Keycode:   '\n',
 		EventType: vaxis.EventPaste,
 	})
 
-	terminal := targetTestTerminal(t, sessions, nodeTargetKey("node-root"))
 	if len(terminal.events) != 1 {
 		t.Fatalf("expected pasted key to be forwarded once, got %d events", len(terminal.events))
 	}
@@ -2303,8 +2347,45 @@ func TestTUIForwardTerminalEventNormalizesPastedNewlines(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected forwarded event to remain a key, got %T", terminal.events[0])
 	}
-	if key.Text != "one\rtwo\rthree" {
-		t.Fatalf("expected pasted newlines to be normalized, got %q", key.Text)
+	if key.Text != "one\ntwo\nthree" {
+		t.Fatalf("expected pasted newlines to remain line feeds, got %q", key.Text)
+	}
+}
+
+func TestTUIHandleTerminalKeyWaitsForFreshSnapshotBeforeRedraw(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
+	state, err := newTUIState(testTUITree(t), newSharedFakeTUISessionManager(sessions))
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() error = %v", err)
+	}
+
+	vx := newRenderTestVaxis(t, 100, 24)
+	defer vx.Close()
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: sessions,
+		vx:       vx,
+	}
+	terminal := targetTestTerminal(t, sessions, nodeTargetKey("node-root"))
+
+	quit, err := app.handleEvent(vaxis.Key{Text: "a", Keycode: 'a'})
+	if err != nil || quit {
+		t.Fatalf("handleEvent(terminal key) = (%v, %v), want (false, nil)", quit, err)
+	}
+	if len(terminal.events) != 1 {
+		t.Fatalf("terminal received %d events, want one", len(terminal.events))
+	}
+	if terminal.drawCalls != 0 {
+		t.Fatalf("terminal was redrawn %d times with a stale snapshot, want none", terminal.drawCalls)
 	}
 }
 
@@ -2645,8 +2726,8 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
 
-	if state.treePaneMode != tuiTreePaneModeInfo {
-		t.Fatalf("expected info pane mode by default, got %q", state.treePaneMode)
+	if state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("expected terminal pane mode by default for the running node, got %q", state.treePaneMode)
 	}
 
 	quit, err := app.handleKey(vaxis.Key{Text: "i", Keycode: 'i'})
@@ -2656,8 +2737,8 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 	if quit {
 		t.Fatalf("expected i to toggle the pane mode, not quit")
 	}
-	if state.treePaneMode != tuiTreePaneModeTerminal {
-		t.Fatalf("expected terminal pane mode after i, got %q", state.treePaneMode)
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("expected info pane mode after i, got %q", state.treePaneMode)
 	}
 
 	if err := state.moveSelection(1); err != nil {
@@ -2666,8 +2747,8 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 	if got := state.selectedEntry(); got.kind != tuiTreeEntryProject || got.project.ID != "project-child" {
 		t.Fatalf("expected child project selection after moving in info mode, got %#v", got)
 	}
-	if state.treePaneMode != tuiTreePaneModeTerminal {
-		t.Fatalf("expected terminal pane mode to stay sticky across selection changes, got %q", state.treePaneMode)
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("expected info pane mode to stay sticky across selection changes, got %q", state.treePaneMode)
 	}
 
 	quit, err = app.handleKey(vaxis.Key{Text: "i", Keycode: 'i'})
@@ -2677,8 +2758,8 @@ func TestTUIHandleKeyITogglesStickyTreePaneMode(t *testing.T) {
 	if quit {
 		t.Fatalf("expected second i to keep the app running")
 	}
-	if state.treePaneMode != tuiTreePaneModeInfo {
-		t.Fatalf("expected info pane mode after toggling back, got %q", state.treePaneMode)
+	if state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("expected terminal pane mode after toggling back, got %q", state.treePaneMode)
 	}
 	if len(sessions.opened) != 0 {
 		t.Fatalf("expected pane mode toggling and selection moves to open no terminal tabs, got %v", sessions.opened)

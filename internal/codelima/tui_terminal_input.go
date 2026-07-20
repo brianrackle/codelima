@@ -144,8 +144,7 @@ func encodeTUITerminalPasteKey(key vaxis.Key) string {
 }
 
 func normalizeTUITerminalPasteText(text string) string {
-	text = strings.ReplaceAll(text, "\r\n", "\r")
-	return strings.ReplaceAll(text, "\n", "\r")
+	return strings.ReplaceAll(text, "\r\n", "\n")
 }
 
 func normalizeTUITerminalEvent(event vaxis.Event) vaxis.Event {

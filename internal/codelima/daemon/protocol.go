@@ -10,8 +10,13 @@ import (
 
 const (
 	MaxMessageSize  = 1 << 20
-	ProtocolVersion = 2
+	ProtocolVersion = 3
 	SessionVersion  = 2
+	HandoffVersion  = 3
+
+	// LegacyHandoffVersion is accepted only by a new importer connecting to
+	// the immediately previous Linux unixpacket transport.
+	LegacyHandoffVersion = 2
 )
 
 type Request struct {

@@ -65,6 +65,32 @@ func TestNodeNameFromLocalhost(t *testing.T) {
 	}
 }
 
+func TestIsGenericForwardingHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{host: "localhost:8080", want: true},
+		{host: "LOCALHOST.:8080", want: true},
+		{host: "localhost", want: true},
+		{host: "127.0.0.1:8080", want: true},
+		{host: "127.0.0.1", want: true},
+		{host: "test-node.localhost:8080"},
+		{host: "127.0.0.2:8080"},
+		{host: "localhost:bad"},
+		{host: "127.0.0.1:bad"},
+		{host: "other:8080"},
+	}
+	for _, test := range tests {
+		t.Run(test.host, func(t *testing.T) {
+			if got := isGenericForwardingHost(test.host); got != test.want {
+				t.Fatalf("isGenericForwardingHost(%q) = %v, want %v", test.host, got, test.want)
+			}
+		})
+	}
+}
+
 func TestDynamicForwardingHandlerRoutesSamePortByNodeHost(t *testing.T) {
 	t.Parallel()
 	upstreams := map[string]*httptest.Server{}
@@ -106,6 +132,57 @@ func TestDynamicForwardingHandlerRoutesSamePortByNodeHost(t *testing.T) {
 	assertForwardingStatus(t, handler, "one.local:8080", http.StatusMisdirectedRequest)
 }
 
+func TestDynamicForwardingHandlerRoutesGenericLocalhostToFirstActiveClaim(t *testing.T) {
+	t.Parallel()
+	port := reserveTCPPort(t)
+	upstreams := map[string]*httptest.Server{}
+	for _, node := range []string{"first", "second"} {
+		node := node
+		upstreams[node] = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("X-Original-Host", request.Host)
+			_, _ = writer.Write([]byte(node))
+		}))
+		defer upstreams[node].Close()
+	}
+
+	firstSeen := time.Now().UTC()
+	forwarder := &dynamicForwarder{
+		listen:   net.Listen,
+		peers:    map[string]forwardingPeer{},
+		routes:   map[dynamicRouteKey]*dynamicForwardingRoute{},
+		known:    map[string]bool{"first": true, "second": true},
+		servers:  map[int]*dynamicPortServer{},
+		failures: map[string]int{},
+	}
+	for offset, node := range []string{"first", "second"} {
+		peer := &dialAddressPeer{address: strings.TrimPrefix(upstreams[node].URL, "http://")}
+		metadata := Node{ID: node, SandboxName: node}
+		key := dynamicRouteKey{node: node, port: port}
+		forwarder.routes[key] = newDynamicForwardingRoute(metadata, port, peer, firstSeen.Add(time.Duration(offset)*time.Millisecond))
+	}
+	forwarder.reconcileServers()
+	defer func() { _ = forwarder.Close() }()
+
+	handler := &dynamicForwardingHandler{forwarder: forwarder, port: port}
+	assertForwardingResponse(t, handler, "localhost:"+strconv.Itoa(port), "first")
+	assertForwardingResponse(t, handler, "127.0.0.1:"+strconv.Itoa(port), "first")
+	assertForwardingResponse(t, handler, "second.localhost:"+strconv.Itoa(port), "second")
+
+	forwarder.mu.Lock()
+	firstKey := dynamicRouteKey{node: "first", port: port}
+	forwarder.routes[firstKey].close()
+	delete(forwarder.routes, firstKey)
+	forwarder.mu.Unlock()
+	forwarder.reconcileServers()
+
+	assertForwardingResponse(t, handler, "localhost:"+strconv.Itoa(port), "second")
+	assertForwardingResponse(t, handler, "127.0.0.1:"+strconv.Itoa(port), "second")
+	ports := forwarder.Snapshot()["ports"].([]map[string]any)
+	if len(ports) != 1 || ports[0]["default_node"] != "second" {
+		t.Fatalf("port snapshot = %#v, want second as the generic localhost claimant", ports)
+	}
+}
+
 func TestDynamicForwardingHandlerReturnsBadGatewayWhenTunnelFails(t *testing.T) {
 	t.Parallel()
 	forwarder := &dynamicForwarder{routes: map[dynamicRouteKey]*dynamicForwardingRoute{}, known: map[string]bool{"node": true}}
@@ -113,6 +190,33 @@ func TestDynamicForwardingHandlerReturnsBadGatewayWhenTunnelFails(t *testing.T) 
 		Node{ID: "node", SandboxName: "node"}, 8080, failingForwardingPeer{}, time.Now(),
 	)
 	assertForwardingStatus(t, &dynamicForwardingHandler{forwarder: forwarder, port: 8080}, "node.localhost:8080", http.StatusBadGateway)
+}
+
+func TestDynamicForwardingRouteFallsBackToIPv6GuestLoopback(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Original-Host", request.Host)
+		_, _ = writer.Write([]byte("ipv6-loopback"))
+	}))
+	defer upstream.Close()
+
+	peer := &ipv6OnlyForwardingPeer{upstreamAddress: strings.TrimPrefix(upstream.URL, "http://")}
+	forwarder := &dynamicForwarder{
+		routes:  map[dynamicRouteKey]*dynamicForwardingRoute{},
+		known:   map[string]bool{"node": true},
+		servers: map[int]*dynamicPortServer{5173: {port: 5173, defaultNode: "node", status: "serving"}},
+	}
+	forwarder.routes[dynamicRouteKey{node: "node", port: 5173}] = newDynamicForwardingRoute(
+		Node{ID: "node", SandboxName: "node"}, 5173, peer, time.Now(),
+	)
+
+	assertForwardingResponse(t, &dynamicForwardingHandler{forwarder: forwarder, port: 5173}, "node.localhost:5173", "ipv6-loopback")
+	assertForwardingResponse(t, &dynamicForwardingHandler{forwarder: forwarder, port: 5173}, "localhost:5173", "ipv6-loopback")
+	wantAttempts := []string{"127.0.0.1:5173", "[::1]:5173"}
+	if got := peer.snapshotAttempts(); !reflect.DeepEqual(got, wantAttempts) {
+		t.Fatalf("guest dial attempts = %v, want %v", got, wantAttempts)
+	}
 }
 
 func TestDynamicForwardingHandlerPassesHTTPUpgrade(t *testing.T) {
@@ -197,7 +301,6 @@ func TestDynamicForwarderReconcilesRoutesListenersAndStoppedNodes(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Host = "test-node.localhost:" + strconv.Itoa(port)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("forwarded request error = %v", err)
@@ -240,20 +343,27 @@ func TestDynamicForwarderRecoversFromHostBindConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = occupied.Close() })
 	port := occupied.Addr().(*net.TCPAddr).Port
 	peer := &controllableForwardingPeer{ports: []int{port}}
 	forwarder := newTestDynamicForwarder(service, &fakeForwardingPeerFactory{peers: map[string]*controllableForwardingPeer{node.SandboxName: peer}})
+	forwarder.interval = 5 * time.Millisecond
+	if err := forwarder.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
 	defer func() { _ = forwarder.Close() }()
-	forwarder.reconcile(context.Background())
-	if got := forwarder.Snapshot()["ports"].([]map[string]any)[0]["status"]; got != "conflicted" {
-		t.Fatalf("listener status = %v, want conflicted", got)
+	waitForForwardingPortStatus(t, forwarder, port, "conflicted")
+	conflictedPorts := forwarder.Snapshot()["ports"].([]map[string]any)
+	if len(conflictedPorts) != 1 || conflictedPorts[0]["default_node"] != "" {
+		t.Fatalf("conflicted port snapshot = %#v, want no claimant before a successful host bind", conflictedPorts)
 	}
 	if err := occupied.Close(); err != nil {
 		t.Fatal(err)
 	}
-	forwarder.reconcile(context.Background())
-	if got := forwarder.Snapshot()["ports"].([]map[string]any)[0]["status"]; got != "serving" {
-		t.Fatalf("listener status after retry = %v, want serving", got)
+	waitForForwardingPortStatus(t, forwarder, port, "serving")
+	ports := forwarder.Snapshot()["ports"].([]map[string]any)
+	if len(ports) != 1 || ports[0]["default_node"] != node.SandboxName {
+		t.Fatalf("port snapshot after retry = %#v, want %s as the generic localhost claimant", ports, node.SandboxName)
 	}
 }
 
@@ -384,6 +494,35 @@ func assertForwardingStatus(t *testing.T, handler http.Handler, host string, wan
 	}
 }
 
+func assertForwardingResponse(t *testing.T, handler http.Handler, host, wantBody string) {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "http://ignored/", nil)
+	request.Host = host
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != wantBody {
+		t.Fatalf("host %q returned %d %q, want 200 %q", host, response.Code, response.Body.String(), wantBody)
+	}
+	if got := response.Header().Get("X-Original-Host"); got != host {
+		t.Fatalf("upstream Host = %q, want %q", got, host)
+	}
+}
+
+func waitForForwardingPortStatus(t *testing.T, forwarder *dynamicForwarder, port int, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		ports := forwarder.Snapshot()["ports"].([]map[string]any)
+		for _, candidate := range ports {
+			if candidate["port"] == port && candidate["status"] == want {
+				return
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("port %d did not reach forwarding status %q; snapshot=%#v", port, want, forwarder.Snapshot())
+}
+
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)
@@ -410,3 +549,30 @@ func (failingForwardingPeer) DialContext(context.Context, string, string) (net.C
 	return nil, fmt.Errorf("injected tunnel failure")
 }
 func (failingForwardingPeer) Close() error { return nil }
+
+type ipv6OnlyForwardingPeer struct {
+	mu              sync.Mutex
+	upstreamAddress string
+	attempts        []string
+}
+
+func (*ipv6OnlyForwardingPeer) Discover(context.Context) ([]int, error) { return nil, nil }
+func (p *ipv6OnlyForwardingPeer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	p.mu.Lock()
+	p.attempts = append(p.attempts, address)
+	p.mu.Unlock()
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	if host != "::1" {
+		return nil, fmt.Errorf("guest IPv4 loopback is not listening")
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, p.upstreamAddress)
+}
+func (*ipv6OnlyForwardingPeer) Close() error { return nil }
+func (p *ipv6OnlyForwardingPeer) snapshotAttempts() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.attempts)
+}

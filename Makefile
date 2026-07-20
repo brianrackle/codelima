@@ -15,10 +15,18 @@ GOPLS := $(TOOLS_DIR)/bin/gopls
 GOLANGCI_LINT := $(TOOLS_DIR)/bin/golangci-lint
 ZIG := $(TOOLS_DIR)/zig/$(ZIG_VERSION)/zig
 
+ifeq ($(origin CC),default)
+  ifeq ($(shell command -v cc 2>/dev/null),)
+    CC := $(ZIG) cc
+  endif
+endif
+
 export PATH := $(TOOLS_DIR)/go/$(GO_VERSION)/bin:$(TOOLS_DIR)/bin:$(PATH)
 export GOMODCACHE := $(TOOLS_DIR)/gopath/pkg/mod
 export GOCACHE := $(TOOLS_DIR)/gocache
 export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
+export CGO_ENABLED := 1
+export CC
 
 .PHONY: init ghostty-vt gopls fmt lint test test-race test-integration build run tui smoke package package-formula verify clean
 
@@ -30,12 +38,14 @@ DIST_DIR ?= $(CURDIR)/dist
 FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
 INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
+GO_TEST_PARALLEL ?= 1
+GO_RACE_TEST_PARALLEL ?= 1
 
 init:
 	./scripts/install_go.sh $(GO_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
+	./scripts/install_zig.sh $(ZIG_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_gopls.sh $(GOPLS_VERSION) $(GO) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_golangci_lint.sh $(GOLANGCI_LINT_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
-	./scripts/install_zig.sh $(ZIG_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_ghostty_vt.sh $(GHOSTTY_VT_GHOSTTY_COMMIT) $(ZIG) $(TOOLS_DIR) $(CURDIR)/tmp
 	$(GO) mod download
 
@@ -53,14 +63,14 @@ lint: init
 	$(GOLANGCI_LINT) run ./...
 
 test: init
-	$(GO) test ./...
+	$(GO) test -parallel $(GO_TEST_PARALLEL) ./...
 
 test-race: init
-	$(GO) test -race ./...
+	$(GO) test -race -parallel $(GO_RACE_TEST_PARALLEL) ./...
 
 test-integration: build
 	mkdir -p $(INTEGRATION_TMP)
-	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -tags=integration ./tests
+	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
 	rm -rf $(INTEGRATION_TMP)
 
 build: init

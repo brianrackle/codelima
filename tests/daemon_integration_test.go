@@ -187,7 +187,17 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		command := "i=0; while [ $i -lt 80 ]; do echo COUNT=$i; i=$((i+1)); sleep 0.02; done\r"
 		h.run(true, "terminal", "send", terminal.TerminalID, "--text", command)
 		time.Sleep(200 * time.Millisecond)
-		h.run(true, "daemon", "update", h.bin)
+		var update struct {
+			Updated     bool   `json:"updated"`
+			LiveHandoff bool   `json:"live_handoff"`
+			Fallback    string `json:"fallback"`
+		}
+		if err := json.Unmarshal(h.json("daemon", "update"), &update); err != nil {
+			t.Fatal(err)
+		}
+		if !update.Updated || !update.LiveHandoff || update.Fallback != "" {
+			t.Fatalf("live update = %#v", update)
+		}
 		time.Sleep(500 * time.Millisecond)
 		var read struct {
 			TerminalID string `json:"terminal_id"`
@@ -244,6 +254,81 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		}
 		h.run(true, "terminal", "close", terminal.TerminalID)
 	})
+}
+
+func TestDaemonUpdateRestartsAfterUnsupportedLegacyHandoffTransport(t *testing.T) {
+	h := newHarness(t)
+	nodeID := h.createNode()
+	h.extra = []string{
+		"CODELIMA_HANDOFF_FORCE_UNSUPPORTED_TRANSPORT=1",
+		"CODELIMA_TEST_DAEMON_SHUTDOWN_DELAY=6s",
+	}
+	h.run(true, "daemon", "start")
+	h.extra = nil
+
+	var before struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "status"), &before); err != nil || before.PID <= 0 {
+		t.Fatalf("status before fallback = %#v, %v", before, err)
+	}
+	var terminal struct {
+		TerminalID string `json:"terminal_id"`
+	}
+	if err := json.Unmarshal(h.json("terminal", "open", "node:"+nodeID, "--kind", "node-host-shell"), &terminal); err != nil {
+		t.Fatal(err)
+	}
+
+	var update struct {
+		Updated     bool   `json:"updated"`
+		LiveHandoff bool   `json:"live_handoff"`
+		Fallback    string `json:"fallback"`
+		PID         int    `json:"pid"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "update"), &update); err != nil {
+		t.Fatal(err)
+	}
+	if !update.Updated || update.LiveHandoff || update.Fallback != "restart" || update.PID <= 0 || update.PID == before.PID {
+		t.Fatalf("fallback update = %#v, old pid %d", update, before.PID)
+	}
+
+	var terminals []struct {
+		TerminalID string `json:"terminal_id"`
+	}
+	if err := json.Unmarshal(h.json("terminal", "list"), &terminals); err != nil {
+		t.Fatal(err)
+	}
+	if len(terminals) != 1 || terminals[0].TerminalID != terminal.TerminalID {
+		t.Fatalf("restored terminals = %#v, want %q", terminals, terminal.TerminalID)
+	}
+	h.run(true, "terminal", "close", terminal.TerminalID)
+}
+
+func TestDaemonStartWaitsForPreviousDaemonShutdownLock(t *testing.T) {
+	h := newHarness(t)
+	h.createNode()
+	h.extra = []string{"CODELIMA_TEST_DAEMON_SHUTDOWN_DELAY=6s"}
+	h.run(true, "daemon", "start")
+	h.extra = nil
+	var before struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "status"), &before); err != nil || before.PID <= 0 {
+		t.Fatalf("status before stop = %#v, %v", before, err)
+	}
+	h.run(true, "daemon", "stop")
+
+	started := time.Now()
+	h.run(true, "daemon", "start")
+	if elapsed := time.Since(started); elapsed < 5*time.Second {
+		t.Fatalf("replacement daemon started before prior shutdown released its lock after %v", elapsed)
+	}
+	var after struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "status"), &after); err != nil || after.PID <= 0 || after.PID == before.PID {
+		t.Fatalf("status after recovered start = %#v, old pid %d, %v", after, before.PID, err)
+	}
 }
 
 func containsCounter(text, needle string) bool {

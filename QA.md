@@ -157,11 +157,13 @@ NODE_ID="$(./bin/codelima --json node show qa-v3-root | sed -n 's/.*"id": *"\([^
 ./bin/codelima --json terminal open "node:$NODE_ID" --kind node-host-shell > "$QA_ROOT/host-terminal.json"
 ./bin/codelima terminal list
 ./bin/codelima daemon status
+./bin/codelima --json daemon update > "$QA_ROOT/daemon-update.json"
+cat "$QA_ROOT/daemon-update.json"
 ```
 
-Verify daemon startup succeeds, `session.json` is version 2 with no terminals, exactly one version-1 quarantine file exists, and the recovery warning names that file. Then verify both terminals target the same `node:<id>` and have different kinds. Send `pwd` to the host terminal and verify it resolves to the node's host directory. Send `pwd` to the guest terminal and verify it resolves to the node workspace. Close both terminal IDs before continuing.
+Verify daemon startup succeeds, `session.json` is version 2 with no terminals, exactly one version-1 quarantine file exists, and the recovery warning names that file. Then verify both terminals target the same `node:<id>` and have different kinds. The no-argument update must replace the daemon PID, report `live_handoff: true`, and preserve both terminal IDs. On macOS it must not report `protocol not supported`, `legacy daemon did not stop`, or `daemon exited before becoming ready`; temporary endpoint files are not shutdown readiness signals. Send `pwd` to the host terminal and verify it resolves to the node's host directory. Send `pwd` to the guest terminal and verify it resolves to the node workspace. Close both terminal IDs before continuing.
 
-## Flow 6: dynamic `{node}.localhost` forwarding
+## Flow 6: dynamic generic and `{node}.localhost` forwarding
 
 Start a guest-loopback server in the running node. This uses Perl's core socket module because the default image does not promise Python:
 
@@ -175,9 +177,49 @@ Wait for daemon discovery, then:
 ```sh
 curl --retry 10 --retry-delay 1 --retry-connrefused \
   "http://qa-v3-root.localhost:18080/"
+curl --retry 10 --retry-delay 1 --retry-connrefused \
+  "http://localhost:18080/"
+curl --retry 10 --retry-delay 1 --retry-connrefused \
+  "http://127.0.0.1:18080/"
 ```
 
-Verify the response contains `root`. Stop the node and verify the route is removed. This flow uses no static 8080/5173 mapping.
+Verify all three responses contain `root`, proving the first listener claims both generic host forms. Start a second VM on the same guest port with a distinct response:
+
+```sh
+./bin/codelima node start qa-v3-root-two
+./bin/codelima shell qa-v3-root-two -- sh -lc \
+  'nohup perl -MIO::Socket::INET -e '\''$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>18080,Listen=>5,Reuse=>1); while($c=$s->accept){<$c>; while(<$c>){last if /^\r?$/}; print $c "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntwo\n"; close $c}'\'' > .qa-http.log 2>&1 &'
+
+curl --retry 10 --retry-delay 1 --retry-connrefused \
+  "http://qa-v3-root-two.localhost:18080/"
+curl "http://qa-v3-root.localhost:18080/"
+curl "http://localhost:18080/"
+curl "http://127.0.0.1:18080/"
+```
+
+Verify the node-specific URLs return `two` and `root` respectively while generic `localhost` and `127.0.0.1` still return `root`. Stop the first claimant and wait for the one-second reconciliation retry to transfer the generic route:
+
+```sh
+./bin/codelima node stop qa-v3-root
+attempt=0
+while :; do
+  response="$(curl -fsS "http://localhost:18080/" 2>/dev/null || true)"
+  [ "$response" = "two" ] && break
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 10 ] || exit 1
+  sleep 1
+done
+curl "http://127.0.0.1:18080/"
+curl "http://qa-v3-root-two.localhost:18080/"
+./bin/codelima node stop qa-v3-root-two
+sleep 2
+if curl -fsS --max-time 2 "http://localhost:18080/"; then exit 1; fi
+if curl -fsS --max-time 2 "http://127.0.0.1:18080/"; then exit 1; fi
+```
+
+Verify generic `localhost`, `127.0.0.1`, and the second node's explicit hostname all return `two` after transfer, then verify the host listener disappears after the final claimant stops. This flow uses no static 8080/5173 mapping.
+
+On a node with an IPv6-capable HTTP test server, repeat the request on an unused port with the guest server bound only to `::1`. Verify `http://localhost:{port}`, `http://127.0.0.1:{port}`, and `http://{node}.localhost:{port}` return the service response instead of a 502. The daemon log should show neither address failing after the successful IPv6 fallback.
 
 ## Flow 7: path-scoped flat TUI
 
@@ -188,11 +230,25 @@ Run in a real terminal:
 ./bin/codelima "$QA_ROOT/work/root"
 ```
 
-After the TUI renders, launch the same command from a second real terminal. Confirm the second TUI starts normally and the first reports that terminal input ownership was taken by another client, then quit the first TUI. Leave the second TUI idle for at least 35 seconds before opening a new terminal tab or switching between guest and host terminals.
+After the TUI renders, launch the same command from a second real terminal. Confirm the second TUI starts normally and the first does not show an input-ownership warning. Return host focus to the first window and open a terminal tab, then return host focus to the second window and open another terminal tab. Repeat the switch once more in each direction; every newly focused window must work immediately and neither window may show an ownership-revoked message. Quit one TUI, then leave the remaining TUI idle for at least 35 seconds before opening a new terminal tab or switching between guest and host terminals.
+
+Copy and paste these two lines into an active guest or host shell, without pressing Enter:
+
+```sh
+printf 'paste-one\n'
+printf 'paste-two\n'
+```
+
+Verify both lines appear promptly as one paste and neither command runs: the terminal must not print `paste-one` or `paste-two`. Press `Ctrl+c` to clear the pasted input.
+
+Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
 
 Verify:
 
 - the left pane title is `Nodes` and has no project rows
+- the initially selected running node renders `Info [Terminal]` in the right-pane border while keyboard focus remains in the node list
+- pressing `i` renders `[Info] Terminal`, moving to another node preserves that explicit info selection, and pressing `i` again restores terminal mode
+- after stopping the selected node and reopening the TUI, its default right-pane mode is info and no replacement guest shell is created
 - rows include `qa-v3-root`, `qa-v3-root-two`, `qa-v3-root-clone`, and `qa-v3-child`
 - rows do not include `qa-v3-prefix`
 - root rows show directory `.` and the child row shows `child`, not absolute paths
@@ -202,7 +258,10 @@ Verify:
 - `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
 - the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
 - `Option+Shift+Backtick` no longer opens or toggles a host terminal
-- the first terminal action after takeover and the idle interval succeeds without a broken pipe or `client is observe-only` error
+- routine focus handoffs do not show `terminal input ownership was taken by another client`
+- the first terminal action after every window-focus takeover and after the idle interval succeeds without a broken pipe or `client is observe-only` error
+- multiline paste appears without character-by-character delay, preserves its newline, and executes nothing until Enter is pressed explicitly
+- ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
 
 Quit with `q`.
 

@@ -170,13 +170,15 @@ Runtime list/status truth is reconciled from one SDK list call and is not persis
 
 ## Dynamic forwarding
 
-The daemon discovers guest TCP listeners for running nodes and listens on host loopback at the same port where available. HTTP and WebSocket traffic is routed by hostname:
+The daemon discovers guest TCP listeners for running nodes and listens on host loopback at the same port where available. HTTP and WebSocket traffic is routed by request host:
 
 ```text
+localhost:{guest-port}
+127.0.0.1:{guest-port}
 {node-slug}.localhost:{guest-port}
 ```
 
-Two nodes may use the same guest port. The node hostname selects the SDK SSH tunnel. Guest services may bind loopback only. Routes disappear when a node stops and recover after daemon restart. Bind conflicts are retried without crashing the daemon.
+The first active node on a port serves both generic host forms. Two nodes may use the same guest port; the node hostname selects the SDK SSH tunnel explicitly. Guest services may bind loopback only. Routes disappear when a node stops and recover after daemon restart. Bind conflicts are retried without crashing the daemon.
 
 Explicit published ports remain available for non-HTTP raw TCP workflows and are frozen at node creation.
 
@@ -187,9 +189,9 @@ Terminal targets are `node:<id>`. Supported schema-v3 terminal kinds are:
 - `node-shell`: guest interactive shell in the node workspace
 - `node-host-shell`: host interactive shell in the node directory
 
-The daemon owns PTYs, Ghostty terminal state, forwarding, and input ownership. Its private Unix-socket protocol uses newline-delimited JSON, exact binary-version negotiation, peer-credential validation, bounded frames, and typed errors. An interactive TUI that connects as observe-only immediately requests `input.takeover`; older clients receive revocation and remain observe-only. Handshake and event-subscription phases have read deadlines; authenticated request connections and subscribed event connections remain usable across arbitrary idle periods.
+The daemon owns PTYs, Ghostty terminal state, forwarding, and input ownership. Its private Unix-socket protocol uses newline-delimited JSON, exact binary-version negotiation, peer-credential validation, bounded frames, and typed errors. Semantic paste is protocol 3; a stale protocol-2 daemon must reject ordinary clients rather than accept an event type it cannot interpret. Daemon lifecycle management is the sole compatibility exception: update and startup recovery may authenticate with a handoff-capable persisted daemon identity only to replace or stop that daemon, and a missing update path always resolves to the invoking client binary. An interactive TUI that connects as observe-only immediately requests `input.takeover`; older clients receive revocation and remain observe-only. When an older TUI window regains host focus, it requests takeover again before processing the next user terminal action. Paste keys are buffered into bounded semantic paste requests; the daemon terminal actor re-creates bracketed-paste boundaries around each payload while preserving LF newlines. Handshake and event-subscription phases have read deadlines; authenticated request connections and subscribed event connections remain usable across arbitrary idle periods.
 
-Terminal sessions persist enough launch state for daemon restart policy. With `restore: forget`, persisted terminal state is replaced without parsing. With `restore: respawn`, unsupported or malformed session state is quarantined beside `_daemon/session.json`, an empty current-version session is written, and daemon startup continues; node and VM state are unaffected. Live update transfers authenticated listeners and PTY descriptors via SCM_RIGHTS and rolls back if import fails. Protocol, session, and handoff format revisions are versioned explicitly.
+Terminal sessions persist enough launch state for daemon restart policy. With `restore: forget`, persisted terminal state is replaced without parsing. With `restore: respawn`, unsupported or malformed session state is quarantined beside `_daemon/session.json`, an empty current-version session is written, and daemon startup continues; node and VM state are unaffected. Handoff version 3 transfers PTY descriptors via SCM_RIGHTS over an authenticated Unix stream with four-byte length-prefixed frames and rolls back if import fails. Control frames reject descriptors, and descriptor batches reject duplicate or unknown terminal IDs. A new importer may consume the previous Linux `unixpacket` version 2 once. The exact legacy-Darwin unsupported-transport error falls back to a daemon restart that preserves VMs and respawns saved tabs. Shutdown persists session intent first, closes terminals concurrently, and treats release of `_locks/daemon.lock` as the authoritative readiness signal. Grace is sized for terminal count; after it expires, only the still-matching daemon identity may be terminated. Startup applies the same recovery to a compatible socket-closed daemon that still owns the lock. Protocol, session, and handoff format revisions are versioned explicitly.
 
 On macOS, the daemon samples the host-wide system file table every two seconds. When host-wide `kern.num_files` reaches the configured percentage of host-wide `kern.maxfiles`, it runs `echo 2 > /proc/sys/vm/drop_caches` in every running mounted node and compares host usage before and after. The default threshold is 20%; every attempt has a 30-second cooldown, with no separate ineffective-action backoff. No `sync` or page-cache drop is permitted. Non-macOS snapshots report this integration as unsupported.
 

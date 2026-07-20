@@ -1,0 +1,104 @@
+All three subsystem reviews are in and verified. Here is the full critique.
+
+---
+
+# Codebase critique: codelima
+
+**Verdict up front:** this is not a hobby-grade codebase — the hermetic build system, the ADR/patterns discipline, the atomic-write layer, the daemon's peer-credential checks and versioned handoff protocol, and a 343-test suite built on real interfaces instead of mocks are all things most professional repos don't have. What separates it from a *beautifully maintained* codebase is that its rigor lives in **prose and comments instead of structure**. Invariants are written in PATTERNS.MD and 89 decision docs, then enforced by hand in a single 47-file, ~19,700-line package full of string-typed state, hand-mirrored structs, and copy-pasted rituals. The compiler is barely helping you. Below, ordered by leverage.
+
+## 1. One giant package means no enforced boundaries
+
+Practically the entire application — store, service, CLI, TUI, daemon host, sandbox client, forwarding, snapshots — lives in `package codelima`: ~47 production files, ~19.7k lines, 737 exported symbols whose exportedness is meaningless because everything is one namespace. The costs are concrete, not aesthetic:
+
+- The TUI bypasses the service facade and reaches straight into the store: `tui_render.go:797` (`a.service.store.projectPath(...)`), `tui_sessions.go:346`. Nothing prevents this; nothing ever will while it's one package.
+- Daemon process lifecycle (SIGTERM/SIGKILL escalation, lock probing, shutdown polling) lives in `cli.go:315-419`, which imports `syscall`. That's orchestration logic in an argument-parsing file.
+- The handoff wire protocol is split across packages: framing and version gating in `daemon_handoff_transport.go` (package codelima), message types and `HandoffVersion` in `daemon/protocol.go`. The fd-batch constant `maxHandoffFDsPerFrame = 64` is defined in the transport but hardcoded as bare `64` twice at the send site (`daemon_host.go:868-869`) — if either drifts, frames overflow the receiver's `CmsgSpace` allocation.
+- Because `daemon` can't import its parent, it has a second, *weaker* atomic-write implementation (`daemon/server.go:432` — rename with no fsync) next to the careful one in `fsutil.go:41`. Your daemon identity files silently get worse durability than your node metadata, decided by which package a function happens to live in.
+- RPC error codes are bare `2`/`5`/`7` magic ints in `daemon/server.go` that happen to equal the `Exit*` constants in `errors.go:5-13` — duplicated because the dependency arrow forbids sharing.
+
+You already know how to do this right: `internal/codelima/terminal` and `internal/codelima/daemon` are clean leaf packages with documented invariants. Finish the job. A reasonable target: `store` (files + locks + fsutil), `entity` (types + validation), `sandbox` (msb\_\*), `daemonhost`, `forward`, `tui`, `clicmd`, plus a tiny leaf for shared error codes and atomic writes. Import direction becomes the enforcement mechanism your Markdown currently pretends to be.
+
+## 2. Delete the dead "project" model — it's your biggest single win
+
+The pre-v3 project subsystem is dead from every public surface but still threads through everything:
+
+- Zero production callers: `ProjectFork`, `FindSnapshot`, `LatestSnapshot`, `ProjectEvents`, `MissingProjectIndexes`, `renderProjectTree` (plus its two helpers), the `RuntimeContainer` constant, and all 207 lines of `snapshot.go` — including `validateSymlinkTarget`, a security-relevant symlink-escape guard that is *completely untested*.
+- `NodeCreate` (`service.go:1000-1122`) carries `if input.Project != ""` compatibility branches that double the image/ports/profile resolution paths. `runtimeProjectForNode` (`service.go:1952`) fabricates a fake `Project` so `SandboxClient` can keep taking `(Project, Node)` pairs — the interface itself is shaped by dead data.
+- `Node.ProjectID` is tagged `json:"-"` and documented as existing "only for source compatibility with pre-v3 internal tests" (`types.go:121-123`). `EnvironmentConfigDelete` scans legacy projects with a comment admitting the same (`environment_config_service.go:128-140`).
+- In the TUI, the whole tree is wrapped in a sentinel `{ID: "flat-nodes"}` project (`tui_app.go:154`) special-cased by magic string in `tui_model.go:202,218`; `OpenProjectTab` exists in the interface, the store, the noop, and two fakes with zero production callers; five permanently-skipped tests (`tui_test.go:772, 1932, 3414, 3683, 3984`) freeze ~500 lines of the old behavior forever.
+- The service-layer test fake renders **legacy `msb` CLI command strings** that the shipped `SDKSandboxClient` never executes (`msb_legacy_test.go` — a test file with zero tests, holding production-shaped rendering logic solely for the fake), so dozens of `service_test.go` assertions validate a pipeline that no longer exists.
+
+This is the "tests keeping dead product code alive" anti-pattern at full scale. Deleting the project model, the snapshot machinery, the legacy fake renderer, and the skipped tests removes an estimated 1,500–2,000 lines *and* simplifies `SandboxClient`'s signature, `NodeCreate`, and the TUI model in one stroke. Git history preserves everything; carrying it in trunk is pure tax.
+
+## 3. The domain is stringly-typed, and it's already caused type confusion
+
+- Node status is a bare `string` with constants, *plus* a parallel legacy `LifecycleState` string and two normalizer functions (`types.go:186-226`). Runtime observations carry their own untyped `Status`. The two vocabularies are compared against each other: `reclaimMountedNodeFilesystemCaches` checks `node.LastRuntimeObservation.Status != NodeStatusRunning` (`service.go:2057`) — an observation status compared to a node-status constant, correct only by coincidence of both being `"running"`. `nodeAutoStartsSession` (`tui_model.go:705`) ORs both sources of truth and its name lies about what it checks. Define `type NodeStatus string` and `type ObservationStatus string` (or ints with `String()`), and the compiler ends this class of bug.
+- Lock domains are free-typed strings at 19 call sites: `acquireLocks(root, "configurations", "nodes")`. A typo mints a new lock file and silently destroys mutual exclusion. And the discipline has already drifted: **`ProjectUpdate` locks `configurations`+`nodes` but not `projects`** (`service.go:574`) while `ProjectCreate`/`ProjectDelete`/`ProjectFork` lock `projects` (`service.go:499,666,874`) — so update-rename races create's slug-uniqueness check with no common lock. Typed constants plus a `withLocks(root, fn, locks...)` helper (which also deletes the 20 copies of `defer func() { _ = lockSet.Close() }()`) fixes both the typo risk and the boilerplate.
+- Cross-version daemon compatibility is decided by substring-matching a remote error string: `strings.Contains(msg, "unixpacket") && strings.Contains(msg, "protocol not supported")` (`cli.go:256-262`) gates a *destructive restart fallback*. Error text from an old binary is now a wire contract. Discriminate on `RPCError.Category`/`Code` and add a typed code for this case.
+- `AppError.Category` is matched as `appErr.Category != "NotFound"` at call sites (`store.go:299,630`). Make categories typed constants with an `IsNotFound(err)` helper.
+- Schema staleness is detected by substring-scanning raw YAML: `strings.Contains(current, "\nstatus:")`, `"\nlifecycle_state: "+state` (`msb_commands.go:322-353`), and YAML "comments" are inserted by string splicing. One marshaler change in field order or quoting silently flips refresh behavior. Parse the YAML and compare values.
+
+## 4. Hand-mirrored wire structs are your worst repetition ratchet
+
+`types.go` (718 lines) maintains a shadow `*Wire` struct per entity plus four marshal/unmarshal hooks plus two field-by-field copy functions each: `nodeFileWire` ↔ `Node` copies ~30 fields **twice** by hand; same pattern for `Project`, `BootstrapState`, `EnvironmentConfig`, `RuntimeCommandTemplates`. Adding one field to `Node` touches five places, and the only guard is human diligence. Meanwhile `RuntimeCommandTemplates` has five separate hand-written per-field functions (`ApplyDefaults`, `IsZero`, `templates`, `removeLegacyMSBCommandTemplates`, wire conversion) even though an `orderedFields()` table already exists in `msb_commands.go:194` — the abstraction was built and then not used.
+
+Fix: keep **one** struct per entity as the serialized form; do legacy-field migration (`EnvironmentCommands`/`SetupCommands` → `BootstrapCommands`) in a small explicit `migrate(wire)` step at read time rather than woven through conversions; drive every `RuntimeCommandTemplates` operation off the field table. If the wire split must stay, generate it — never hand-maintain parallel 30-field structs.
+
+## 5. Reliability: context, locks, and atomicity are inconsistently applied
+
+- **The context chain is severed at the RPC boundary.** `daemon/server.go:291` passes `context.Background()` to every handler, so nothing a handler does — including `NodeStart`, which boots a VM — is cancellable on client disconnect or daemon shutdown, and `Run`'s `wg.Wait()` then blocks on work it can't cancel. Downstream, `ProjectCreate` accepts a ctx and discards it (`service.go:494`), `NodeCleanupIncomplete` manufactures `context.Background()` twice (`service.go:1277,1286`), the startup/import poll loops sleep without selecting on `ctx.Done()` (`daemon_host.go:693-704, 1048-1064`), and `acquireLocks` blocks on `LOCK_EX` forever with no cancellation (`locks.go:32`). Adopt one rule — ctx flows from `main` through every blocking call, including the store — and the daemon's shutdown story becomes real instead of aspirational.
+- **Multi-file writes are non-atomic with no read-side locking.** `SaveNode` writes five files sequentially (`store.go:670-720`); every mutation then appends an event as a sixth write; readers take no locks at all. A crash or concurrent read mid-sequence sees torn state, and a failed event append after a successful save silently diverges the log. Minimum: write the event first or make save+event one journaled operation; document the read-tearing tolerance explicitly.
+- **`Server.prepare` leaks on late error paths** — verified: a request-listen or chmod failure returns with the flock held and listeners open (`daemon/server.go:195-210`) because `Run` only defers cleanup after `prepare` succeeds. Add an error-conditional unwind inside `prepare`.
+- **`Broadcast` does synchronous, deadline-less writes to every subscriber** (`daemon/server.go:154-171`) and is called from terminal event callbacks — one wedged client stalls event fan-out. Per-client bounded queues, or at least a write deadline.
+- The terminal "actor" is honest about Draw/String bypassing it, but adopt/rollback mutate `pty`/`ptyWriter`/`quit` around it (`tui_terminal_ghostty_cgo.go:2246-2255, 2492-2520`), so the mutex — not the actor — is the real mechanism, and the next contributor will assume guarantees that don't hold. Route adoption through actor commands (the machinery exists: `cmdBeginHandoff`), and make `quit` immutable per pump generation.
+- **Live fault injectors ship in production paths**: `CODELIMA_TEST_DAEMON_SHUTDOWN_DELAY`, `CODELIMA_HANDOFF_FAIL_IMPORT`, `CODELIMA_HANDOFF_FORCE_UNSUPPORTED_TRANSPORT` are read from the environment at runtime (`daemon_host.go:466,1017`, `daemon_handoff_transport.go:45`). Any user env can trigger them. Make them struct fields set by tests.
+- `exists()` treats every `stat` error as "not exists" (`fsutil.go:32-35`) and is used in branch decisions everywhere — permission errors silently become absence.
+
+## 6. Performance: the store does O(all-nodes) work per operation, and the TUI polls what it's already told
+
+- `ensureReadyForWrite` → `seedAndRepair` → `ensureNodeMetadataFiles` runs on **every mutating command** and re-reads every `node.yaml` (plus a project resolution per node, plus the substring scans from §3) before doing any actual work (`store.go:209-260`). Slug lookups full-scan every entity file — twice, once for live and once for deleted (`NodeByIDOrSlug`, `store.go:736-770`) — despite a half-built `_index/` scheme: nodes have a by-instance index but no by-slug index, and `SaveNode` re-reads the previous node on every save just to detect renames. For tens of nodes this is invisible; the design is still wrong, and the TUI's 2-second refresh multiplies it. Finish the index scheme (by-slug for nodes), make seed/repair a versioned one-time migration (stamp a marker; skip when current), and stop re-reading state you already hold under lock.
+- Every open daemon-backed terminal tab polls the **entire cell grid as JSON every 50ms** (`tui_terminal_daemon.go:342-368`) while the server already broadcasts `terminal.dirty` events that the client receives and uses only to redraw. N tabs = N×20Hz full-snapshot RPCs regardless of dirtiness, with poll errors silently dropped so a dead daemon becomes a frozen pane. Fetch snapshots on dirty (with a generation check); surface repeated failures.
+- The forwarder closes SSH peers while holding the mutex `ServeHTTP` read-locks (`dynamic_forwarding.go:400-460`) — proxied requests stall behind slow teardowns. `reconcileServers` (`:539`) already collects-then-closes outside the lock; apply the same pattern to peers.
+- `runSDKExec` leaks a goroutine per stdin-attached exec whose guest exits first, and buffers unbounded guest stderr (`msb_sdk.go:453-468`).
+
+## 7. Repetition you should refactor away
+
+- **The CLI is a hand-rolled framework** (`cli.go`, 1,198 lines): a `flag.NewFlagSet` ritual per subcommand, the identical "positional-target-then-flags" dance copy-pasted seven times, **every flag registered with an empty help string and output discarded**, and a single hand-maintained `usage()` block guaranteed to drift. `codelima node create -h` tells the user nothing. Either adopt cobra (this is exactly its job) or build the 60-line internal table (`{name, flags, positionals, run}`) once — and get real per-command help either way.
+- **Entity CRUD is written three times** (configuration, environment-config, project) with the same skeleton — ready-for-write → locks → slug check → mutate → save — and it has already drifted: configuration slugs are `slugify`-validated (`configuration_service.go:207`), environment-config slugs are not (`service.go:1890`). Extract the shared slug/uniqueness/lock ritual; keep only the per-entity mutation distinct.
+- **The TUI app object** has 24 fields and 93 methods across six files; the mutually-exclusive right-pane overlay is four nullable pointers whose disjunction is re-derived in five places with *inconsistent error policy* (dialog errors are fatal, selector errors go to status — `tui_app.go:203-249`, `tui_render.go:384-542`). One `overlay` interface field collapses five switch sites and forces one policy. `handleKey` repeats one dispatch block seven times with a parallel negated predicate list that must be kept in sync by hand (`tui_input.go:23-113`) — one binding table serves both. 48 bare `a.status = ...` assignments mix errors with successes, and the footer styles them all as errors; the code even apologizes for the capture hack it forced (`tui_render.go:227`). Replace with `a.setStatus(level, msg)`.
+- Three hand-rolled ordered-write queues coexist in one subsystem (actor channel loop, slice+wake+Once, mutex+Cond+buffer); pick one idiom.
+- Delete the pure indirection: `compat.go` (`As`/`Is` re-exports of `errors.As/Is` — the daemon review found exactly one non-test caller that needs it), `filepathDir` (`events.go:74`), the triple-named layout wrapper (`tui_render.go:651-659`), the identical-branch if/else (`tui_terminal_daemon.go:387`), byte-identical keymaps (`tui_terminal_input.go:241-253`), and the dead helpers the TUI review enumerated.
+- 52 hand-rolled `append([]string(nil), ...)` clones and a `reflect.DeepEqual` for `[]string` (`store.go:317-325`) in a Go 1.24 codebase that imports `slices` elsewhere — use `slices.Clone`, `slices.Equal`, `maps.Clone`, `cmp.Or` (which replaces `coalesce`) uniformly.
+
+## 8. Tests: strong bones, drift-shaped risks
+
+The suite's fundamentals are genuinely good — fakes behind real interfaces, injected clocks, channel gates instead of sleeps in unit code, rich failure messages, and the reflection canaries and pre-migration characterization tests are *justified and well-documented*, not smells. The liabilities:
+
+- **Green-by-skip**: 29 skip sites can silently vanish the entire 41-test ghostty/actor suite on a builder without the library, and `daemon_host_test.go:92` converts a mid-test `terminal.open` failure into a skip. Add a CI env (`CODELIMA_TEST_REQUIRE_TERMINALS=1`) that turns those into failures.
+- **CI never runs `-race`** (`verify` = fmt+lint+test+build), and `GO_TEST_PARALLEL=1` defaults tests to serial — which is currently load-bearing: `tui_test.go:1580` calls `t.Parallel()` and then swaps the `newSessionTUITerminal` package global, violating the rule written on the helper built for that swap. Fix the seam (make the factory a store field), un-serialize, and put `test-race` in CI.
+- Workflow helpers bypass the production dialog path (`submitTUIDialog` calls `OnSubmit` directly, skipping `Update`/required-field validation — `tui_test.go:4570`), so field-navigation regressions pass every workflow test.
+- Fixed 150–500ms sleeps in `tests/daemon_integration_test.go:171-240` are the main flake surface; the unit packages already have the right `waitFor` pattern to copy.
+- Untested entirely: `snapshot.go` (delete it per §2, or test `validateSymlinkTarget`), `locks.go`, `errors.go`, both store\_config files.
+
+## 9. The small tells that read "unfinished"
+
+- The module is named `github.com/brianrackle/test_lima` while the product, repo, and Homebrew formula all say `codelima`. Rename it now, before anything imports it — it's in every import path and ldflag.
+- Test fixtures `test-node-dir/` are committed at the repo root (and `test-project-dir/` sits untracked next to them) instead of `testdata/`.
+- `PATTERNS.MD` (extension case), a 938-line TODO.md doing issue-tracker duty, and 28 code comments citing "work item 0.7.2 / ADR 59 / IMPROVEMENT_PLAN Part F §2.2" — provenance narration that rots. Keep the invariant ("callers must hold the nodes lock"), move the archaeology to `decisions/`.
+- A 50-line POSIX shell program with `sudo` symlink hacks lives as a Go string slice (`interactiveShellLaunchCommand`, `service.go:2142-2189`). Embed it as a `.sh` via `go:embed` where it can be read, linted, and tested.
+- `writeSuccess`/`writeError` discard JSON marshal errors; error JSON goes to stdout while error text goes to stderr — pick one contract.
+- `.golangci.yml` enables five linters. For a codebase with this much hand-rolled duplication, add at least `errorlint`, `gocritic`, `revive`, `copyloopvar`, `unparam`, `sloglint`, and `misspell` — several findings above (identical branches, unused params like `nodeYAMLBytes`'s `_ = defaults`, `log.Printf` vs `slog` in the forwarder) would have been machine-caught.
+
+## If I owned this, in order
+
+1. **Delete the project/snapshot subsystem and the legacy fake renderer** (§2). Biggest LOC and complexity win, zero user impact, simplifies `SandboxClient`.
+2. **Split the package** along the seams that already exist conceptually (§1), moving the handoff framing and error codes into `daemon`/a leaf package, and daemon lifecycle out of `cli.go`.
+3. **Type the domain**: status enums, lock keys + `withLocks` (fixing the `ProjectUpdate` lock gap), typed RPC error codes replacing the `unixpacket` substring sniff (§3).
+4. **Thread `context.Context` end-to-end** — per-connection contexts in the daemon server, ctx-aware polls and locks (§5).
+5. **Collapse the wire-struct mirrors** onto single serialized structs with an explicit migrate step, and drive `RuntimeCommandTemplates` off its field table (§4).
+6. **Adopt a real CLI layer** with help text; extract the shared CRUD ritual (§7).
+7. **TUI consolidations**: one overlay interface, one binding table, one status setter, split the 2,671-line cgo file along its six responsibilities (§7).
+8. **Event-driven terminal snapshots and index-backed lookups**; kill the per-write seed/repair scan (§6).
+9. **CI hardening**: `-race` job, skip-accounting for the cgo suite, fix the parallel/global-seam race, integration `waitFor`, rename the module, `testdata/` (§8, §9).
+
+The through-line: you've already written down what correct looks like — in PATTERNS.MD, in ADRs, in careful comments. The remaining work is making the compiler, the package graph, and the type system enforce it so the documentation describes the structure instead of substituting for it.

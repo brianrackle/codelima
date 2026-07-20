@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -264,8 +263,12 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 			entry.term.Update(vaxis.Key{Keycode: params.Keycode, ShiftedCode: params.Shifted, Text: params.Text, Modifiers: vaxis.ModifierMask(params.Modifiers), EventType: vaxis.EventType(params.EventType)})
 		case "mouse":
 			entry.term.Update(vaxis.Mouse{Col: params.Col, Row: params.Row, Button: vaxis.MouseButton(params.Button), EventType: vaxis.EventType(params.EventType)})
+		case "paste":
+			entry.term.Update(vaxis.PasteStartEvent{})
+			entry.term.Update(normalizeTUITerminalEvent(vaxis.Key{Text: params.Text, EventType: vaxis.EventPaste}))
+			entry.term.Update(vaxis.PasteEndEvent{})
 		default:
-			return nil, daemon.Error("InvalidArgument", "terminal event type must be key or mouse", ExitInvalidArgument, nil)
+			return nil, daemon.Error("InvalidArgument", "terminal event type must be key, paste, or mouse", ExitInvalidArgument, nil)
 		}
 		return map[string]bool{"sent": true}, nil
 	default:
@@ -285,7 +288,7 @@ type terminalIDParams struct {
 	TerminalID string `json:"terminal_id"`
 }
 
-func (h *daemonHost) open(ctx context.Context, params terminalOpenParams, terminalID string) (daemon.TerminalState, error) {
+func (h *daemonHost) open(_ context.Context, params terminalOpenParams, terminalID string) (daemon.TerminalState, error) {
 	target, err := terminal.ParseTargetKey(params.Target)
 	if err != nil {
 		return daemon.TerminalState{}, daemon.Error("InvalidArgument", err.Error(), ExitInvalidArgument, nil)
@@ -434,14 +437,16 @@ func (h *daemonHost) TerminalCount() int {
 }
 
 func (h *daemonHost) Close() error {
-	var closeErr error
+	// Session state is recovery intent. Persist it before any potentially slow
+	// forwarding or terminal teardown so a forced legacy-daemon shutdown can
+	// still respawn every saved tab.
+	closeErr := h.persist()
 	if h.virtioFSPressure != nil {
 		h.virtioFSPressure.Close()
 	}
 	if h.forwarder != nil {
-		closeErr = h.forwarder.Close()
+		closeErr = errors.Join(closeErr, h.forwarder.Close())
 	}
-	_ = h.persist()
 	h.mu.Lock()
 	entries := make([]*daemonTerminalEntry, 0, len(h.terminals))
 	for id, entry := range h.terminals {
@@ -449,8 +454,19 @@ func (h *daemonHost) Close() error {
 		delete(h.terminals, id)
 	}
 	h.mu.Unlock()
+	var terminals sync.WaitGroup
+	terminals.Add(len(entries))
 	for _, entry := range entries {
-		entry.term.Close()
+		go func() {
+			defer terminals.Done()
+			entry.term.Close()
+		}()
+	}
+	terminals.Wait()
+	if value := os.Getenv("CODELIMA_TEST_DAEMON_SHUTDOWN_DELAY"); value != "" {
+		if delay, err := time.ParseDuration(value); err == nil && delay > 0 {
+			time.Sleep(delay)
+		}
 	}
 	return closeErr
 }
@@ -644,6 +660,14 @@ func startDaemon(ctx context.Context, service *Service) (daemon.Status, error) {
 	if status, err := daemonclient.Ping(ctx, service.cfg.MetadataRoot, Version); err == nil && status.Running {
 		return daemon.Status{}, preconditionFailed("daemon already running", map[string]any{"pid": status.PID})
 	}
+	if err := recoverDaemonBeforeStart(ctx, service.cfg.MetadataRoot); err != nil {
+		return daemon.Status{}, dependencyUnavailable("previous daemon did not release startup ownership", err, nil)
+	}
+	// Another current daemon may have won the startup race while recovery was
+	// waiting for the previous lock owner.
+	if status, err := daemonclient.Ping(ctx, service.cfg.MetadataRoot, Version); err == nil && status.Running {
+		return daemon.Status{}, preconditionFailed("daemon already running", map[string]any{"pid": status.PID})
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return daemon.Status{}, err
@@ -681,6 +705,35 @@ func startDaemon(ctx context.Context, service *Service) (daemon.Status, error) {
 	_ = command.Process.Kill()
 	<-waitCh
 	return daemon.Status{}, dependencyUnavailable("daemon did not become ready within 5 seconds", nil, nil)
+}
+
+func recoverDaemonBeforeStart(ctx context.Context, home string) error {
+	paths := daemon.HomePaths(home)
+	available, err := daemonLockAvailable(paths.Lock)
+	if err != nil || available {
+		return err
+	}
+	identity, identityErr := readDaemonIdentity(home)
+	if identityErr != nil || !recoverableDaemonIdentity(identity) {
+		return waitForDaemonShutdown(ctx, home, daemonStartRecoveryTimeout)
+	}
+
+	client, dialErr := daemonclient.Dial(ctx, daemonclient.Options{
+		Home: home, Version: identity.Version, Protocol: identity.Protocol, Timeout: 2 * time.Second,
+	})
+	terminalCount := 0
+	if dialErr == nil {
+		var status daemon.Status
+		_ = client.Call(ctx, "daemon.status", nil, &status)
+		terminalCount = status.TerminalCount
+		var stopped map[string]bool
+		stopErr := client.Call(ctx, "daemon.stop", nil, &stopped)
+		_ = client.Close()
+		if stopErr != nil {
+			return fmt.Errorf("stop previous daemon before start: %w", stopErr)
+		}
+	}
+	return finishDaemonShutdown(ctx, home, identity, daemonShutdownTimeout(terminalCount))
 }
 
 func daemonStatus(ctx context.Context, service *Service) (daemon.Status, error) {
@@ -721,11 +774,7 @@ type quiescedTerminal struct {
 
 func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	if binaryPath == "" {
-		var err error
-		binaryPath, err = os.Executable()
-		if err != nil {
-			return nil, toDaemonError(err)
-		}
+		return nil, daemon.Error("InvalidArgument", "daemon update requires the caller binary path", ExitInvalidArgument, nil)
 	}
 	binaryPath = resolveCodelimaExecutablePath(binaryPath)
 	if info, err := os.Stat(binaryPath); err != nil || info.IsDir() {
@@ -772,7 +821,7 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	token := strings.ReplaceAll(newID(), "-", "")
 	handoffPath := filepath.Join(daemon.HomePaths(h.service.cfg.MetadataRoot).Dir, fmt.Sprintf("handoff-%d.sock", os.Getpid()))
 	_ = os.Remove(handoffPath)
-	listener, err := net.ListenUnix("unixpacket", &net.UnixAddr{Name: handoffPath, Net: "unixpacket"})
+	listener, err := listenHandoff(handoffPath)
 	if err != nil {
 		return rollback(err, false, nil)
 	}
@@ -801,18 +850,19 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	if err := daemon.RequireSameUserPeer(conn); err != nil {
 		return rollback(err, false, process)
 	}
-	message, _, err := readHandoffPacket(conn)
+	peer := newHandoffConnection(conn, handoffFramingLengthPrefixed)
+	message, err := peer.readControlMessage()
 	if err != nil || message.Type != "hello" || message.Token != token {
 		if err == nil {
 			err = errors.New("invalid handoff authentication")
 		}
 		return rollback(err, false, process)
 	}
-	manifest := daemon.HandoffManifest{Version: 2, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
+	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
 	for _, item := range quiesced {
 		manifest.Runtimes = append(manifest.Runtimes, daemon.HandoffRuntime{TerminalID: item.id, ChildPID: item.state.ChildPID, Cols: item.state.Cols, Rows: item.state.Rows, Replay: item.state.Replay})
 	}
-	if err := writeHandoffJSON(conn, manifest, nil); err != nil {
+	if err := peer.writeJSON(manifest, nil); err != nil {
 		return rollback(err, false, process)
 	}
 	for start := 0; start < len(quiesced); start += 64 {
@@ -823,11 +873,11 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 			ids = append(ids, item.id)
 			fds = append(fds, int(item.state.PTY.Fd()))
 		}
-		if err := writeHandoffJSON(conn, daemon.HandoffMessage{Type: "fds", TerminalIDs: ids}, fds); err != nil {
+		if err := peer.writeJSON(daemon.HandoffMessage{Type: "fds", TerminalIDs: ids}, fds); err != nil {
 			return rollback(err, false, process)
 		}
 	}
-	message, _, err = readHandoffPacket(conn)
+	message, err = peer.readControlMessage()
 	if err != nil || message.Type != "ready" {
 		if err == nil {
 			err = errors.New(message.Error)
@@ -838,10 +888,10 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 		return rollback(err, false, process)
 	}
 	prepared := true
-	if err := writeHandoffJSON(conn, daemon.HandoffMessage{Type: "commit", Token: token}, nil); err != nil {
+	if err := peer.writeJSON(daemon.HandoffMessage{Type: "commit", Token: token}, nil); err != nil {
 		return rollback(err, prepared, process)
 	}
-	message, _, err = readHandoffPacket(conn)
+	message, err = peer.readControlMessage()
 	if err != nil || message.Type != "committed" {
 		if err == nil {
 			err = errors.New(message.Error)
@@ -860,100 +910,75 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	}
 	h.broadcast("daemon.update_committed", map[string]int{"pid": message.PID})
 	time.AfterFunc(10*time.Millisecond, h.stopServer)
-	return map[string]any{"updated": true, "terminals": len(quiesced)}, nil
-}
-
-func writeHandoffJSON(conn *net.UnixConn, value any, fds []int) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	var rights []byte
-	if len(fds) > 0 {
-		rights = unix.UnixRights(fds...)
-	}
-	_ = conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-	_, _, err = conn.WriteMsgUnix(data, rights, nil)
-	return err
-}
-
-func readHandoffPacket(conn *net.UnixConn) (daemon.HandoffMessage, []int, error) {
-	data := make([]byte, daemon.MaxMessageSize)
-	oob := make([]byte, unix.CmsgSpace(64*4))
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	n, oobn, _, _, err := conn.ReadMsgUnix(data, oob)
-	if err != nil {
-		return daemon.HandoffMessage{}, nil, err
-	}
-	var message daemon.HandoffMessage
-	if err := json.Unmarshal(data[:n], &message); err != nil {
-		return daemon.HandoffMessage{}, nil, err
-	}
-	fds, err := parseHandoffFDs(oob[:oobn])
-	return message, fds, err
-}
-
-func readHandoffManifest(conn *net.UnixConn) (daemon.HandoffManifest, error) {
-	data := make([]byte, daemon.MaxMessageSize)
-	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-	n, _, _, _, err := conn.ReadMsgUnix(data, nil)
-	if err != nil {
-		return daemon.HandoffManifest{}, err
-	}
-	var manifest daemon.HandoffManifest
-	if err := json.Unmarshal(data[:n], &manifest); err != nil {
-		return daemon.HandoffManifest{}, err
-	}
-	return manifest, nil
-}
-
-func parseHandoffFDs(oob []byte) ([]int, error) {
-	if len(oob) == 0 {
-		return nil, nil
-	}
-	messages, err := unix.ParseSocketControlMessage(oob)
-	if err != nil {
-		return nil, err
-	}
-	var fds []int
-	for _, message := range messages {
-		values, err := unix.ParseUnixRights(&message)
-		if err != nil {
-			return nil, err
-		}
-		fds = append(fds, values...)
-	}
-	return fds, nil
+	return map[string]any{"updated": true, "live_handoff": true, "terminals": len(quiesced)}, nil
 }
 
 func importDaemon(ctx context.Context, service *Service, handoffPath, token string) error {
 	if handoffPath == "" || token == "" {
 		return invalidArgument("daemon import requires --handoff and --token", nil)
 	}
-	conn, err := net.DialUnix("unixpacket", nil, &net.UnixAddr{Name: handoffPath, Net: "unixpacket"})
+	peer, err := dialHandoff(handoffPath)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
-	if err := writeHandoffJSON(conn, daemon.HandoffMessage{Type: "hello", Token: token}, nil); err != nil {
+	defer func() { _ = peer.Close() }()
+	if err := peer.writeJSON(daemon.HandoffMessage{Type: "hello", Token: token}, nil); err != nil {
 		return err
 	}
-	manifest, err := readHandoffManifest(conn)
+	manifest, err := peer.readManifest()
 	if err != nil {
 		return err
 	}
-	if manifest.Version != 2 || manifest.Token != token || manifest.Session.Version != daemon.SessionVersion {
-		_ = writeHandoffJSON(conn, daemon.HandoffMessage{Type: "failed", Error: "invalid handoff manifest"}, nil)
+	wantHandoffVersion := daemon.HandoffVersion
+	if peer.framing == handoffFramingLegacyPacket {
+		wantHandoffVersion = daemon.LegacyHandoffVersion
+	}
+	if manifest.Version != wantHandoffVersion || manifest.Token != token || manifest.Session.Version != daemon.SessionVersion {
+		_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: "invalid handoff manifest"}, nil)
 		return errors.New("invalid handoff manifest")
 	}
+	runtimeIDs := make(map[string]struct{}, len(manifest.Runtimes))
+	for _, runtimeState := range manifest.Runtimes {
+		if runtimeState.TerminalID == "" {
+			return errors.New("handoff runtime has an empty terminal id")
+		}
+		if _, duplicate := runtimeIDs[runtimeState.TerminalID]; duplicate {
+			return errors.New("handoff manifest has duplicate terminal runtimes")
+		}
+		runtimeIDs[runtimeState.TerminalID] = struct{}{}
+	}
 	fdsByID := map[string]int{}
+	closePendingFDs := func() {
+		for id, fd := range fdsByID {
+			_ = unix.Close(fd)
+			delete(fdsByID, id)
+		}
+	}
+	defer closePendingFDs()
 	for len(fdsByID) < len(manifest.Runtimes) {
-		message, fds, readErr := readHandoffPacket(conn)
+		message, fds, readErr := peer.readMessage()
 		if readErr != nil {
 			return readErr
 		}
 		if message.Type != "fds" || len(message.TerminalIDs) != len(fds) {
+			closeHandoffFDs(fds)
 			return errors.New("invalid handoff fd batch")
+		}
+		batchIDs := make(map[string]struct{}, len(message.TerminalIDs))
+		for _, id := range message.TerminalIDs {
+			if _, expected := runtimeIDs[id]; !expected {
+				closeHandoffFDs(fds)
+				return errors.New("handoff fd batch names an unknown terminal")
+			}
+			if _, duplicate := fdsByID[id]; duplicate {
+				closeHandoffFDs(fds)
+				return errors.New("handoff fd batch duplicates a terminal")
+			}
+			if _, duplicate := batchIDs[id]; duplicate {
+				closeHandoffFDs(fds)
+				return errors.New("handoff fd batch duplicates a terminal")
+			}
+			batchIDs[id] = struct{}{}
 		}
 		for i, id := range message.TerminalIDs {
 			fdsByID[id] = fds[i]
@@ -977,12 +1002,13 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 			releaseImported()
 			return errors.New("handoff terminal metadata does not match fds")
 		}
+		delete(fdsByID, runtimeState.TerminalID)
 		ptyFile := os.NewFile(uintptr(fd), "codelima-imported-pty")
 		term, adoptErr := adoptGhosttyTUITerminal(state.TabID, func(event vaxis.Event) { host.handleTerminalEvent(state.TerminalID, event) }, ptyFile, runtimeState.ChildPID, runtimeState.Cols, runtimeState.Rows, runtimeState.Replay)
 		if adoptErr != nil {
 			_ = ptyFile.Close()
 			releaseImported()
-			_ = writeHandoffJSON(conn, daemon.HandoffMessage{Type: "failed", Error: adoptErr.Error()}, nil)
+			_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: adoptErr.Error()}, nil)
 			return adoptErr
 		}
 		imported = append(imported, term.(handoffDaemonTerminal))
@@ -990,14 +1016,14 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	}
 	if os.Getenv("CODELIMA_HANDOFF_FAIL_IMPORT") == "1" {
 		releaseImported()
-		_ = writeHandoffJSON(conn, daemon.HandoffMessage{Type: "failed", Error: "injected import failure"}, nil)
+		_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: "injected import failure"}, nil)
 		return errors.New("injected import failure")
 	}
-	if err := writeHandoffJSON(conn, daemon.HandoffMessage{Type: "ready"}, nil); err != nil {
+	if err := peer.writeJSON(daemon.HandoffMessage{Type: "ready"}, nil); err != nil {
 		releaseImported()
 		return err
 	}
-	message, _, err := readHandoffPacket(conn)
+	message, err := peer.readControlMessage()
 	if err != nil || message.Type != "commit" || message.Token != token {
 		releaseImported()
 		if err == nil {
@@ -1022,7 +1048,7 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, pingErr := daemonclient.Ping(context.Background(), service.cfg.MetadataRoot, Version); pingErr == nil {
-			if err := writeHandoffJSON(conn, daemon.HandoffMessage{Type: "committed", PID: os.Getpid()}, nil); err != nil {
+			if err := peer.writeJSON(daemon.HandoffMessage{Type: "committed", PID: os.Getpid()}, nil); err != nil {
 				server.Stop()
 				return err
 			}
@@ -1031,7 +1057,7 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 		}
 		select {
 		case runErr := <-done:
-			_ = writeHandoffJSON(conn, daemon.HandoffMessage{Type: "failed", Error: runErr.Error()}, nil)
+			_ = peer.writeJSON(daemon.HandoffMessage{Type: "failed", Error: runErr.Error()}, nil)
 			return runErr
 		default:
 		}

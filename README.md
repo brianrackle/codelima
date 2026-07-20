@@ -51,6 +51,8 @@ make test-integration
 make smoke
 ```
 
+The Go SDK requires cgo. The Makefile enables it and uses the host `cc` when available, falling back to the managed Zig compiler installed by `make init` in minimal development sandboxes. Tests run serially by default to avoid filesystem-resource spikes on virtualized development hosts; override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` after qualifying a host.
+
 See `BUILD.md` for packaging and release details.
 
 ## Use a separate home
@@ -238,23 +240,35 @@ Important bindings:
 - `d`: delete the selected node
 - `q`: quit
 
+When the initially selected node is running, the TUI opens its existing or newly created guest tab in the right pane and highlights `Terminal` by default while keeping keyboard focus in the node list. A stopped initial node remains on `Info` and does not start a guest shell. After startup, `i` is a sticky explicit choice: moving between nodes does not replace the selected pane mode.
+
 The host and guest shells are both tabs of the node target. Host mode is indicated by the red top bar. Host tabs resolve their working directory from stored node metadata, so they remain available when the node is stopped or Microsandbox is temporarily unavailable.
+
+Multiline paste is delivered to terminal applications as one bracketed paste rather than a sequence of simulated key presses. Newlines remain in the input buffer and do not execute pasted commands; press Enter explicitly when the pasted text is ready.
+
+Ordinary terminal input is delivered through an ordered background queue, so typing remains responsive while the daemon is serving terminal snapshots. The TUI redraws typed input when the daemon publishes the resulting fresh snapshot instead of repainting the previous screen after every key.
 
 ## Local development servers
 
 The daemon discovers listening guest TCP ports and routes HTTP and WebSocket traffic dynamically:
 
 ```text
+http://localhost:{guest-port}
+http://127.0.0.1:{guest-port}
 http://{node-slug}.localhost:{guest-port}
 ```
 
 For a node named `api-dev` serving on guest port 8080:
 
 ```sh
+curl http://localhost:8080
+curl http://127.0.0.1:8080
 curl http://api-dev.localhost:8080
 ```
 
-No fixed list such as 3000/5173/8080 is preconfigured. Two nodes can use the same guest port because the hostname selects the node. The server may bind guest loopback; traffic is tunneled through the daemon's Microsandbox SDK SSH helper.
+No fixed list such as 3000/5173/8080 is preconfigured. The first active node discovered on a port claims the generic `localhost` and `127.0.0.1` URLs while it remains listening. When it stops, the daemon assigns the earliest remaining claimant during its one-second reconciliation loop. A temporary conflict with another host process is also retried every second; claims are in-memory and are not persisted.
+
+Two nodes can use the same guest port because `{node-slug}.localhost` always selects that specific node, regardless of which node owns the generic URL. The server may bind IPv4 or IPv6 guest loopback (`127.0.0.1`, `::1`, or `localhost`); traffic is tunneled through the daemon's Microsandbox SDK SSH helper. `codelima daemon snapshot` reports the generic `default_node` for every active port; it remains empty while a host bind is conflicted and no claim has succeeded.
 
 Raw TCP services can still use explicit `--port HOST:GUEST` mappings at node creation. Explicit host ports must be unique among simultaneously running nodes.
 
@@ -271,7 +285,9 @@ codelima daemon stop
 
 The TUI starts or connects to the daemon automatically according to `_config/settings.yaml`.
 
-An interactive TUI claims daemon input ownership when it connects, making any older client observe-only, and its authenticated connection remains open while idle. Returning to that TUI and opening a terminal therefore requires neither a manual `terminal takeover` nor a daemon restart.
+After rebuilding a development binary while a daemon is already running, apply it with `./bin/codelima daemon update`. With no path argument, the command sends the exact binary being invoked and can bridge from the prior handoff-capable daemon protocol while preserving PTYs. The handoff uses framed Unix streams and SCM_RIGHTS on both macOS and Linux. A legacy macOS daemon that reports the old unsupported `unixpacket` transport is restarted by the update command; VMs remain running and saved tabs respawn, but those terminal processes restart once because the legacy daemon cannot transfer their descriptors. Shutdown waits on the authoritative daemon lock rather than stale socket pathnames, allows time based on the number of terminals, and terminates only the still-matching daemon identity if graceful teardown gets stuck. TUI autostart applies the same recovery when an earlier daemon has closed its socket but still owns the lock. Other handoff failures still roll back to the old daemon. Ordinary clients remain exact-version only, so a stale daemon cannot silently accept newer input such as semantic paste. An already-open TUI must currently be quit and reopened after the update so it reconnects to the replacement daemon; asynchronous input failure is shown instead of silently dropping text.
+
+An interactive TUI claims daemon input ownership when it connects, making any older client observe-only, and its authenticated connection remains open while idle. When multiple TUI windows remain open, focusing a window silently reclaims ownership before its next terminal action and makes the previously focused window observe-only. Routine window switching does not show an ownership warning and requires neither a manual `terminal takeover` nor a daemon restart, including after an idle interval.
 
 On macOS, the daemon also protects mounted VirtioFS workspaces from system file-table exhaustion. It samples the host-wide `kern.num_files` against the host-wide `kern.maxfiles` every two seconds and, at 20% by default, asks running mounted nodes to release clean dentry/inode caches. Every attempt has a 30-second cooldown. The operation does not run `sync`, does not discard dirty data, and does not interrupt active file handles; the tradeoff is temporarily colder path-lookup caches.
 
