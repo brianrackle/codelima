@@ -296,6 +296,7 @@ Verify:
 - `n` opens node creation with a blank directory field and muted current-directory placeholder
 - `a` opens global configuration management and `g` opens global environment management titled `Environments`; its create, manage, and delete surfaces consistently call each reusable command bundle an environment
 - configuration selectors list only `small`, `medium`, `large`, `xlarge` in that order and select `small` by default
+- in the configuration update dialog, `Left` and `Right` move the cursor in every editable text and resource field; after moving left, moving right and typing inserts at the expected position, while `Right` still opens the Environments selector
 - `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
 - the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
 - `Option+Shift+Backtick` no longer opens or toggles a host terminal

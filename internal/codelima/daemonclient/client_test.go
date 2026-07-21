@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/testutil"
 )
 
 func TestClientExactVersionHandshake(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testutil.TempDir(t, "dc-")
 	paths := daemon.HomePaths(home)
 	if err := os.MkdirAll(paths.Dir, 0o700); err != nil {
 		t.Fatal(err)

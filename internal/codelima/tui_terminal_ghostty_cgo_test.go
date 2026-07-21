@@ -719,6 +719,7 @@ func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
 	cmd := exec.Command("/bin/bash", "--noprofile", "--norc", "-i")
 	cmd.Env = append(os.Environ(),
 		"TERM="+tuiEmbeddedTermEnv,
+		"BASH_SILENCE_DEPRECATION_WARNING=1",
 		`PS1=brianrackle@sandbox-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianrackle/Projects/codelima\$ `,
 	)
 	if err := ghostty.Start(cmd); err != nil {

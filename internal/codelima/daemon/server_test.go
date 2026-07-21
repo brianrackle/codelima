@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brianrackle/codelima/internal/testutil"
 )
 
 func TestProtocolRoundTripAndOversizeRejection(t *testing.T) {
@@ -38,7 +39,7 @@ func TestHomePathsStayUnderPrivateDaemonDirectory(t *testing.T) {
 }
 
 func TestSubscribedEventConnectionSurvivesRequestReadTimeout(t *testing.T) {
-	home := t.TempDir()
+	home := daemonServerTestHome(t)
 	server := NewServer(Config{Home: home, Version: "test", Handler: testHandler{}, ReadTimeout: 25 * time.Millisecond})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -158,14 +159,5 @@ func mustJSONForTest(t *testing.T, value any) json.RawMessage {
 
 func daemonServerTestHome(t *testing.T) string {
 	t.Helper()
-	root := filepath.Clean(filepath.Join("..", "..", "..", "tmp"))
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	home, err := os.MkdirTemp(root, "daemon-server-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(home) })
-	return home
+	return testutil.TempDir(t, "ds-")
 }

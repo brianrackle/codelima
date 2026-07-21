@@ -601,7 +601,9 @@ Disadvantages:
 - Needs careful cleanup behavior so interrupted installs do not permanently block future setup.
 - May slightly slow concurrent commands because one setup path must wait for the other.
 
-### 23. Verify macOS Ghostty lib-vt install after disabling xcframework emission
+### 23. [resolved] Verify macOS Ghostty lib-vt install after disabling xcframework emission
+
+Resolution: resolved by the July 21, 2026 GitHub Actions runs on the `macos-14` arm64 image. Both CI jobs completed `install_ghostty_vt.sh` with the pinned Ghostty commit and `-Demit-xcframework=false`, and the v0.1.0 release job built and packaged the Darwin arm64 archive with `libghostty-vt.dylib` successfully.
 
 Problem:
 

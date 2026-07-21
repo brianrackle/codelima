@@ -51,7 +51,11 @@ func TestShutdownTerminalProcessEscalatesToSIGKILLForStubbornGroup(t *testing.T)
 }
 
 func TestShutdownTerminalProcessTreatsExitedProcessAsSuccess(t *testing.T) {
-	cmd := exec.Command("/bin/true")
+	trueBinary, err := exec.LookPath("true")
+	if err != nil {
+		t.Fatalf("look up true executable: %v", err)
+	}
+	cmd := exec.Command(trueBinary)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("cmd.Start() error = %v", err)

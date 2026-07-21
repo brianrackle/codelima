@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brianrackle/codelima/internal/testutil"
 	"github.com/creack/pty"
 	"gopkg.in/yaml.v3"
 )
@@ -200,6 +201,10 @@ func TestRenderLimaTemplateAppliesRuntimeInvariants(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
+	resolvedWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
 	node := Node{
 		ID: "node-id", SandboxName: "demo", Image: "template:ubuntu",
 		VCPUs: 6, MemoryMiB: 6144, DiskMiB: 32768,
@@ -241,7 +246,7 @@ audio:
 		t.Fatalf("mounts = %#v", rendered["mounts"])
 	}
 	mount := mounts[0].(map[string]any)
-	if mount["location"] != workspace || mount["mountPoint"] != "/workspace" || mount["writable"] != true {
+	if mount["location"] != resolvedWorkspace || mount["mountPoint"] != "/workspace" || mount["writable"] != true {
 		t.Fatalf("mount = %#v", mount)
 	}
 	containerd := rendered["containerd"].(map[string]any)
@@ -287,7 +292,10 @@ func TestRenderLimaTemplateCopyModeHasNoMounts(t *testing.T) {
 
 func TestParseLimaSSHConfigRestrictsPaths(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	instanceDir := filepath.Join(home, "demo")
 	if err := os.MkdirAll(instanceDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -360,7 +368,7 @@ func TestWriteRenderedLimaTemplateIsPrivate(t *testing.T) {
 
 func TestLimaClientLifecycleWithFakeLimactl(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testutil.TempDir(t, "lima-")
 	binary := writeFakeLimactl(t, home)
 	client := NewLimaClient(home)
 	client.Binary = binary
@@ -436,7 +444,7 @@ func TestLimaClientLifecycleWithFakeLimactl(t *testing.T) {
 
 func TestLimaCreateDoesNotDeletePreExistingInstance(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testutil.TempDir(t, "lima-")
 	binary := writeFakeLimactl(t, home)
 	if err := os.WriteFile(binary+".state", []byte("demo Stopped\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -464,7 +472,7 @@ func TestLimaCreateDoesNotDeletePreExistingInstance(t *testing.T) {
 
 func TestLimaCloneDoesNotDeletePreExistingTarget(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	home := testutil.TempDir(t, "lima-")
 	binary := writeFakeLimactl(t, home)
 	if err := os.WriteFile(binary+".state", []byte("source Stopped\ntarget Stopped\n"), 0o600); err != nil {
 		t.Fatal(err)

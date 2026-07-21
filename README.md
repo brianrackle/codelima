@@ -260,6 +260,8 @@ Important bindings:
 - `d`: delete the selected node
 - `q`: quit
 
+Inside a form, `Tab`, `Up`, and `Down` move between fields. `Left` and `Right` move the cursor within editable values; on a selector field, `Right` or `Enter` opens its choices. `Ctrl+s` submits and `Esc` cancels.
+
 When the initially selected node is running, the TUI opens its existing or newly created guest tab in the right pane and highlights `Terminal` by default while keeping keyboard focus in the node list. A stopped initial node remains on `Info` and does not start a guest shell. After startup, `i` is a sticky explicit choice: moving between nodes does not replace the selected pane mode.
 
 The host and guest shells are both tabs of the node target. Host mode is indicated by the red top bar. Host tabs resolve their working directory from stored node metadata, so they remain available when the node is stopped or Lima is temporarily unavailable.

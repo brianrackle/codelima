@@ -132,10 +132,7 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 				}
 			}
 			return false, nil
-		case event.MatchString("Right"):
-			if len(d.Fields) == 0 || d.Fields[d.FieldIndex].Activate == nil {
-				return false, nil
-			}
+		case event.MatchString("Right") && len(d.Fields) > 0 && d.Fields[d.FieldIndex].Activate != nil:
 			d.Error = ""
 			if err := d.Fields[d.FieldIndex].Activate(); err != nil {
 				d.Error = err.Error()

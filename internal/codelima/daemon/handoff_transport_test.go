@@ -6,18 +6,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brianrackle/codelima/internal/testutil"
 )
 
 // handoffTestTempDir creates a temp dir under the repo-rooted tmp/ so Unix
 // socket paths stay within the kernel sun_path limit (t.TempDir can exceed it).
 func handoffTestTempDir(t *testing.T, prefix string) string {
 	t.Helper()
-	root, err := os.MkdirTemp(filepath.Join("..", "..", "..", "tmp"), prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	return root
+	return testutil.TempDir(t, prefix)
 }
 
 func TestHandoffTransportUsesFramedUnixStreamWithDescriptorPassing(t *testing.T) {

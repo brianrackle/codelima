@@ -6,10 +6,12 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+
+	"github.com/brianrackle/codelima/internal/testutil"
 )
 
 func TestRequireSameUserPeerAcceptsOwnerConnection(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "peer.sock")
+	path := filepath.Join(testutil.TempDir(t, "peer-"), "peer.sock")
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)

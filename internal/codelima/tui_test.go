@@ -2952,6 +2952,65 @@ func TestTUIDialogCtrlLeftBracketCancels(t *testing.T) {
 	}
 }
 
+func TestTUIDialogLeftAndRightMoveCursorInEveryTextField(t *testing.T) {
+	t.Parallel()
+
+	dialog := newTUIDialog(
+		"Update Configuration",
+		"Update",
+		nil,
+		[]tuiDialogField{
+			newTUIInputField("slug", "Configuration Slug", "small", true),
+			newTUIInputField("image", "Image", "ubuntu", true),
+			newTUIInputField("vcpus", "vCPUs", "1234", true),
+		},
+		nil,
+	)
+
+	for index := range dialog.Fields {
+		dialog.FieldIndex = index
+		input := dialog.Fields[index].Input
+		end := input.CursorPosition()
+
+		if _, err := dialog.Update(vaxis.Key{Keycode: vaxis.KeyLeft}); err != nil {
+			t.Fatalf("field %q Left error = %v", dialog.Fields[index].Key, err)
+		}
+		if got := input.CursorPosition(); got != end-1 {
+			t.Fatalf("field %q cursor after Left = %d, want %d", dialog.Fields[index].Key, got, end-1)
+		}
+
+		if _, err := dialog.Update(vaxis.Key{Keycode: vaxis.KeyRight}); err != nil {
+			t.Fatalf("field %q Right error = %v", dialog.Fields[index].Key, err)
+		}
+		if got := input.CursorPosition(); got != end {
+			t.Fatalf("field %q cursor after Right = %d, want %d", dialog.Fields[index].Key, got, end)
+		}
+	}
+}
+
+func TestTUIDialogRightStillActivatesSelectorFields(t *testing.T) {
+	t.Parallel()
+
+	activated := false
+	dialog := newTUIDialog(
+		"Update Configuration",
+		"Update",
+		nil,
+		[]tuiDialogField{newTUIValueSelectorField("environment", "Environment", "dev", true, nil, func() error {
+			activated = true
+			return nil
+		})},
+		nil,
+	)
+
+	if _, err := dialog.Update(vaxis.Key{Keycode: vaxis.KeyRight}); err != nil {
+		t.Fatalf("selector Right error = %v", err)
+	}
+	if !activated {
+		t.Fatal("Right did not activate selector field")
+	}
+}
+
 func TestTUIHandleEventEscapeClosesDialog(t *testing.T) {
 	t.Parallel()
 
