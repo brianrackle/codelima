@@ -1170,12 +1170,14 @@ func TestDeletedBuiltInEnvironmentConfigIsNotRecreated(t *testing.T) {
 	if err := service.EnsureReady(context.Background(), true); err != nil {
 		t.Fatalf("EnsureReady(true) error = %v", err)
 	}
-	defaultConfiguration, err := service.ConfigurationShow(context.Background(), DefaultConfigurationSlug)
+	configurations, err := service.ConfigurationList(context.Background(), false)
 	if err != nil {
-		t.Fatalf("ConfigurationShow(default) error = %v", err)
+		t.Fatalf("ConfigurationList() error = %v", err)
 	}
-	if _, err := service.ConfigurationUpdate(context.Background(), defaultConfiguration.ID, ConfigurationUpdateInput{Environments: []string{}}); err != nil {
-		t.Fatalf("ConfigurationUpdate(clear default environments) error = %v", err)
+	for _, configuration := range configurations {
+		if _, err := service.ConfigurationUpdate(context.Background(), configuration.ID, ConfigurationUpdateInput{Environments: []string{}}); err != nil {
+			t.Fatalf("ConfigurationUpdate(clear %s environments) error = %v", configuration.Slug, err)
+		}
 	}
 
 	if _, err := service.EnvironmentConfigDelete(context.Background(), "codex"); err != nil {

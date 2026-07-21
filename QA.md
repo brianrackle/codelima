@@ -32,7 +32,10 @@ Unix sockets; if the checkout is on 9p/NFS, use an isolated short local
 cat "$CODELIMA_HOME/_config/schema.version"
 find "$CODELIMA_HOME" -maxdepth 3 -type d | sort
 ./bin/codelima configuration list
-./bin/codelima configuration show default
+./bin/codelima configuration show small
+for preset in small medium large xlarge; do
+  ./bin/codelima configuration show "$preset"
+done
 ```
 
 Verify:
@@ -40,7 +43,8 @@ Verify:
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
 - schema version is `4`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
-- `default` exists with 2 CPUs, 4096 MiB memory, 20480 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
+- `small` is the implicit default and exists with 1 CPU, 1024 MiB memory, 10240 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
+- the configuration list contains only `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments
 
 Check schema-v3 rejection without mutation:
 
@@ -66,7 +70,7 @@ Verify the error requests a fresh `--home`/`CODELIMA_HOME` and does not claim to
   --slug qa-tools \
   --bootstrap-command 'printf qa-tools > .qa-tools-installed'
 
-./bin/codelima configuration update default \
+./bin/codelima configuration update small \
   --environment qa-tools \
   --vcpus 2 \
   --memory 4GiB \
@@ -97,8 +101,8 @@ Verify the node still reports 3 CPUs, 5120 MiB memory, and 24576 MiB disk, provi
 Protection checks:
 
 ```sh
-if ./bin/codelima configuration delete default; then exit 1; fi
-if ./bin/codelima configuration update default --slug renamed-default; then exit 1; fi
+if ./bin/codelima configuration delete small; then exit 1; fi
+if ./bin/codelima configuration update small --slug renamed-small; then exit 1; fi
 if ./bin/codelima configuration delete qa-large; then exit 1; fi
 ```
 
@@ -109,17 +113,17 @@ Verify all three fail with `PreconditionFailed`.
 ```sh
 ./bin/codelima node create \
   --slug qa-v3-root-two \
-  --configuration default \
+  --configuration small \
   --directory "$QA_ROOT/work/root"
 
 ./bin/codelima node create \
   --slug qa-v3-child \
-  --configuration default \
+  --configuration small \
   --directory "$QA_ROOT/work/root/child"
 
 ./bin/codelima node create \
   --slug qa-v3-prefix \
-  --configuration default \
+  --configuration small \
   --directory "$QA_ROOT/work/prefix" \
   --workspace-mode copy
 
@@ -258,9 +262,20 @@ verify only `sleep` is interrupted: the terminal tab and guest prompt remain
 open. Paste the two-line block again and verify no literal `^[[200~` or
 `^[[201~` bracketed-paste markers appear.
 
+Immediately after starting a node, toggle between tree and terminal focus with
+`Option+Backtick` or `F6` several times. Verify width growth keeps the prompt
+clean without typing literal `^L` characters or clearing earlier terminal
+history.
+
 Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
 
 Leave both TUIs and all their terminal tabs idle for at least 30 seconds. In Activity Monitor, inspect every `codelima` process (the daemon and both TUI clients): none may remain near 100% CPU, and idle clients should settle near zero rather than consuming CPU in proportion to their open tab count. `msb` and the Virtual Machine Service are separate VM-runtime processes and are not part of this client/daemon idle assertion.
+
+During that idle interval, verify no structured Lima warning or other
+subprocess diagnostic overwrites the TUI chrome. From the second terminal,
+inspect `$CODELIMA_HOME/_logs/codelima.log`; any Lima diagnostic emitted during
+initial load or refresh must appear there with `source=limactl` instead of on
+the TUI screen.
 
 While one TUI remains open, run `./bin/codelima --json daemon update` from the second real terminal. Confirm the open TUI reports that CodeLima was updated and must be reopened. Leave it at that message for at least 30 seconds and verify its `codelima` process remains idle instead of pinning a core on the closed event stream; then quit and reopen it before continuing.
 
@@ -279,7 +294,8 @@ Verify:
 - root rows show directory `.` and the child row shows `child`, not absolute paths
 - each row shows a configuration label
 - `n` opens node creation with a blank directory field and muted current-directory placeholder
-- `a` opens global configuration management and `g` opens global environment management
+- `a` opens global configuration management and `g` opens global environment management titled `Environments`; its create, manage, and delete surfaces consistently call each reusable command bundle an environment
+- configuration selectors list only `small`, `medium`, `large`, `xlarge` in that order and select `small` by default
 - `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
 - the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
 - `Option+Shift+Backtick` no longer opens or toggles a host terminal
@@ -287,6 +303,7 @@ Verify:
 - the first terminal action after every window-focus takeover and after the idle interval succeeds without a broken pipe or `client is observe-only` error
 - multiline paste appears without character-by-character delay, preserves its newline, and executes nothing until Enter is pressed explicitly
 - arrows and `Ctrl+a`/`Ctrl+e` edit the guest command line without printing control sequences, `Ctrl+c` interrupts the guest job without closing its tab, and bracketed-paste markers never appear as text
+- focus-driven terminal width growth neither prints `^L` nor clears earlier terminal history
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
 - an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream
@@ -305,7 +322,7 @@ Create and start a mounted node, then populate its guest dentry/inode caches:
 ```sh
 ./bin/codelima node create \
   --slug qa-v3-mounted \
-  --configuration default \
+  --configuration small \
   --directory "$QA_ROOT/work/root" \
   --workspace-mode mounted
 ./bin/codelima node start qa-v3-mounted

@@ -17,10 +17,10 @@ const (
 	WorkspaceModeMounted = "mounted"
 	DefaultWorkspaceMode = WorkspaceModeMounted
 
-	DefaultConfigurationSlug = "default"
-	DefaultVCPUs             = uint8(2)
-	DefaultMemoryMiB         = uint32(4 * 1024)
-	DefaultDiskMiB           = uint32(20 * 1024)
+	DefaultConfigurationSlug = "small"
+	DefaultVCPUs             = uint8(1)
+	DefaultMemoryMiB         = uint32(1 * 1024)
+	DefaultDiskMiB           = uint32(10 * 1024)
 )
 
 // NodeStatus is the CodeLima-owned durable lifecycle state persisted in

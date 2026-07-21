@@ -14,12 +14,14 @@ Problem:
 - ADR 91 adds an automated two-window regression proving a path-scoped refresh no longer closes tabs whose live nodes are outside that window's projection, while confirmed deletion still closes them. The matching disjoint-root, two-tabs-per-process restart flow still needs native interactive verification.
 - ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the full interactive flow.
 - ADR 93 restores the pre-Microsandbox foreground-process-group invariant for interactive Lima shells. A real Linux/aarch64 Lima guest and controlling PTY verified Left, `Ctrl+a`, `Ctrl+e`, multiline bracketed paste, and guest `Ctrl+c`; `TestRunInteractiveCommandKeepsPTYInForeground` covers the underlying PTY ownership regression automatically. The same checks inside the complete native macOS Ghostty TUI flow remain part of this item.
+- ADR 94 redirects successful Lima-command diagnostics to the rotating TUI log, and ADR 95 replaces width-growth `Ctrl-L` injection with a supplemental process-group `SIGWINCH`. A focused Linux PTY run with a fake Lima boundary reproduced the exact unhealthy-instance warning, confirmed it appeared only as `source=limactl` in `_logs/codelima.log`, toggled Option+Backtick repeatedly without `^L`, and preserved earlier output across split/full-width changes. This development host has neither `limactl` nor `/dev/kvm`, so it cannot run QA's real QEMU/KVM lifecycle or substitute for the remaining native-host flow.
 
 Suggested solution:
 
 - Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+w` adjacent-close steps, with and without `macos-option-as-alt`.
 - Launch the same path-scoped TUI from a second real terminal, repeatedly switch host focus in both directions, and verify each newly focused TUI can immediately open or control a guest/host tab without either window showing the ownership-revoked message. Also launch two TUIs at disjoint directory roots, open two tabs in each, wait through refresh, quit and reopen both, and verify all four tabs survive. Paste the multiline QA sample and confirm it appears promptly without executing, type the ordinary-input sample quickly and confirm it keeps pace without reordering, then leave the final owner idle for at least 35 seconds and verify its next terminal action also succeeds.
 - Open guest/host/guest tabs with wrapped output, verify all idle CodeLima processes settle instead of pinning cores, live-update while one TUI remains open and verify that disconnected client also stays idle, then quit and reopen at the captured width to verify tab order and line boundaries remain intact.
+- On a real unhealthy Lima instance, leave the TUI open through several refreshes and confirm the structured warning stays out of the chrome while appearing in `_logs/codelima.log`; immediately after starting a node, repeat split/full-width focus changes and confirm no literal `^L` appears and earlier history remains visible.
 
 Advantages:
 
@@ -298,19 +300,18 @@ Disadvantages:
 - Introducing timeouts or degraded-ready behavior would add lifecycle-policy decisions around what counts as a successful start.
 - Reproducing the stall consistently may require host-specific Lima state that is hard to model in automated tests.
 
-### 12. Replace the embedded-terminal width-growth redraw shim with a terminal-native fix
+### 12. [resolved] Replace the embedded-terminal width-growth redraw shim with a terminal-native fix
 
 Problem:
 
-- Embedded Ghostty terminal sessions now send `Ctrl-L` to shell-like primary-screen apps after width growth so readline prompts repaint cleanly instead of leaving duplicated wrapped fragments behind.
-- That workaround fixes the reproduced `bash` prompt corruption, but it relies on application-level redraw behavior rather than solving the underlying mismatch between Ghostty resize reflow and shell `SIGWINCH` cleanup sequences.
-- A narrower terminal-native fix would reduce the chance of surprising behavior in other primary-screen applications that happen to match the current guard.
+- Embedded Ghostty terminal sessions sent `Ctrl-L` to shell-like primary-screen apps after width growth so readline prompts repainted cleanly instead of leaving duplicated wrapped fragments behind.
+- During a newly starting Lima/SSH transport, that input could echo literally as `^L`; in a ready shell it could clear history the user expected to retain.
+- Resolved by ADR 95: after updating Ghostty and PTY geometry, CodeLima sends a supplemental `SIGWINCH` to the PTY child process group. The existing wrapped-bash regression still passes, and a new canonical-mode PTY regression proves width growth injects no form feed.
 
 Suggested solution:
 
-- Reproduce the prompt-redraw sequence against upstream Ghostty VT behavior and confirm whether the long-term fix belongs in Ghostty, in the bridge, or in how CodeLima sequences PTY resize and emulator resize.
-- Replace the `Ctrl-L` shim with a terminal-level approach once a clean fix exists, then keep the current `bash` width-growth regression test as coverage for the final behavior.
-- If the fix requires an upstream Ghostty patch, vendor that patch through the existing `ghostty-vt-codelima.patch` flow and document the narrower integration contract in the relevant ADR.
+- Keep both automated regressions: one for a clean wrapped bash prompt and one proving that canonical-mode applications receive no synthetic form feed.
+- Complete the native interactive focus-toggle and history-preservation check tracked in TODO #0.
 
 Advantages:
 
@@ -320,9 +321,8 @@ Advantages:
 
 Disadvantages:
 
-- The root cause may depend on upstream Ghostty VT internals outside this repository.
-- A true terminal-level fix is likely more invasive than the current localized workaround.
-- Validating the final behavior may require more real-terminal integration testing than the current automated regression test.
+- A second signal is still a compatibility workaround around resize/reflow timing.
+- Native interactive validation remains necessary because scripted PTYs cannot prove host-terminal rendering and history preservation end to end.
 
 ### 13. Validate the TUI `F6` focus-toggle fallback in Terminal.app and decide whether an Apple-specific shortcut is still needed
 

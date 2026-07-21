@@ -14,7 +14,7 @@ func TestDefaultConfigurationIsPersistedEditableAndProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigurationCreate() error = %v", err)
 	}
-	if created.VCPUs != 2 || created.MemoryMiB != 4096 || created.DiskMiB != 20480 {
+	if created.VCPUs != 1 || created.MemoryMiB != 1024 || created.DiskMiB != 10240 {
 		t.Fatalf("new configuration did not copy default: %+v", created)
 	}
 	if got := strings.Join(created.Environments, ","); got != "codex,claude-code" {
@@ -30,7 +30,7 @@ func TestDefaultConfigurationIsPersistedEditableAndProtected(t *testing.T) {
 		t.Fatalf("default update = %+v, %v", updatedDefault, err)
 	}
 	unchanged, err := service.ConfigurationShow(context.Background(), created.ID)
-	if err != nil || unchanged.MemoryMiB != 4096 {
+	if err != nil || unchanged.MemoryMiB != 1024 {
 		t.Fatalf("existing configuration changed with default: %+v, %v", unchanged, err)
 	}
 	if _, err := service.ConfigurationUpdate(context.Background(), defaultConfiguration.ID, ConfigurationUpdateInput{Slug: "renamed"}); err == nil {
@@ -38,6 +38,22 @@ func TestDefaultConfigurationIsPersistedEditableAndProtected(t *testing.T) {
 	}
 	if _, err := service.ConfigurationDelete(context.Background(), defaultConfiguration.ID); err == nil {
 		t.Fatalf("default configuration delete succeeded")
+	}
+}
+
+func TestLegacyDefaultConfigurationSlugCannotBeReused(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+	if _, err := service.ConfigurationCreate(context.Background(), ConfigurationCreateInput{Slug: "default"}); err == nil {
+		t.Fatal("created a configuration with the retired default slug")
+	}
+	configuration, err := service.ConfigurationCreate(context.Background(), ConfigurationCreateInput{Slug: "custom"})
+	if err != nil {
+		t.Fatalf("ConfigurationCreate(custom) error = %v", err)
+	}
+	if _, err := service.ConfigurationUpdate(context.Background(), configuration.ID, ConfigurationUpdateInput{Slug: "default"}); err == nil {
+		t.Fatal("renamed a configuration to the retired default slug")
 	}
 }
 

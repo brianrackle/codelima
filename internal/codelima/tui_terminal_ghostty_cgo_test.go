@@ -745,6 +745,46 @@ func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
 	}
 }
 
+func TestGhosttyTerminalWidthGrowthDoesNotInjectFormFeed(t *testing.T) {
+	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
+	if err != nil {
+		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
+	}
+	defer terminal.Close()
+
+	ghostty, ok := terminal.(*ghosttyTUITerminal)
+	if !ok {
+		t.Fatalf("expected ghostty terminal implementation, got %T", terminal)
+	}
+
+	renderSnapshot := func(width, height int) string {
+		vx := newRenderTestVaxis(t, width, height)
+		defer vx.Close()
+
+		win := vx.Window()
+		win.Clear()
+		ghostty.Draw(win)
+		return renderedScreenText(t, vx, width, height)
+	}
+
+	ghostty.Resize(24, 12)
+	cmd := exec.Command("/bin/sh", "-c", "stty echoctl 2>/dev/null || true; printf 'ready> '; cat")
+	cmd.Env = append(os.Environ(), "TERM="+tuiEmbeddedTermEnv)
+	if err := ghostty.Start(cmd); err != nil {
+		t.Fatalf("ghostty.Start() error = %v", err)
+	}
+
+	waitForCondition(t, 5*time.Second, func() bool {
+		return strings.Contains(renderSnapshot(24, 12), "ready>")
+	}, "test process prompt to appear")
+
+	ghostty.Resize(80, 12)
+	time.Sleep(100 * time.Millisecond)
+	if got := renderSnapshot(80, 12); strings.Contains(got, "^L") {
+		t.Fatalf("width growth injected form feed into the PTY: %q", got)
+	}
+}
+
 func TestGhosttyTerminalShiftEnterDoesNotLeakModifyOtherKeysSequenceAtBashPrompt(t *testing.T) {
 	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
 	if err != nil {

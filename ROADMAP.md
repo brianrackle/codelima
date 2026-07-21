@@ -7,7 +7,7 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 ## Priorities
 
 1 [complete locally]: eliminate per-tab idle snapshot polling and stop permanently closed daemon event streams after one reported error; active snapshots are dirty-event driven and hidden tabs defer full-grid pulls until visible (ADR 90; native Activity Monitor verification remains in TODO #0)
-2 (was 0.4): Fix issue: resizing window often causes terminal contents to clear. option + ` with codex or raw terminal causes whole terminal to clear so the previous content is no longer visible and only a fresh prompt is shown. Also fix the bug where a disconnected client loses its open terminal tabs.
+2 (was 0.4) [complete locally]: terminal width growth uses a supplemental `SIGWINCH` redraw instead of injected `Ctrl-L`, preserving prompt rendering without `^L` text or history clearing; disconnected clients retain their daemon-owned tabs (ADRs 91 and 95; native interactive verification remains in TODO #0)
 3 (was 0.10): support kitty graphics protocol so I can get those sweet codex pets.
 4 (was 0.11) [partially complete]: bring in and wire up the latest libghostty improvements as demonstrated in https://github.com/ghostty-org/ghostling — Ghostling-pinned libghostty-vt and focus encoder are wired; full interactive QA remains in TODO.md
 5 (was 0.12): support CodeLima node renaming through the command line, including an explicit Lima clone/rename policy

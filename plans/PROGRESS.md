@@ -91,7 +91,7 @@ Done locally. ADR 72 removes the public project model and introduces reusable gl
 | Item | Status | Notes |
 |---|---|---|
 | 6.1 Keybindings/prefix | pending | |
-| 6.2 Roadmap 0.15 + 0.4 | partially complete | priority 5 / former 0.15 done in ADR 87; resize/focus clearing priority 1 / former 0.4 remains |
+| 6.2 Roadmap 0.15 + 0.4 | done locally | terminal-default selection is in ADR 87; width growth now requests redraw with `SIGWINCH` instead of injected `Ctrl-L` in ADR 95; native interactive verification remains in TODO #0 |
 | 6.3 Goto picker | pending | |
 | 6.4 Theme fidelity | pending | TODO #1 |
 | 6.5 Kitty graphics | pending | |

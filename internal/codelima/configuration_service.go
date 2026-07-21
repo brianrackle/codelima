@@ -120,7 +120,7 @@ func (s *Service) ConfigurationUpdate(ctx context.Context, value string, input C
 	}
 	if input.Slug != "" && input.Slug != configuration.Slug {
 		if configuration.Slug == DefaultConfigurationSlug {
-			return Configuration{}, preconditionFailed("the default configuration cannot be renamed", nil)
+			return Configuration{}, preconditionFailed("the default configuration (small) cannot be renamed", nil)
 		}
 		if err := s.ensureUniqueConfigurationSlug(input.Slug, configuration.ID); err != nil {
 			return Configuration{}, err
@@ -151,7 +151,7 @@ func (s *Service) ConfigurationDelete(ctx context.Context, value string) (Config
 		return Configuration{}, err
 	}
 	if configuration.Slug == DefaultConfigurationSlug {
-		return Configuration{}, preconditionFailed("the default configuration cannot be deleted", nil)
+		return Configuration{}, preconditionFailed("the default configuration (small) cannot be deleted", nil)
 	}
 	nodes, err := s.store.ConfigurationNodes(configuration.ID, false)
 	if err != nil {
@@ -207,6 +207,9 @@ func (s *Service) applyConfigurationInput(configuration *Configuration, input Co
 func (s *Service) ensureUniqueConfigurationSlug(slug, currentID string) error {
 	if slugify(slug) != slug {
 		return invalidArgument("configuration slug must be a lowercase slug", map[string]any{"slug": slug})
+	}
+	if slug == legacyDefaultConfigurationSlug {
+		return invalidArgument("configuration slug default is reserved", map[string]any{"slug": slug})
 	}
 	configurations, err := s.store.ListConfigurations(false)
 	if err != nil {

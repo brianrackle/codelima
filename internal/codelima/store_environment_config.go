@@ -53,10 +53,10 @@ func (s *Store) EnvironmentConfigByID(configID string) (EnvironmentConfig, error
 	path := s.environmentConfigPath(configID)
 	if err := readYAMLFile(path, &config); err != nil {
 		if os.IsNotExist(err) {
-			return EnvironmentConfig{}, notFound("environment config not found", map[string]any{"id": configID})
+			return EnvironmentConfig{}, notFound("environment not found", map[string]any{"id": configID})
 		}
 
-		return EnvironmentConfig{}, metadataCorruption("failed to load environment config", err, map[string]any{"path": path})
+		return EnvironmentConfig{}, metadataCorruption("failed to load environment", err, map[string]any{"path": path})
 	}
 
 	return config, nil
@@ -71,7 +71,7 @@ func (s *Store) EnvironmentConfigByIDOrSlug(value string) (EnvironmentConfig, er
 	if exists(indexPath) {
 		data, err := os.ReadFile(indexPath)
 		if err != nil {
-			return EnvironmentConfig{}, metadataCorruption("failed to read environment config slug index", err, map[string]any{"path": indexPath})
+			return EnvironmentConfig{}, metadataCorruption("failed to read environment slug index", err, map[string]any{"path": indexPath})
 		}
 
 		return s.EnvironmentConfigByID(strings.TrimSpace(string(data)))
@@ -105,7 +105,7 @@ func (s *Store) EnvironmentConfigByIDOrSlug(value string) (EnvironmentConfig, er
 		return *deletedMatch, nil
 	}
 
-	return EnvironmentConfig{}, notFound("environment config not found", map[string]any{"query": value})
+	return EnvironmentConfig{}, notFound("environment not found", map[string]any{"query": value})
 }
 
 func (s *Store) ListEnvironmentConfigs(includeDeleted bool) ([]EnvironmentConfig, error) {

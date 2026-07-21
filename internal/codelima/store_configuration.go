@@ -21,26 +21,81 @@ func (s *Store) configurationSlugIndexPath(slug string) string {
 	return filepath.Join(s.cfg.MetadataRoot, "_index", "configurations", "by-slug", slug)
 }
 
-func (s *Store) ensureDefaultConfiguration(now time.Time) error {
-	if _, err := s.ConfigurationByIDOrSlug(DefaultConfigurationSlug); err == nil {
-		return nil
-	} else if !IsNotFound(err) {
-		return err
+type builtInConfigurationSpec struct {
+	Slug      string
+	VCPUs     uint8
+	MemoryMiB uint32
+	DiskMiB   uint32
+}
+
+func builtInConfigurationSpecs() []builtInConfigurationSpec {
+	return []builtInConfigurationSpec{
+		{Slug: DefaultConfigurationSlug, VCPUs: DefaultVCPUs, MemoryMiB: DefaultMemoryMiB, DiskMiB: DefaultDiskMiB},
+		{Slug: "medium", VCPUs: 4, MemoryMiB: 8 * 1024, DiskMiB: 50 * 1024},
+		{Slug: "large", VCPUs: 6, MemoryMiB: 16 * 1024, DiskMiB: 75 * 1024},
+		{Slug: "xlarge", VCPUs: 8, MemoryMiB: 32 * 1024, DiskMiB: 100 * 1024},
+	}
+}
+
+func (s *Store) ensureBuiltInConfigurations(now time.Time) error {
+	for _, spec := range builtInConfigurationSpecs() {
+		if configuration, err := s.ConfigurationByIDOrSlug(spec.Slug); err == nil {
+			// Small was deletable before it became the protected implicit
+			// default. Restore a tombstoned record without replacing any values
+			// the user customized while it was live.
+			if spec.Slug == DefaultConfigurationSlug && configuration.DeletedAt != nil {
+				configuration.DeletedAt = nil
+				configuration.UpdatedAt = now
+				if err := s.SaveConfiguration(configuration); err != nil {
+					return err
+				}
+			}
+			continue
+		} else if !IsNotFound(err) {
+			return err
+		}
+
+		if err := s.SaveConfiguration(Configuration{
+			ID:                newID(),
+			Slug:              spec.Slug,
+			Image:             s.cfg.DefaultImage,
+			AgentProfileName:  s.cfg.DefaultAgentProfile,
+			Environments:      defaultConfigurationEnvironmentSlugs(),
+			BootstrapCommands: []string{},
+			VCPUs:             spec.VCPUs,
+			MemoryMiB:         spec.MemoryMiB,
+			DiskMiB:           spec.DiskMiB,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}); err != nil {
+			return err
+		}
 	}
 
-	return s.SaveConfiguration(Configuration{
-		ID:                newID(),
-		Slug:              DefaultConfigurationSlug,
-		Image:             s.cfg.DefaultImage,
-		AgentProfileName:  s.cfg.DefaultAgentProfile,
-		Environments:      defaultConfigurationEnvironmentSlugs(),
-		BootstrapCommands: []string{},
-		VCPUs:             DefaultVCPUs,
-		MemoryMiB:         DefaultMemoryMiB,
-		DiskMiB:           DefaultDiskMiB,
-		CreatedAt:         now,
-		UpdatedAt:         now,
-	})
+	return nil
+}
+
+const legacyDefaultConfigurationSlug = "default"
+
+// retireLegacyDefaultConfiguration hides the former default from live
+// configuration surfaces without removing the record. Existing nodes keep the
+// configuration ID they were created from and can therefore continue to
+// hydrate their historical "default" label and frozen values.
+func (s *Store) retireLegacyDefaultConfiguration(now time.Time) error {
+	configuration, err := s.ConfigurationByIDOrSlug(legacyDefaultConfigurationSlug)
+	if IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if configuration.DeletedAt != nil {
+		return nil
+	}
+
+	configuration.DeletedAt = &now
+	configuration.UpdatedAt = now
+	return s.SaveConfiguration(configuration)
 }
 
 func defaultConfigurationEnvironmentSlugs() []string {
@@ -133,15 +188,29 @@ func (s *Store) ListConfigurations(includeDeleted bool) ([]Configuration, error)
 		configurations = append(configurations, configuration)
 	}
 	sort.Slice(configurations, func(i, j int) bool {
-		if configurations[i].Slug == DefaultConfigurationSlug {
-			return configurations[j].Slug != DefaultConfigurationSlug
-		}
-		if configurations[j].Slug == DefaultConfigurationSlug {
-			return false
+		leftRank := builtInConfigurationSortRank(configurations[i].Slug)
+		rightRank := builtInConfigurationSortRank(configurations[j].Slug)
+		if leftRank != rightRank {
+			return leftRank < rightRank
 		}
 		return configurations[i].Slug < configurations[j].Slug
 	})
 	return configurations, nil
+}
+
+func builtInConfigurationSortRank(slug string) int {
+	switch slug {
+	case DefaultConfigurationSlug:
+		return 0
+	case "medium":
+		return 1
+	case "large":
+		return 2
+	case "xlarge":
+		return 3
+	default:
+		return 4
+	}
 }
 
 func (s *Store) ConfigurationNodes(configurationID string, includeDeleted bool) ([]Node, error) {

@@ -2084,8 +2084,10 @@ func (t *ghosttyTUITerminal) resizeLocked(width, height int) {
 		_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
 		if t.shouldRequestPrimaryScreenRedrawLocked(oldWidth, width) {
 			// Bash/readline prompt redraws can leave stale wrapped fragments after
-			// width growth, so ask shell-like primary-screen sessions to repaint.
-			t.writePTYLocked("\x0c")
+			// width growth. Request another window-change redraw from the terminal
+			// process group (the child is the session leader created by pty.Start)
+			// without injecting Ctrl+L into application input.
+			_ = syscall.Kill(-t.childPID, syscall.SIGWINCH)
 		}
 	}
 }

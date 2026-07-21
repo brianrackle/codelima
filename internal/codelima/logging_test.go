@@ -2,6 +2,8 @@ package codelima
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -130,6 +132,52 @@ func TestNewTUIFileLoggerWritesUnderLogsDir(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "tui log line") {
 		t.Fatalf("log file missing record: %q", string(data))
+	}
+}
+
+func TestEnableFileLoggingContainsSuccessfulLimaDiagnostics(t *testing.T) {
+	// Not parallel: enableFileLogging swaps the process-global package logger.
+	original := packageLog()
+	t.Cleanup(func() { setPackageLogger(original) })
+
+	home := t.TempDir()
+	binary := filepath.Join(home, "limactl")
+	if err := os.WriteFile(binary, []byte(`#!/bin/sh
+printf '%s\n' 'time="2026-07-21T09:12:59-07:00" level=warning msg="instance mrwing has errors"' >&2
+printf '%s\n' '{"name":"mrwing","status":"Stopped"}'
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	var terminalStderr bytes.Buffer
+	service := NewService(DefaultConfig(home), nil, nil, io.Discard, &terminalStderr)
+	client, ok := service.sandbox.(*LimaClient)
+	if !ok {
+		t.Fatalf("sandbox = %T, want *LimaClient", service.sandbox)
+	}
+	client.Binary = binary
+
+	closeLog, err := service.enableFileLogging()
+	if err != nil {
+		t.Fatalf("enableFileLogging() error = %v", err)
+	}
+	if _, err := client.List(context.Background()); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if err := closeLog(); err != nil {
+		t.Fatalf("close log error = %v", err)
+	}
+
+	if terminalStderr.Len() != 0 {
+		t.Fatalf("Lima diagnostic leaked to TUI stderr: %q", terminalStderr.String())
+	}
+	data, err := os.ReadFile(filepath.Join(home, "_logs", "codelima.log"))
+	if err != nil {
+		t.Fatalf("read TUI log: %v", err)
+	}
+	logText := string(data)
+	if !strings.Contains(logText, "instance mrwing has errors") || !strings.Contains(logText, "source=limactl") {
+		t.Fatalf("TUI log does not contain the Lima diagnostic: %q", logText)
 	}
 }
 

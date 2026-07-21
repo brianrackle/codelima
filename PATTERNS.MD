@@ -12,7 +12,9 @@ A configuration is global to one metadata home and never owns a directory. It co
 
 Node creation resolves a configuration and copies every effective value into node/bootstrap metadata. Existing nodes never consult a mutable configuration for runtime behavior. This snapshot-at-creation boundary prevents an innocent configuration edit from changing or invalidating a running VM.
 
-The reserved `default` configuration is editable but not renamable or deletable. On a fresh home it references the built-in `codex` and `claude-code` environments, so nodes created from it install both coding agents. Seed/repair never overwrites an existing default configuration. New configurations are deep copies of its current value rather than children that inherit future changes.
+The `small` configuration is the editable but non-renamable and non-deletable implicit default. It references the built-in `codex` and `claude-code` environments on a fresh home, so nodes created without an explicit configuration install both coding agents. Seed/repair never overwrites an existing `small` configuration. New configurations are deep copies of its current value rather than children that inherit future changes.
+
+Built-in sizes are persisted configurations, not synthetic UI rows. Seed them through the store so CLI and TUI consumers agree, order them by size instead of alphabetically, and treat any existing record—including a soft-deleted tombstone—as user-owned. A seed-revision bump may add a genuinely missing size to an older home, but repair must never overwrite a customized configuration or resurrect a deleted optional size. If a formerly optional record becomes a required protected default, restore its tombstone in place so custom values and identity survive. Retire the former `default` configuration with a tombstone rather than removing its record: it disappears from live lists while existing nodes can still hydrate their historical configuration ID and slug.
 
 ## Canonical directory binding
 
@@ -48,6 +50,16 @@ Lima logs in as an unprivileged distribution user. Preserve CodeLima's existing
 root guest-command contract at one boundary by prefixing noninteractive
 commands with `sudo -H --`; do not scatter privilege changes through bootstrap
 or workspace code.
+
+Fullscreen terminal applications must contain every subprocess diagnostic at
+the mode boundary before taking ownership of the screen. CLI mode may forward
+runtime stderr to the caller's stderr, but TUI mode replaces the long-lived
+runtime client's diagnostic writer with a structured file-log adapter before
+the initial data load. Keep successful-command stderr as well as failed-command
+stderr: tools such as Lima can report actionable warnings while returning zero.
+Background operations may override the client through `withIO` so their output
+continues to appear in the operation surface. No recurring refresh path may
+retain a writer that points at the TUI process's original stderr.
 
 Keep `LIMA_HOME` short and place it on a filesystem that supports Unix sockets.
 Lima creates hostagent, QMP, serial, guest-agent, and OpenSSH control sockets
@@ -97,6 +109,14 @@ Daemon terminal sessions are recoverable cache state, not authoritative node met
 Live update transfers PTY file descriptors over an authenticated, length-prefixed Unix stream with SCM_RIGHTS. Never assume stream read boundaries equal writes: frame every bounded JSON payload and collect ancillary descriptors while reading the exact frame. Reject descriptors on control frames and duplicate or unknown terminal descriptors rather than ignoring or leaking them. The CLI resolves and sends its own executable even when no path is given; never resolve an omitted replacement inside the old daemon. Daemon lifecycle management alone may authenticate with the running daemon's persisted protocol-2-or-newer identity to cross an exact-version boundary: update explicitly takes input ownership, while startup recovery may only stop the matching daemon. Import is staged, acknowledged, and committed; a failed import rolls back to the old daemon. Only the exact legacy-Darwin `unixpacket` unsupported error may fall back to a clean stop/start; do not turn generic handoff errors into destructive restarts. Integration paths use a short project-rooted temp directory so handoff socket names stay within kernel limits.
 
 Treat terminal geometry as one invariant across the wrapper, emulator, and PTY. A handoff replacement must resize the emulator to the captured dimensions before attaching the transferred PTY and replaying output; assigning wrapper fields alone corrupts cell-row strides, while resizing after attachment can send an unnecessary `SIGWINCH` to the child.
+
+Geometry repair must stay out of the terminal input stream. After primary-screen
+width growth, resize Ghostty and the PTY first, then request a clean redraw with
+`SIGWINCH` to the PTY child process group. Never inject `Ctrl-L` or another
+application key as a resize workaround: a transport that is still starting can
+echo it literally, and a ready shell can clear history the user expected to
+keep. Alternate-screen, mouse-tracking, narrower, and scrolled-back sessions do
+not receive the supplemental redraw signal.
 
 The daemon lock, not the presence of socket or identity pathnames, is the authoritative shutdown/startup gate. Persist terminal restoration intent before slow cleanup, close terminal runtimes concurrently, and size legacy shutdown grace for the reported terminal count. After the bounded grace, signal only a process whose persisted token and PID still match and whose daemon lock remains held. Startup uses the same lifecycle-only recovery for a compatible daemon that has closed its socket but not yet released the lock.
 

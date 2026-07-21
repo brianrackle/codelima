@@ -88,18 +88,29 @@ codelima settings show
 codelima doctor --repair
 ```
 
-The reserved `default` configuration starts with:
+`small` is the protected implicit default configuration. It starts with:
 
 - image `template:ubuntu`
 - agent profile `codex-cli`
 - environments `codex` and `claude-code`
-- 2 vCPUs
-- 4096 MiB memory
-- 20480 MiB disk
+- 1 vCPU
+- 1024 MiB memory
+- 10240 MiB disk
 
-It is editable, but it cannot be renamed or deleted. Creating another configuration copies the current default once; later default edits do not change that copy.
+It is editable, but it cannot be renamed or deleted. Creating another configuration copies the current `small` configuration once; later `small` edits do not change that copy. Omitting `--configuration` when creating a node selects `small`.
 
-The two built-in coding-agent environments install both CLIs in nodes created from the default configuration. The `codex-cli` agent profile selects Codex for validation and launch behavior; Claude Code remains available as `claude`.
+CodeLima seeds four ready-to-use size configurations:
+
+| Configuration | vCPUs | Memory | Disk |
+| --- | ---: | ---: | ---: |
+| `small` | 1 | 1 GiB | 10 GiB |
+| `medium` | 4 | 8 GiB | 50 GiB |
+| `large` | 6 | 16 GiB | 75 GiB |
+| `xlarge` | 8 | 32 GiB | 100 GiB |
+
+The configurations use the same initial image, agent profile, and `codex`/`claude-code` environments. `medium`, `large`, and `xlarge` are ordinary configurations that can be edited or deleted. Seed and repair add a missing size to an older schema-v4 home, preserve customized values, and do not restore a deleted optional size. Because `small` is required as the implicit default, an upgraded home restores it if it was deleted while retaining its customized values. Upgraded homes retire the former `default` record from live configuration lists; existing nodes that were created from it retain their frozen values and historical association.
+
+The two built-in coding-agent environments install both CLIs in nodes created from `small`. The `codex-cli` agent profile selects Codex for validation and launch behavior; Claude Code remains available as `claude`.
 
 ```sh
 codelima node create --slug codelima-dev --directory .
@@ -114,7 +125,7 @@ codex --yolo
 claude
 ```
 
-Configuration values are frozen into the node at creation. Updating `default` affects future nodes only.
+Configuration values are frozen into the node at creation. Updating `small` affects future nodes only.
 
 ## Configurations
 
@@ -122,7 +133,8 @@ List and inspect configurations:
 
 ```sh
 codelima configuration list
-codelima configuration show default
+codelima configuration show small
+codelima configuration show medium
 ```
 
 Create a reusable recipe. Memory and disk accept MiB or GiB values:
@@ -169,7 +181,7 @@ The built-in `codex` and `claude-code` environments are seeded by a mutating com
 
 ## Nodes and directories
 
-Create a node in the current directory with the default configuration:
+Create a node in the current directory with the implicit `small` configuration:
 
 ```sh
 codelima node create --slug api-dev
@@ -260,7 +272,22 @@ Guest shells retain normal terminal line editing: arrow keys and Readline
 controls operate inside the guest, while `Ctrl+c` interrupts the active guest
 job without closing its CodeLima tab.
 
+Expanding a terminal from the split pane to full width requests a redraw with a
+terminal resize signal, not synthetic shell input. Switching focus with
+`Option+Backtick` or `F6` therefore does not type `^L` into a shell or clear its
+existing terminal history.
+
 Ordinary terminal input is delivered through an ordered background queue, so typing remains responsive while the daemon is serving terminal snapshots. The TUI redraws typed input when the daemon publishes the resulting fresh snapshot instead of repainting the previous screen after every key. Terminal snapshots are event-driven: idle tabs issue no recurring snapshot requests, and hidden tabs defer full-grid transfer until they become visible. Active output remains coalesced to at most 20 snapshots per second.
+
+While the full-screen TUI is open, CodeLima writes service, Ghostty, and Lima
+diagnostics to `$CODELIMA_HOME/_logs/codelima.log` instead of terminal stderr,
+so background warnings cannot overwrite the screen. The file rotates at about
+5 MiB and keeps one `codelima.log.1` generation. Put `--log-level debug` before
+the directory argument to retain debug records when investigating a session:
+
+```sh
+codelima --log-level debug .
+```
 
 ## Local development servers
 

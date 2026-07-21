@@ -109,9 +109,10 @@ func (s *Service) log() *slog.Logger {
 	return s.logger
 }
 
-// enableFileLogging switches the Service logger (and the process-global
-// libghostty capture logger) to the TUI file sink at the configured level. The
-// TUI runner calls it once at startup and defers the returned closer.
+// enableFileLogging switches the Service logger, process-global libghostty
+// capture logger, and Lima subprocess diagnostics to the TUI file sink at the
+// configured level. The TUI runner calls it once at startup and defers the
+// returned closer.
 func (s *Service) enableFileLogging() (func() error, error) {
 	logger, closeLog, err := newTUIFileLogger(s.cfg.MetadataRoot, s.logLevel)
 	if err != nil {
@@ -119,6 +120,9 @@ func (s *Service) enableFileLogging() (func() error, error) {
 	}
 	s.logger = logger
 	setPackageLogger(logger)
+	if lima, ok := s.sandbox.(*LimaClient); ok {
+		lima.Stderr = newDiagnosticLogWriter(logger, "limactl")
+	}
 	return closeLog, nil
 }
 
@@ -179,7 +183,7 @@ func (s *Service) withIO(stdout, stderr io.Writer) *Service {
 func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	// A user-initiated app launch is a session start, not a background read:
 	// run the one-time locked seed/repair pass here so a fresh home shows the
-	// built-in agent profiles and environment configs in the TUI's pickers.
+	// built-in agent profiles and environments in the TUI's pickers.
 	// This is idempotent, flock-guarded, and once per process — categorically
 	// different from the per-tick unlocked writes work item 0.3 removed (ADR
 	// 57). The 2s auto-refresh path stays a pure read, and no runtime
@@ -298,7 +302,7 @@ func (s *Service) ensureDirectories() error {
 // seedAndRepair seeds built-in metadata and repairs stale files while holding
 // the environments, configurations, and nodes flocks (acquireLocks sorts its
 // keys, so the lock order stays deadlock-free). Holding the locks is what
-// keeps concurrent seeding from duplicating built-in environment configs
+// keeps concurrent seeding from duplicating built-in environments
 // (TODO #20).
 func (s *Service) seedAndRepair(ctx context.Context, force bool) error {
 	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments, lockConfigurations, lockNodes)
@@ -1401,7 +1405,7 @@ func (s *Service) ensureUniqueEnvironmentConfigSlug(slug, currentConfigID string
 
 	for _, config := range configs {
 		if config.Slug == slug && config.ID != currentConfigID {
-			return preconditionFailed("environment config slug already exists", map[string]any{"slug": slug})
+			return preconditionFailed("environment slug already exists", map[string]any{"slug": slug})
 		}
 	}
 
@@ -1418,7 +1422,7 @@ func (s *Service) resolveEnvironmentConfigRefs(refs []string) ([]string, error) 
 	for _, ref := range refs {
 		ref = strings.TrimSpace(ref)
 		if ref == "" {
-			return nil, invalidArgument("environment config slug is required", nil)
+			return nil, invalidArgument("environment slug is required", nil)
 		}
 
 		config, err := s.store.EnvironmentConfigByIDOrSlug(ref)
@@ -1426,7 +1430,7 @@ func (s *Service) resolveEnvironmentConfigRefs(refs []string) ([]string, error) 
 			return nil, err
 		}
 		if config.DeletedAt != nil {
-			return nil, notFound("environment config not found", map[string]any{"query": ref})
+			return nil, notFound("environment not found", map[string]any{"query": ref})
 		}
 		if seen[config.Slug] {
 			continue

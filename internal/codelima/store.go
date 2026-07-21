@@ -162,10 +162,10 @@ func (s *Store) ensureDirectories() error {
 }
 
 // seedRevision versions the seed-and-repair pass. Bump it whenever the
-// built-in profiles/environments/default configuration, the config refresh
+// built-in profiles/environments/configurations, the config refresh
 // rules, or the node-file format change so existing homes re-run the full
 // pass exactly once instead of on every mutating command.
-const seedRevision = "1"
+const seedRevision = "3"
 
 func (s *Store) seedVersionPath() string {
 	return filepath.Join(s.cfg.MetadataRoot, "_config", "seed.version")
@@ -177,7 +177,7 @@ func (s *Store) seedVersionCurrent() bool {
 }
 
 // seedAndRepair writes the global config when missing or stale, seeds built-in
-// agent profiles, environments, and the default configuration, and refreshes
+// agent profiles, environments, and configurations, and refreshes
 // node metadata files. The pass is versioned: once a home is stamped with the
 // current seedRevision it is skipped, so ordinary mutating commands stop
 // re-reading every node file. force (doctor --repair) always runs it.
@@ -206,7 +206,10 @@ func (s *Store) seedAndRepair(now time.Time, force bool) error {
 	if err := s.ensureBuiltInEnvironmentConfigs(now); err != nil {
 		return err
 	}
-	if err := s.ensureDefaultConfiguration(now); err != nil {
+	if err := s.ensureBuiltInConfigurations(now); err != nil {
+		return err
+	}
+	if err := s.retireLegacyDefaultConfiguration(now); err != nil {
 		return err
 	}
 

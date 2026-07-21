@@ -69,7 +69,7 @@ type cliGroup struct {
 var cliGroups = []cliGroup{
 	{Name: "doctor", Summary: "run health checks against the local installation"},
 	{Name: "settings", Summary: "inspect the effective configuration", Default: "show", JoinUnknownArgs: true},
-	{Name: "environment", Summary: "manage environment configs (reusable bootstrap command sets)", JoinUnknownArgs: true},
+	{Name: "environment", Summary: "manage environments (reusable bootstrap command sets)", JoinUnknownArgs: true},
 	{Name: "configuration", Summary: "manage node configurations (image, resources, environments)"},
 	{Name: "node", Summary: "manage sandbox nodes bound to host directories"},
 	{Name: "shell", Summary: "open an interactive shell in a node"},
@@ -100,7 +100,7 @@ var cliCommands = []*cliCommand{
 	{
 		Group:   "environment",
 		Name:    "create",
-		Summary: "create an environment config",
+		Summary: "create an environment",
 		Flags: func(fs *flag.FlagSet) {
 			fs.String("slug", "", "unique lowercase identifier for the new environment")
 			environmentCommandFlags(fs)
@@ -119,7 +119,7 @@ var cliCommands = []*cliCommand{
 	{
 		Group:   "environment",
 		Name:    "list",
-		Summary: "list environment configs",
+		Summary: "list environments",
 		Flags: func(fs *flag.FlagSet) {
 			fs.Bool("include-deleted", false, "include soft-deleted environments in the listing")
 		},
@@ -130,8 +130,8 @@ var cliCommands = []*cliCommand{
 	{
 		Group:      "environment",
 		Name:       "show",
-		Summary:    "show one environment config",
-		Positional: "config",
+		Summary:    "show one environment",
+		Positional: "environment",
 		MinArgs:    1,
 		Run: func(ctx context.Context, service *Service, config string, _ *flag.FlagSet, _ []string) (any, error) {
 			return service.EnvironmentConfigShow(ctx, config)
@@ -141,7 +141,7 @@ var cliCommands = []*cliCommand{
 		Group:      "environment",
 		Name:       "update",
 		Summary:    "replace or clear an environment's bootstrap commands",
-		Positional: "config",
+		Positional: "environment",
 		MinArgs:    1,
 		Flags: func(fs *flag.FlagSet) {
 			fs.Bool("clear-bootstrap-commands", false, "remove every bootstrap command from the environment")
@@ -161,8 +161,8 @@ var cliCommands = []*cliCommand{
 	{
 		Group:      "environment",
 		Name:       "delete",
-		Summary:    "soft-delete an environment config",
-		Positional: "config",
+		Summary:    "soft-delete an environment",
+		Positional: "environment",
 		MinArgs:    1,
 		Run: func(ctx context.Context, service *Service, config string, _ *flag.FlagSet, _ []string) (any, error) {
 			return service.EnvironmentConfigDelete(ctx, config)
@@ -602,7 +602,7 @@ var cliCommands = []*cliCommand{
 }
 
 func environmentCommandFlags(fs *flag.FlagSet) {
-	commands := &stringSliceFlag{}
+	commands := new(stringSliceFlag)
 	fs.Var(commands, "bootstrap-command", "command run once while bootstrapping a node (repeatable)")
 	fs.Var(commands, "setup-command", "alias for --bootstrap-command")
 	fs.Var(commands, "env-command", "alias for --bootstrap-command")
@@ -617,9 +617,9 @@ func configurationSpecFlags(fs *flag.FlagSet) {
 	fs.String("disk", "", "disk size, e.g. 20480MiB or 40GiB")
 	fs.Bool("clear-environments", false, "remove every environment from the configuration")
 	fs.Bool("clear-bootstrap-commands", false, "remove every bootstrap command from the configuration")
-	environments := &stringSliceFlag{}
-	fs.Var(environments, "environment", "environment config slug to attach (repeatable)")
-	bootstrap := &stringSliceFlag{}
+	environments := new(stringSliceFlag)
+	fs.Var(environments, "environment", "environment slug to attach (repeatable)")
+	bootstrap := new(stringSliceFlag)
 	fs.Var(bootstrap, "bootstrap-command", "command run once while bootstrapping a node (repeatable)")
 }
 

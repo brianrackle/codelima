@@ -11,14 +11,31 @@ import (
 
 func TestHelpAdvertisesConfigurationModelWithoutProjects(t *testing.T) {
 	text := usage()
-	for _, want := range []string{"settings show", "configuration create|list|show|update|delete|clone", "nodes in that directory and its descendants"} {
+	for _, want := range []string{"settings show", "environment create|list|show|update|delete", "configuration create|list|show|update|delete|clone", "nodes in that directory and its descendants"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("usage missing %q:\n%s", want, text)
 		}
 	}
-	for _, removed := range []string{"project create", "project tree", "config show"} {
+	for _, removed := range []string{"project create", "project tree", "config show", "environment config"} {
 		if strings.Contains(text, removed) {
 			t.Fatalf("usage still exposes %q:\n%s", removed, text)
+		}
+	}
+}
+
+func TestEnvironmentHelpUsesEnvironmentTerminology(t *testing.T) {
+	group := findCLIGroup("environment")
+	if group == nil {
+		t.Fatal("environment command group not found")
+	}
+
+	texts := []string{groupHelp(group)}
+	for _, command := range commandsForGroup(group.Name) {
+		texts = append(texts, commandHelp(command))
+	}
+	for _, text := range texts {
+		if strings.Contains(strings.ToLower(text), "environment config") {
+			t.Fatalf("environment help uses legacy config terminology:\n%s", text)
 		}
 	}
 }
@@ -130,7 +147,7 @@ func TestCommandTableCoversEveryGroupAndHelp(t *testing.T) {
 
 func TestConfigurationCLIUsesHumanResourceSizes(t *testing.T) {
 	service, _ := newTestService(t)
-	createdAny, err := dispatchConfiguration(context.Background(), service, []string{"create", "--slug", "large", "--vcpus", "8", "--memory", "8GiB", "--disk", "40GiB", "--environment", "codex"})
+	createdAny, err := dispatchConfiguration(context.Background(), service, []string{"create", "--slug", "custom-size", "--vcpus", "8", "--memory", "8GiB", "--disk", "40GiB", "--environment", "codex"})
 	if err != nil {
 		t.Fatalf("configuration create error = %v", err)
 	}
@@ -138,7 +155,7 @@ func TestConfigurationCLIUsesHumanResourceSizes(t *testing.T) {
 	if created.VCPUs != 8 || created.MemoryMiB != 8192 || created.DiskMiB != 40960 || len(created.Environments) != 1 || created.Environments[0] != "codex" {
 		t.Fatalf("unexpected configuration: %+v", created)
 	}
-	clonedAny, err := dispatchConfiguration(context.Background(), service, []string{"clone", "large", "--slug", "large-copy"})
+	clonedAny, err := dispatchConfiguration(context.Background(), service, []string{"clone", "custom-size", "--slug", "custom-size-copy"})
 	if err != nil {
 		t.Fatalf("configuration clone error = %v", err)
 	}
@@ -147,11 +164,11 @@ func TestConfigurationCLIUsesHumanResourceSizes(t *testing.T) {
 		t.Fatalf("clone did not copy configuration: %+v", cloned)
 	}
 	// The positional target may also trail the flags (fs.Arg(0) fallback).
-	updatedAny, err := dispatchConfiguration(context.Background(), service, []string{"update", "--vcpus", "4", "large"})
+	updatedAny, err := dispatchConfiguration(context.Background(), service, []string{"update", "--vcpus", "4", "custom-size"})
 	if err != nil {
 		t.Fatalf("configuration update error = %v", err)
 	}
-	if updated := updatedAny.(Configuration); updated.VCPUs != 4 || updated.Slug != "large" {
+	if updated := updatedAny.(Configuration); updated.VCPUs != 4 || updated.Slug != "custom-size" || len(updated.Environments) != 1 || updated.Environments[0] != "codex" {
 		t.Fatalf("trailing positional update failed: %+v", updated)
 	}
 }
@@ -170,7 +187,7 @@ func TestNodeCreateCLIDefaultsDirectoryConfigurationAndMountedWorkspace(t *testi
 	if created.DirectoryPath != workspace || created.ConfigurationSlug != DefaultConfigurationSlug || created.ConfigurationID == "" {
 		t.Fatalf("node defaults not resolved: %+v", created)
 	}
-	if created.VCPUs != 2 || created.MemoryMiB != 4096 || created.DiskMiB != 20480 {
+	if created.VCPUs != 1 || created.MemoryMiB != 1024 || created.DiskMiB != 10240 {
 		t.Fatalf("default resources not frozen: %+v", created)
 	}
 	if created.WorkspaceMode != WorkspaceModeMounted || created.WorkspaceMountPath != workspace {

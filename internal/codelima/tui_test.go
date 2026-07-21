@@ -531,20 +531,20 @@ func TestTUIDrawTransientRightPaneContentUsesSplitLayout(t *testing.T) {
 		},
 		{
 			name:  "menu",
-			title: "Environment Configs",
+			title: "Environments",
 			configure: func(app *vaxisTUIApp) {
 				app.overlay = &tuiMenu{
-					Title:   "Environment Configs",
-					Entries: []tuiMenuEntry{{Key: 'c', Label: "Create Config"}},
+					Title:   "Environments",
+					Entries: []tuiMenuEntry{{Key: 'c', Label: "Create Environment"}},
 				}
 			},
 		},
 		{
 			name:  "selector",
-			title: "Select Environment Configs",
+			title: "Select Environments",
 			configure: func(app *vaxisTUIApp) {
 				app.overlay = newTUISelector(
-					"Select Environment Configs",
+					"Select Environments",
 					nil,
 					[]tuiSelectorOption{{Label: "codex", Value: "codex"}},
 					nil,
@@ -3216,6 +3216,32 @@ func TestTUIConfigurationMenuCreatesReusableConfiguration(t *testing.T) {
 	}
 }
 
+func TestTUIConfigurationSelectorOrdersBuiltInSizes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	if err := service.ensureReadyForWrite(ctx); err != nil {
+		t.Fatalf("ensureReadyForWrite() error = %v", err)
+	}
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+
+	if err := app.openConfigurationSelector("", func(string) error { return nil }); err != nil {
+		t.Fatalf("openConfigurationSelector() error = %v", err)
+	}
+	selector := app.activeSelector()
+	if selector == nil {
+		t.Fatal("expected configuration selector")
+	}
+	values := make([]string, 0, len(selector.Options))
+	for _, option := range selector.Options {
+		values = append(values, option.Value)
+	}
+	if got := strings.Join(values, ","); got != "small,medium,large,xlarge" {
+		t.Fatalf("configuration selector order = %q", got)
+	}
+}
+
 func TestTUIManageEnvironmentConfigUsesSelector(t *testing.T) {
 	t.Parallel()
 
@@ -3234,16 +3260,36 @@ func TestTUIManageEnvironmentConfigUsesSelector(t *testing.T) {
 	if err := app.performAction(tuiActionSpec{ID: tuiActionEnvironmentConfigManage}); err != nil {
 		t.Fatalf("performAction(environment config manage) error = %v", err)
 	}
-	if app.activeMenu() == nil || app.activeMenu().Title != "Environment Configs" {
-		t.Fatalf("expected environment config menu, got %#v", app.activeMenu())
+	if app.activeMenu() == nil || app.activeMenu().Title != "Environments" {
+		t.Fatalf("expected environments menu, got %#v", app.activeMenu())
 	}
-	chooseTUIMenuEntry(t, app, "Manage Config")
-	if app.activeSelector() == nil || app.activeSelector().Title != "Manage Environment Config" {
-		t.Fatalf("expected manage config selector, got %#v", app.activeSelector())
+	chooseTUIMenuEntry(t, app, "Manage Environment")
+	if app.activeSelector() == nil || app.activeSelector().Title != "Manage Environment" {
+		t.Fatalf("expected manage environment selector, got %#v", app.activeSelector())
 	}
 	chooseTUISelector(t, app, "shared-dev")
-	if app.activeMenu() == nil || app.activeMenu().Title != "Environment Config: shared-dev" {
-		t.Fatalf("expected environment config command menu, got %#v", app.activeMenu())
+	if app.activeMenu() == nil || app.activeMenu().Title != "Environment: shared-dev" {
+		t.Fatalf("expected environment command menu, got %#v", app.activeMenu())
+	}
+}
+
+func TestTUICreateEnvironmentUsesEnvironmentTerminology(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+
+	if err := app.openEnvironmentConfigsMenu(); err != nil {
+		t.Fatalf("openEnvironmentConfigsMenu() error = %v", err)
+	}
+	chooseTUIMenuEntry(t, app, "Create Environment")
+	dialog := app.activeDialog()
+	if dialog == nil || dialog.Title != "Create Environment" {
+		t.Fatalf("expected create environment dialog, got %#v", dialog)
+	}
+	if len(dialog.Fields) != 1 || dialog.Fields[0].Label != "Environment Slug" {
+		t.Fatalf("expected environment slug field, got %#v", dialog.Fields)
 	}
 }
 
@@ -3265,42 +3311,42 @@ func TestTUIEnvironmentConfigCommandEditingReopensMenuAndSupportsReorder(t *test
 		t.Fatalf("openManageEnvironmentConfigDialog(shared-dev) error = %v", err)
 	}
 	chooseTUISelector(t, app, "shared-dev")
-	if app.activeMenu() == nil || app.activeMenu().Title != "Environment Config: shared-dev" {
-		t.Fatalf("expected environment config command menu, got %#v", app.activeMenu())
+	if app.activeMenu() == nil || app.activeMenu().Title != "Environment: shared-dev" {
+		t.Fatalf("expected environment command menu, got %#v", app.activeMenu())
 	}
 
 	chooseTUIMenuEntry(t, app, "Add Bootstrap Command")
-	if app.activeDialog() == nil || app.activeDialog().Title != "Add Environment Config Bootstrap Command" {
+	if app.activeDialog() == nil || app.activeDialog().Title != "Add Environment Bootstrap Command" {
 		t.Fatalf("expected add command dialog, got %#v", app.activeDialog())
 	}
 	submitTUIDialog(t, app, map[string]string{"command": "brew bundle"})
-	if app.activeMenu() == nil || app.activeMenu().Title != "Environment Config: shared-dev" {
+	if app.activeMenu() == nil || app.activeMenu().Title != "Environment: shared-dev" {
 		t.Fatalf("expected command menu to reopen after add, got %#v", app.activeMenu())
 	}
 
 	chooseTUIMenuEntry(t, app, "Move Bootstrap Command")
-	if app.activeSelector() == nil || app.activeSelector().Title != "Move Environment Config Bootstrap Command" {
+	if app.activeSelector() == nil || app.activeSelector().Title != "Move Environment Bootstrap Command" {
 		t.Fatalf("expected move command selector, got %#v", app.activeSelector())
 	}
 	chooseTUISelector(t, app, "4. brew bundle")
-	if app.activeMenu() == nil || app.activeMenu().Title != "Move Environment Config Bootstrap Command: brew bundle" {
+	if app.activeMenu() == nil || app.activeMenu().Title != "Move Environment Bootstrap Command: brew bundle" {
 		t.Fatalf("expected move direction menu, got %#v", app.activeMenu())
 	}
 	chooseTUIMenuEntry(t, app, "Move Up")
-	if app.activeMenu() == nil || app.activeMenu().Title != "Environment Config: shared-dev" {
+	if app.activeMenu() == nil || app.activeMenu().Title != "Environment: shared-dev" {
 		t.Fatalf("expected command menu to reopen after reorder, got %#v", app.activeMenu())
 	}
 
 	chooseTUIMenuEntry(t, app, "Remove Bootstrap Command")
-	if app.activeSelector() == nil || app.activeSelector().Title != "Remove Environment Config Bootstrap Commands" {
+	if app.activeSelector() == nil || app.activeSelector().Title != "Remove Environment Bootstrap Commands" {
 		t.Fatalf("expected remove command selector, got %#v", app.activeSelector())
 	}
 	chooseTUISelector(t, app, "2. direnv allow", "3. brew bundle")
-	if app.activeDialog() == nil || app.activeDialog().Title != "Remove Environment Config Bootstrap Commands" {
+	if app.activeDialog() == nil || app.activeDialog().Title != "Remove Environment Bootstrap Commands" {
 		t.Fatalf("expected remove command confirmation dialog, got %#v", app.activeDialog())
 	}
 	submitTUIDialog(t, app, map[string]string{})
-	if app.activeMenu() == nil || app.activeMenu().Title != "Environment Config: shared-dev" {
+	if app.activeMenu() == nil || app.activeMenu().Title != "Environment: shared-dev" {
 		t.Fatalf("expected command menu to reopen after remove, got %#v", app.activeMenu())
 	}
 

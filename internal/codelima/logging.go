@@ -1,6 +1,7 @@
 package codelima
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -39,6 +40,32 @@ func discardLogger() *slog.Logger {
 // (stderr in production) filtered at level.
 func newTextLogger(w io.Writer, level slog.Level) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: level}))
+}
+
+// diagnosticLogWriter adapts subprocess stderr to structured warning records.
+// Subprocess writes are intentionally treated as self-contained chunks: the
+// os/exec copy loop does not promise line-aligned writes, and retaining every
+// chunk is more important than buffering a final unterminated diagnostic.
+type diagnosticLogWriter struct {
+	logger *slog.Logger
+	source string
+}
+
+func newDiagnosticLogWriter(logger *slog.Logger, source string) io.Writer {
+	return &diagnosticLogWriter{logger: logger, source: source}
+}
+
+func (w *diagnosticLogWriter) Write(p []byte) (int, error) {
+	message := strings.TrimSpace(string(p))
+	if message == "" {
+		return len(p), nil
+	}
+	logger := w.logger
+	if logger == nil {
+		logger = discardLogger()
+	}
+	logger.Log(context.Background(), slog.LevelWarn, message, "source", w.source)
+	return len(p), nil
 }
 
 // rotatingLogWriter is an io.Writer that appends to a file and, when a write

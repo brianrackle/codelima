@@ -66,13 +66,13 @@ func (a *vaxisTUIApp) openEnvironmentConfigSelector(title string, description []
 		return err
 	}
 	if !multi && len(options) == 0 {
-		return fmt.Errorf("no environment configs configured")
+		return fmt.Errorf("no environments configured")
 	}
 	if multi && len(options) == 0 {
-		description = append(description, "No reusable environment configs configured. Press Enter to keep none assigned.")
+		description = append(description, "No reusable environments configured. Press Enter to keep none assigned.")
 	}
 	selector := newTUISelector(title, description, options, current, multi, onSubmit)
-	selector.EmptyText = "No environment configs configured."
+	selector.EmptyText = "No environments configured."
 	a.showSelector(selector)
 	return nil
 }
@@ -401,7 +401,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 	}
 
 	description := []string{
-		"No environment configs configured.",
+		"No environments configured.",
 	}
 	if len(configs) > 0 {
 		description = description[:0]
@@ -410,18 +410,18 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 			description = append(description, fmt.Sprintf("- %s (%d bootstrap commands)", config.Slug, len(config.BootstrapCommands)))
 		}
 	} else {
-		description = append(description[:0], "No environment configs configured.")
+		description = append(description[:0], "No environments configured.")
 	}
 
 	entries := []tuiMenuEntry{
-		{Key: 'c', Label: "Create Config", Action: func() error { a.openCreateEnvironmentConfigDialog(); return nil }},
+		{Key: 'c', Label: "Create Environment", Action: func() error { a.openCreateEnvironmentConfigDialog(); return nil }},
 	}
 	if len(configs) > 0 {
-		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Config", Action: func() error { return a.openManageEnvironmentConfigDialog(configs[0].Slug) }})
+		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Environment", Action: func() error { return a.openManageEnvironmentConfigDialog(configs[0].Slug) }})
 	}
 
 	a.overlay = &tuiMenu{
-		Title:       "Environment Configs",
+		Title:       "Environments",
 		Description: description,
 		Entries:     entries,
 	}
@@ -431,14 +431,14 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 
 func (a *vaxisTUIApp) openCreateEnvironmentConfigDialog() {
 	a.overlay = newTUIDialog(
-		"Create Environment Config",
+		"Create Environment",
 		"Create",
 		[]string{
-			"Create a reusable environment config for project bootstrap commands.",
-			"Create the config first, then add or reorder as many commands as you need from the command editor.",
+			"Create a reusable environment for bootstrap commands.",
+			"Create the environment first, then add or reorder as many commands as you need from the command editor.",
 		},
 		[]tuiDialogField{
-			newTUIInputField("slug", "Config Slug", "", true),
+			newTUIInputField("slug", "Environment Slug", "", true),
 		},
 		func(values map[string]string) error {
 			config, err := a.service.EnvironmentConfigCreate(a.ctx, EnvironmentConfigCreateInput{
@@ -447,7 +447,7 @@ func (a *vaxisTUIApp) openCreateEnvironmentConfigDialog() {
 			if err != nil {
 				return err
 			}
-			a.setStatus(slog.LevelInfo, "created environment config "+config.Slug)
+			a.setStatus(slog.LevelInfo, "created environment "+config.Slug)
 			a.openEnvironmentConfigCommandMenu(config)
 			return nil
 		},
@@ -460,13 +460,13 @@ func (a *vaxisTUIApp) openManageEnvironmentConfigDialog(defaultSlug string) erro
 		selected = append(selected, defaultSlug)
 	}
 	return a.openEnvironmentConfigSelector(
-		"Manage Environment Config",
-		[]string{"Choose an environment config to edit its commands or delete it."},
+		"Manage Environment",
+		[]string{"Choose an environment to edit its commands or delete it."},
 		selected,
 		false,
 		func(values []string) error {
 			if len(values) == 0 {
-				return fmt.Errorf("select an environment config")
+				return fmt.Errorf("select an environment")
 			}
 			config, err := a.service.EnvironmentConfigShow(a.ctx, values[0])
 			if err != nil {
@@ -493,23 +493,23 @@ func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig)
 	}
 
 	a.overlay = &tuiMenu{
-		Title:       "Environment Config: " + config.Slug,
+		Title:       "Environment: " + config.Slug,
 		Description: description,
 		Entries: []tuiMenuEntry{
 			{Key: 'a', Label: "Add Bootstrap Command", Action: func() error { a.openAddEnvironmentConfigCommandDialog(config); return nil }},
 			{Key: 'r', Label: "Remove Bootstrap Command", Action: func() error { return a.openRemoveEnvironmentConfigCommandDialog(config) }},
 			{Key: 'm', Label: "Move Bootstrap Command", Action: func() error { return a.openMoveEnvironmentConfigCommandDialog(config) }},
 			{Key: 'c', Label: "Clear Bootstrap Commands", Action: func() error { a.openClearEnvironmentConfigCommandsDialog(config); return nil }},
-			{Key: 'd', Label: "Delete Config", Action: func() error { a.openDeleteEnvironmentConfigDialog(config); return nil }},
+			{Key: 'd', Label: "Delete Environment", Action: func() error { a.openDeleteEnvironmentConfigDialog(config); return nil }},
 		},
 	}
 }
 
 func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentConfig) {
 	a.overlay = newTUIDialog(
-		"Add Environment Config Bootstrap Command",
+		"Add Environment Bootstrap Command",
 		"Add",
-		[]string{"Add a bootstrap command to the reusable environment config."},
+		[]string{"Add a bootstrap command to the reusable environment."},
 		[]tuiDialogField{
 			newTUIInputField("command", "Command", "", true),
 		},
@@ -519,7 +519,7 @@ func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentCo
 			if err != nil {
 				return err
 			}
-			a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
+			a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
 			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 		},
 	)
@@ -527,12 +527,12 @@ func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentCo
 
 func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config EnvironmentConfig) error {
 	if len(config.BootstrapCommands) == 0 {
-		return fmt.Errorf("environment config %s has no commands", config.Slug)
+		return fmt.Errorf("environment %s has no commands", config.Slug)
 	}
 
 	a.showSelector(newTUISelector(
-		"Remove Environment Config Bootstrap Commands",
-		[]string{"Choose one or more reusable environment config bootstrap commands to remove."},
+		"Remove Environment Bootstrap Commands",
+		[]string{"Choose one or more reusable environment bootstrap commands to remove."},
 		commandSelectorOptions(config.BootstrapCommands),
 		nil,
 		true,
@@ -545,13 +545,13 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 				return fmt.Errorf("select at least one command to remove")
 			}
 
-			description := []string{"Remove the selected reusable environment config commands?"}
+			description := []string{"Remove the selected reusable environment commands?"}
 			for _, index := range indices {
 				description = append(description, fmt.Sprintf("%d. %s", index+1, config.BootstrapCommands[index]))
 			}
 
 			a.overlay = newTUIDialog(
-				"Remove Environment Config Bootstrap Commands",
+				"Remove Environment Bootstrap Commands",
 				"Remove",
 				description,
 				nil,
@@ -562,7 +562,7 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 					if err != nil {
 						return err
 					}
-					a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
+					a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				},
 			)
@@ -575,12 +575,12 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 
 func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentConfig) error {
 	if len(config.BootstrapCommands) < 2 {
-		return fmt.Errorf("environment config %s needs at least two commands to change order", config.Slug)
+		return fmt.Errorf("environment %s needs at least two commands to change order", config.Slug)
 	}
 
 	a.showSelector(newTUISelector(
-		"Move Environment Config Bootstrap Command",
-		[]string{"Choose a reusable environment config bootstrap command to move up or down."},
+		"Move Environment Bootstrap Command",
+		[]string{"Choose a reusable environment bootstrap command to move up or down."},
 		commandSelectorOptions(config.BootstrapCommands),
 		nil,
 		false,
@@ -604,7 +604,7 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 					if err != nil {
 						return err
 					}
-					a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
+					a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				}})
 			}
@@ -616,14 +616,14 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 					if err != nil {
 						return err
 					}
-					a.setStatus(slog.LevelInfo, "updated environment config "+updated.Slug)
+					a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
 					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 				}})
 			}
 
 			a.overlay = &tuiMenu{
-				Title:       "Move Environment Config Bootstrap Command: " + command,
-				Description: []string{"Choose how to reposition the selected reusable environment config bootstrap command."},
+				Title:       "Move Environment Bootstrap Command: " + command,
+				Description: []string{"Choose how to reposition the selected reusable environment bootstrap command."},
 				Entries:     entries,
 			}
 			return nil
@@ -634,16 +634,16 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 
 func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config EnvironmentConfig) {
 	a.overlay = newTUIDialog(
-		"Clear Environment Config Bootstrap Commands",
+		"Clear Environment Bootstrap Commands",
 		"Clear",
-		[]string{"Remove all bootstrap commands from environment config " + config.Slug + "."},
+		[]string{"Remove all bootstrap commands from environment " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
 			updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{ClearBootstrapCommands: true})
 			if err != nil {
 				return err
 			}
-			a.setStatus(slog.LevelInfo, "cleared environment config "+updated.Slug)
+			a.setStatus(slog.LevelInfo, "cleared environment "+updated.Slug)
 			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
 		},
 	)
@@ -652,16 +652,16 @@ func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config Environmen
 func (a *vaxisTUIApp) openDeleteEnvironmentConfigDialog(config EnvironmentConfig) {
 	selectedKey := a.state.selectedEntry().key()
 	a.overlay = newTUIDialog(
-		"Delete Environment Config",
+		"Delete Environment",
 		"Delete",
-		[]string{"Delete reusable environment config " + config.Slug + "."},
+		[]string{"Delete reusable environment " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
 			deleted, err := a.service.EnvironmentConfigDelete(a.ctx, config.ID)
 			if err != nil {
 				return err
 			}
-			a.setStatus(slog.LevelInfo, "deleted environment config "+deleted.Slug)
+			a.setStatus(slog.LevelInfo, "deleted environment "+deleted.Slug)
 			return a.reloadData(selectedKey)
 		},
 	)
