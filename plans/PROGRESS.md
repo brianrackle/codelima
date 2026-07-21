@@ -1,6 +1,9 @@
 # Improvement Plan — Progress Tracker
 
-Status board for `plans/IMPROVEMENT_PLAN.md` and `plans/MICROSANDBOX_MIGRATION_PLAN.md`.
+> Historical tracker. ADRs 92–93 and `../LIMA_PLAN.md` supersede its Microsandbox
+> backend entries; `ROADMAP.md` carries the current schema-v4/Lima status.
+
+Historical status board for `plans/IMPROVEMENT_PLAN.md` and `plans/MICROSANDBOX_MIGRATION_PLAN.md`.
 Update this file in the same commit that completes an item. One line per work item;
 link the commit and any ADRs. Statuses: `done` / `in progress` / `pending` / `blocked (<on what>)`.
 

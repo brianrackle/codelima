@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -36,14 +35,6 @@ func (f *stringSliceFlag) Set(value string) error {
 }
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) > 0 && args[0] == sdkSSHServeCommand {
-		if err := dispatchSDKSSHServe(ctx, args[1:]); err != nil {
-			_, _ = fmt.Fprintln(stderr, err)
-			return exitCodeForError(err)
-		}
-		return ExitSuccess
-	}
-
 	options, rest, err := parseGlobalOptions(args)
 	if err != nil {
 		writeError(stdout, stderr, true, err)
@@ -82,26 +73,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	return ExitSuccess
-}
-
-func dispatchSDKSSHServe(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet(sdkSSHServeCommand, flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	sandboxName := flags.String("sandbox", "", "sandbox whose SSH stream this helper serves")
-	authorizedKeysPath := flags.String("authorized-keys", "", "authorized_keys file granting access to the helper")
-	if err := flags.Parse(args); err != nil {
-		return invalidArgument(err.Error(), nil)
-	}
-	if flags.NArg() != 0 {
-		return invalidArgument("unexpected SDK SSH helper arguments", map[string]any{"arguments": flags.Args()})
-	}
-	if *sandboxName == "" {
-		return invalidArgument("--sandbox is required", nil)
-	}
-	if *authorizedKeysPath == "" {
-		return invalidArgument("--authorized-keys is required", nil)
-	}
-	return sdkSSHServe(ctx, *sandboxName, *authorizedKeysPath)
 }
 
 func parseGlobalOptions(args []string) (globalOptions, []string, error) {

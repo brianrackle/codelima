@@ -8,8 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -17,8 +15,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
 func TestParseProcNetTCPSelectsUnprivilegedLoopbackAndWildcardListeners(t *testing.T) {
@@ -255,32 +251,6 @@ func TestDynamicForwardingHandlerPassesHTTPUpgrade(t *testing.T) {
 	}
 }
 
-func TestLoadOrCreateForwardingSignerIsIdempotentAndPrivate(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	first, publicPath, err := loadOrCreateForwardingSigner(home)
-	if err != nil {
-		t.Fatalf("loadOrCreateForwardingSigner() error = %v", err)
-	}
-	second, secondPublicPath, err := loadOrCreateForwardingSigner(home)
-	if err != nil {
-		t.Fatalf("second loadOrCreateForwardingSigner() error = %v", err)
-	}
-	if !reflect.DeepEqual(first.PublicKey().Marshal(), second.PublicKey().Marshal()) || publicPath != secondPublicPath {
-		t.Fatal("expected forwarding key to be reused")
-	}
-	assertFileMode(t, filepath.Dir(publicPath), 0o700)
-	assertFileMode(t, strings.TrimSuffix(publicPath, ".pub"), 0o600)
-	assertFileMode(t, publicPath, 0o644)
-	if err := os.Chmod(publicPath, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := loadOrCreateForwardingSigner(home); err != nil {
-		t.Fatalf("mode-repair loadOrCreateForwardingSigner() error = %v", err)
-	}
-	assertFileMode(t, publicPath, 0o644)
-}
-
 func TestDynamicForwarderReconcilesRoutesListenersAndStoppedNodes(t *testing.T) {
 	service, _ := newTestService(t)
 	node := saveForwardingTestNode(t, service, "test-node", "running")
@@ -365,7 +335,7 @@ func TestDynamicForwarderRecoversFromHostBindConflict(t *testing.T) {
 	}
 }
 
-func TestDynamicForwarderRetriesKeyAuthorizationWithoutBlockingDaemon(t *testing.T) {
+func TestDynamicForwarderRetriesTransportPreparationWithoutBlockingDaemon(t *testing.T) {
 	service, _ := newTestService(t)
 	factory := &retryingForwardingPeerFactory{}
 	forwarder := newTestDynamicForwarder(service, factory)
@@ -433,7 +403,7 @@ type retryingForwardingPeerFactory struct {
 	calls int
 }
 
-func (f *retryingForwardingPeerFactory) Prepare(context.Context, string) error {
+func (f *retryingForwardingPeerFactory) Prepare(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
@@ -442,12 +412,12 @@ func (f *retryingForwardingPeerFactory) Prepare(context.Context, string) error {
 	}
 	return nil
 }
-func (*retryingForwardingPeerFactory) Connect(context.Context, Node, ssh.Signer) (forwardingPeer, error) {
+func (*retryingForwardingPeerFactory) Connect(context.Context, Node) (forwardingPeer, error) {
 	return nil, fmt.Errorf("unexpected Connect call")
 }
 
-func (*fakeForwardingPeerFactory) Prepare(context.Context, string) error { return nil }
-func (f *fakeForwardingPeerFactory) Connect(_ context.Context, node Node, _ ssh.Signer) (forwardingPeer, error) {
+func (*fakeForwardingPeerFactory) Prepare(context.Context) error { return nil }
+func (f *fakeForwardingPeerFactory) Connect(_ context.Context, node Node) (forwardingPeer, error) {
 	peer := f.peers[node.SandboxName]
 	if peer == nil {
 		return nil, fmt.Errorf("no peer for %s", node.SandboxName)
@@ -515,17 +485,6 @@ func waitForForwardingPortStatus(t *testing.T, forwarder *dynamicForwarder, port
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("port %d did not reach forwarding status %q; snapshot=%#v", port, want, forwarder.Snapshot())
-}
-
-func assertFileMode(t *testing.T, path string, want os.FileMode) {
-	t.Helper()
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat(%q) error = %v", path, err)
-	}
-	if got := info.Mode().Perm(); got != want {
-		t.Fatalf("mode for %q = %o, want %o", path, got, want)
-	}
 }
 
 type dialAddressPeer struct{ address string }

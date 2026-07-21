@@ -1,23 +1,29 @@
 # Manual QA
 
-Run these flows from the repository root after `make verify`. Keep all disposable artifacts under `./tmp/qa-v3` and remove them when finished.
+Run these flows from the repository root after `make verify`. Keep all disposable artifacts under `./tmp/qa-v4` and remove them when finished.
 
-These checks assume the host can run Microsandbox. The pinned SDK ensures its matching `0.6.6` runtime support files are installed on the first dependency check, so that first command may download them. CodeLima uses the Go SDK directly; an `msb` executable does not need to be on `PATH`.
+These checks assume the host has Lima 2.1.0 or a compatible newer Lima 2.x
+release and can run VZ on macOS arm64 or QEMU/KVM on Linux. The first create may
+download the upstream Ubuntu cloud image.
 
 ## Setup
 
 ```sh
-export QA_ROOT="$PWD/tmp/qa-v3"
+export QA_ROOT="$PWD/tmp/qa-v4"
 export CODELIMA_HOME="$QA_ROOT/home"
+export LIMA_HOME="$QA_ROOT/lima"
 rm -rf "$QA_ROOT"
 mkdir -p "$QA_ROOT/work/root/child" "$QA_ROOT/work/prefix"
 printf 'root\n' > "$QA_ROOT/work/root/README.md"
 printf 'child\n' > "$QA_ROOT/work/root/child/README.md"
 ```
 
-Use a short root. CodeLima and Microsandbox derive Unix-domain socket paths, and deeply nested QA paths can exceed the kernel limit.
+Use a short root. Lima derives Unix-domain socket paths below `LIMA_HOME`, and
+deep paths can exceed the kernel limit. The selected filesystem must support
+Unix sockets; if the checkout is on 9p/NFS, use an isolated short local
+`LIMA_HOME` and remove it explicitly during cleanup.
 
-## Flow 1: schema-v3 surface and clean break
+## Flow 1: schema-v4 surface and clean break
 
 ```sh
 ./bin/codelima --help > "$QA_ROOT/help.txt"
@@ -32,20 +38,23 @@ find "$CODELIMA_HOME" -maxdepth 3 -type d | sort
 Verify:
 
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
-- schema version is `3`
+- schema version is `4`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
-- `default` exists with 2 CPUs, 4096 MiB memory, 20480 MiB disk, the Debian systemd image, `codex-cli`, and ordered environments `codex` then `claude-code`
+- `default` exists with 2 CPUs, 4096 MiB memory, 20480 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
 
-Check schema-v2 rejection:
+Check schema-v3 rejection without mutation:
 
 ```sh
-mkdir -p "$QA_ROOT/v2/_config"
-printf '2\n' > "$QA_ROOT/v2/_config/schema.version"
-if ./bin/codelima --home "$QA_ROOT/v2" configuration list > "$QA_ROOT/v2.out" 2> "$QA_ROOT/v2.err"; then
-  echo 'unexpected schema-v2 success' >&2
+mkdir -p "$QA_ROOT/v3/_config"
+printf '3\n' > "$QA_ROOT/v3/_config/schema.version"
+sha256sum "$QA_ROOT/v3/_config/schema.version" > "$QA_ROOT/v3.before"
+if ./bin/codelima --home "$QA_ROOT/v3" configuration list > "$QA_ROOT/v3.out" 2> "$QA_ROOT/v3.err"; then
+  echo 'unexpected schema-v3 success' >&2
   exit 1
 fi
-cat "$QA_ROOT/v2.err"
+cat "$QA_ROOT/v3.err"
+sha256sum "$QA_ROOT/v3/_config/schema.version" > "$QA_ROOT/v3.after"
+diff -u "$QA_ROOT/v3.before" "$QA_ROOT/v3.after"
 ```
 
 Verify the error requests a fresh `--home`/`CODELIMA_HOME` and does not claim to migrate.
@@ -242,6 +251,13 @@ printf 'paste-two\n'
 
 Verify both lines appear promptly as one paste and neither command runs: the terminal must not print `paste-one` or `paste-two`. Press `Ctrl+c` to clear the pasted input.
 
+In the active guest shell, type `abcd`, use Left twice, type `X`, then use
+`Ctrl+a` and `Ctrl+e`. Verify the cursor edits and moves normally and no literal
+`^[[D`, `^[[C`, `^A`, or `^E` text appears. Run `sleep 60`, press `Ctrl+c`, and
+verify only `sleep` is interrupted: the terminal tab and guest prompt remain
+open. Paste the two-line block again and verify no literal `^[[200~` or
+`^[[201~` bracketed-paste markers appear.
+
 Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
 
 Leave both TUIs and all their terminal tabs idle for at least 30 seconds. In Activity Monitor, inspect every `codelima` process (the daemon and both TUI clients): none may remain near 100% CPU, and idle clients should settle near zero rather than consuming CPU in proportion to their open tab count. `msb` and the Virtual Machine Service are separate VM-runtime processes and are not part of this client/daemon idle assertion.
@@ -270,6 +286,7 @@ Verify:
 - routine focus handoffs do not show `terminal input ownership was taken by another client`
 - the first terminal action after every window-focus takeover and after the idle interval succeeds without a broken pipe or `client is observe-only` error
 - multiline paste appears without character-by-character delay, preserves its newline, and executes nothing until Enter is pressed explicitly
+- arrows and `Ctrl+a`/`Ctrl+e` edit the guest command line without printing control sequences, `Ctrl+c` interrupts the guest job without closing its tab, and bracketed-paste markers never appear as text
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
 - an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream
@@ -344,4 +361,4 @@ done
 rm -rf "$QA_ROOT"
 ```
 
-Verify no QA sandbox remains in the Microsandbox runtime and `git status --short` contains no QA artifacts.
+Verify `limactl list --json` under the QA `LIMA_HOME` contains no QA instance and `git status --short` contains no QA artifacts.

@@ -388,7 +388,7 @@ func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 		return node.DeletedAt == nil && node.Status != NodeStatusTerminated
 	case terminal.TargetProject:
 		// Project targets belong to the retired project-terminal model. Treat
-		// any restored bookkeeping for them as stale in schema v3.
+		// any restored bookkeeping for them as stale in schema v4.
 		return false
 	default:
 		return true

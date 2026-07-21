@@ -1,6 +1,6 @@
 # Use the Microsandbox Go SDK without a CLI fallback
 
-Status: Accepted
+Status: Superseded by [ADR 92](return_to_lima_as_the_sole_runtime_92.md)
 
 ## Context and Problem Statement
 

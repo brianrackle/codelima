@@ -43,7 +43,7 @@ func DefaultConfig(home string) Config {
 	cfg := Config{
 		MetadataRoot:        home,
 		DefaultAgentProfile: "codex-cli",
-		DefaultImage:        "ghcr.io/superradcompany/debian-systemd:12",
+		DefaultImage:        "template:ubuntu",
 		DefaultPorts:        []string{},
 		RuntimeCommands:     defaultRuntimeCommandTemplates(),
 	}
@@ -88,10 +88,7 @@ func LoadConfig(homeOverride string) (Config, error) {
 		cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
 	}
 
-	cfg.RuntimeCommands = removeLegacyMSBCommandTemplates(cfg.RuntimeCommands).ApplyDefaults(defaultRuntimeCommandTemplates())
-	if err := validateSDKRuntimeCommandTemplates(cfg.RuntimeCommands); err != nil {
-		return Config{}, err
-	}
+	cfg.RuntimeCommands = cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
 	if cfg.Daemon.Restore == "" {
 		cfg.Daemon.Restore = "respawn"
 	}

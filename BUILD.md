@@ -36,7 +36,7 @@ All test recipes run tests serially by default, avoiding filesystem-resource
 spikes on virtualized development hosts. Override `GO_TEST_PARALLEL` or
 `GO_RACE_TEST_PARALLEL` only after qualifying the host.
 
-The Microsandbox Go SDK requires cgo. Make enables cgo for every recipe, uses a host `cc` when present, and otherwise uses the managed Zig compiler. Zig is installed before Go-based development tools so `make init` also succeeds in minimal sandboxes without a system C compiler.
+The Ghostty terminal integration requires cgo. Make enables cgo for every recipe, uses a host `cc` when present, and otherwise uses the managed Zig compiler. Zig is installed before Go-based development tools so `make init` also succeeds in minimal sandboxes without a system C compiler.
 
 Useful supporting targets:
 
@@ -47,18 +47,32 @@ make test-integration
 make lint
 make fmt
 make smoke
+make test-lima-native
 make gopls GOPLS_ARGS="check internal/codelima/tui_test.go"
 ```
 
 The source checkout intentionally namespaces development binaries by the same platform tag used for `.tooling`, such as `linux-aarch64` or `darwin-arm64`. This prevents a host build and a guest build in the same shared checkout from overwriting each other's executable. Use `make run` or `make tui` when possible; both invoke the platform-scoped binary directly.
 
-Runtime-backed manual checks require a Microsandbox-capable host. CodeLima embeds the official Go SDK at `v0.6.6`; the SDK's `EnsureInstalled` path installs its matching `msb` and `libkrunfw` support files under `~/.microsandbox` when absent. CodeLima never shells out to that binary, and there is no CLI fallback. Release qualification must start from both a warm install and an empty SDK runtime cache. Keep `MSB_HOME` short enough for platform Unix-socket path limits.
+Runtime-backed manual checks require Lima 2.1.0 or a compatible newer Lima
+2.x release. Use VZ on macOS arm64 and QEMU/KVM on Linux amd64/arm64. Keep
+`LIMA_HOME` short, private, and on a local filesystem that supports Unix
+sockets. Release qualification must include a warm guest-image cache and a
+clean cache so template resolution/download failures are visible. The gated
+`make test-lima-native` recipe resolves the Ubuntu template and validates the
+CodeLima-rendered YAML with the installed `limactl`.
 
-Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module over a hidden CodeLima helper process. The helper connects with the Go SDK, prepares a per-sandbox SDK SSH server, and serves it on stdin/stdout; it invokes neither `msb` nor host OpenSSH. Release qualification must verify generic `localhost` and `127.0.0.1` claimant selection, one-second bind retry and claimant transfer, and `{node}.localhost` HTTP and Upgrade traffic on both native platforms, including two nodes sharing one guest port and a guest-loopback-only service.
+Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module and a
+persistent client per running node. Connection data comes only from Lima's
+generated instance `ssh.config`; no hidden runtime helper or host OpenSSH
+process is launched per node. The daemon also owns one `limactl watch --json`
+observation process. Release qualification must verify generic `localhost` and
+`127.0.0.1` claimant selection, one-second bind retry and claimant transfer,
+and `{node}.localhost` HTTP and Upgrade traffic on both native platforms,
+including two nodes sharing one guest port and a guest-loopback-only service.
 
 ## Self-Hosted Development Metadata
 
-The repository includes a sanitized reusable configuration example at `examples/self-host/configuration.yaml`. Configurations are directory-independent in schema v3. Import or reproduce its fields in a live configuration, then create a node with that configuration while the node directory points at the local checkout.
+The repository includes a sanitized reusable configuration example at `examples/self-host/configuration.yaml`. Configurations are directory-independent in schema v4. Import or reproduce its fields in a live configuration, then create a node with that configuration while the node directory points at the local checkout.
 
 Review the bootstrap commands before use; they intentionally install development tools and may need distro-specific adjustments.
 
@@ -76,10 +90,8 @@ Each packaged archive contains:
 - `<asset>.json`
   - manifest with version, target platform, asset name, and SHA-256
 
-The Go SDK embeds one platform-specific FFI library. As a reference point, the
-unstripped local `linux/arm64` development binary measured 32,649,456 bytes
-after the SDK migration; artifact size varies by target and Go toolchain and
-must be recorded during release qualification.
+Artifact size varies by target, Ghostty library, and Go toolchain and must be
+recorded during release qualification.
 
 Build a release archive for the current platform:
 
@@ -112,7 +124,7 @@ make package-formula \
 
 The generated formula:
 
-- installs `git` as a runtime dependency; microsandbox remains an explicit host prerequisite
+- installs `git` and Lima as runtime dependencies
 - installs the packaged binary and Ghostty library into `libexec`
 - writes a wrapper `bin/codelima` that points `CODELIMA_GHOSTTY_VT_LIB` at the packaged library
 
@@ -173,7 +185,7 @@ Standard release flow:
 
 1. Ensure `make verify` passes locally.
 2. Ensure `make test-race` and `make test-integration` pass locally.
-3. Complete every flow in `QA.md`, including the native macOS and Linux microsandbox qualification and interactive TUI checks.
+3. Complete every flow in `QA.md`, including native macOS VZ, Linux QEMU/KVM, Lima observation/forwarding, and interactive TUI checks.
 4. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
 5. Ensure the tap repo settings and token are configured.
 6. Create and push the release tag:

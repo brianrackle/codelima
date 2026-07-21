@@ -99,7 +99,7 @@ func (h *harness) createNode() string {
 		ConfigurationSlug:  configuration.Slug,
 		DirectoryPath:      h.work,
 		Runtime:            codelima.RuntimeVM,
-		Provider:           codelima.ProviderMicrosandbox,
+		Provider:           codelima.ProviderLima,
 		SandboxName:        "integration-" + strconv.FormatInt(now.UnixNano(), 36),
 		Image:              configuration.Image,
 		VCPUs:              configuration.VCPUs,

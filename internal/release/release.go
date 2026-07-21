@@ -17,7 +17,7 @@ import (
 
 const (
 	FormulaClassName = "Codelima"
-	FormulaDesc      = "Shell-first TUI and CLI for microsandbox-backed project nodes"
+	FormulaDesc      = "Shell-first TUI and CLI for Lima-backed coding nodes"
 	FormulaHomepage  = "https://github.com/brianrackle/codelima"
 	FormulaLicense   = "GPL-3.0-only"
 	executableMode   = 0o755
@@ -72,8 +72,8 @@ func LibraryFilename(goos string) (string, error) {
 	}
 }
 
-// ValidateTarget enforces the platforms for which Microsandbox SDK 0.6.6
-// bundles an FFI runtime. There is deliberately no CLI fallback.
+// ValidateTarget enforces the platforms for which Lima and the packaged
+// Ghostty terminal bridge are release-qualified.
 func ValidateTarget(goos, goarch string) error {
 	goos = strings.TrimSpace(goos)
 	goarch = strings.TrimSpace(goarch)
@@ -83,7 +83,7 @@ func ValidateTarget(goos, goarch string) error {
 	case goos == "linux" && (goarch == "amd64" || goarch == "arm64"):
 		return nil
 	default:
-		return fmt.Errorf("unsupported Microsandbox SDK target %s/%s", goos, goarch)
+		return fmt.Errorf("unsupported Lima runtime target %s/%s", goos, goarch)
 	}
 }
 
@@ -273,6 +273,9 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 
 	builder.WriteString("  depends_on ")
 	builder.WriteString(rubyString("git"))
+	builder.WriteString("\n")
+	builder.WriteString("  depends_on ")
+	builder.WriteString(rubyString("lima"))
 	builder.WriteString("\n")
 	builder.WriteString("\n")
 	builder.WriteString("  def install\n")

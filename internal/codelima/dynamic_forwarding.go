@@ -2,20 +2,13 @@ package codelima
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,68 +27,9 @@ type forwardingPeer interface {
 }
 
 type forwardingPeerFactory interface {
-	Prepare(context.Context, string) error
-	Connect(context.Context, Node, ssh.Signer) (forwardingPeer, error)
+	Prepare(context.Context) error
+	Connect(context.Context, Node) (forwardingPeer, error)
 }
-
-type sshForwardingPeerFactory struct{ runtime SandboxSSHRuntime }
-
-func (f sshForwardingPeerFactory) Prepare(ctx context.Context, publicKeyPath string) error {
-	return f.runtime.AuthorizeSSHKey(ctx, publicKeyPath)
-}
-
-func (f sshForwardingPeerFactory) Connect(ctx context.Context, node Node, signer ssh.Signer) (forwardingPeer, error) {
-	transport, err := f.runtime.OpenSSHTransport(ctx, node.SandboxName)
-	if err != nil {
-		return nil, err
-	}
-	connection := &sshTransportConn{ReadWriteCloser: transport}
-	config := &ssh.ClientConfig{
-		User:            "root",
-		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Transport is already scoped to the resolved sandbox process.
-	}
-	type handshakeResult struct {
-		connection ssh.Conn
-		channels   <-chan ssh.NewChannel
-		requests   <-chan *ssh.Request
-		err        error
-	}
-	result := make(chan handshakeResult, 1)
-	go func() {
-		conn, channels, requests, handshakeErr := ssh.NewClientConn(connection, node.SandboxName, config)
-		result <- handshakeResult{connection: conn, channels: channels, requests: requests, err: handshakeErr}
-	}()
-	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		_ = connection.Close()
-		return nil, ctx.Err()
-	case <-timer.C:
-		_ = connection.Close()
-		return nil, errors.New("microsandbox SSH handshake timed out")
-	case outcome := <-result:
-		if outcome.err != nil {
-			_ = connection.Close()
-			return nil, outcome.err
-		}
-		return &sshForwardingPeer{client: ssh.NewClient(outcome.connection, outcome.channels, outcome.requests)}, nil
-	}
-}
-
-type sshTransportConn struct{ io.ReadWriteCloser }
-
-func (*sshTransportConn) LocalAddr() net.Addr              { return forwardingAddr("host") }
-func (*sshTransportConn) RemoteAddr() net.Addr             { return forwardingAddr("sandbox") }
-func (*sshTransportConn) SetDeadline(time.Time) error      { return nil }
-func (*sshTransportConn) SetReadDeadline(time.Time) error  { return nil }
-func (*sshTransportConn) SetWriteDeadline(time.Time) error { return nil }
-
-type forwardingAddr string
-
-func (a forwardingAddr) Network() string { return "stdio" }
-func (a forwardingAddr) String() string  { return string(a) }
 
 type sshForwardingPeer struct{ client *ssh.Client }
 
@@ -190,53 +124,6 @@ func forwardableProcAddress(address string) bool {
 	}
 }
 
-func loadOrCreateForwardingSigner(home string) (ssh.Signer, string, error) {
-	directory := filepath.Join(home, "_daemon", "forwarding")
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return nil, "", err
-	}
-	if err := os.Chmod(directory, 0o700); err != nil {
-		return nil, "", err
-	}
-	privatePath := filepath.Join(directory, "id_ed25519")
-	publicPath := privatePath + ".pub"
-	privatePEM, err := os.ReadFile(privatePath)
-	if os.IsNotExist(err) {
-		_, privateKey, generateErr := ed25519.GenerateKey(rand.Reader)
-		if generateErr != nil {
-			return nil, "", generateErr
-		}
-		encoded, marshalErr := x509.MarshalPKCS8PrivateKey(privateKey)
-		if marshalErr != nil {
-			return nil, "", marshalErr
-		}
-		privatePEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded})
-		if err := atomicWriteFile(privatePath, privatePEM, 0o600); err != nil {
-			return nil, "", err
-		}
-	} else if err != nil {
-		return nil, "", err
-	}
-	if err := os.Chmod(privatePath, 0o600); err != nil {
-		return nil, "", err
-	}
-	signer, err := ssh.ParsePrivateKey(privatePEM)
-	if err != nil {
-		return nil, "", err
-	}
-	publicKey := ssh.MarshalAuthorizedKey(signer.PublicKey())
-	current, readErr := os.ReadFile(publicPath)
-	if readErr != nil || string(current) != string(publicKey) {
-		if err := atomicWriteFile(publicPath, publicKey, 0o644); err != nil {
-			return nil, "", err
-		}
-	}
-	if err := os.Chmod(publicPath, 0o644); err != nil {
-		return nil, "", err
-	}
-	return signer, publicPath, nil
-}
-
 type dynamicRouteKey struct {
 	node string
 	port int
@@ -325,8 +212,6 @@ type dynamicForwarder struct {
 	mu       sync.RWMutex
 	wg       sync.WaitGroup
 	cancel   context.CancelFunc
-	signer   ssh.Signer
-	keyPath  string
 	prepared bool
 	peers    map[string]forwardingPeer
 	failures map[string]int
@@ -337,24 +222,20 @@ type dynamicForwarder struct {
 	lastPoll time.Time
 }
 
-func newDynamicForwarder(service *Service, runtime SandboxSSHRuntime) *dynamicForwarder {
+func newDynamicForwarder(service *Service, runtime LimaSSHRuntime) *dynamicForwarder {
 	return &dynamicForwarder{
 		logger: service.log(),
 
-		service: service, factory: sshForwardingPeerFactory{runtime: runtime}, interval: forwardingPollInterval,
+		service: service, factory: limaSSHForwardingPeerFactory{runtime: runtime}, interval: forwardingPollInterval,
 		listen: net.Listen, peers: map[string]forwardingPeer{}, failures: map[string]int{},
 		routes: map[dynamicRouteKey]*dynamicForwardingRoute{}, known: map[string]bool{}, servers: map[int]*dynamicPortServer{},
 	}
 }
 
 func (f *dynamicForwarder) Start(parent context.Context) error {
-	signer, publicKeyPath, err := loadOrCreateForwardingSigner(f.service.cfg.MetadataRoot)
-	if err != nil {
-		return err
-	}
 	ctx, cancel := context.WithCancel(parent)
 	f.mu.Lock()
-	f.signer, f.keyPath, f.cancel = signer, publicKeyPath, cancel
+	f.cancel = cancel
 	f.mu.Unlock()
 	f.wg.Add(1)
 	go func() {
@@ -380,11 +261,11 @@ func (f *dynamicForwarder) run(ctx context.Context) {
 
 func (f *dynamicForwarder) reconcile(ctx context.Context) {
 	f.mu.RLock()
-	prepared, keyPath := f.prepared, f.keyPath
+	prepared := f.prepared
 	f.mu.RUnlock()
 	if !prepared {
-		if err := f.factory.Prepare(ctx, keyPath); err != nil {
-			f.recordError(fmt.Errorf("authorize dynamic forwarding key: %w", err))
+		if err := f.factory.Prepare(ctx); err != nil {
+			f.recordError(fmt.Errorf("prepare dynamic forwarding: %w", err))
 			return
 		}
 		f.mu.Lock()
@@ -430,10 +311,9 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 	for nodeID, node := range running {
 		f.mu.RLock()
 		peer := f.peers[nodeID]
-		signer := f.signer
 		f.mu.RUnlock()
 		if peer == nil {
-			peer, err = f.factory.Connect(ctx, node, signer)
+			peer, err = f.factory.Connect(ctx, node)
 			if err != nil {
 				f.recordError(fmt.Errorf("connect %s forwarding peer: %w", node.SandboxName, err))
 				continue

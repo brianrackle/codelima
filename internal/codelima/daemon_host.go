@@ -46,6 +46,7 @@ type daemonTerminalEntry struct {
 type daemonHost struct {
 	service            *Service
 	forwarder          *dynamicForwarder
+	observer           LimaObservationRuntime
 	virtioFSPressure   *virtioFSPressureController
 	virtioFSSupported  bool
 	restore            string
@@ -67,8 +68,11 @@ func newDaemonHost(service *Service) *daemonHost {
 		resumeReplacement:  func() error { return errors.New("daemon replacement unavailable") },
 		stopServer:         func() {},
 	}
-	if runtime, ok := service.sandbox.(SandboxSSHRuntime); ok {
+	if runtime, ok := service.sandbox.(LimaSSHRuntime); ok {
 		host.forwarder = newDynamicForwarder(service, runtime)
+	}
+	if observer, ok := service.sandbox.(LimaObservationRuntime); ok {
+		host.observer = observer
 	}
 	if sampler, supported := platformHostFilePressureSampler(); supported {
 		host.virtioFSSupported = true
@@ -433,9 +437,14 @@ func (h *daemonHost) Snapshot(context.Context) (any, error) {
 			virtioFSReclaim["last_error"] = state.LastError
 		}
 	}
+	observation := map[string]any{"connected": false}
+	if h.observer != nil {
+		observation = h.observer.ObservationSnapshot()
+	}
 	return map[string]any{
 		"session":          daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()},
 		"forwarding":       forwarding,
+		"lima_observation": observation,
 		"virtiofs_reclaim": virtioFSReclaim,
 	}, nil
 }
@@ -456,6 +465,9 @@ func (h *daemonHost) Close() error {
 	}
 	if h.forwarder != nil {
 		closeErr = errors.Join(closeErr, h.forwarder.Close())
+	}
+	if h.observer != nil {
+		closeErr = errors.Join(closeErr, h.observer.StopObservation())
 	}
 	h.mu.Lock()
 	entries := make([]*daemonTerminalEntry, 0, len(h.terminals))
@@ -486,6 +498,13 @@ func (h *daemonHost) startForwarding(ctx context.Context) error {
 		return nil
 	}
 	return h.forwarder.Start(ctx)
+}
+
+func (h *daemonHost) startObservation(ctx context.Context) error {
+	if h.observer == nil {
+		return nil
+	}
+	return h.observer.StartObservation(ctx)
 }
 
 func (h *daemonHost) startVirtioFSPressureMonitoring(ctx context.Context) {
@@ -664,6 +683,9 @@ func runDaemon(ctx context.Context, service *Service) error {
 	host.stopServer = server.Stop
 	if err := host.restoreSession(ctx); err != nil {
 		return err
+	}
+	if err := host.startObservation(ctx); err != nil {
+		return fmt.Errorf("start Lima observation: %w", err)
 	}
 	if err := host.startForwarding(ctx); err != nil {
 		return fmt.Errorf("start dynamic forwarding: %w", err)
@@ -1065,6 +1087,10 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	host.prepareReplacement = server.PrepareReplacement
 	host.resumeReplacement = server.ResumeAfterReplacement
 	host.stopServer = server.Stop
+	if err := host.startObservation(ctx); err != nil {
+		releaseImported()
+		return fmt.Errorf("start Lima observation: %w", err)
+	}
 	if err := host.startForwarding(ctx); err != nil {
 		releaseImported()
 		return fmt.Errorf("start dynamic forwarding: %w", err)

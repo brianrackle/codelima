@@ -17,7 +17,7 @@ case "$GOOS/$GOARCH" in
   darwin/arm64|linux/amd64|linux/arm64)
     ;;
   *)
-    echo "unsupported Microsandbox SDK target: $GOOS/$GOARCH" >&2
+    echo "unsupported CodeLima release target: $GOOS/$GOARCH" >&2
     exit 1
     ;;
 esac

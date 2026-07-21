@@ -28,7 +28,7 @@ export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 export CGO_ENABLED := 1
 export CC
 
-.PHONY: init ghostty-vt gopls fmt lint test test-race test-integration build run tui smoke package package-formula verify clean
+.PHONY: init ghostty-vt gopls tidy fmt lint test test-race test-integration test-lima-native build run tui smoke package package-formula verify clean
 
 PACKAGE_VERSION ?= 0.0.0-dev
 VERSION_LDFLAGS := -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION)
@@ -56,6 +56,9 @@ ghostty-vt:
 gopls: init
 	$(GOPLS) $(GOPLS_ARGS)
 
+tidy: init
+	$(GO) mod tidy
+
 fmt: init
 	$(GO) fmt ./...
 
@@ -73,6 +76,12 @@ test-integration: build
 	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
 	rm -rf $(INTEGRATION_TMP)
 
+test-lima-native: init
+	@set -eu; native_lima_tmp='$(CURDIR)/tmp/native-lima'; \
+	trap 'rm -rf "$$native_lima_tmp"' EXIT; \
+	mkdir -p "$$native_lima_tmp"; \
+	CODELIMA_NATIVE_LIMA=1 TMPDIR="$$native_lima_tmp" $(GO) test -run '^TestNativeLimaTemplateValidation$$' ./internal/codelima
+
 build: init
 	mkdir -p $(BIN_DIR)
 	$(GO) build -ldflags "$(VERSION_LDFLAGS)" -o $(CODELIMA_BIN) ./cmd/codelima
@@ -85,10 +94,10 @@ tui: build
 	$(CODELIMA_BIN) $(ARGS)
 
 smoke: build
-	CODELIMA_BIN=$(CODELIMA_BIN) ./scripts/smoke_3_layers.sh
+	CODELIMA_BIN=$(CODELIMA_BIN) /bin/sh ./scripts/smoke_3_layers.sh
 
 package: init
-	./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG)
+	/bin/sh ./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG)
 
 package-formula: init
 	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)

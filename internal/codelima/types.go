@@ -11,7 +11,7 @@ import (
 const (
 	RuntimeVM = "vm"
 
-	ProviderMicrosandbox = "microsandbox"
+	ProviderLima = "lima"
 
 	WorkspaceModeCopy    = "copy"
 	WorkspaceModeMounted = "mounted"
@@ -45,8 +45,11 @@ const (
 type ObservationStatus string
 
 const (
-	ObservationRunning ObservationStatus = "running"
-	ObservationStopped ObservationStatus = "stopped"
+	ObservationUninitialized ObservationStatus = "uninitialized"
+	ObservationInstalling    ObservationStatus = "installing"
+	ObservationBroken        ObservationStatus = "broken"
+	ObservationRunning       ObservationStatus = "running"
+	ObservationStopped       ObservationStatus = "stopped"
 )
 
 type RuntimeCommandTemplates struct {
@@ -62,11 +65,6 @@ type RuntimeCommandTemplates struct {
 	Copy                 []string `json:"copy,omitempty" yaml:"copy,omitempty"`
 	ShellExec            []string `json:"shell_exec,omitempty" yaml:"shell_exec,omitempty"`
 	ShellLogin           []string `json:"shell_login,omitempty" yaml:"shell_login,omitempty"`
-}
-
-type NetPolicy struct {
-	Default string   `json:"default" yaml:"default"`
-	Allow   []string `json:"allow,omitempty" yaml:"allow,omitempty"`
 }
 
 // Configuration is a reusable sandbox recipe. Nodes copy its resolved values
@@ -103,11 +101,17 @@ type EnvironmentConfig struct {
 type Environment = EnvironmentConfig
 
 type RuntimeObservation struct {
-	Name     string            `json:"name,omitempty" yaml:"name,omitempty"`
-	Exists   bool              `json:"exists" yaml:"exists"`
-	Status   ObservationStatus `json:"status,omitempty" yaml:"status,omitempty"`
-	Dir      string            `json:"dir,omitempty" yaml:"dir,omitempty"`
-	Hostname string            `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	Name          string            `json:"name,omitempty" yaml:"name,omitempty"`
+	Exists        bool              `json:"exists" yaml:"exists"`
+	Status        ObservationStatus `json:"status,omitempty" yaml:"status,omitempty"`
+	Dir           string            `json:"dir,omitempty" yaml:"dir,omitempty"`
+	Hostname      string            `json:"hostname,omitempty" yaml:"hostname,omitempty"`
+	SSHAddress    string            `json:"ssh_address,omitempty" yaml:"ssh_address,omitempty"`
+	SSHPort       int               `json:"ssh_port,omitempty" yaml:"ssh_port,omitempty"`
+	SSHConfigFile string            `json:"ssh_config_file,omitempty" yaml:"ssh_config_file,omitempty"`
+	LimaHome      string            `json:"lima_home,omitempty" yaml:"lima_home,omitempty"`
+	LimaVersion   string            `json:"lima_version,omitempty" yaml:"lima_version,omitempty"`
+	VMType        string            `json:"vm_type,omitempty" yaml:"vm_type,omitempty"`
 }
 
 type Node struct {
@@ -126,7 +130,6 @@ type Node struct {
 	DiskMiB                uint32                  `json:"disk_mib" yaml:"disk_mib"`
 	Environments           []string                `json:"environments" yaml:"environments"`
 	Ports                  []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
-	NetPolicy              *NetPolicy              `json:"net_policy,omitempty" yaml:"net_policy,omitempty"`
 	Status                 NodeStatus              `json:"status" yaml:"status"`
 	LifecycleState         NodeStatus              `json:"-" yaml:"-"`
 	AgentProfileName       string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
@@ -160,7 +163,6 @@ type nodeFileWire struct {
 	DiskMiB              uint32                  `json:"disk_mib" yaml:"disk_mib"`
 	Environments         []string                `json:"environments" yaml:"environments"`
 	Ports                []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
-	NetPolicy            *NetPolicy              `json:"net_policy,omitempty" yaml:"net_policy,omitempty"`
 	LifecycleState       NodeStatus              `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
 	Status               NodeStatus              `json:"status,omitempty" yaml:"status,omitempty"`
 	AgentProfileName     string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
@@ -235,7 +237,6 @@ func newNodeFileWire(node Node) nodeFileWire {
 		DiskMiB:              node.DiskMiB,
 		Environments:         append([]string(nil), node.Environments...),
 		Ports:                append([]string(nil), node.Ports...),
-		NetPolicy:            cloneNetPolicy(node.NetPolicy),
 		LifecycleState:       nodeLifecycleState(node),
 		AgentProfileName:     node.AgentProfileName,
 		RuntimeCommands:      node.RuntimeCommands,
@@ -279,11 +280,10 @@ func (w nodeFileWire) node() Node {
 		DiskMiB:              w.DiskMiB,
 		Environments:         append([]string(nil), w.Environments...),
 		Ports:                append([]string(nil), w.Ports...),
-		NetPolicy:            cloneNetPolicy(w.NetPolicy),
 		Status:               status,
 		LifecycleState:       lifecycleState,
 		AgentProfileName:     w.AgentProfileName,
-		RuntimeCommands:      removeLegacyMSBCommandTemplates(w.RuntimeCommands),
+		RuntimeCommands:      w.RuntimeCommands,
 		BootstrapCommands:    append([]string(nil), w.BootstrapCommands...),
 		WorkspaceMode:        w.WorkspaceMode,
 		GuestWorkspacePath:   w.GuestWorkspacePath,
@@ -295,13 +295,6 @@ func (w nodeFileWire) node() Node {
 		UpdatedAt:            w.UpdatedAt,
 		DeletedAt:            w.DeletedAt,
 	}
-}
-
-func cloneNetPolicy(policy *NetPolicy) *NetPolicy {
-	if policy == nil {
-		return nil
-	}
-	return &NetPolicy{Default: policy.Default, Allow: append([]string(nil), policy.Allow...)}
 }
 
 type BootstrapState struct {

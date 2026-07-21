@@ -51,7 +51,6 @@ type NodeCreateInput struct {
 	Provider      string
 	WorkspaceMode string
 	Ports         []string
-	NetPolicy     *NetPolicy
 }
 
 type NodeCloneInput struct {
@@ -61,12 +60,12 @@ type NodeCloneInput struct {
 
 func NewService(cfg Config, sandbox SandboxClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
 	if sandbox == nil {
-		sandbox = NewSDKSandboxClient()
+		sandbox = NewLimaClient(cfg.MetadataRoot)
 	}
-	if sdk, ok := sandbox.(*SDKSandboxClient); ok {
-		sdk.RuntimeCommands = sdk.RuntimeCommands.ApplyDefaults(cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates()))
-		sdk.Stdout = stdout
-		sdk.Stderr = stderr
+	if lima, ok := sandbox.(*LimaClient); ok {
+		lima.RuntimeCommands = cfg.RuntimeCommands.ApplyDefaults(defaultRuntimeCommandTemplates())
+		lima.Stdout = stdout
+		lima.Stderr = stderr
 	}
 
 	return &Service{
@@ -170,8 +169,8 @@ func (s *Service) withIO(stdout, stderr io.Writer) *Service {
 	cloned.stdout = stdout
 	cloned.stderr = stderr
 
-	if sdk, ok := s.sandbox.(*SDKSandboxClient); ok {
-		cloned.sandbox = sdk.withIO(stdout, stderr)
+	if lima, ok := s.sandbox.(*LimaClient); ok {
+		cloned.sandbox = lima.withIO(stdout, stderr)
 	}
 
 	return &cloned
@@ -184,7 +183,7 @@ func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	// This is idempotent, flock-guarded, and once per process — categorically
 	// different from the per-tick unlocked writes work item 0.3 removed (ADR
 	// 57). The 2s auto-refresh path stays a pure read, and no runtime
-	// dependencies are validated: launching the TUI must work without msb.
+	// dependencies are validated: launching the TUI must work without Lima.
 	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return err
 	}
@@ -279,7 +278,7 @@ func (s *Service) ensureReady(ctx context.Context, mutating bool) error {
 // skeleton plus seed/repair under locks, without the runtime-dependency
 // validation that EnsureReady(mutating=true) performs. Metadata-only mutations
 // (configuration and environment writes) call it directly so they keep
-// working without a usable Microsandbox runtime.
+// working without a usable Lima runtime.
 func (s *Service) ensureReadyForWrite(ctx context.Context) error {
 	if err := s.ensureDirectories(); err != nil {
 		return err
@@ -316,10 +315,8 @@ func (s *Service) validateDependencies(ctx context.Context) error {
 		return dependencyUnavailable("git is required", err, nil)
 	}
 
-	if version, err := s.sandbox.Version(ctx); err != nil {
+	if _, err := s.sandbox.Version(ctx); err != nil {
 		return err
-	} else if version != requiredMicrosandboxVersion {
-		return dependencyUnavailable(fmt.Sprintf("microsandbox SDK runtime %s found; codelima %s requires exactly %s (see docs: pinning microsandbox)", version, Version, requiredMicrosandboxVersion), nil, nil)
 	}
 
 	if _, err := s.sandbox.List(ctx); err != nil {
@@ -362,18 +359,16 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 	}
 
 	if version, versionErr := s.sandbox.Version(ctx); versionErr != nil {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_sdk", Status: "fail", Message: versionErr.Error()})
-	} else if version != requiredMicrosandboxVersion {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_sdk", Status: "fail", Message: fmt.Sprintf("found %s, required exactly %s", version, requiredMicrosandboxVersion)})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "lima", Status: "fail", Message: versionErr.Error()})
 	} else {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_sdk", Status: "ok", Message: fmt.Sprintf("SDK and runtime match required version %s", version)})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "lima", Status: "ok", Message: fmt.Sprintf("limactl %s is supported", version)})
 	}
 
 	observations, err := s.sandbox.List(ctx)
 	if err != nil {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_list", Status: "fail", Message: err.Error()})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "lima_list", Status: "fail", Message: err.Error()})
 	} else {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "microsandbox_list", Status: "ok", Message: "SDK sandbox listing succeeded"})
+		report.Checks = append(report.Checks, DoctorCheck{Name: "lima_list", Status: "ok", Message: "Lima instance listing succeeded"})
 		orphanWarnings, orphanErr := s.detectOrphans(observations)
 		if orphanErr != nil {
 			return DoctorReport{}, orphanErr
@@ -413,7 +408,28 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 	}
 
 	if len(s.cfg.MetadataRoot) > 120 {
-		report.Warnings = append(report.Warnings, "CODELIMA_HOME path is long; keep MSB_HOME short enough for Unix sockets")
+		report.Warnings = append(report.Warnings, "CODELIMA_HOME path is long; keep LIMA_HOME short enough for Unix sockets")
+	}
+
+	if lima, ok := s.sandbox.(*LimaClient); ok {
+		if home, homeErr := lima.resolvedLimaHome(); homeErr != nil {
+			report.Checks = append(report.Checks, DoctorCheck{Name: "lima_home", Status: "fail", Message: homeErr.Error()})
+		} else {
+			report.Checks = append(report.Checks, DoctorCheck{Name: "lima_home", Status: "ok", Message: home})
+		}
+		goos, _ := lima.platform()
+		switch goos {
+		case "darwin":
+			report.Checks = append(report.Checks, DoctorCheck{Name: "lima_driver", Status: "ok", Message: "VZ with VirtioFS"})
+		case "linux":
+			kvm, kvmErr := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+			if kvmErr != nil {
+				report.Checks = append(report.Checks, DoctorCheck{Name: "lima_driver", Status: "fail", Message: "QEMU requires accessible /dev/kvm: " + kvmErr.Error()})
+			} else {
+				_ = kvm.Close()
+				report.Checks = append(report.Checks, DoctorCheck{Name: "lima_driver", Status: "ok", Message: "QEMU with KVM and 9p"})
+			}
+		}
 	}
 
 	return report, nil
@@ -433,7 +449,7 @@ func (s *Service) detectOrphans(observations []RuntimeObservation) ([]string, er
 
 	for _, observation := range observations {
 		if _, ok := nodeByInstance[observation.Name]; !ok {
-			warnings = append(warnings, "microsandbox without metadata: "+observation.Name)
+			warnings = append(warnings, "Lima instance without metadata: "+observation.Name)
 		}
 	}
 
@@ -443,7 +459,7 @@ func (s *Service) detectOrphans(observations []RuntimeObservation) ([]string, er
 		}
 
 		if _, ok := findObservation(observations, node.SandboxName); !ok {
-			warnings = append(warnings, "metadata exists but microsandbox is missing: "+node.SandboxName)
+			warnings = append(warnings, "metadata exists but Lima instance is missing: "+node.SandboxName)
 		}
 	}
 
@@ -494,13 +510,13 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	}
 
 	runtime := coalesce(input.Runtime, RuntimeVM)
-	provider := coalesce(input.Provider, ProviderMicrosandbox)
+	provider := coalesce(input.Provider, ProviderLima)
 	if runtime != RuntimeVM {
-		return Node{}, unsupportedFeature("runtime is reserved but not implemented in Milestone 1", map[string]any{"runtime": runtime})
+		return Node{}, unsupportedFeature("only the vm runtime is supported", map[string]any{"runtime": runtime})
 	}
 
-	if provider != ProviderMicrosandbox {
-		return Node{}, unsupportedFeature("provider is reserved but not implemented in Milestone 1", map[string]any{"provider": provider})
+	if provider != ProviderLima {
+		return Node{}, unsupportedFeature("only the Lima provider is supported", map[string]any{"provider": provider})
 	}
 
 	profileName := configuration.AgentProfileName
@@ -567,7 +583,6 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		DiskMiB:            configuration.DiskMiB,
 		Environments:       append([]string(nil), configuration.Environments...),
 		Ports:              ports,
-		NetPolicy:          cloneNetPolicy(input.NetPolicy),
 		Status:             NodeStatusCreated,
 		AgentProfileName:   profileName,
 		BootstrapCommands:  bootstrap.CombinedCommands(),
@@ -580,6 +595,9 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		UpdatedAt:          s.now(),
 	}
 
+	if err := s.store.SaveIncompleteNodeReference(node.ID, node.SandboxName); err != nil {
+		return Node{}, err
+	}
 	cleanupNodeDir := true
 	cleanupInstance := false
 	defer func() {
@@ -587,19 +605,30 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 			return
 		}
 		if cleanupInstance {
-			_ = s.sandbox.Delete(ctx, node)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			deleteErr := s.sandbox.Delete(cleanupCtx, node)
+			cancel()
+			if deleteErr != nil {
+				err = errors.Join(err, fmt.Errorf("rollback Lima instance %s: %w", node.SandboxName, deleteErr))
+				return
+			}
 		}
 		if cleanupNodeDir {
-			_ = os.RemoveAll(s.store.nodeDir(nodeID))
+			removeErr := s.store.RemoveIncompleteNodeMetadata([]IncompleteNodeMetadata{{
+				NodeID: node.ID, DirectoryPath: s.store.nodeDir(node.ID), SandboxName: node.SandboxName,
+			}})
+			if removeErr != nil {
+				err = errors.Join(err, removeErr)
+			}
 		}
 	}()
 
 	s.logRuntime("create", node.ID)
-	if err := s.sandbox.Create(ctx, node); err != nil {
-		return Node{}, err
+	if createErr := s.sandbox.Create(ctx, node); createErr != nil {
+		cleanupInstance = runtimeMutationMayHaveCreated(createErr)
+		return Node{}, createErr
 	}
 	cleanupInstance = true
-
 	if err := s.store.SaveNode(node, bootstrap); err != nil {
 		return Node{}, err
 	}
@@ -700,7 +729,7 @@ func (s *Service) NodeCleanupIncomplete(ctx context.Context, apply bool) (Incomp
 	// A dry run only inspects the home, so it stays on the read tier and never
 	// requires a runtime backend. Applying can tear down live runtime instances,
 	// so it takes the full write-readiness path (seed/repair under locks plus
-	// runtime-dependency validation, which requires msb).
+	// runtime-dependency validation, which requires Lima).
 	if apply {
 		if err := s.EnsureReady(ctx, true); err != nil {
 			return IncompleteNodeCleanupResult{}, err
@@ -742,7 +771,7 @@ func (s *Service) NodeCleanupIncomplete(ctx context.Context, apply bool) (Incomp
 			if _, live := findObservation(observations, instanceName); live {
 				if delErr := s.sandbox.Delete(ctx, Node{SandboxName: instanceName}); delErr != nil {
 					// Leave the dir (and its ref) in place so a retry or a
-					// manual msb removal can still find the sandbox.
+					// manual limactl deletion can still find the instance.
 					teardownFailures = append(teardownFailures, instanceName)
 					continue
 				}
@@ -788,7 +817,7 @@ func (s *Service) NodeShow(ctx context.Context, value string) (Node, error) {
 
 // nodeTerminalMetadata resolves the durable node fields needed to launch a
 // terminal without reconciling live VM status. A host terminal must remain
-// available when Microsandbox is stopped or temporarily unavailable, and a
+// available when Lima is stopped or temporarily unavailable, and a
 // guest terminal's child command performs its own runtime checks.
 func (s *Service) nodeTerminalMetadata(ctx context.Context, value string) (Node, error) {
 	if err := s.EnsureReady(ctx, false); err != nil {
@@ -827,6 +856,9 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 	}
 
 	if node.LastRuntimeObservation == nil || node.LastRuntimeObservation.Status != ObservationRunning {
+		if err := s.ensureNodeHostPortsAvailable(ctx, node); err != nil {
+			return Node{}, err
+		}
 		s.logRuntime("start", node.ID)
 		if err := s.sandbox.Start(ctx, node); err != nil {
 			return Node{}, err
@@ -901,6 +933,52 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		return Node{}, err
 	}
 	return result, nil
+}
+
+func (s *Service) ensureNodeHostPortsAvailable(ctx context.Context, node Node) error {
+	ports, err := validatePorts(node.Ports)
+	if err != nil || len(ports) == 0 {
+		return err
+	}
+	requested := make(map[string]struct{}, len(ports))
+	for _, port := range ports {
+		requested[strings.SplitN(port, ":", 2)[0]] = struct{}{}
+	}
+	observations, err := s.sandbox.List(ctx)
+	if err != nil {
+		return err
+	}
+	running := make(map[string]struct{})
+	for _, observation := range observations {
+		if observation.Status == ObservationRunning {
+			running[observation.Name] = struct{}{}
+		}
+	}
+	nodes, err := s.store.ListNodes(false)
+	if err != nil {
+		return err
+	}
+	for _, other := range nodes {
+		if other.ID == node.ID {
+			continue
+		}
+		if _, ok := running[other.SandboxName]; !ok {
+			continue
+		}
+		otherPorts, validateErr := validatePorts(other.Ports)
+		if validateErr != nil {
+			return validateErr
+		}
+		for _, port := range otherPorts {
+			hostPort := strings.SplitN(port, ":", 2)[0]
+			if _, conflict := requested[hostPort]; conflict {
+				return preconditionFailed("host port is already reserved by a running node", map[string]any{
+					"host_port": hostPort, "node": other.Slug, "sandbox_name": other.SandboxName,
+				})
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error) {
@@ -1044,7 +1122,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	bootstrap.BootstrapCommands = append([]string(nil), sourceBootstrap.BootstrapCommands...)
 	bootstrap.Environment = cloneMap(sourceBootstrap.Environment)
 
-	childNode = Node{
+	cloneTarget := Node{
 		ID:                   nodeID,
 		Slug:                 childNodeSlug,
 		ConfigurationID:      sourceNode.ConfigurationID,
@@ -1052,7 +1130,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		DirectoryPath:        sourceNode.DirectoryPath,
 		ParentNodeID:         sourceNode.ID,
 		Runtime:              RuntimeVM,
-		Provider:             ProviderMicrosandbox,
+		Provider:             ProviderLima,
 		SandboxName:          sandboxName,
 		Image:                sourceNode.Image,
 		VCPUs:                sourceNode.VCPUs,
@@ -1060,7 +1138,6 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		DiskMiB:              sourceNode.DiskMiB,
 		Environments:         append([]string(nil), sourceNode.Environments...),
 		Ports:                append([]string(nil), sourceNode.Ports...),
-		NetPolicy:            cloneNetPolicy(sourceNode.NetPolicy),
 		Status:               NodeStatusCreated,
 		AgentProfileName:     sourceNode.AgentProfileName,
 		RuntimeCommands:      sourceNode.RuntimeCommands,
@@ -1074,21 +1151,48 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),
 	}
-
-	s.logRuntime("clone", childNode.ID)
-	if err := s.sandbox.Clone(ctx, sourceNode, childNode); err != nil {
+	if err := s.store.SaveIncompleteNodeReference(cloneTarget.ID, cloneTarget.SandboxName); err != nil {
 		return Node{}, err
 	}
+	cleanupChild := true
+	cleanupCloneInstance := false
+	defer func() {
+		if err == nil || !cleanupChild {
+			return
+		}
+		if cleanupCloneInstance {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			deleteErr := s.sandbox.Delete(cleanupCtx, cloneTarget)
+			cancel()
+			if deleteErr != nil {
+				err = errors.Join(err, fmt.Errorf("rollback cloned Lima instance %s: %w", cloneTarget.SandboxName, deleteErr))
+				return
+			}
+		}
+		removeErr := s.store.RemoveIncompleteNodeMetadata([]IncompleteNodeMetadata{{
+			NodeID: cloneTarget.ID, DirectoryPath: s.store.nodeDir(cloneTarget.ID), SandboxName: cloneTarget.SandboxName,
+		}})
+		if removeErr != nil {
+			err = errors.Join(err, removeErr)
+		}
+	}()
 
-	reconciledChildNode, err := s.reconcileNode(ctx, childNode, false)
+	s.logRuntime("clone", cloneTarget.ID)
+	if cloneErr := s.sandbox.Clone(ctx, sourceNode, cloneTarget); cloneErr != nil {
+		cleanupCloneInstance = runtimeMutationMayHaveCreated(cloneErr)
+		return Node{}, cloneErr
+	}
+	cleanupCloneInstance = true
+
+	reconciledChildNode, err := s.reconcileNode(ctx, cloneTarget, false)
 	if err != nil {
 		return Node{}, err
 	}
 	if reconciledChildNode.LastRuntimeObservation != nil && reconciledChildNode.LastRuntimeObservation.Status == ObservationRunning {
-		if err := s.sandbox.Stop(ctx, childNode); err != nil {
+		if err := s.sandbox.Stop(ctx, cloneTarget); err != nil {
 			return Node{}, err
 		}
-		reconciledChildNode, err = s.reconcileNode(ctx, childNode, false)
+		reconciledChildNode, err = s.reconcileNode(ctx, cloneTarget, false)
 		if err != nil {
 			return Node{}, err
 		}
@@ -1098,6 +1202,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	if err := s.store.SaveNode(childNode, bootstrap); err != nil {
 		return Node{}, err
 	}
+	cleanupChild = false
 
 	if err := s.store.AppendNodeEvent(childNode.ID, Event{Timestamp: s.now(), Type: "node.cloned", Fields: map[string]any{"source_node_id": sourceNode.ID}}); err != nil {
 		return Node{}, err
@@ -1394,6 +1499,9 @@ func (s *Service) generateSandboxName(nodeSlug string) (string, error) {
 	}
 	if err := validateSandboxName(sandboxName); err != nil {
 		return "", err
+	}
+	if exists(s.store.nodeInstanceIndexPath(sandboxName)) {
+		return "", preconditionFailed("sandbox name already exists", map[string]any{"sandbox_name": sandboxName})
 	}
 
 	nodes, err := s.store.ListNodes(false)

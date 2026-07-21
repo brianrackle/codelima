@@ -1,7 +1,6 @@
 package codelima
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,34 +41,32 @@ func TestLoadRuntimeCommandsFileAcceptsWrappedAndBareYAML(t *testing.T) {
 	}
 }
 
-func TestSDKRuntimeCommandsAcceptGuestCommandsAndRejectCLICustomization(t *testing.T) {
+func TestRuntimeCommandsAllowLifecycleCustomization(t *testing.T) {
 	t.Parallel()
-	if err := validateSDKRuntimeCommandTemplates(RuntimeCommandTemplates{
-		Bootstrap:            []string{"apt-get update"},
-		WorkspaceSeedPrepare: []string{"mkdir -p {{target_path}}"},
-	}); err != nil {
-		t.Fatalf("validateSDKRuntimeCommandTemplates(guest commands) error = %v", err)
+	node := Node{RuntimeCommands: RuntimeCommandTemplates{Start: []string{"{{binary}} start --custom {{sandbox_name}}"}}}
+	commands, err := resolveConfiguredRuntimeCommands("limactl", defaultRuntimeCommandTemplates(), node.RuntimeCommands, runtimeCommandStart, map[string]string{"sandbox_name": shellQuote("demo")})
+	if err != nil {
+		t.Fatalf("resolveConfiguredRuntimeCommands() error = %v", err)
 	}
-
-	err := validateSDKRuntimeCommandTemplates(RuntimeCommandTemplates{Start: []string{"msb start --custom {{sandbox_name}}"}})
-	var appErr *AppError
-	if !errors.As(err, &appErr) || appErr.Category != "PreconditionFailed" {
-		t.Fatalf("validateSDKRuntimeCommandTemplates(custom start) error = %#v", err)
-	}
-	if appErr.Fields["command"] != "start" {
-		t.Fatalf("custom override error fields = %#v", appErr.Fields)
+	if got := strings.Join(commands, "|"); got != "'limactl' start --custom 'demo'" {
+		t.Fatalf("custom start commands = %q", got)
 	}
 }
 
-func TestRemoveLegacyMSBCommandTemplatesDoesNotRemoveCustomization(t *testing.T) {
+func TestDefaultRuntimeCommandsUseLima(t *testing.T) {
 	t.Parallel()
-	legacy := legacyMSBCommandTemplates()
-	legacy.Start = []string{"custom start"}
-	got := removeLegacyMSBCommandTemplates(legacy)
-	if len(got.Version) != 0 || len(got.Create) != 0 || len(got.Clone) != 0 {
-		t.Fatalf("removeLegacyMSBCommandTemplates() retained exact defaults: %#v", got)
+	defaults := defaultRuntimeCommandTemplates()
+	for name, commands := range map[string][]string{
+		"version": defaults.Version, "list": defaults.List, "create": defaults.Create,
+		"start": defaults.Start, "stop": defaults.Stop, "delete": defaults.Delete,
+		"clone": defaults.Clone, "copy": defaults.Copy, "shell_exec": defaults.ShellExec,
+	} {
+		if len(commands) == 0 || !strings.Contains(commands[0], "{{binary}}") {
+			t.Fatalf("%s defaults = %#v", name, commands)
+		}
 	}
-	if len(got.Start) != 1 || got.Start[0] != "custom start" {
-		t.Fatalf("removeLegacyMSBCommandTemplates() removed customization: %#v", got.Start)
+	prepare := strings.Join(defaults.WorkspaceSeedPrepare, "\n")
+	if !strings.Contains(prepare, "SUDO_USER") || !strings.Contains(prepare, `chown "$owner:$group"`) {
+		t.Fatalf("workspace seed preparation must return the target parent to Lima's SSH user: %q", prepare)
 	}
 }

@@ -259,22 +259,13 @@ var cliCommands = []*cliCommand{
 			fs.String("directory", "", "host directory the node is bound to (defaults to the current directory)")
 			fs.String("slug", "", "unique lowercase identifier for the new node")
 			fs.String("workspace-mode", DefaultWorkspaceMode, "how the workspace reaches the node: mounted or copy")
-			fs.String("net-default", "", "default network policy for the node: allow or deny")
 			ports := &stringSliceFlag{}
 			fs.Var(ports, "port", "port forward as HOST:GUEST (repeatable)")
-			netAllow := &stringSliceFlag{}
-			fs.Var(netAllow, "net-allow", "host reachable when the default network policy is deny (repeatable)")
 		},
 		Run: func(ctx context.Context, service *Service, _ string, fs *flag.FlagSet, _ []string) (any, error) {
 			slug := flagString(fs, "slug")
 			if slug == "" {
 				return nil, invalidArgument("node create requires --slug", nil)
-			}
-			netDefault := flagString(fs, "net-default")
-			netAllow := flagStrings(fs, "net-allow")
-			var netPolicy *NetPolicy
-			if netDefault != "" || netAllow != nil {
-				netPolicy = &NetPolicy{Default: coalesce(netDefault, "deny"), Allow: netAllow}
 			}
 			return service.NodeCreate(ctx, NodeCreateInput{
 				Configuration: flagString(fs, "configuration"),
@@ -282,7 +273,6 @@ var cliCommands = []*cliCommand{
 				Slug:          slug,
 				WorkspaceMode: flagString(fs, "workspace-mode"),
 				Ports:         flagStrings(fs, "port"),
-				NetPolicy:     netPolicy,
 			})
 		},
 	},
@@ -620,7 +610,7 @@ func environmentCommandFlags(fs *flag.FlagSet) {
 
 func configurationSpecFlags(fs *flag.FlagSet) {
 	fs.String("slug", "", "unique lowercase identifier for the configuration")
-	fs.String("image", "", "sandbox image reference nodes boot from")
+	fs.String("image", "", "Lima template reference nodes boot from")
 	fs.String("agent-profile", "", "agent profile installed into nodes")
 	fs.Uint("vcpus", 0, "virtual CPU count for nodes (1-255)")
 	fs.String("memory", "", "memory size, e.g. 4096MiB or 8GiB")

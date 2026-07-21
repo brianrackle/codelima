@@ -1,6 +1,6 @@
 # Dynamic Localhost and Node-Hostname Forwarding Specification
 
-Status: Implemented locally; native macOS/Linux release qualification remains in `TODO.md`
+Status: Routing behavior retained; Microsandbox transport superseded by ADR 92's persistent Lima SSH transport
 Purpose: Reproduce Lima-style automatic guest-listener forwarding for HTTP and WebSocket development servers at `http://localhost:{port}` and `http://127.0.0.1:{port}` while preserving explicit `http://{node}.localhost:{port}` access when nodes share a port, without declaring ports before sandbox creation.
 
 ## 1. Problem Statement

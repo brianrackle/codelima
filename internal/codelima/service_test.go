@@ -22,6 +22,7 @@ type fakeSandbox struct {
 	shellCalls   []fakeShellCall
 	copyCalls    []fakeCopyCall
 	createErr    error
+	cloneErr     error
 	failCommand  string
 	cloneStatus  ObservationStatus
 	listCalls    int
@@ -90,7 +91,7 @@ func (f *fakeSandbox) recordCall(call string) {
 }
 
 func (f *fakeSandbox) Version(context.Context) (string, error) {
-	return requiredMicrosandboxVersion, nil
+	return requiredLimaVersion, nil
 }
 
 func (f *fakeSandbox) ResolveCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
@@ -160,6 +161,9 @@ func (f *fakeSandbox) Delete(_ context.Context, node Node) error {
 
 func (f *fakeSandbox) Clone(_ context.Context, sourceNode, targetNode Node) error {
 	f.recordCall("clone " + sourceNode.SandboxName + " " + targetNode.SandboxName)
+	if f.cloneErr != nil {
+		return f.cloneErr
+	}
 	f.cloneGate.block(targetNode.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -169,6 +173,34 @@ func (f *fakeSandbox) Clone(_ context.Context, sourceNode, targetNode Node) erro
 	}
 	f.observations[targetNode.SandboxName] = RuntimeObservation{Name: targetNode.SandboxName, Exists: true, Status: status, Dir: "/fake/" + targetNode.SandboxName}
 	return nil
+}
+
+func TestNodeCloneFailureCleansRuntimeReferenceAndMetadata(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	source, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "clone-source"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	fake := service.sandbox.(*fakeSandbox)
+	fake.cloneErr = &runtimeMutationError{error: errors.New("forced clone failure")}
+	if _, err := service.NodeClone(ctx, NodeCloneInput{SourceNode: source.ID, NodeSlug: "clone-target"}); err == nil {
+		t.Fatal("NodeClone() unexpectedly succeeded")
+	}
+	entries, err := os.ReadDir(filepath.Join(service.cfg.MetadataRoot, "nodes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != source.ID {
+		t.Fatalf("node metadata after clone rollback = %#v", entries)
+	}
+	if exists(service.store.nodeInstanceIndexPath("clone-target")) {
+		t.Fatal("clone rollback left the target instance index")
+	}
+	if !containsCall(fake.calls, "delete clone-target") {
+		t.Fatalf("clone rollback did not attempt runtime deletion: %v", fake.calls)
+	}
 }
 
 func (f *fakeSandbox) CopyToGuest(_ context.Context, node Node, sourcePath, targetPath string, recursive bool) error {
@@ -201,7 +233,7 @@ func (f *fakeSandbox) Shell(_ context.Context, node Node, command []string, work
 	return nil
 }
 
-func TestEnvironmentConfigMetadataMutationsDoNotRequireMicrosandbox(t *testing.T) {
+func TestEnvironmentConfigMetadataMutationsDoNotRequireLima(t *testing.T) {
 	t.Parallel()
 
 	service, _ := newTestService(t)
@@ -303,6 +335,34 @@ func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 
 	if node.Status != NodeStatusTerminated {
 		t.Fatalf("expected terminated status, got %q", node.Status)
+	}
+}
+
+func TestNodeStartRejectsHostPortOwnedByRunningNode(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	first, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "first-port-node", Ports: []string{"18080:8080"}})
+	if err != nil {
+		t.Fatalf("NodeCreate(first) error = %v", err)
+	}
+	second, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "second-port-node", Ports: []string{"18080:3000"}})
+	if err != nil {
+		t.Fatalf("NodeCreate(second) error = %v", err)
+	}
+	if _, err := service.NodeStart(ctx, first.ID); err != nil {
+		t.Fatalf("NodeStart(first) error = %v", err)
+	}
+	_, err = service.NodeStart(ctx, second.ID)
+	var appErr *AppError
+	if !errors.As(err, &appErr) || appErr.Category != CategoryPreconditionFailed {
+		t.Fatalf("NodeStart(second) error = %#v", err)
+	}
+	if appErr.Fields["host_port"] != "18080" {
+		t.Fatalf("port conflict fields = %#v", appErr.Fields)
+	}
+	if containsCall(service.sandbox.(*fakeSandbox).calls, "start "+second.SandboxName) {
+		t.Fatalf("conflicting node reached runtime start: %v", service.sandbox.(*fakeSandbox).calls)
 	}
 }
 
@@ -445,6 +505,9 @@ func TestNodeCreateCleansUpPartialMetadataWhenSandboxCreateFails(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected failed node create to remove partial metadata, found %d entries", len(entries))
+	}
+	if containsCall(service.sandbox.(*fakeSandbox).calls, "delete broken-node") {
+		t.Fatal("a create failure without a mutation marker deleted a potentially pre-existing runtime instance")
 	}
 }
 

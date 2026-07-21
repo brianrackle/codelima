@@ -2,7 +2,7 @@
 
 ## Schema-owned metadata home
 
-`CODELIMA_HOME` is authoritative for configurations, environments, nodes, daemon state, indexes, and locks. Durable writes use temp-file-plus-rename semantics. `_config/schema.version` is checked before metadata is interpreted; schema v3 rejects schema-v2 and legacy Lima homes instead of attempting an in-place migration.
+`CODELIMA_HOME` is authoritative for configurations, environments, nodes, daemon state, indexes, and locks. Durable writes use temp-file-plus-rename semantics. `_config/schema.version` is checked before metadata is interpreted; schema v4 rejects schema-v2, schema-v3, and legacy Lima homes instead of attempting an in-place migration.
 
 Read paths create only the directory skeleton required to inspect a recognized home. Seed and repair work runs under the relevant flock set from mutating readiness, `doctor --repair`, or TUI startup. Runtime-backed node lists fetch sandbox observations once, index by sandbox name, and merge transient status in memory.
 
@@ -22,23 +22,45 @@ Directory scoping uses `filepath.Rel`-style containment, never string-prefix mat
 
 `copy` mode seeds the canonical directory into a guest-local tree exactly once. `mounted` mode exposes the canonical host directory read/write at the same path and is the default for new nodes across service, CLI, and TUI creation paths. Explicit `copy` remains available, and blank legacy node metadata still resolves to `copy`. Runtime lifecycle and shells use the node's frozen directory and workspace mode only.
 
-## Microsandbox SDK boundary
+## Lima CLI and rendered-template boundary
 
-The official Microsandbox Go SDK pinned at `v0.6.6` is the only runtime integration. Its `EnsureInstalled` API provides the matching runtime support files before version validation; CodeLima never executes the installed `msb` and has no CLI fallback. Lifecycle, listing, guest exec, interactive attach, file copy, snapshots, mounts, published ports, and network policy use typed SDK operations.
+Lima 2.x is the only runtime integration. `LimaClient` contains the CLI
+boundary, validates the compatible version range, parses JSON-lines output,
+maps bounded command failures into CodeLima error classes, and terminates the
+whole child process group on cancellation. Interactive shell transports are
+the deliberate exception: keep `sh`/`limactl`/SSH in the foreground process
+group inherited from the terminal wrapper. The wrapper owns the PTY session
+and tab teardown already terminates that complete group; placing only the
+runtime child in a new group without a matching `tcsetpgrp` handoff makes it a
+background reader and breaks arrows, line editing, paste, and guest interrupts.
+Keep argv data quoted at the runtime-command seam and never interpolate
+unvalidated instance identities into destructive operations.
 
-Sandbox creation uses `WithImage`, `WithCPUs`, `WithMemory`, and `WithOCIUpperSize` for the node's frozen values. SDK 0.6.6 copies one file at a time, so recursive seeding walks the host tree, creates guest directories, copies regular files, and recreates symbolic links through typed guest exec. Unsupported special files fail explicitly.
+`instance.lima.yaml` is a private derived artifact, not durable product truth.
+Resolve the selected `image` template with `limactl template copy --fill`,
+modify parsed YAML structurally, atomically write mode `0600`, and require
+`limactl validate` before create. Strip inherited mounts and containerd,
+render only the selected workspace, use exact binary MiB values, and put a
+final ignore-all rule after explicit port mappings so CodeLima remains the host
+listener owner.
 
-Copied regular files must not be assumed to retain host executable bits. Bootstrap commands that run repository scripts invoke an explicit guest interpreter, for example `sh ./script/setup`, unless the bootstrap first sets and verifies the required mode.
+Lima logs in as an unprivileged distribution user. Preserve CodeLima's existing
+root guest-command contract at one boundary by prefixing noninteractive
+commands with `sudo -H --`; do not scatter privilege changes through bootstrap
+or workspace code.
 
-Keep runtime homes short because Microsandbox derives Unix-domain sockets beneath them and the kernel path limit is much smaller than normal filesystem path limits.
+Keep `LIMA_HOME` short and place it on a filesystem that supports Unix sockets.
+Lima creates hostagent, QMP, serial, guest-agent, and OpenSSH control sockets
+beneath each instance directory; ordinary network mounts may reject them even
+when regular files work.
 
 ## Dynamic node-hostname forwarding
 
 The daemon owns HTTP/WebSocket forwarding for discovered guest listeners. The earliest active route on a port claims both `localhost:{guest-port}` and `127.0.0.1:{guest-port}` until that guest listener disappears; the next active claimant takes over during the one-second reconciliation loop. Treat only the exact IPv4 loopback address as a generic alias, preserve the original request `Host` upstream, and keep the claim ephemeral rather than persisting it.
 
-Host routing at `{node-slug}.localhost:{guest-port}` always chooses the named node, so several nodes can use the same guest port regardless of the generic claimant. Traffic travels over a multiplexed SDK-backed SSH helper. Discovery accepts IPv4 and IPv6 guest-loopback listeners, so each new tunnel connection tries `127.0.0.1` and then `::1`; keep accepted discovery addresses and dial targets aligned. Host bind conflicts remain observable and are retried every reconciliation.
+Host routing at `{node-slug}.localhost:{guest-port}` always chooses the named node, so several nodes can use the same guest port regardless of the generic claimant. Traffic travels over one persistent Go SSH client per running Lima node. Resolve the localhost endpoint and identity only from the Lima-owned `ssh.config`, validate its ownership, permissions, and containment under `LIMA_HOME`, and do not modify global SSH configuration. Discovery accepts IPv4 and IPv6 guest-loopback listeners, so each new tunnel connection tries `127.0.0.1` and then `::1`; keep accepted discovery addresses and dial targets aligned. Host bind conflicts remain observable and are retried every reconciliation.
 
-Explicit `HOST:GUEST` ports remain an advanced raw-TCP escape hatch selected at node creation. They are validated and frozen because SDK port configuration cannot be changed after sandbox creation.
+Explicit `HOST:GUEST` ports remain an advanced raw-TCP escape hatch selected at node creation. They are validated and frozen in the rendered Lima instance template.
 
 ## Pressure-triggered host integration recovery
 
@@ -48,15 +70,15 @@ Guest cache reclamation stays scoped to running mounted nodes and to clean files
 
 ## Runtime observation versus durable lifecycle
 
-`node.yaml` persists CodeLima-owned lifecycle and stable runtime configuration. Running/stopped truth discovered from Microsandbox is attached as a transient `RuntimeObservation` and is not written during ordinary reads. Mutating reconciliation persists only at explicit lifecycle boundaries.
+`node.yaml` persists CodeLima-owned lifecycle and stable runtime configuration. Running/stopped truth discovered from Lima is attached as a transient `RuntimeObservation` and is not written during ordinary reads. The daemon owns one `limactl watch --json` process, seeds an observation cache with one direct list, and serves recurring TUI and forwarding refreshes from that cache. Lifecycle operations reconcile directly after mutation and update the cache. Mutating reconciliation persists only at explicit lifecycle boundaries.
 
-An incomplete node directory without `node.yaml` remains discoverable through `doctor` and `node cleanup-incomplete`. Applied cleanup tears down a matching sandbox before deleting its only durable reference.
+An incomplete node directory without `node.yaml` remains discoverable through `doctor` and `node cleanup-incomplete`. Persist `sandbox.ref` plus its exact instance index before runtime create or clone so applied cleanup can tear down only that matching Lima instance before deleting its durable reference. Deferred rollback closures must capture the immutable target node, never a named return value that can become zero-valued on error.
 
 ## Terminal identity and actors
 
-The `internal/codelima/terminal` package owns typed `TargetKey`, `TerminalID`, and terminal kinds. Schema-v3 front ends create node targets only. Guest and host tabs share `node:<id>` while their kinds distinguish `node-shell` from `node-host-shell`.
+The `internal/codelima/terminal` package owns typed `TargetKey`, `TerminalID`, and terminal kinds. Schema-v4 front ends create node targets only. Guest and host tabs share `node:<id>` while their kinds distinguish `node-shell` from `node-host-shell`.
 
-Every managed terminal starts from `Service.TerminalLaunchSpec`. Guest shells re-enter `codelima shell <node>`; host shells start in the node's canonical directory. Terminal creation resolves this durable node metadata without live runtime reconciliation: host shells do not depend on Microsandbox availability, and guest-shell child commands perform their own runtime checks. Front ends never assemble launch commands independently.
+Every managed terminal starts from `Service.TerminalLaunchSpec`. Guest shells re-enter `codelima shell <node>`; host shells start in the node's canonical directory. Terminal creation resolves this durable node metadata without live runtime reconciliation: host shells do not depend on Lima availability, and guest-shell child commands perform their own runtime checks. Front ends never assemble launch commands independently.
 
 Daemon terminal runtimes are serialized actors. Clients send commands for input, resize, snapshot, focus, clipboard, and close; they do not call Ghostty or PTY state concurrently. Dirty notifications are edge-triggered and clients pull snapshots, preventing redraw loops. Never poll immutable terminal grids on an idle timer: route dirty notifications through the single-owner UI loop, retain only a dirty version for hidden tabs, and let the active tab wake a capacity-one snapshot worker with a bounded frame cadence. Keep terminal input off the TUI event loop: enqueue semantic events onto one FIFO worker per daemon terminal, stop admission and drain accepted input on detach, surface asynchronous delivery failures, and redraw payload input only after a fresh snapshot arrives. Preserve semantic input boundaries across the client/daemon seam: buffer Vaxis paste keys until `PasteEndEvent`, send bounded UTF-8-safe semantic paste chunks, and let the daemon actor re-create paste-start/payload/paste-end so Ghostty remains the owner of bracketed-paste mode. Preserve LF in paste data; a pasted newline is text, not an Enter key.
 

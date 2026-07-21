@@ -14,7 +14,7 @@ func TestNodeMarshalsRuntimeCommandsWhenConfigured(t *testing.T) {
 		ID:               "node-1",
 		Slug:             "root-node",
 		Runtime:          RuntimeVM,
-		Provider:         ProviderMicrosandbox,
+		Provider:         ProviderLima,
 		SandboxName:      "root-root-node-12345678",
 		Status:           NodeStatusCreated,
 		AgentProfileName: "codex-cli",

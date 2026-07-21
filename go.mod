@@ -7,7 +7,6 @@ require (
 	github.com/containerd/console v1.0.3
 	github.com/creack/pty v1.1.18
 	github.com/google/uuid v1.6.0
-	github.com/superradcompany/microsandbox/sdk/go v0.6.6
 	golang.org/x/crypto v0.48.0
 	golang.org/x/sys v0.41.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -9,8 +10,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-const requiredMicrosandboxVersion = "0.6.6"
 
 var (
 	unresolvedRuntimePlaceholderPattern = regexp.MustCompile(`\{\{[^{}]+\}\}`)
@@ -34,6 +33,16 @@ type SandboxClient interface {
 	Clone(ctx context.Context, sourceNode, targetNode Node) error
 	CopyToGuest(ctx context.Context, node Node, sourcePath, targetPath string, recursive bool) error
 	Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error
+}
+
+// runtimeMutationError marks a failed runtime call that may have created its
+// target. Service rollback may delete only errors carrying this marker; plain
+// precondition/dependency failures must never tear down a pre-existing instance.
+type runtimeMutationError struct{ error }
+
+func runtimeMutationMayHaveCreated(err error) bool {
+	var mutationErr *runtimeMutationError
+	return errors.As(err, &mutationErr)
 }
 
 type runtimeCommandKind string
@@ -108,14 +117,6 @@ func shellArgsFragment(args []string) string {
 		quoted = append(quoted, shellQuote(arg))
 	}
 	return strings.Join(quoted, " ")
-}
-
-func cloneSnapshotName(sandboxName string) string {
-	name := "clone-" + sandboxName
-	if len(name) > 128 {
-		name = name[:128]
-	}
-	return name
 }
 
 func validatePorts(ports []string) ([]string, error) {

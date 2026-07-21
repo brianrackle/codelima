@@ -1,12 +1,6 @@
 package codelima
 
-import (
-	"slices"
-
-	"gopkg.in/yaml.v3"
-)
-
-const ()
+import "gopkg.in/yaml.v3"
 
 type runtimeCommandsExample struct {
 	RuntimeCommands RuntimeCommandTemplates `yaml:"runtime_commands"`
@@ -19,95 +13,41 @@ type runtimeCommandTemplateField struct {
 
 func defaultRuntimeCommandTemplates() RuntimeCommandTemplates {
 	return RuntimeCommandTemplates{
-		Bootstrap: []string{},
-		WorkspaceSeedPrepare: []string{
-			`rm -rf {{target_path}} && mkdir -p {{target_parent}}`,
-		},
-	}
-}
-
-// legacyMSBCommandTemplates is retained only to recognize and remove the exact
-// built-in templates written by CodeLima before the Go SDK migration. These
-// strings are never executed by the production runtime.
-func legacyMSBCommandTemplates() RuntimeCommandTemplates {
-	return RuntimeCommandTemplates{
 		Version: []string{
 			"{{binary}} --version",
 		},
 		List: []string{
-			"{{binary}} ls --format json",
+			"{{binary}} list --json",
 		},
 		Create: []string{
-			"{{binary}} create --name {{sandbox_name}} --cpus 2 --memory 4G --init auto --shell /bin/bash{{mount_flags}}{{port_flags}}{{net_flags}} {{image}}",
-			"{{binary}} stop {{sandbox_name}}",
+			"{{binary}} create -y --name {{sandbox_name}} {{template_path}}",
 		},
 		Start: []string{
-			"{{binary}} start {{sandbox_name}}",
+			"{{binary}} start -y {{sandbox_name}}",
 		},
 		Stop: []string{
-			"{{binary}} stop {{sandbox_name}}",
+			"{{binary}} stop -y {{sandbox_name}}",
 		},
 		Delete: []string{
-			"{{binary}} rm -f {{sandbox_name}}",
+			"{{binary}} delete -f {{sandbox_name}}",
 		},
 		Clone: []string{
-			"{{binary}} snapshot create {{snapshot_name}} --from {{source_sandbox}} --force",
-			"{{binary}} run --snapshot {{snapshot_name}} --name {{sandbox_name}} --detach --cpus 2 --memory 4G --init auto --shell /bin/bash{{mount_flags}}{{port_flags}}{{net_flags}}",
-			"{{binary}} stop {{sandbox_name}}",
-			"{{binary}} snapshot rm {{snapshot_name}}",
+			"{{binary}} clone -y {{source_sandbox}} {{sandbox_name}}",
 		},
-		Bootstrap: defaultRuntimeCommandTemplates().Bootstrap,
+		Bootstrap: []string{},
 		WorkspaceSeedPrepare: []string{
-			`rm -rf {{target_path}} && mkdir -p {{target_parent}}`,
+			`owner="${SUDO_USER:-$(id -un)}" && group="$(id -gn "$owner")" && rm -rf {{target_path}} && mkdir -p {{target_parent}} && chown "$owner:$group" {{target_parent}}`,
 		},
 		Copy: []string{
-			"{{binary}} copy {{source_path}} {{copy_target}}",
+			"{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}}",
 		},
 		ShellExec: []string{
-			"{{binary}} exec{{workdir_flag}} {{sandbox_name}}{{command_args}}",
+			"{{binary}} shell{{workdir_flag}} {{sandbox_name}}{{command_args}}",
 		},
 		ShellLogin: []string{
-			"{{binary}} exec -t{{workdir_flag}} {{sandbox_name}} -- {{login_command}}",
+			"{{binary}} shell{{workdir_flag}} {{sandbox_name}}{{command_args}}",
 		},
 	}
-}
-
-// guestRuntimeCommandKinds are the only template kinds the Go SDK executes;
-// every other kind is a legacy CLI relic that is recognized (for removal) but
-// never run.
-func guestRuntimeCommandKind(kind runtimeCommandKind) bool {
-	return kind == runtimeCommandBootstrap || kind == runtimeCommandWorkspaceSeedPrepare
-}
-
-func validateSDKRuntimeCommandTemplates(templates ...RuntimeCommandTemplates) error {
-	legacy := legacyMSBCommandTemplates()
-	for _, template := range templates {
-		for _, field := range template.orderedFields() {
-			if guestRuntimeCommandKind(field.key) || len(*field.values) == 0 {
-				continue
-			}
-			if slices.Equal(*field.values, legacy.templates(field.key)) {
-				continue
-			}
-			return preconditionFailed("runtime command override is unavailable with the Microsandbox Go SDK", map[string]any{
-				"command": string(field.key),
-			})
-		}
-	}
-	return nil
-}
-
-func removeLegacyMSBCommandTemplates(template RuntimeCommandTemplates) RuntimeCommandTemplates {
-	legacy := legacyMSBCommandTemplates()
-	for _, field := range template.orderedFields() {
-		if guestRuntimeCommandKind(field.key) {
-			continue
-		}
-		if slices.Equal(*field.values, legacy.templates(field.key)) {
-			*field.values = nil
-		}
-	}
-	return template
 }
 
 func (t RuntimeCommandTemplates) ApplyDefaults(defaults RuntimeCommandTemplates) RuntimeCommandTemplates {
@@ -237,7 +177,7 @@ func nodeFileNeedsRefresh(data []byte, node Node, _ RuntimeCommandTemplates) boo
 
 func containsUnsupportedRuntimeCommandYAML(runtimeCommands map[string]any) bool {
 	for key := range runtimeCommands {
-		if !guestRuntimeCommandKind(runtimeCommandKind(key)) {
+		if !supportedRuntimeCommandKind(runtimeCommandKind(key)) {
 			return true
 		}
 	}

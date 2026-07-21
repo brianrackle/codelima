@@ -10,9 +10,10 @@ Problem:
 - ADR 87 makes terminal the default right-pane view for an initially selected running node while leaving stopped nodes info-first. Automated tests cover both startup defaults and the sticky `i` override; the real-terminal pass must confirm the running-node border shows `Info [Terminal]` without moving keyboard focus out of the node list.
 - macOS Option delivery depends on the emulator: if Ghostty is not configured with `macos-option-as-alt = true` and the Option glyph fallbacks (`†`, `ˇ`, `∑`) do not arrive, the tab keybindings cannot fire.
 - Daemon integration coverage proves that a second TUI takes input ownership and can open a terminal after several connection read-timeout intervals. Focus-handoff coverage also proves repeated first-to-second-to-first `FocusIn` transitions reclaim ownership before the next mutation, while revocation-event coverage proves routine handoffs stay out of the TUI footer. Paste coverage proves daemon-backed terminals batch semantic paste requests, preserve LF, retain bracket boundaries, avoid shortcut matching, and chunk large UTF-8 payloads safely. Input-queue coverage proves ordinary keys leave the UI loop without waiting for daemon RPC completion, stay ordered, and wait for fresh terminal state before redraw. A real two-terminal run still needs to confirm both TUIs repeatedly follow host-window focus without an ownership warning or observe-only error, verify multiline paste and responsive ordinary typing visually, and open a first guest or host tab after the 35-second QA idle interval.
-- ADRs 88 and 89 add automated unit and daemon-integration coverage for reconnect tab order and non-default-width handoff replay. The 2026-07-20 local QA run could not perform the matching interactive Flow 7 check because this Linux/aarch64 environment has no `/dev/kvm`; Microsandbox aborted the first VM before its agent relay became available.
+- ADRs 88 and 89 add automated unit and daemon-integration coverage for reconnect tab order and non-default-width handoff replay. The matching interactive Flow 7 check still requires a real terminal on native macOS.
 - ADR 91 adds an automated two-window regression proving a path-scoped refresh no longer closes tabs whose live nodes are outside that window's projection, while confirmed deletion still closes them. The matching disjoint-root, two-tabs-per-process restart flow still needs native interactive verification.
-- ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the Microsandbox-backed interactive flow.
+- ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the full interactive flow.
+- ADR 93 restores the pre-Microsandbox foreground-process-group invariant for interactive Lima shells. A real Linux/aarch64 Lima guest and controlling PTY verified Left, `Ctrl+a`, `Ctrl+e`, multiline bracketed paste, and guest `Ctrl+c`; `TestRunInteractiveCommandKeepsPTYInForeground` covers the underlying PTY ownership regression automatically. The same checks inside the complete native macOS Ghostty TUI flow remain part of this item.
 
 Suggested solution:
 
@@ -26,7 +27,7 @@ Advantages:
 
 Disadvantages:
 
-- Needs a real microsandbox-capable host and an interactive terminal; cannot be automated in CI today.
+- Needs a real Lima-capable host and an interactive terminal; cannot be automated in CI today.
 
 ### 1. Feed the host terminal background into the Ghostty backend
 
@@ -134,7 +135,7 @@ Disadvantages:
 
 Problem:
 
-- Configuration and environment create, update, clone, and delete avoid Microsandbox validation because they only mutate local metadata.
+- Configuration and environment create, update, clone, and delete avoid Lima validation because they only mutate local metadata.
 - Other mutating service paths may still call the broader runtime validation helper even when they do not need live sandbox state.
 - That keeps some metadata-only commands slower and harder to use from environments that only need the local store.
 
@@ -142,12 +143,12 @@ Suggested solution:
 
 - Audit all mutating `Service` methods and classify them as metadata-only or runtime-backed.
 - Keep dependency validation only on runtime-backed operations such as node create, lifecycle, shell, and clone.
-- Add focused regression tests that fail if metadata-only mutations start querying microsandbox again.
+- Add focused regression tests that fail if metadata-only mutations start querying Lima again.
 
 Advantages:
 
 - Keeps metadata operations predictably fast.
-- Makes CLI and TUI behavior more consistent when microsandbox is unavailable or slow.
+- Makes CLI and TUI behavior more consistent when Lima is unavailable or slow.
 - Reduces surprising coupling between local metadata edits and host virtualization state.
 
 Disadvantages:
@@ -267,9 +268,11 @@ Disadvantages:
 - Fixing the ordering may require broader changes in how runtime-backed service mutations reconcile metadata.
 - A durable cleanup record or retry path would add state and complexity to node lifecycle management.
 
-### 11. [cancelled] Investigate Lima-backed `node start` hangs when the optional containerd readiness check never completes
+### 11. [resolved] Avoid Lima containerd readiness hangs
 
-Resolution: cancelled because Lima is no longer a runtime dependency. Microsandbox has no equivalent Lima containerd readiness wait.
+Resolution: ADR 92 returns to Lima with both system and user containerd disabled
+in every rendered instance template. Native Linux/aarch64 start/restart passed
+without the optional containerd readiness path.
 
 Problem:
 
@@ -404,7 +407,7 @@ Disadvantages:
 Problem:
 
 - Interactive `codelima shell` sessions and embedded TUI shells now install temporary readline bindings so bash consumes modified-enter sequences as literal newlines instead of echoing fragments like `;2;13~`.
-- That repair is intentionally scoped to the default guest shell path, which is bash in CodeLima's default Microsandbox image.
+- That repair is intentionally scoped to the default guest shell path, which is bash in CodeLima's Ubuntu Lima template.
 - If a user changes their guest login shell to zsh or another line editor, the current `INPUTRC`-based fix will not help because those shells ignore readline configuration.
 
 Suggested solution:
@@ -425,23 +428,23 @@ Disadvantages:
 - Supporting multiple shell families will complicate the interactive shell wrapper and its tests.
 - More shell-specific logic increases the risk of drift between CLI shell sessions and embedded TUI sessions if it is not kept centralized.
 
-### 17. Separate durable node lifecycle from live microsandbox runtime state
+### 17. Separate durable node lifecycle from live Lima runtime state
 
 Problem:
 
-- `node.yaml` now persists only CodeLima-owned lifecycle metadata, but the in-memory `Node` model and user-facing outputs still expose a single `status` field that mixes lifecycle values with live microsandbox runtime values.
-- That means callers still have to infer whether a given `status` came from CodeLima lifecycle state such as `failed` or `terminated`, or from a fresh Microsandbox observation such as `running` or `stopped`.
+- `node.yaml` now persists only CodeLima-owned lifecycle metadata, but the in-memory `Node` model and user-facing outputs still expose a single `status` field that mixes lifecycle values with live Lima runtime values.
+- That means callers still have to infer whether a given `status` came from CodeLima lifecycle state such as `failed` or `terminated`, or from a fresh Lima observation such as `running` or `stopped`.
 - The storage-layer split is done, but the API and renderer vocabulary still overlap.
 
 Suggested solution:
 
-- Split the public node model into an explicit lifecycle field for CodeLima-owned states such as `created`, `provisioning`, `failed`, `terminating`, and `terminated`, plus a separate live runtime field sourced from microsandbox.
+- Split the public node model into an explicit lifecycle field for CodeLima-owned states such as `created`, `provisioning`, `failed`, `terminating`, and `terminated`, plus a separate live runtime field sourced from Lima.
 - Update CLI and TUI rendering so operator-facing surfaces can present both concepts deliberately instead of overloading one `status` field.
 - Keep compatibility shims only as long as needed for existing API and test callers.
 
 Advantages:
 
-- Makes microsandbox the single source of truth for live VM state.
+- Makes Lima the single source of truth for live VM state.
 - Clarifies which parts of node state are CodeLima-owned orchestration metadata versus external runtime facts.
 - Reduces ambiguity for renderers, tests, and future API consumers.
 
@@ -706,84 +709,37 @@ Disadvantages:
 
 - 10Hz retry while genuinely backpressured; touches a tested helper.
 
-### 28. Complete microsandbox E1 release qualification on both native platforms
+### 28. Complete Lima release qualification on every native platform
 
 Problem:
 
-- E1–E10 passed against microsandbox 0.6.6 in the available nested
-  Linux/aarch64-on-Apple environment. The production swap, Track 3 daemon, and
-  Track 4 handoff are implemented and locally verified; ADR 55 is Accepted.
-- The tested guest contract is `--init auto` with
-  `ghcr.io/superradcompany/debian-systemd:12`. It eliminates the zombie seen
-  with microsandbox's minimal agent as PID 1.
-- Native macOS/Apple Silicon and native Linux/KVM runs, a host reboot
-  persistence check, and human observation of a full-screen authenticated
-  agent remain release qualifications. No native result is claimed by the
-  nested run.
-- The native rerun must qualify the official Go SDK paths from ADR 71,
-  including streaming exec/stdin, interactive `Attach`, snapshot clone,
-  mounted workspaces, and the CodeLima SDK SSH helper. It must also prove that
-  a failing PATH-shadow `msb` executable is never invoked by CodeLima.
-- Those SDK paths passed in the available nested Linux/aarch64 environment on
-  2026-07-10, including recursive copy after fixing the SDK's file-at-a-time
-  copy semantic. The native rerun remains a release qualification rather than
-  unfinished SDK implementation.
-- The available Linux/aarch64 sandbox on 2026-07-18 now provides glibc 2.36,
-  while the SDK 0.6.6 bundled `libmicrosandbox_go_ffi.so` references
-  `GLIBC_2.39`. QA Flow 1's metadata checks pass, but the SDK cannot load, so
-  node creation and runtime-backed Flows 2–8—including ADR 79's two-VM generic
-  `localhost`/`127.0.0.1` claimant/transfer flow—cannot be rerun in this sandbox.
-- On 2026-07-20 the SDK and FFI loaded successfully, but `msb doctor` reported
-  `/dev/kvm` missing. QA Flow 1, the zero-terminal portion of Flow 5 (including
-  session quarantine and live update), and the Linux skip check from Flow 8
-  passed; the first Flow 2 node creation aborted before the agent relay became
-  available, so runtime-backed Flows 2–7 still require a KVM-capable host.
-- A native macOS trial exposed multi-second input echo while the TUI repeatedly
-  redrew a daemon terminal. ADR 68 removes the draw/unchanged-resize/event
-  feedback loop with client and daemon regression coverage; the native rerun
-  must confirm that ordinary typing remains responsive after repeated redraws
-  and resizes.
-- The same native qualification must create a fresh node with the built-in
-  `codex` environment after ADR 69, confirm bootstrap invokes the official
-  standalone installer, and verify `command -v codex` plus an authenticated
-  interactive Codex session from the ordinary node shell.
-- The native macOS run must execute QA Flow 8 from ADR 73 against Apple
-  Virtualization.framework, record `kern.num_files` and the owning
-  virtualization process's descriptor count before and after reclamation, and
-  confirm the default 20% trigger intervenes before the observed `ENFILE`
-  failure under a large mounted-tree traversal.
-- Dynamic-forwarding unit coverage proves IPv4-to-IPv6 guest-loopback fallback,
-  but the native rerun must also bind a real guest HTTP server only to `::1`
-  and verify generic `localhost` and `127.0.0.1` plus `{node}.localhost` host routes through
-  the Microsandbox SSH `direct-tcpip` implementation.
-- No-argument live update now supplies the caller binary and protocol 3 rejects
-  stale protocol-2 semantic-paste clients. Native Linux qualification must
-  start the prior `unixpacket` daemon, invoke update from the protocol-3 binary
-  with no path, and verify legacy-import terminal continuity. Native macOS
-  qualification must verify that the same first update reports the one-time
-  `fallback: restart`, keeps VMs running, and restores terminal IDs, then that a
-  second update between framed-stream daemons reports `live_handoff: true` and
-  preserves the live terminal process. The first update must also complete when
-  legacy teardown lasts longer than five seconds, and an immediate subsequent
-  start must wait for daemon-lock release rather than exit before ready.
+- ADRs 92–93 and `LIMA_PLAN.md` return CodeLima to Lima 2.x with schema v4. The
+  automated suite, real Linux/aarch64 QEMU/KVM create/start/shell/stop/restart,
+  running-source clone restoration, observation watch, persistent SSH HTTP
+  forwarding, interactive PTY input, delete, and cleanup passed on 2026-07-20
+  and 2026-07-21. Evidence is in
+  `plans/spike-notes/LIMA_RETURN_SPIKE.md`.
+- Native macOS arm64 VZ/VirtioFS, Linux amd64, and the complete interactive
+  Ghostty/agent matrix have not all run. Host reboot, macOS sleep/wake,
+  five-minute idle CPU, explicit-port conflicts, two-node same-port routing,
+  and VirtioFS file-pressure behavior
+  remain release qualification.
+- The Linux implementation run was nested and its checkout filesystem was 9p.
+  It proved that `LIMA_HOME` on 9p fails OpenSSH control-socket creation and
+  that an isolated native-filesystem `LIMA_HOME` succeeds. Native release runs
+  must qualify the documented short/local runtime-home requirement.
 
 Suggested solution:
 
-- Re-run all of E1 through CodeLima's embedded Ghostty terminal on native
-  macOS/Apple Silicon and native Linux/KVM, including both login transports,
-  full-screen agents, mouse, clipboard, latency, and abrupt terminal close.
-- Re-run lifecycle, mount, port, clone, daemon, and live-update QA on each host,
-  verify IPv4- and IPv6-loopback dynamic forwarding, and verify writable-layer
-  persistence after a physical reboot.
-- Run the schema-v3 QA matrix on a native host with glibc 2.39 or newer, or
-  obtain an SDK 0.6.6 ARM64 FFI build compatible with its documented minimum;
-  report the current 2.39 symbol dependency upstream if the latter is expected.
-- On macOS, run the pressure flow first at the QA-only 1% threshold and then at
-  the production 20% threshold while watching host descriptor counts; adjust
-  the default in a follow-up ADR if the native failure boundary leaves
-  insufficient headroom.
-- Record exact host, image digest, commands, and output in the spike notes before
-  publishing a release.
+- Run every `QA.md` flow on macOS arm64, Linux amd64, and Linux arm64 using
+  Lima 2.1.0 plus the newest supported 2.x release.
+- Record VZ/QEMU process CPU after a five-minute idle window, interactive input
+  cadence, sleep/wake or reboot recovery, mounted/copy semantics, clone source
+  restoration, and observation/SSH reconnection.
+- On macOS, run the VirtioFS pressure flow at the QA threshold and production
+  threshold while recording host descriptor counts.
+- Append exact versions, image digests, commands, outputs, and cleanup proof to
+  the Lima spike report before publishing a release.
 
 Advantages:
 
@@ -791,34 +747,30 @@ Advantages:
   virtualization stacks.
 - Separates local implementation completion from release evidence that cannot
   be produced in a nested development guest.
-- Resolving the FFI baseline mismatch restores repeatable runtime QA on the
-  existing Linux/aarch64 sandbox instead of relying only on physical hosts.
+- Confirms Lima's supported VZ and QEMU/KVM paths rather than relying only on a
+  nested Linux implementation environment.
 
 Disadvantages:
 
-- Requires two physical host environments and human terminal interaction.
+- Requires all three release architectures and human terminal interaction.
 - Host reboot verification is unsuitable for ordinary CI.
-- Upgrading the sandbox libc changes its baseline, while rebuilding or fixing
-  the bundled SDK FFI is external to CodeLima.
 
 ### 29. Build and publish a smaller pre-baked default guest image
 
 Problem:
 
-- The safe default is currently a third-party Debian systemd image selected
-  because it passed the real-PID-1 close contract and supports the apt-based
-  built-in bootstraps.
-- Pulling and bootstrapping general-purpose images increases first-node startup
-  time, and CodeLima does not control that image's update cadence or digest.
+- The safe default is currently Lima's upstream Ubuntu template, which supplies
+  a full distribution guest and supports the apt-based built-in bootstraps.
+- Pulling and bootstrapping a general-purpose cloud image increases first-node
+  startup time, and CodeLima does not control the template's update cadence.
 
 Suggested solution:
 
-- Define a minimal apt-based image with a real reaper (`tini`, s6, or systemd),
-  `/bin/sh`, CA certificates, curl, git, Node/npm prerequisites, and no embedded
-  user secrets.
-- Publish immutable multi-architecture digests, add an image build/scan Make
-  recipe and release job, then rerun E1–E10 and the complete QA matrix before
-  changing `default_image` in a new ADR.
+- Define a minimal apt-based cloud image/template with systemd, `/bin/sh`, CA
+  certificates, curl, git, agent prerequisites, and no embedded user secrets.
+- Publish immutable multi-architecture digests, add an image/template build and
+  scan Make recipe, then rerun the Lima matrix before changing the default
+  configuration's `image` in a new ADR.
 
 Advantages:
 
@@ -836,11 +788,10 @@ Problem:
 
 - ADRs 70 and 79 deliver automatic HTTP/WebSocket routes at generic
   `localhost:{port}` and explicit `{node}.localhost:{port}`, but raw TCP has no
-  HTTP Host header, UDP is not supported by the Microsandbox SSH seam, and
+  HTTP Host header, UDP is not supported by the Lima SSH seam, and
   direct TLS hides the hostname until after connection establishment.
-- ADR 71 removed the former additive global `msb ssh authorize` mutation. The
-  SDK helper now applies the per-home public key only to its per-sandbox SSH
-  server, so there is no stale global authorization to revoke.
+- ADR 92 uses Lima's private per-instance SSH config and identity without
+  changing global SSH authorization, so there is no CodeLima key to revoke.
 - Live daemon update reconstructs forwarding peers and host listeners after
   commit rather than transferring them with the terminal descriptors.
 
@@ -856,8 +807,8 @@ Advantages:
 
 - Could extend node-name addressing beyond HTTP and reduce forwarding churn
   during daemon replacement.
-- Could reduce reliance on a stable per-home forwarding key if rotation is
-  later added to the SDK-helper lifecycle.
+- Could preserve raw connections across daemon live update if listener handoff
+  is later added.
 
 Disadvantages:
 
@@ -873,10 +824,10 @@ Problem:
 - Writing `2` to `/proc/sys/vm/drop_caches` requires guest root or the
   equivalent `CAP_SYS_ADMIN` privilege. The current reclaimer executes
   `sh -c 'echo 2 > /proc/sys/vm/drop_caches'` without checking either.
-- The default Microsandbox guest contract was validated as `uid=0` with no
-  `sudo`, so the command is expected to work for the shipped default image,
-  but configurable images or future guest-identity changes may run SDK execs
-  without sufficient privilege.
+- Lima logs in as its distribution user and CodeLima wraps noninteractive
+  guest commands with passwordless `sudo -H --`, so the command is expected to
+  run as root for the shipped template; custom templates can still violate
+  that elevation contract.
 - Unit coverage currently uses a fake guest shell. Native macOS QA has not yet
   demonstrated that the real command can write the sysctl and release host
   descriptors. An unprivileged node reports a generic reclaim error and then
@@ -887,9 +838,9 @@ Suggested solution:
 - Add a tested guest privilege/writability probe before reclamation and expose
   an explicit unsupported or insufficient-privilege result in the daemon
   snapshot instead of relying on the redirection failure.
-- Keep the direct write for the root-based default contract. If non-root
-  guests are intentionally supported, use a non-interactive elevation path
-  such as `sudo -n sh -c 'echo 2 > /proc/sys/vm/drop_caches'`; never use
+- Keep the direct write behind the centralized root command boundary. If
+  non-root guests are intentionally supported, use a non-interactive elevation
+  path such as `sudo -n sh -c 'echo 2 > /proc/sys/vm/drop_caches'`; never use
   `sudo echo 2 > ...`, because the calling shell performs the redirection.
 - Extend QA Flow 8 to assert the effective guest identity, successful sysctl
   write, and a measurable descriptor reduction on native macOS.

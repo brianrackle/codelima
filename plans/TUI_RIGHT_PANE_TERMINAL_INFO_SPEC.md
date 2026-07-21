@@ -1,11 +1,11 @@
 # TUI Running-Node Default Pane Specification
 
 Status: Implemented v2 (Go / Vaxis / Ghostty VT)
-Purpose: Define the conditional startup pane default for schema-v3 nodes while preserving explicit, sticky pane selection after initialization.
+Purpose: Define the conditional startup pane default for schema-v4 nodes while preserving explicit, sticky pane selection after initialization.
 
 ## Assumptions
 
-- The schema-v3 TUI contains a flat node list and no user-facing project rows.
+- The schema-v4 TUI contains a flat node list and no user-facing project rows.
 - Guest terminals are available only when `nodeAutoStartsSession` reports a node as running.
 - Daemon-backed terminal tabs may already exist when a TUI starts.
 

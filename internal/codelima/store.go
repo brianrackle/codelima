@@ -14,14 +14,17 @@ type Store struct {
 	cfg Config
 }
 
-const metadataSchemaVersion = "3"
+const metadataSchemaVersion = "4"
 
 func ensureSchemaVersion(home string) error {
 	marker := filepath.Join(home, "_config", "schema.version")
 	if data, err := os.ReadFile(marker); err == nil {
 		found := strings.TrimSpace(string(data))
+		if found == "3" {
+			return preconditionFailed("this CODELIMA_HOME uses schema v3. Stop and delete its Microsandbox nodes with the previous CodeLima release, or point --home/CODELIMA_HOME at a new directory; no automatic runtime migration exists", map[string]any{"found": found, "required": metadataSchemaVersion})
+		}
 		if found == "2" {
-			return preconditionFailed("this CODELIMA_HOME uses schema v2. Point --home/CODELIMA_HOME at a new directory; no automatic migration exists", map[string]any{"found": found, "required": metadataSchemaVersion})
+			return preconditionFailed(fmt.Sprintf("this CODELIMA_HOME uses schema v%s. Use its matching previous CodeLima release to remove runtime nodes, or point --home/CODELIMA_HOME at a new directory; no automatic runtime migration exists", found), map[string]any{"found": found, "required": metadataSchemaVersion})
 		}
 		if found != metadataSchemaVersion {
 			return preconditionFailed("unsupported CODELIMA_HOME schema version", map[string]any{"found": strings.TrimSpace(string(data)), "required": metadataSchemaVersion})
@@ -406,6 +409,27 @@ func (s *Store) incompleteNodeMetadata(nodeID string) (IncompleteNodeMetadata, e
 
 func (s *Store) nodeInstanceIndexPath(instanceName string) string {
 	return filepath.Join(s.cfg.MetadataRoot, "_index", "nodes", "by-instance", instanceName)
+}
+
+func (s *Store) SaveIncompleteNodeReference(nodeID, sandboxName string) error {
+	if strings.TrimSpace(nodeID) == "" {
+		return invalidArgument("node id is required for incomplete runtime registration", nil)
+	}
+	if err := validateSandboxName(sandboxName); err != nil {
+		return err
+	}
+	if err := ensureDir(s.nodeDir(nodeID)); err != nil {
+		return err
+	}
+	if err := atomicWriteFile(s.nodeInstanceRefPath(nodeID), []byte(sandboxName+"\n"), 0o644); err != nil {
+		_ = os.RemoveAll(s.nodeDir(nodeID))
+		return err
+	}
+	if err := atomicWriteFile(s.nodeInstanceIndexPath(sandboxName), []byte(nodeID+"\n"), 0o644); err != nil {
+		_ = os.RemoveAll(s.nodeDir(nodeID))
+		return err
+	}
+	return nil
 }
 
 func (s *Store) nodeSlugIndexPath(slug string) string {

@@ -1,10 +1,10 @@
 # CodeLima Improvement Plan — Implementation Handover
 
-> Historical implementation handover. Project-oriented object-model and terminal examples below describe the pre-schema-v3 codebase. ADR 72 and `SPEC.md` now define reusable configurations, directory-bound nodes, and node-scoped host terminals; do not implement new work from the superseded project examples.
+> Historical implementation handover. Project-oriented object-model and terminal examples below describe the pre-schema-v3 codebase. ADR 72 and `SPEC.md` now define reusable configurations, directory-bound nodes, and node-scoped host terminals; ADR 92 supersedes the Microsandbox backend material below with schema-v4 Lima. Do not implement new work from the superseded examples.
 
 Status: Handover — implementation-ready
 Audience: the implementing team. This document assumes you know Go. It does **not** assume prior knowledge of this codebase, the TUI internals, the Ghostty bridge, PTY/process-group mechanics, or the daemon design space — everything you need is either in here or pointed to from here.
-Companion document: `plans/MICROSANDBOX_MIGRATION_PLAN.md` (the proposed Lima → microsandbox backend swap; automated E1 passed in the current environment with a real guest init, while E2–E10 and release qualification remain; see `plans/spike-notes/MSB_SPIKE.md`).
+Current backend document: `../LIMA_PLAN.md`. `MICROSANDBOX_MIGRATION_PLAN.md` and its spike are retained only as historical migration evidence.
 
 ---
 

@@ -673,7 +673,7 @@ func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
 		"Delete",
 		[]string{
 			"Delete node " + node.Slug + ".",
-			"The associated microsandbox will be terminated.",
+			"The associated Lima instance will be terminated.",
 		},
 		nil,
 		func(_ map[string]string) error {

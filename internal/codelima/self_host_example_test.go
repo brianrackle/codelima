@@ -48,10 +48,10 @@ func TestSelfHostConfigurationExampleIsSanitizedAndValid(t *testing.T) {
 	if got := strings.Join(configuration.Environments, "|"); got != "codex" {
 		t.Fatalf("expected codex environment, got %q", got)
 	}
-	if configuration.Image != "ghcr.io/superradcompany/debian-systemd:12" {
-		t.Fatalf("expected microsandbox image, got %q", configuration.Image)
+	if configuration.Image != "template:ubuntu" {
+		t.Fatalf("expected Lima template, got %q", configuration.Image)
 	}
-	if got := strings.Join(configuration.BootstrapCommands, "|"); got != `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"|echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.profile|eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"|apt-get update && apt-get install -yq make build-essential bubblewrap curl|curl -fsSL https://install.microsandbox.dev | sh` {
+	if got := strings.Join(configuration.BootstrapCommands, "|"); got != `sudo -u "$SUDO_USER" -H /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"|sudo -u "$SUDO_USER" -H sh -lc 'echo '\''eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"'\'' >> ~/.profile'|apt-get update && apt-get install -yq make build-essential bubblewrap curl|sudo -u "$SUDO_USER" -H sh -lc 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && brew install lima'` {
 		t.Fatalf("expected bootstrap overrides, got %q", got)
 	}
 	if configuration.VCPUs != 2 || configuration.MemoryMiB != 4096 || configuration.DiskMiB != 20480 {

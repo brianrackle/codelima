@@ -3,16 +3,15 @@
 # creating a node in your local checkout directory.
 id: 019d25e8-6b6f-73ad-aa54-499f76f03f55
 slug: codelima
-image: ghcr.io/superradcompany/debian-systemd:12
+image: template:ubuntu
 agent_profile_name: codex-cli
 environments:
   - codex
 bootstrap_commands:
-  - /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  - echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.profile
-  - eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+  - sudo -u "$SUDO_USER" -H /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  - sudo -u "$SUDO_USER" -H sh -lc 'echo '\''eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"'\'' >> ~/.profile'
   - apt-get update && apt-get install -yq make build-essential bubblewrap curl
-  - curl -fsSL https://install.microsandbox.dev | sh
+  - sudo -u "$SUDO_USER" -H sh -lc 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && brew install lima'
 vcpus: 2
 memory_mib: 4096
 disk_mib: 20480

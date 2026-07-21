@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestEnsureLayoutCreatesSchemaV3WithoutProjectStorage(t *testing.T) {
+func TestEnsureLayoutCreatesSchemaV4WithoutProjectStorage(t *testing.T) {
 	home := t.TempDir()
 	store := NewStore(DefaultConfig(home))
 	if err := store.EnsureLayout(); err != nil {
@@ -25,7 +25,7 @@ func TestEnsureLayoutCreatesSchemaV3WithoutProjectStorage(t *testing.T) {
 		}
 	}
 	marker, err := os.ReadFile(filepath.Join(home, "_config", "schema.version"))
-	if err != nil || string(marker) != "3\n" {
+	if err != nil || string(marker) != "4\n" {
 		t.Fatalf("schema marker = %q, %v", marker, err)
 	}
 	configuration, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
@@ -37,6 +37,41 @@ func TestEnsureLayoutCreatesSchemaV3WithoutProjectStorage(t *testing.T) {
 	}
 	if got := strings.Join(configuration.Environments, ","); got != "codex,claude-code" {
 		t.Fatalf("expected default coding-agent environments, got %q", got)
+	}
+}
+
+func TestSchemaV3HomeIsRejectedWithoutMutation(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "_config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(configDir, "schema.version")
+	if err := os.WriteFile(marker, []byte("3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nodeDir := filepath.Join(home, "nodes", "existing")
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nodePath := filepath.Join(nodeDir, "node.yaml")
+	const original = "provider: microsandbox\nsandbox_name: existing\n"
+	if err := os.WriteFile(nodePath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := NewStore(DefaultConfig(home)).EnsureLayout()
+	if err == nil || !strings.Contains(err.Error(), "schema v3") || !strings.Contains(err.Error(), "new directory") {
+		t.Fatalf("expected actionable v3 rejection, got %v", err)
+	}
+	if data, readErr := os.ReadFile(marker); readErr != nil || string(data) != "3\n" {
+		t.Fatalf("v3 marker was mutated: %q, %v", data, readErr)
+	}
+	if data, readErr := os.ReadFile(nodePath); readErr != nil || string(data) != original {
+		t.Fatalf("v3 node was mutated: %q, %v", data, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, "configurations")); !os.IsNotExist(statErr) {
+		t.Fatalf("v3 rejection created schema-v4 directories")
 	}
 }
 
@@ -103,7 +138,7 @@ func TestConfigurationAndFrozenNodeRoundTrip(t *testing.T) {
 		t.Fatalf("SaveConfiguration() error = %v", err)
 	}
 	directory := t.TempDir()
-	node := Node{ID: newID(), Slug: "worker", ConfigurationID: configuration.ID, DirectoryPath: directory, Runtime: RuntimeVM, Provider: ProviderMicrosandbox, SandboxName: "worker", Image: configuration.Image, VCPUs: configuration.VCPUs, MemoryMiB: configuration.MemoryMiB, DiskMiB: configuration.DiskMiB, Environments: []string{"codex"}, Status: NodeStatusCreated, AgentProfileName: "codex-cli", BootstrapCommands: []string{"true"}, WorkspaceMode: WorkspaceModeCopy, GuestWorkspacePath: directory, CreatedAt: now, UpdatedAt: now}
+	node := Node{ID: newID(), Slug: "worker", ConfigurationID: configuration.ID, DirectoryPath: directory, Runtime: RuntimeVM, Provider: ProviderLima, SandboxName: "worker", Image: configuration.Image, VCPUs: configuration.VCPUs, MemoryMiB: configuration.MemoryMiB, DiskMiB: configuration.DiskMiB, Environments: []string{"codex"}, Status: NodeStatusCreated, AgentProfileName: "codex-cli", BootstrapCommands: []string{"true"}, WorkspaceMode: WorkspaceModeCopy, GuestWorkspacePath: directory, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveNode(node, BootstrapState{AgentProfileName: "codex-cli"}); err != nil {
 		t.Fatalf("SaveNode() error = %v", err)
 	}

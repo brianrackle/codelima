@@ -1,6 +1,6 @@
 # Replace Lima with microsandbox as the sole runtime backend
 
-Status: Accepted — microsandbox 0.6.6 passed the complete local Phase 0 gate
+Status: Superseded by [ADR 92](return_to_lima_as_the_sole_runtime_92.md)
 
 ## Context and Problem Statement
 

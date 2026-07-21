@@ -1,6 +1,6 @@
 # CodeLima
 
-CodeLima is a Go CLI and shell-first TUI for directory-bound coding VMs. It uses Microsandbox as its sole runtime and the official Microsandbox Go SDK as its sole integration; CodeLima never shells out to the `msb` CLI and has no CLI fallback.
+CodeLima is a Go CLI and shell-first TUI for directory-bound coding VMs. It uses Lima 2.x as its sole runtime, with VZ on macOS arm64 and QEMU/KVM on Linux. Nodes are full-distribution Ubuntu VMs configured through inspectable Lima templates and commands.
 
 The model has three user-facing objects:
 
@@ -8,17 +8,25 @@ The model has three user-facing objects:
 - An environment is a reusable ordered list of bootstrap commands that configurations can reference.
 - A node is a VM bound to one host directory. A directory can have multiple nodes, and every node records the configuration that created it.
 
-Projects are not part of schema v3. Passing a directory to CodeLima scopes the TUI to nodes bound to that directory or its descendants.
+Projects are not part of schema v4. Passing a directory to CodeLima scopes the TUI to nodes bound to that directory or its descendants.
 
 ## Requirements
 
 - macOS arm64, Linux amd64, or Linux arm64
-- A host capable of running Microsandbox (including its virtualization requirements)
+- Lima 2.1.0 or a compatible newer Lima 2.x release
+- Apple Virtualization.framework on macOS arm64, or QEMU with KVM on Linux
 - `git`
 
-The Go module pins the official SDK at `v0.6.6`. On its first runtime dependency check, the SDK ensures its matching `msb` and `libkrunfw` support files are installed under `~/.microsandbox`; an initial download may therefore require network access. CodeLima does not execute that `msb` binary and has no CLI fallback.
+Install Lima with `brew install lima`. CodeLima validates `limactl`, resolves the configured template, and lets Lima download its upstream guest image on first node creation.
 
-Keep both `CODELIMA_HOME` and `MSB_HOME` reasonably short. Microsandbox derives Unix-domain socket paths beneath them, and operating systems impose a small fixed path-length limit. Prefer paths such as `~/.codelima-v3` and `~/.msb` over deeply nested directories.
+Keep both `CODELIMA_HOME` and `LIMA_HOME` reasonably short. Lima derives Unix-domain socket paths beneath `LIMA_HOME`, and operating systems impose a small fixed path-length limit. `LIMA_HOME` must be on a filesystem that supports Unix sockets; network mounts such as 9p may store files successfully but fail during SSH/hostagent startup. Prefer paths such as `~/.codelima-v4` and `~/.lima`.
+
+Each running node has visible Lima hostagent and VZ/QEMU processes. The
+CodeLima daemon owns one long-lived `limactl watch --json` process for all
+nodes, so the TUI's recurring refresh does not spawn `limactl list`. Stopping a
+node removes its VM-driver and hostagent processes. Cloning a running node
+briefly stops the source because Lima requires a stopped disk, creates a
+stopped clone, and then restores the source to running.
 
 ## Install
 
@@ -29,7 +37,7 @@ brew tap brianrackle/codelima
 brew install codelima
 ```
 
-The formula installs CodeLima, its bundled `libghostty-vt` library, and `git`. Microsandbox remains a host prerequisite and installs its matching runtime support files during CodeLima's first dependency check. Release archives are published for macOS arm64, Linux amd64, and Linux arm64.
+The formula installs CodeLima, its bundled `libghostty-vt` library, `git`, and Lima. Release archives are published for macOS arm64, Linux amd64, and Linux arm64.
 
 ## Build
 
@@ -51,22 +59,22 @@ make test-integration
 make smoke
 ```
 
-The Go SDK requires cgo. The Makefile enables it and uses the host `cc` when available, falling back to the managed Zig compiler installed by `make init` in minimal development sandboxes. Tests run serially by default to avoid filesystem-resource spikes on virtualized development hosts; override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` after qualifying a host.
+The Ghostty integration requires cgo. The Makefile enables it and uses the host `cc` when available, falling back to the managed Zig compiler installed by `make init` in minimal development sandboxes. Tests run serially by default to avoid filesystem-resource spikes on virtualized development hosts; override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` after qualifying a host.
 
 See `BUILD.md` for packaging and release details.
 
 ## Use a separate home
 
-Schema v3 intentionally does not migrate old Lima-backed or schema-v2 homes. To run old and new CodeLima builds side by side, give the new binary its own home:
+Schema v4 intentionally does not migrate Microsandbox-backed schema-v3 homes, schema-v2 homes, or legacy Lima layouts. To run old and new CodeLima builds side by side, give the new binary its own home:
 
 ```sh
-CODELIMA_HOME="$HOME/.codelima-msb" ./bin/darwin-arm64/codelima .
+CODELIMA_HOME="$HOME/.codelima-v4" ./bin/darwin-arm64/codelima .
 ```
 
 or:
 
 ```sh
-./bin/darwin-arm64/codelima --home "$HOME/.codelima-msb" .
+./bin/darwin-arm64/codelima --home "$HOME/.codelima-v4" .
 ```
 
 `--home` must precede the command or directory argument. The old build can continue using `~/.codelima`; each home has its own daemon, metadata, and terminal sessions.
@@ -82,7 +90,7 @@ codelima doctor --repair
 
 The reserved `default` configuration starts with:
 
-- image `ghcr.io/superradcompany/debian-systemd:12`
+- image `template:ubuntu`
 - agent profile `codex-cli`
 - environments `codex` and `claude-code`
 - 2 vCPUs
@@ -122,7 +130,7 @@ Create a reusable recipe. Memory and disk accept MiB or GiB values:
 ```sh
 codelima configuration create \
   --slug large-codex \
-  --image ghcr.io/superradcompany/debian-systemd:12 \
+  --image template:ubuntu \
   --agent-profile codex-cli \
   --environment codex \
   --bootstrap-command 'apt-get update && apt-get install -y ripgrep' \
@@ -242,11 +250,15 @@ Important bindings:
 
 When the initially selected node is running, the TUI opens its existing or newly created guest tab in the right pane and highlights `Terminal` by default while keeping keyboard focus in the node list. A stopped initial node remains on `Info` and does not start a guest shell. After startup, `i` is a sticky explicit choice: moving between nodes does not replace the selected pane mode.
 
-The host and guest shells are both tabs of the node target. Host mode is indicated by the red top bar. Host tabs resolve their working directory from stored node metadata, so they remain available when the node is stopped or Microsandbox is temporarily unavailable.
+The host and guest shells are both tabs of the node target. Host mode is indicated by the red top bar. Host tabs resolve their working directory from stored node metadata, so they remain available when the node is stopped or Lima is temporarily unavailable.
 
 Quitting the TUI detaches from daemon-owned tabs instead of closing them. Reopening the same CodeLima home reconnects the surviving tabs in their original creation order. Multiple path-scoped TUI processes may use the same home: a window refresh preserves daemon tabs owned by nodes outside that window's directory scope, so closing and reopening disjoint windows does not delete one another's tabs. Live daemon update also preserves tab order and rebuilds wrapped terminal content at its captured geometry.
 
 Multiline paste is delivered to terminal applications as one bracketed paste rather than a sequence of simulated key presses. Newlines remain in the input buffer and do not execute pasted commands; press Enter explicitly when the pasted text is ready.
+
+Guest shells retain normal terminal line editing: arrow keys and Readline
+controls operate inside the guest, while `Ctrl+c` interrupts the active guest
+job without closing its CodeLima tab.
 
 Ordinary terminal input is delivered through an ordered background queue, so typing remains responsive while the daemon is serving terminal snapshots. The TUI redraws typed input when the daemon publishes the resulting fresh snapshot instead of repainting the previous screen after every key. Terminal snapshots are event-driven: idle tabs issue no recurring snapshot requests, and hidden tabs defer full-grid transfer until they become visible. Active output remains coalesced to at most 20 snapshots per second.
 
@@ -270,7 +282,7 @@ curl http://api-dev.localhost:8080
 
 No fixed list such as 3000/5173/8080 is preconfigured. The first active node discovered on a port claims the generic `localhost` and `127.0.0.1` URLs while it remains listening. When it stops, the daemon assigns the earliest remaining claimant during its one-second reconciliation loop. A temporary conflict with another host process is also retried every second; claims are in-memory and are not persisted.
 
-Two nodes can use the same guest port because `{node-slug}.localhost` always selects that specific node, regardless of which node owns the generic URL. The server may bind IPv4 or IPv6 guest loopback (`127.0.0.1`, `::1`, or `localhost`); traffic is tunneled through the daemon's Microsandbox SDK SSH helper. `codelima daemon snapshot` reports the generic `default_node` for every active port; it remains empty while a host bind is conflicted and no claim has succeeded.
+Two nodes can use the same guest port because `{node-slug}.localhost` always selects that specific node, regardless of which node owns the generic URL. The server may bind IPv4 or IPv6 guest loopback (`127.0.0.1`, `::1`, or `localhost`); traffic is tunneled through one persistent Go SSH connection built from Lima's private per-instance SSH configuration. `codelima daemon snapshot` reports the generic `default_node` for every active port; it remains empty while a host bind is conflicted and no claim has succeeded.
 
 Raw TCP services can still use explicit `--port HOST:GUEST` mappings at node creation. Explicit host ports must be unique among simultaneously running nodes.
 

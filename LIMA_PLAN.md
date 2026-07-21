@@ -1,6 +1,6 @@
 # Return to Lima Runtime Plan
 
-Status: Draft v1 (Go implementation, Lima 2.x)
+Status: Implemented locally (Go, Lima 2.x); full native release qualification remains in `TODO.md` item 28
 
 Purpose: Replace Microsandbox with Lima as CodeLima's sole VM runtime while preserving the current directory-bound node, reusable configuration, daemon-owned terminal, and dynamic hostname-forwarding product model.
 
@@ -15,7 +15,7 @@ The intended host runtime is:
 - macOS arm64: Lima with Apple's Virtualization.framework (`vmType: vz`).
 - Linux amd64/arm64: Lima with QEMU and KVM acceleration.
 - Guest: an upstream Lima Ubuntu template unless the Phase 0 comparison selects a Debian template.
-- Filesystem sharing: VirtioFS on VZ; the Phase 0-selected Lima-supported mount type on QEMU.
+- Filesystem sharing: VirtioFS on VZ; 9p on QEMU.
 - Built-in containerd: disabled.
 - VM lifecycle and guest entry: `limactl` 2.x.
 
@@ -26,7 +26,7 @@ This change replaces an opaque Microsandbox VMM process with Lima's per-instance
 - CodeLima may make another major metadata break because Microsandbox VM disks cannot be converted into Lima VM disks safely.
 - Users will recreate nodes in a fresh schema-v4 `CODELIMA_HOME`; no automatic schema-v3 or disk migration will be provided.
 - Configuration and environment definitions are small enough to recreate or copy manually. An export/import tool is outside this plan.
-- Lima 2.1.1 is the minimum implementation target. CodeLima will support compatible Lima 2.x releases rather than pinning one exact patch version.
+- Lima 2.1.0 is the minimum implementation target. CodeLima will support compatible Lima 2.x releases rather than pinning one exact patch version; the local 2.1.0 qualification confirmed the required template, list, clone, watch, and SSH metadata contracts.
 - The current release platforms remain macOS arm64, Linux amd64, and Linux arm64.
 - Lima does not replace Microsandbox network policy. Per-node domain egress rules will be removed from the supported surface.
 
@@ -61,7 +61,7 @@ This change replaces an opaque Microsandbox VMM process with Lima's per-instance
 These decisions are normative for the initial implementation:
 
 1. Lima is the sole backend. Do not add a provider registry, runtime selection flag, or dual-backend compatibility layer.
-2. Metadata schema v4 uses Lima vocabulary. `sandbox_name` becomes `instance_name`, and `image` becomes `template`.
+2. Metadata schema v4 retains the existing `sandbox_name` and `image` field names so the runtime replacement does not create unnecessary product-surface churn. In schema v4, `image` contains a Lima template reference and `sandbox_name` contains the Lima instance name.
 3. Schema v3 is rejected with an actionable error. CodeLima must not mutate a schema-v3 home.
 4. The default template is `template:ubuntu` unless Phase 0 demonstrates a material reliability or idle-cost advantage for a specific Debian template.
 5. The default VM driver is `vz` on macOS and `qemu` on Linux.
@@ -70,8 +70,7 @@ These decisions are normative for the initial implementation:
 8. Lima automatic port publication is disabled. Codelima remains the owner of public host listeners and hostname routing.
 9. Explicit ports are rendered as static Lima forwarding rules before a final ignore-all rule.
 10. Initial Lima SSH connectivity uses a localhost TCP SSH port (`ssh.overVsock: false`) so the Go forwarding client can use a stable, inspectable transport. A later optimization may add direct AF_VSOCK support.
-11. Lima's current clone operation requires a stopped source. `node clone` must return a precondition error for a running source rather than stopping it implicitly.
-12. A supplied `net_policy` is a validation error in schema-v4 inputs; it must not be silently ignored.
+11. Lima's current clone operation requires a stopped source. `node clone` temporarily stops a running source, clones it, and restores the source to its prior running state. A stopped source remains stopped.
 
 ## 5. Target Architecture
 
@@ -167,62 +166,29 @@ The existing daemon-generated Microsandbox authorization key and `__sdk-ssh-serv
 
 ### 6.1 Settings
 
-Schema-v4 settings replace `default_image` with `default_template`:
+Schema-v4 keeps the current daemon-only serialized settings contract:
 
 ```yaml
-metadata_root: /Users/example/.codelima
-default_agent_profile: codex-cli
-default_template: template:ubuntu
-default_ports: []
-
-lima:
-  vm_type_darwin: vz
-  vm_type_linux: qemu
-  mount_type_darwin: virtiofs
-  mount_type_linux: default
-  ssh_over_vsock: false
-  containerd: none
-
-runtime_commands:
-  version:
-    - "{{binary}} --version"
-  list:
-    - "{{binary}} list --json"
-  create:
-    - "{{binary}} create -y --name {{instance_name}} {{template_path}}"
-  start:
-    - "{{binary}} start -y {{instance_name}}"
-  stop:
-    - "{{binary}} stop -y {{instance_name}}"
-  delete:
-    - "{{binary}} delete -f {{instance_name}}"
-  clone:
-    - "{{binary}} clone -y {{source_instance}} {{target_instance}}"
-  copy:
-    - "{{binary}} copy{{recursive_flag}} {{source_path}} {{copy_target}}"
-  shell_exec:
-    - "{{binary}} shell --workdir {{workdir}} {{instance_name}} -- {{command}}"
-  shell_login:
-    - "{{binary}} shell --workdir {{workdir}} {{instance_name}}"
+daemon:
+  autostart: true
+  restore: respawn
+  virtiofs_reclaim: true
+  virtiofs_reclaim_threshold_percent: 20
 ```
 
-The final command syntax must be set from Phase 0 output and covered by table tests. Empty workdir and command fragments must not produce invalid arguments.
+The reusable default configuration retains its `image` field and seeds it as
+`template:ubuntu`. Runtime command defaults remain an internal compatibility
+seam and are not added to `settings.yaml`.
 
 The compiled minimum version is authoritative and is not user-configurable. CodeLima accepts Lima major version 2 at or above the minimum, rejects older or different major versions, and warns in `doctor` when the installed minor is newer than the highest release qualified by CodeLima.
 
 ### 6.2 Configuration
 
-Reusable configurations change from:
-
 ```yaml
-image: ghcr.io/superradcompany/debian-systemd:12
+image: template:ubuntu
 ```
 
-to:
-
-```yaml
-template: template:ubuntu
-```
+The field name remains `image`, but OCI image references are no longer accepted: the value resolves through Lima's template mechanism.
 
 CPU, memory, disk, agent profile, environments, and bootstrap commands retain their current frozen-at-node-create semantics.
 
@@ -233,8 +199,8 @@ The durable node fields become:
 ```yaml
 runtime: vm
 provider: lima
-instance_name: api-dev
-template: template:ubuntu
+sandbox_name: api-dev
+image: template:ubuntu
 vcpus: 2
 memory_mib: 4096
 disk_mib: 20480
@@ -246,8 +212,6 @@ workspace_mount_path: /Users/example/src/api
 
 Remove:
 
-- `sandbox_name`
-- `image`
 - `net_policy`
 - Microsandbox-only command-template compatibility fields
 
@@ -262,7 +226,7 @@ Keep:
 - lifecycle state
 - timestamps
 
-The store artifact `sandbox.ref` becomes `lima-instance.ref`, and the instance-name index is updated atomically with node metadata.
+The store artifact remains `sandbox.ref`, and the sandbox-name index continues to be updated atomically with node metadata. In schema v4 the referenced sandbox is always a Lima instance.
 
 ### 6.4 Schema Guard
 
@@ -322,11 +286,8 @@ Explicit host ports must remain unique across running nodes. Conflicts return th
 
 The default Lima user-mode network is sufficient for outbound access and SSH management. `vzNAT`, `socket_vmnet`, bridged networking, and routable guest IPs are outside the first release.
 
-Because Lima does not enforce the former domain allowlist:
-
-- schema-v4 removes `net_policy` from configuration, node creation, CLI help, TUI forms, output, README, QA, and examples;
-- a supplied `net_policy` option fails as unsupported;
-- release notes must call out that Lima nodes have ordinary outbound network access.
+Schema v4 has no network-policy model, configuration, validation, or CLI/TUI
+surface. Lima nodes use ordinary outbound network access.
 
 ## 8. Lifecycle Contract
 
@@ -362,8 +323,9 @@ The optional containerd readiness path must not run. A guest that is SSH-ready a
 
 ### 8.4 Clone
 
-- The source node and Lima instance must exist and be stopped.
-- A running source returns `preconditionFailed` with instructions to stop it.
+- The source node and Lima instance must exist.
+- If the source is running, CodeLima stops it before cloning and restarts it afterward. If cloning fails, restoring the source still takes precedence over returning, and both failures are surfaced when applicable.
+- A source that was stopped before cloning remains stopped.
 - The target instance name must be unique before metadata is committed.
 - `limactl clone` creates a stopped target.
 - The target inherits frozen configuration, resources, bootstrap completion, workspace mode, and directory association according to current `NodeClone` semantics.
@@ -396,7 +358,7 @@ The Lima client maps errors into existing CodeLima classes:
 | invalid template, resources, mount, or port | `invalidArgument` |
 | instance not found | `notFound` |
 | instance already exists | `preconditionFailed` |
-| clone source running | `preconditionFailed` |
+| source stop or restart during clone fails | existing lifecycle error mapping |
 | host port already reserved by a CodeLima node | `preconditionFailed` |
 | malformed `limactl` JSON | `metadataCorruption` or dependency protocol error, never partial data |
 | guest command nonzero exit | `guestExitError` with bounded stderr tail |
@@ -417,31 +379,29 @@ Rules:
 
 `codelima doctor` must report:
 
-- `limactl` path and parsed version;
-- supported-version result;
+- parsed `limactl` version and supported-version result;
 - host VM driver selection;
 - KVM availability on Linux or VZ availability on macOS;
 - resolved `LIMA_HOME`;
-- configured template resolution and validation;
 - mount type;
-- observation watcher status;
-- count of CodeLima-owned and unmatched Lima instances.
+- Lima list health and unmatched instances through the existing warnings.
 
 Doctor must remain read-only unless `--repair` is supplied.
 
 ### 10.2 Node Logs
 
-`node logs` must expose the relevant bounded tail from Lima's instance directory, including hostagent stderr and available serial/cloud-init logs. Missing optional logs are reported individually and do not hide available logs.
+`node logs` retains the existing CodeLima lifecycle-event contract. Lima's
+hostagent, serial, and cloud-init files remain directly inspectable beneath the
+instance directory reported by `limactl list --json`; this backend change does
+not add a second log format to the product surface.
 
 ### 10.3 Daemon Snapshot
 
 The daemon snapshot adds:
 
-- Lima version and home;
 - watcher connected state, last event time, restart count, and last error;
 - last full reconciliation time;
-- per-node forwarding connection state;
-- selected VM and mount types.
+- cached instance count alongside the existing forwarding connection state.
 
 Microsandbox SDK state is removed. The VirtioFS reclaim section is retained only if L0.14 requires a runtime-neutral Lima implementation.
 
@@ -519,11 +479,11 @@ Exit criterion: all runtime operations pass automated tests using a fake `limact
 ### Phase 3: Schema v4 and Product Surface
 
 1. Add schema-v4 types and guard behavior.
-2. Replace image fields and flags with template fields and flags.
-3. Replace sandbox identity with Lima instance identity.
+2. Retain image fields and flags while changing their accepted values from Microsandbox OCI images to Lima template references.
+3. Retain sandbox identity fields while using them as Lima instance identities.
 4. Set `provider: lima` and reject all other providers.
 5. Remove network-policy fields, flags, forms, outputs, examples, and validation paths.
-6. Restore the generated `instance.lima.yaml` and `lima-instance.ref` artifacts under node metadata.
+6. Restore the generated `instance.lima.yaml` artifact and retain `sandbox.ref` under node metadata.
 7. Update default configuration seeding and self-host examples.
 8. Preserve bootstrap state, mounted/copy workspace semantics, and lifecycle rollback.
 
@@ -588,7 +548,7 @@ Required unit coverage:
 - Command placeholder resolution and shell quoting.
 - Lifecycle error mapping and context cancellation.
 - Create/start/delete rollback and incomplete cleanup.
-- Stopped clone success and running clone precondition.
+- Stopped clone success, running-source stop/clone/restart, and source restoration after clone failure.
 - Schema-v4 initialization and schema-v3 no-mutation rejection.
 - SSH config parsing restricted to Lima-owned files.
 - Forwarding discovery, direct TCP dialing, reconnect, IPv4/IPv6 loopback, HTTP Upgrade, and two-node same-port routing.
