@@ -1,107 +1,256 @@
-# CodeLima
+# codelima
 
-CodeLima is a Go CLI and shell-first TUI for directory-bound coding VMs. It uses Lima 2.x as its sole runtime, with VZ on macOS arm64 and QEMU/KVM on Linux. Nodes are full-distribution Ubuntu VMs configured through inspectable Lima templates and commands.
+**Give coding agents a machine of their own. Then run as many as you can use.**
 
-The model has three user-facing objects:
+Coding agents are at their best when they can install packages, run services,
+start containers, and change a project without stopping every few minutes to
+ask for permission. Giving an agent that freedom directly on your laptop is
+uncomfortable. Taking the freedom away wastes the reason to use an agent in the
+first place.
 
-- A configuration is a reusable, directory-independent VM recipe: image, agent profile, environments, direct bootstrap commands, vCPUs, memory, and disk.
-- An environment is a reusable ordered list of bootstrap commands that configurations can reference.
-- A node is a VM bound to one host directory. A directory can have multiple nodes, and every node records the configuration that created it.
+codelima resolves that tension with full Linux sandboxes powered by
+[Lima](https://lima-vm.io/). Inside a sandbox, an agent can run with broad
+permissions and do real engineering work. Outside it, your host remains your
+host.
 
-Projects are not part of schema v4. Passing a directory to CodeLima scopes the TUI to nodes bound to that directory or its descendants.
+Your code does not disappear into the VM. By default, the project is mounted
+read/write at the exact same absolute path, so edits appear immediately in your
+host editor, Git client, and filesystem. The operating system boundary is
+isolated; the working tree is deliberately shared.
 
-## Requirements
+And codelima is built for more than one agent:
 
-- macOS arm64, Linux amd64, or Linux arm64
-- Lima 2.1.0 or a compatible newer Lima 2.x release
-- Apple Virtualization.framework on macOS arm64, or QEMU with KVM on Linux
-- `git`
+- Run several agent sessions in one sandbox, or spread them across many.
+- Run several sandboxes against one project.
+- Run different experiments, branches, and services side by side.
+- Work across many projects without turning your terminal into a maze.
+- Stop sandboxes you are not using and bring them back quickly.
+- Close the TUI without losing live terminal sessions.
 
-Install Lima with `brew install lima`. CodeLima validates `limactl`, resolves the configured template, and lets Lima download its upstream guest image on first node creation.
+The point is not to manage virtual machines. The point is to unleash coding
+agents and keep control of all the work they can do.
 
-On macOS arm64, CodeLima asks Virtualization.framework whether the host supports nested virtualization. When it does, CodeLima enables Lima nested virtualization automatically for every new node and passes `--nested-virt` whenever any node starts, including nodes created by an older CodeLima build. This makes KVM available to workloads inside supported VZ guests without a per-configuration setting. Unsupported Macs continue with nested virtualization disabled; Linux continues to use its existing QEMU/KVM host path without requesting this additional Lima nesting layer. `codelima doctor` reports the detected macOS capability.
+codelima is self-hosted: all codelima development happens inside codelima.
+Nested virtualization makes the loop complete—you can run codelima inside
+codelima. Codex and Claude Code are supported out of the box, so agents can get
+to work without hand-building their environments first.
 
-Keep both `CODELIMA_HOME` and `LIMA_HOME` reasonably short. Lima derives Unix-domain socket paths beneath `LIMA_HOME`, and operating systems impose a small fixed path-length limit. `LIMA_HOME` must be on a filesystem that supports Unix sockets; network mounts such as 9p may store files successfully but fail during SSH/hostagent startup. Prefer paths such as `~/.codelima-v4` and `~/.lima`.
+## See the whole workshop
 
-Each running node has visible Lima hostagent and VZ/QEMU processes. The
-CodeLima daemon owns one long-lived `limactl watch --json` process for all
-nodes, so the TUI's recurring refresh does not spawn `limactl list`. Stopping a
-node removes its VM-driver and hostagent processes. Cloning a running node
-briefly stops the source because Lima requires a stopped disk, creates a
-stopped clone, and then restores the source to running.
+codelima wraps sandboxes, agent sessions, host shells, services, and experiments
+in one keyboard-driven TUI.
+
+```sh
+cd ~/src/my-project
+codelima .
+```
+
+`codelima .` opens a project-local view: only sandboxes attached to the current
+directory or its descendants appear. Run `codelima` with no path to see every
+sandbox across every project.
+
+In the TUI:
+
+1. Press `n` to create a sandbox.
+2. Press `s` to start it.
+3. Press `Option+t` to open a guest terminal tab.
+4. Press `Option+Backtick` to move focus into the terminal.
+5. Run your agent with the freedom it needs.
+
+```sh
+codex --yolo
+```
+
+Create another sandbox and another agent. Open a host tab when you need Git or
+editor commands outside the VM. Switch projects without giving up the sessions
+already doing useful work.
+
+codelima calls each directory-bound sandbox a **node** in the CLI and TUI.
+
+## Why it changes the agent workflow
+
+### No permission bottleneck
+
+Let agents install dependencies, change system configuration, launch
+long-running processes, and explore freely inside a VM. The sandbox contains
+system-level consequences while the mounted project keeps useful code changes
+on the host.
+
+### Many agents, not one terminal
+
+A node is an independent machine with its own CPU, memory, disk, processes, and
+terminal tabs. Open several tabs when agents should share one environment. Give
+the same project to several nodes when you want parallel implementations or
+isolated experiments. Give different projects their own nodes when you want to
+keep several streams of work moving at once.
+
+### Services feel local
+
+Start a web server in a sandbox and reach it from the host without maintaining a
+fixed port list:
+
+```text
+http://localhost:{port}
+http://127.0.0.1:{port}
+http://{node}.localhost:{port}
+```
+
+If `api-redesign` is serving on port 8080:
+
+```sh
+curl http://api-redesign.localhost:8080
+```
+
+Two nodes can serve the same guest port at the same time. Their node-qualified
+hostnames keep the traffic separate, while the first active node on a port also
+claims the short `localhost` form.
+
+### Sessions survive the interface
+
+A persistent daemon owns terminal sessions and network forwarding. Quit the TUI
+and reopen it later; surviving guest and host tabs reconnect in their original
+order. The work does not belong to a fragile UI process.
+
+### The host and sandbox stay in step
+
+Mounted workspaces are read/write and keep the same absolute path on both sides
+of the VM boundary. Tools, scripts, and agent instructions that refer to the
+working directory do not need a sandbox-specific path. Host edits appear in the
+sandbox, and agent edits appear on the host.
+
+Use `--workspace-mode copy` when an experiment should have a guest-local copy
+instead.
+
+### Real machines when the work needs them
+
+Each node can have its own vCPU, memory, and disk allocation. On supported Apple
+silicon Macs, codelima enables nested virtualization automatically, making KVM
+available inside the guest for workloads that need another virtualization
+layer. Linux uses Lima's QEMU/KVM path.
+
+## Features
+
+- Full-screen TUI for multiplexing sandboxes, agent sessions, services, host
+  shells, and experiments
+- Multiple independent sandboxes for one directory
+- Directory-scoped and all-project views
+- Dynamic HTTP and WebSocket forwarding to the host
+- Node-qualified `*.localhost` routing when services share a port
+- Read/write mounted workspaces, with optional isolated copy mode
+- Identical working-directory paths on the host and in the guest
+- Daemon-owned terminal sessions that survive TUI restarts
+- Multiple guest and host terminal tabs per node
+- Fast sandbox creation, deletion, start, and stop workflows
+- Configurable vCPU, memory, and disk resources per sandbox
+- Automatic nested virtualization on supported Apple silicon hosts
+- KVM access inside supported guests for nested virtualization workloads
+- Reusable configurations and environment bootstrap bundles
+- CLI and JSON interfaces for scripting and automation
+- Lima 2.x with VZ on macOS and QEMU/KVM on Linux
 
 ## Install
 
-Install the latest packaged release with Homebrew:
+Homebrew installs codelima, Lima, Git, and the bundled Ghostty terminal library:
 
 ```sh
 brew tap brianrackle/codelima
 brew install codelima
 ```
 
-The formula installs CodeLima, its bundled `libghostty-vt` library, `git`, and Lima. Release archives are published for macOS arm64, Linux amd64, and Linux arm64.
+Release archives are available for macOS arm64, Linux amd64, and Linux arm64
+from [GitHub Releases](https://github.com/brianrackle/codelima/releases).
 
-## Build
+Requirements:
 
-The repository manages its toolchain under `.tooling/<os>-<arch>`:
+- macOS arm64, Linux amd64, or Linux arm64
+- Lima 2.1.0 or a compatible newer Lima 2.x release
+- Apple Virtualization.framework on macOS, or QEMU with KVM on Linux
+- Git
 
-```sh
-make init
-make verify
-```
-
-`make build` writes `bin/<os>-<arch>/codelima` and refreshes `bin/codelima` as a convenience symlink. Other useful recipes are:
-
-```sh
-make fmt
-make lint
-make test
-make test-race
-make test-integration
-make smoke
-```
-
-The Ghostty integration requires cgo. The Makefile enables it and uses the host `cc` when available, falling back to the managed Zig compiler installed by `make init` in minimal development sandboxes. Test packages and tests within each package run serially by default to avoid filesystem-resource spikes on virtualized development hosts; override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` after qualifying a host.
-
-See `BUILD.md` for packaging and release details.
-
-## Use a separate home
-
-Schema v4 intentionally does not migrate Microsandbox-backed schema-v3 homes, schema-v2 homes, or legacy Lima layouts. To run old and new CodeLima builds side by side, give the new binary its own home:
+Run the doctor before creating your first node:
 
 ```sh
-CODELIMA_HOME="$HOME/.codelima-v4" ./bin/darwin-arm64/codelima .
-```
-
-or:
-
-```sh
-./bin/darwin-arm64/codelima --home "$HOME/.codelima-v4" .
-```
-
-`--home` must precede the command or directory argument. The old build can continue using `~/.codelima`; each home has its own daemon, metadata, and terminal sessions.
-
-## Quick start
-
-Inspect the global settings and repair/seed a fresh home:
-
-```sh
-codelima settings show
 codelima doctor --repair
 ```
 
-`small` is the protected implicit default configuration. It starts with:
+The first start may take longer while Lima downloads the Ubuntu image and
+codelima installs the built-in Codex and Claude Code environments.
 
-- image `template:ubuntu`
-- agent profile `codex-cli`
-- environments `codex` and `claude-code`
-- 2 vCPUs
-- 4096 MiB memory
-- 25600 MiB disk
+## Guide
 
-It is editable, but it cannot be renamed or deleted. Creating another configuration copies the current `small` configuration once; later `small` edits do not change that copy. Omitting `--configuration` when creating a node selects `small`.
+### The TUI
 
-CodeLima seeds five ready-to-use size configurations:
+| Key | Action |
+| --- | --- |
+| `Up` / `Down` | Select a node |
+| `n` | Create a node |
+| `s` | Start or stop the selected node |
+| `c` | Clone the selected node |
+| `d` | Delete the selected node |
+| `i` | Switch between node info and terminal views |
+| `Option+Backtick` or `F6` | Toggle node-list and terminal focus |
+| `Option+t` | Open a guest terminal tab |
+| `Option+Shift+t` | Open a host terminal tab in the project directory |
+| `Option+Left` / `Option+Right` | Switch terminal tabs |
+| `Option+w` | Close the active terminal tab |
+| `a` | Manage node configurations |
+| `g` | Manage environment bootstrap bundles |
+| `m` | Show background-task messages |
+| `q` | Quit from the node-list focus |
+
+Inside forms, use `Tab`, `Up`, and `Down` to move between fields, `Enter` or
+`Right` to open choices, `Ctrl+s` to submit, and `Esc` to cancel.
+
+On macOS, configure the terminal with `macos-option-as-alt = true` when
+available. codelima also recognizes the standard US-layout Option glyphs for
+its core shortcuts.
+
+Host and guest terminals are tabs on the same node. A red top bar identifies a
+host tab. Host tabs stay useful while the VM is stopped because they run on the
+host in the node's project directory.
+
+### One project, several agents
+
+Create two nodes bound to the current directory:
+
+```sh
+codelima node create --slug api-redesign
+codelima node create --slug test-hardening
+codelima node start api-redesign
+codelima node start test-hardening
+```
+
+Open the project view and give each node its own terminal tab:
+
+```sh
+codelima .
+```
+
+Both sandboxes see the same mounted working tree by default but have independent
+operating systems and processes. Use separate worktrees when concurrent agents
+should not edit the same files.
+
+### Many projects at once
+
+Open a scoped TUI for each project:
+
+```sh
+codelima ~/src/frontend
+codelima ~/src/backend
+```
+
+Or open the global workshop:
+
+```sh
+codelima
+```
+
+All views can share one daemon. Closing one path-scoped view does not discard
+the tabs belonging to another.
+
+### Shape a sandbox for the job
+
+codelima includes five starting sizes:
 
 | Configuration | vCPUs | Memory | Disk |
 | --- | ---: | ---: | ---: |
@@ -111,42 +260,20 @@ CodeLima seeds five ready-to-use size configurations:
 | `large` | 6 | 16 GiB | 75 GiB |
 | `xlarge` | 8 | 32 GiB | 100 GiB |
 
-The configurations use the same initial image, agent profile, and `codex`/`claude-code` environments. `xsmall`, `medium`, `large`, and `xlarge` are ordinary configurations that can be edited or deleted. Seed and repair add a missing size to an older schema-v4 home, preserve customized values, and do not restore a deleted optional size. Seed revision 4 adds `xsmall` and updates an untouched legacy 1/1/10 `small` record to 2/4/25 in place; any customized `small` is preserved. Because `small` is required as the implicit default, an upgraded home restores it if it was deleted while retaining its customized values. Existing nodes keep their frozen resources. Upgraded homes also retire the former `default` record from live configuration lists; existing nodes that were created from it retain their frozen values and historical association.
-
-The TUI configuration selector shows each name with its vCPU, RAM, and disk values, including `xsmall (1 vCPU, 1 GiB RAM, 10 GiB disk)` and `small (2 vCPU, 4 GiB RAM, 25 GiB disk)`, while selecting a row still records only its slug.
-
-The two built-in coding-agent environments install both CLIs in nodes created from `small`. The `codex-cli` agent profile selects Codex for validation and launch behavior; Claude Code remains available as `claude`.
+`small` is the default. Choose another size at creation:
 
 ```sh
-codelima node create --slug codelima-dev --directory .
-codelima node start codelima-dev
-codelima shell codelima-dev
+codelima node create \
+  --slug large-refactor \
+  --configuration large \
+  --directory .
 ```
 
-Inside the node, both agents are available:
-
-```sh
-codex --yolo
-claude
-```
-
-Configuration values are frozen into the node at creation. Updating `small` affects future nodes only.
-
-## Configurations
-
-List and inspect configurations:
-
-```sh
-codelima configuration list
-codelima configuration show small
-codelima configuration show medium
-```
-
-Create a reusable recipe. Memory and disk accept MiB or GiB values:
+Create reusable configurations when a workflow needs more than a size:
 
 ```sh
 codelima configuration create \
-  --slug large-codex \
+  --slug web-agent \
   --image template:ubuntu \
   --agent-profile codex-cli \
   --environment codex \
@@ -156,253 +283,87 @@ codelima configuration create \
   --disk 40GiB
 ```
 
-Update, clone, and delete:
+Configuration values are frozen into a node when it is created, so changing a
+configuration affects future nodes without rewriting running experiments.
 
-```sh
-codelima configuration update large-codex --memory 12GiB
-codelima configuration clone large-codex --slug large-codex-copy
-codelima configuration delete large-codex-copy
-```
-
-A configuration referenced by any live node cannot be deleted. Repeated `--environment` and `--bootstrap-command` flags preserve order. Use `--clear-environments` or `--clear-bootstrap-commands` to clear either list.
-
-## Environments
-
-Environments are reusable bootstrap bundles:
-
-```sh
-codelima environment create \
-  --slug web-tools \
-  --bootstrap-command 'apt-get update' \
-  --bootstrap-command 'apt-get install -y nodejs npm'
-
-codelima environment list
-codelima environment show web-tools
-codelima environment update web-tools --bootstrap-command 'npm install -g pnpm'
-codelima environment delete web-tools
-```
-
-The built-in `codex` and `claude-code` environments are seeded by a mutating command, `doctor --repair`, or TUI startup. An environment referenced by a configuration cannot be deleted.
-
-## Nodes and directories
-
-Create a node in the current directory with the implicit `small` configuration:
-
-```sh
-codelima node create --slug api-dev
-```
-
-Select another configuration or directory explicitly:
-
-```sh
-codelima node create \
-  --slug api-large \
-  --configuration large-codex \
-  --directory /Users/me/src/api
-```
-
-Multiple nodes may be bound to the same directory. Node slugs are globally unique within one `CODELIMA_HOME` so every command can address a node unambiguously.
-
-Lifecycle and inspection commands:
+### Work from the CLI
 
 ```sh
 codelima node list
-codelima node show api-dev
-codelima node start api-dev
-codelima node status api-dev
-codelima node logs api-dev
-codelima node stop api-dev
-codelima node delete api-dev
+codelima node show api-redesign
+codelima node start api-redesign
+codelima shell api-redesign
+codelima node logs api-redesign
+codelima node stop api-redesign
+codelima node delete api-redesign
 ```
 
-Cloning requires a new slug and keeps the source node's directory, configuration association, frozen resources, environments, bootstrap state, and workspace mode:
+Clone a node to branch an experiment:
 
 ```sh
-codelima node clone api-dev --slug api-experiment
+codelima node clone api-redesign --slug api-redesign-2
 ```
 
-Workspace modes:
-
-- `copy` seeds a guest-local copy of the directory on first start.
-- `mounted` mounts the host directory read/write at the same absolute path in the guest.
-
-New nodes default to `mounted`, so host and guest edits are immediately shared. Select isolated copy mode explicitly when needed:
+Create a guest-local workspace instead of a host mount:
 
 ```sh
-codelima node create --slug api-isolated --workspace-mode copy
+codelima node create \
+  --slug destructive-experiment \
+  --workspace-mode copy
 ```
 
-## TUI
-
-Open all nodes:
+Add an explicit raw TCP mapping when dynamic HTTP/WebSocket forwarding is not
+the right fit:
 
 ```sh
-codelima
+codelima node create \
+  --slug tcp-service \
+  --port 15432:5432
 ```
 
-Open only nodes bound to the current directory or a descendant:
+Run `codelima --help` for the complete command surface and
+`codelima <group> <command> --help` for command flags. Put global flags before
+the command or path:
 
 ```sh
+codelima --json node list
+codelima --home ~/.codelima-work .
+```
+
+## How codelima works
+
+codelima uses Lima as its VM runtime. VZ provides lightweight virtualization on
+macOS arm64; QEMU/KVM provides it on Linux amd64 and arm64. Nodes are ordinary
+full-distribution Ubuntu VMs described by inspectable Lima templates.
+
+Three concepts make the system reusable:
+
+- A **node** is one directory-bound sandbox.
+- A **configuration** is a recipe for its image, agent profile, environments,
+  bootstrap commands, vCPUs, memory, and disk.
+- An **environment** is an ordered, reusable set of bootstrap commands.
+
+The persistent daemon owns terminal runtimes and discovers guest services. The
+TUI is a view onto that durable state, not the owner of it.
+
+Run `codelima doctor` to inspect Lima, host virtualization, nested
+virtualization, and configuration health.
+
+Keep custom `CODELIMA_HOME` and `LIMA_HOME` paths short and place `LIMA_HOME` on
+a local filesystem that supports Unix sockets. Lima derives socket paths below
+that directory:
+
+```sh
+CODELIMA_HOME="$HOME/.codelima-v4" \
+LIMA_HOME="$HOME/.lima" \
 codelima .
 ```
 
-The left pane is a flat list of nodes with configuration, relative directory, and runtime status. Configuration and environment management are global actions; there are no project rows.
+Schema-v4 homes intentionally do not migrate older codelima metadata. Use
+`--home` or `CODELIMA_HOME` to start with a separate home when evaluating a new
+build alongside an older one.
 
-Important bindings:
+## The name
 
-- `Up` / `Down`: select a node
-- `i`: toggle info and terminal views
-- `Option+Backtick` or `F6`: toggle tree and terminal focus
-- `Option+t`: open another guest terminal tab for the selected node
-- `Option+Shift+t`: open a host terminal tab rooted at the node directory
-- `Option+Left` / `Option+Right`: switch tabs
-- `Option+w`: close the active tab
-- `n`: create a node
-- `a`: manage configurations
-- `g`: manage environments
-- `s`: start or stop the selected node
-- `c`: clone the selected node
-- `d`: delete the selected node
-- `q`: quit
-
-Inside a form, `Tab`, `Up`, and `Down` move between fields. `Left` and `Right` move the cursor within editable values; on a selector field, `Right` or `Enter` opens its choices. `Ctrl+s` submits and `Esc` cancels.
-
-When the initially selected node is running, the TUI opens its existing or newly created guest tab in the right pane and highlights `Terminal` by default while keeping keyboard focus in the node list. A stopped initial node remains on `Info` and does not start a guest shell. After startup, `i` is a sticky explicit choice: moving between nodes does not replace the selected pane mode.
-
-The host and guest shells are both tabs of the node target. Host mode is indicated by the red top bar. Host tabs resolve their working directory from stored node metadata, so they remain available when the node is stopped or Lima is temporarily unavailable.
-
-Quitting the TUI detaches from daemon-owned tabs instead of closing them. Reopening the same CodeLima home reconnects the surviving tabs in their original creation order. Multiple path-scoped TUI processes may use the same home: a window refresh preserves daemon tabs owned by nodes outside that window's directory scope, so closing and reopening disjoint windows does not delete one another's tabs. Live daemon update also preserves tab order and rebuilds wrapped terminal content at its captured geometry.
-
-Multiline paste is delivered to terminal applications as one bracketed paste rather than a sequence of simulated key presses. Newlines remain in the input buffer and do not execute pasted commands; press Enter explicitly when the pasted text is ready.
-
-Guest shells retain normal terminal line editing: arrow keys and Readline
-controls operate inside the guest, while `Ctrl+c` interrupts the active guest
-job without closing its CodeLima tab.
-
-Expanding a terminal from the split pane to full width requests a redraw with a
-terminal resize signal, not synthetic shell input. Switching focus with
-`Option+Backtick` or `F6` therefore does not type `^L` into a shell or clear its
-existing terminal history.
-
-Ordinary terminal input is delivered through an ordered background queue, so typing remains responsive while the daemon is serving terminal snapshots. The TUI redraws typed input when the daemon publishes the resulting fresh snapshot instead of repainting the previous screen after every key. Terminal snapshots are event-driven: idle tabs issue no recurring snapshot requests, and hidden tabs defer full-grid transfer until they become visible. Active output remains coalesced to at most 20 snapshots per second.
-
-While the full-screen TUI is open, CodeLima writes service, Ghostty, and Lima
-diagnostics to `$CODELIMA_HOME/_logs/codelima.log` instead of terminal stderr,
-so background warnings cannot overwrite the screen. The file rotates at about
-5 MiB and keeps one `codelima.log.1` generation. Put `--log-level debug` before
-the directory argument to retain debug records when investigating a session:
-
-```sh
-codelima --log-level debug .
-```
-
-## Local development servers
-
-The daemon discovers listening guest TCP ports and routes HTTP and WebSocket traffic dynamically:
-
-```text
-http://localhost:{guest-port}
-http://127.0.0.1:{guest-port}
-http://{node-slug}.localhost:{guest-port}
-```
-
-For a node named `api-dev` serving on guest port 8080:
-
-```sh
-curl http://localhost:8080
-curl http://127.0.0.1:8080
-curl http://api-dev.localhost:8080
-```
-
-No fixed list such as 3000/5173/8080 is preconfigured. The first active node discovered on a port claims the generic `localhost` and `127.0.0.1` URLs while it remains listening. When it stops, the daemon assigns the earliest remaining claimant during its one-second reconciliation loop. A temporary conflict with another host process is also retried every second; claims are in-memory and are not persisted.
-
-Two nodes can use the same guest port because `{node-slug}.localhost` always selects that specific node, regardless of which node owns the generic URL. The server may bind IPv4 or IPv6 guest loopback (`127.0.0.1`, `::1`, or `localhost`); traffic is tunneled through one persistent Go SSH connection built from Lima's private per-instance SSH configuration. `codelima daemon snapshot` reports the generic `default_node` for every active port; it remains empty while a host bind is conflicted and no claim has succeeded.
-
-Raw TCP services can still use explicit `--port HOST:GUEST` mappings at node creation. Explicit host ports must be unique among simultaneously running nodes.
-
-## Daemon and terminal automation
-
-The daemon owns terminal runtimes, dynamic forwarding, input ownership, and live-update handoff:
-
-```sh
-codelima daemon start
-codelima daemon status
-codelima daemon snapshot
-codelima daemon stop
-```
-
-The TUI starts or connects to the daemon automatically according to `_config/settings.yaml`.
-
-After rebuilding a development binary while a daemon is already running, apply it with `./bin/codelima daemon update`. With no path argument, the command sends the exact binary being invoked and can bridge from the prior handoff-capable daemon protocol while preserving PTYs. The handoff uses framed Unix streams and SCM_RIGHTS on both macOS and Linux. A legacy macOS daemon that reports the old unsupported `unixpacket` transport is restarted by the update command; VMs remain running and saved tabs respawn, but those terminal processes restart once because the legacy daemon cannot transfer their descriptors. Shutdown waits on the authoritative daemon lock rather than stale socket pathnames, allows time based on the number of terminals, and terminates only the still-matching daemon identity if graceful teardown gets stuck. TUI autostart applies the same recovery when an earlier daemon has closed its socket but still owns the lock. Other handoff failures still roll back to the old daemon. Ordinary clients remain exact-version only, so a stale daemon cannot silently accept newer input such as semantic paste. An already-open TUI must currently be quit and reopened after the update so it reconnects to the replacement daemon; the TUI reports this after commit, stops reading the permanently closed event stream, and remains idle instead of retrying `EOF`. Once disconnection is observed—or the first ownership takeover fails—the TUI stops probing the dead request socket, keeps the reopen instruction instead of `broken pipe`, and writes transport details to the TUI log. Asynchronous input failures are shown before disconnection instead of silently dropping text.
-
-An interactive TUI claims daemon input ownership when it connects, making any older client observe-only, and its authenticated connection remains open while idle. When multiple TUI windows remain open, focusing a window silently reclaims ownership before its next terminal action and makes the previously focused window observe-only. Routine window switching does not show an ownership warning and requires neither a manual `terminal takeover` nor a daemon restart, including after an idle interval.
-
-On macOS, the daemon also protects mounted VirtioFS workspaces from system file-table exhaustion. It samples the host-wide `kern.num_files` against the host-wide `kern.maxfiles` every two seconds and, at 20% by default, asks running mounted nodes to release clean dentry/inode caches. Every attempt has a 30-second cooldown. The operation does not run `sync`, does not discard dirty data, and does not interrupt active file handles; the tradeoff is temporarily colder path-lookup caches.
-
-The daemon-only settings are:
-
-```yaml
-daemon:
-  autostart: true
-  restore: respawn
-  virtiofs_reclaim: true
-  virtiofs_reclaim_threshold_percent: 20
-```
-
-The threshold accepts 1 through 95. Set `virtiofs_reclaim: false` to disable the macOS workaround. `codelima daemon snapshot` reports whether the integration is supported, current host usage, the last reclaim result, and the next eligible attempt.
-
-`_daemon/session.json` contains only terminal restoration intent. With `restore: respawn`, CodeLima preserves an unsupported or malformed file beside that path, writes a fresh current-version session, logs the recovery, and continues starting the daemon. With `restore: forget`, it replaces old session state directly. This recovery never changes nodes, VM disks, or workspace files.
-
-Automation can open guest or host tabs for a node target:
-
-```sh
-NODE_ID="$(codelima --json node show api-dev | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)"
-codelima --json terminal open "node:$NODE_ID" --kind node-shell
-codelima --json terminal open "node:$NODE_ID" --kind node-host-shell
-codelima terminal list
-```
-
-Use `terminal read`, `terminal send`, `terminal close`, and `terminal takeover` for snapshot reads and explicit input ownership. Client and daemon versions must match exactly.
-
-## Metadata layout
-
-Schema v3 uses:
-
-```text
-CODELIMA_HOME/
-├── _config/
-│   ├── schema.version
-│   ├── settings.yaml
-│   └── agent-profiles/
-├── _daemon/
-├── _index/
-│   ├── configurations/by-slug/
-│   ├── environments/by-slug/
-│   └── nodes/by-instance/
-├── _locks/
-├── configurations/<id>/configuration.yaml
-├── environments/<id>/environment.yaml
-└── nodes/<id>/
-    ├── node.yaml
-    ├── bootstrap.yaml
-    ├── sandbox-instance.ref
-    └── events.jsonl
-```
-
-There is no `projects/` directory. A home with schema version 2 is rejected with instructions to choose a fresh home; automatic migration is intentionally unsupported.
-
-## Command summary
-
-```text
-codelima [--home PATH] [--json] [--log-level LEVEL] [PATH]
-codelima doctor [--repair]
-codelima settings show
-codelima environment create|list|show|update|delete
-codelima configuration create|list|show|update|delete|clone
-codelima node create|list|cleanup-incomplete|show|start|stop|clone|delete|status|logs|shell
-codelima shell <node> [-- command...]
-codelima daemon run|start|stop|status|snapshot|update
-codelima terminal open|close|list|read|send|takeover
-```
-
-Use global flags before the command group, for example `codelima --home ~/.codelima-msb --json node list`.
+codelima is built on the awesome [Lima](https://lima-vm.io/) project and takes
+inspiration from the name [Colima](https://github.com/abiosoft/colima).
