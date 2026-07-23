@@ -19,6 +19,8 @@ Projects are not part of schema v4. Passing a directory to CodeLima scopes the T
 
 Install Lima with `brew install lima`. CodeLima validates `limactl`, resolves the configured template, and lets Lima download its upstream guest image on first node creation.
 
+On macOS arm64, CodeLima asks Virtualization.framework whether the host supports nested virtualization. When it does, CodeLima enables Lima nested virtualization automatically for every new node and passes `--nested-virt` whenever any node starts, including nodes created by an older CodeLima build. This makes KVM available to workloads inside supported VZ guests without a per-configuration setting. Unsupported Macs continue with nested virtualization disabled; Linux continues to use its existing QEMU/KVM host path without requesting this additional Lima nesting layer. `codelima doctor` reports the detected macOS capability.
+
 Keep both `CODELIMA_HOME` and `LIMA_HOME` reasonably short. Lima derives Unix-domain socket paths beneath `LIMA_HOME`, and operating systems impose a small fixed path-length limit. `LIMA_HOME` must be on a filesystem that supports Unix sockets; network mounts such as 9p may store files successfully but fail during SSH/hostagent startup. Prefer paths such as `~/.codelima-v4` and `~/.lima`.
 
 Each running node has visible Lima hostagent and VZ/QEMU processes. The
@@ -59,7 +61,7 @@ make test-integration
 make smoke
 ```
 
-The Ghostty integration requires cgo. The Makefile enables it and uses the host `cc` when available, falling back to the managed Zig compiler installed by `make init` in minimal development sandboxes. Tests run serially by default to avoid filesystem-resource spikes on virtualized development hosts; override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` after qualifying a host.
+The Ghostty integration requires cgo. The Makefile enables it and uses the host `cc` when available, falling back to the managed Zig compiler installed by `make init` in minimal development sandboxes. Test packages and tests within each package run serially by default to avoid filesystem-resource spikes on virtualized development hosts; override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` after qualifying a host.
 
 See `BUILD.md` for packaging and release details.
 
@@ -93,22 +95,25 @@ codelima doctor --repair
 - image `template:ubuntu`
 - agent profile `codex-cli`
 - environments `codex` and `claude-code`
-- 1 vCPU
-- 1024 MiB memory
-- 10240 MiB disk
+- 2 vCPUs
+- 4096 MiB memory
+- 25600 MiB disk
 
 It is editable, but it cannot be renamed or deleted. Creating another configuration copies the current `small` configuration once; later `small` edits do not change that copy. Omitting `--configuration` when creating a node selects `small`.
 
-CodeLima seeds four ready-to-use size configurations:
+CodeLima seeds five ready-to-use size configurations:
 
 | Configuration | vCPUs | Memory | Disk |
 | --- | ---: | ---: | ---: |
-| `small` | 1 | 1 GiB | 10 GiB |
+| `xsmall` | 1 | 1 GiB | 10 GiB |
+| `small` | 2 | 4 GiB | 25 GiB |
 | `medium` | 4 | 8 GiB | 50 GiB |
 | `large` | 6 | 16 GiB | 75 GiB |
 | `xlarge` | 8 | 32 GiB | 100 GiB |
 
-The configurations use the same initial image, agent profile, and `codex`/`claude-code` environments. `medium`, `large`, and `xlarge` are ordinary configurations that can be edited or deleted. Seed and repair add a missing size to an older schema-v4 home, preserve customized values, and do not restore a deleted optional size. Because `small` is required as the implicit default, an upgraded home restores it if it was deleted while retaining its customized values. Upgraded homes retire the former `default` record from live configuration lists; existing nodes that were created from it retain their frozen values and historical association.
+The configurations use the same initial image, agent profile, and `codex`/`claude-code` environments. `xsmall`, `medium`, `large`, and `xlarge` are ordinary configurations that can be edited or deleted. Seed and repair add a missing size to an older schema-v4 home, preserve customized values, and do not restore a deleted optional size. Seed revision 4 adds `xsmall` and updates an untouched legacy 1/1/10 `small` record to 2/4/25 in place; any customized `small` is preserved. Because `small` is required as the implicit default, an upgraded home restores it if it was deleted while retaining its customized values. Existing nodes keep their frozen resources. Upgraded homes also retire the former `default` record from live configuration lists; existing nodes that were created from it retain their frozen values and historical association.
+
+The TUI configuration selector shows each name with its vCPU, RAM, and disk values, including `xsmall (1 vCPU, 1 GiB RAM, 10 GiB disk)` and `small (2 vCPU, 4 GiB RAM, 25 GiB disk)`, while selecting a row still records only its slug.
 
 The two built-in coding-agent environments install both CLIs in nodes created from `small`. The `codex-cli` agent profile selects Codex for validation and launch behavior; Claude Code remains available as `claude`.
 
@@ -328,7 +333,7 @@ codelima daemon stop
 
 The TUI starts or connects to the daemon automatically according to `_config/settings.yaml`.
 
-After rebuilding a development binary while a daemon is already running, apply it with `./bin/codelima daemon update`. With no path argument, the command sends the exact binary being invoked and can bridge from the prior handoff-capable daemon protocol while preserving PTYs. The handoff uses framed Unix streams and SCM_RIGHTS on both macOS and Linux. A legacy macOS daemon that reports the old unsupported `unixpacket` transport is restarted by the update command; VMs remain running and saved tabs respawn, but those terminal processes restart once because the legacy daemon cannot transfer their descriptors. Shutdown waits on the authoritative daemon lock rather than stale socket pathnames, allows time based on the number of terminals, and terminates only the still-matching daemon identity if graceful teardown gets stuck. TUI autostart applies the same recovery when an earlier daemon has closed its socket but still owns the lock. Other handoff failures still roll back to the old daemon. Ordinary clients remain exact-version only, so a stale daemon cannot silently accept newer input such as semantic paste. An already-open TUI must currently be quit and reopened after the update so it reconnects to the replacement daemon; the TUI reports this after commit, stops reading the permanently closed event stream, and remains idle instead of retrying `EOF`. Asynchronous input failure is shown instead of silently dropping text.
+After rebuilding a development binary while a daemon is already running, apply it with `./bin/codelima daemon update`. With no path argument, the command sends the exact binary being invoked and can bridge from the prior handoff-capable daemon protocol while preserving PTYs. The handoff uses framed Unix streams and SCM_RIGHTS on both macOS and Linux. A legacy macOS daemon that reports the old unsupported `unixpacket` transport is restarted by the update command; VMs remain running and saved tabs respawn, but those terminal processes restart once because the legacy daemon cannot transfer their descriptors. Shutdown waits on the authoritative daemon lock rather than stale socket pathnames, allows time based on the number of terminals, and terminates only the still-matching daemon identity if graceful teardown gets stuck. TUI autostart applies the same recovery when an earlier daemon has closed its socket but still owns the lock. Other handoff failures still roll back to the old daemon. Ordinary clients remain exact-version only, so a stale daemon cannot silently accept newer input such as semantic paste. An already-open TUI must currently be quit and reopened after the update so it reconnects to the replacement daemon; the TUI reports this after commit, stops reading the permanently closed event stream, and remains idle instead of retrying `EOF`. Once disconnection is observed—or the first ownership takeover fails—the TUI stops probing the dead request socket, keeps the reopen instruction instead of `broken pipe`, and writes transport details to the TUI log. Asynchronous input failures are shown before disconnection instead of silently dropping text.
 
 An interactive TUI claims daemon input ownership when it connects, making any older client observe-only, and its authenticated connection remains open while idle. When multiple TUI windows remain open, focusing a window silently reclaims ownership before its next terminal action and makes the previously focused window observe-only. Routine window switching does not show an ownership warning and requires neither a manual `terminal takeover` nor a daemon restart, including after an idle interval.
 

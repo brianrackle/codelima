@@ -187,7 +187,7 @@ func TestNodeCreateCLIDefaultsDirectoryConfigurationAndMountedWorkspace(t *testi
 	if created.DirectoryPath != workspace || created.ConfigurationSlug != DefaultConfigurationSlug || created.ConfigurationID == "" {
 		t.Fatalf("node defaults not resolved: %+v", created)
 	}
-	if created.VCPUs != 1 || created.MemoryMiB != 1024 || created.DiskMiB != 10240 {
+	if created.VCPUs != 2 || created.MemoryMiB != 4*1024 || created.DiskMiB != 25*1024 {
 		t.Fatalf("default resources not frozen: %+v", created)
 	}
 	if created.WorkspaceMode != WorkspaceModeMounted || created.WorkspaceMountPath != workspace {

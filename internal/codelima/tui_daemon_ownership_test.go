@@ -3,8 +3,10 @@ package codelima
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +150,64 @@ func TestTUIWindowFocusReclaimsInputFromNewerWindow(t *testing.T) {
 	}
 	if err := firstClient.Call(context.Background(), "terminal.open", map[string]string{"target": "node:first-after-repeat-focus"}, nil); err != nil {
 		t.Fatalf("first TUI terminal.open after repeat focus = %v", err)
+	}
+}
+
+func TestTUIWindowFocusPreservesDaemonDisconnectGuidance(t *testing.T) {
+	t.Parallel()
+
+	client := &daemonclient.Client{Hello: daemon.HelloResult{ClientID: "disconnected-client"}}
+	app := &vaxisTUIApp{
+		ctx:      context.Background(),
+		service:  &Service{daemonClient: client},
+		messages: newTUIMessageLog(10),
+	}
+	disconnectErr := errors.New("codelima daemon updated; quit and reopen CodeLima to reconnect")
+
+	if quit, err := app.handleEvent(tuiDaemonDisconnectedEvent{Err: disconnectErr}); err != nil || quit {
+		t.Fatalf("handleEvent(tuiDaemonDisconnectedEvent) = (%v, %v), want (false, nil)", quit, err)
+	}
+	if quit, err := app.handleEvent(vaxis.FocusIn{}); err != nil || quit {
+		t.Fatalf("handleEvent(FocusIn) = (%v, %v), want (false, nil)", quit, err)
+	}
+	if quit, err := app.handleEvent(tuiTerminalErrorEvent{Err: errors.New("send terminal input: EOF")}); err != nil || quit {
+		t.Fatalf("handleEvent(tuiTerminalErrorEvent) = (%v, %v), want (false, nil)", quit, err)
+	}
+	if app.status != disconnectErr.Error() {
+		t.Fatalf("status after focus = %q, want disconnect guidance %q", app.status, disconnectErr)
+	}
+	if strings.Contains(app.status, "reclaim terminal input ownership") || strings.Contains(app.status, "broken pipe") {
+		t.Fatalf("focus overwrote disconnect guidance with dead-socket error: %q", app.status)
+	}
+}
+
+func TestTUIWindowFocusLatchesFailedDaemonRequestConnection(t *testing.T) {
+	t.Parallel()
+
+	app := &vaxisTUIApp{
+		ctx:      context.Background(),
+		service:  &Service{daemonClient: &daemonclient.Client{}},
+		messages: newTUIMessageLog(10),
+	}
+
+	if quit, err := app.handleEvent(vaxis.FocusIn{}); err != nil || quit {
+		t.Fatalf("handleEvent(FocusIn) = (%v, %v), want (false, nil)", quit, err)
+	}
+	const want = "daemon connection lost; quit and reopen CodeLima to reconnect"
+	if app.status != want {
+		t.Fatalf("status after failed takeover = %q, want %q", app.status, want)
+	}
+	if !app.daemonDisconnected {
+		t.Fatal("failed takeover did not latch the daemon disconnect")
+	}
+
+	// A second focus event must not probe the known-dead request connection or
+	// replace the one actionable recovery message.
+	if quit, err := app.handleEvent(vaxis.FocusIn{}); err != nil || quit {
+		t.Fatalf("second handleEvent(FocusIn) = (%v, %v), want (false, nil)", quit, err)
+	}
+	if app.status != want || app.messages.Len() != 1 {
+		t.Fatalf("repeated focus status/messages = (%q, %d), want (%q, 1)", app.status, app.messages.Len(), want)
 	}
 }
 

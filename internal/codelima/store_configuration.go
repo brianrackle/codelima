@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,8 +29,16 @@ type builtInConfigurationSpec struct {
 	DiskMiB   uint32
 }
 
+const (
+	xSmallConfigurationSlug = "xsmall"
+	legacySmallVCPUs        = uint8(1)
+	legacySmallMemoryMiB    = uint32(1 * 1024)
+	legacySmallDiskMiB      = uint32(10 * 1024)
+)
+
 func builtInConfigurationSpecs() []builtInConfigurationSpec {
 	return []builtInConfigurationSpec{
+		{Slug: xSmallConfigurationSlug, VCPUs: legacySmallVCPUs, MemoryMiB: legacySmallMemoryMiB, DiskMiB: legacySmallDiskMiB},
 		{Slug: DefaultConfigurationSlug, VCPUs: DefaultVCPUs, MemoryMiB: DefaultMemoryMiB, DiskMiB: DefaultDiskMiB},
 		{Slug: "medium", VCPUs: 4, MemoryMiB: 8 * 1024, DiskMiB: 50 * 1024},
 		{Slug: "large", VCPUs: 6, MemoryMiB: 16 * 1024, DiskMiB: 75 * 1024},
@@ -37,14 +46,24 @@ func builtInConfigurationSpecs() []builtInConfigurationSpec {
 	}
 }
 
-func (s *Store) ensureBuiltInConfigurations(now time.Time) error {
+func (s *Store) ensureBuiltInConfigurations(now time.Time, migrateLegacySmall bool) error {
 	for _, spec := range builtInConfigurationSpecs() {
 		if configuration, err := s.ConfigurationByIDOrSlug(spec.Slug); err == nil {
+			changed := false
+			if migrateLegacySmall && spec.Slug == DefaultConfigurationSlug && s.isUntouchedLegacySmall(configuration) {
+				configuration.VCPUs = spec.VCPUs
+				configuration.MemoryMiB = spec.MemoryMiB
+				configuration.DiskMiB = spec.DiskMiB
+				changed = true
+			}
 			// Small was deletable before it became the protected implicit
 			// default. Restore a tombstoned record without replacing any values
 			// the user customized while it was live.
 			if spec.Slug == DefaultConfigurationSlug && configuration.DeletedAt != nil {
 				configuration.DeletedAt = nil
+				changed = true
+			}
+			if changed {
 				configuration.UpdatedAt = now
 				if err := s.SaveConfiguration(configuration); err != nil {
 					return err
@@ -73,6 +92,16 @@ func (s *Store) ensureBuiltInConfigurations(now time.Time) error {
 	}
 
 	return nil
+}
+
+func (s *Store) isUntouchedLegacySmall(configuration Configuration) bool {
+	return configuration.VCPUs == legacySmallVCPUs &&
+		configuration.MemoryMiB == legacySmallMemoryMiB &&
+		configuration.DiskMiB == legacySmallDiskMiB &&
+		configuration.Image == s.cfg.DefaultImage &&
+		configuration.AgentProfileName == s.cfg.DefaultAgentProfile &&
+		slices.Equal(configuration.Environments, defaultConfigurationEnvironmentSlugs()) &&
+		len(configuration.BootstrapCommands) == 0
 }
 
 const legacyDefaultConfigurationSlug = "default"
@@ -200,16 +229,18 @@ func (s *Store) ListConfigurations(includeDeleted bool) ([]Configuration, error)
 
 func builtInConfigurationSortRank(slug string) int {
 	switch slug {
-	case DefaultConfigurationSlug:
+	case xSmallConfigurationSlug:
 		return 0
-	case "medium":
+	case DefaultConfigurationSlug:
 		return 1
-	case "large":
+	case "medium":
 		return 2
-	case "xlarge":
+	case "large":
 		return 3
-	default:
+	case "xlarge":
 		return 4
+	default:
+		return 5
 	}
 }
 

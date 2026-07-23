@@ -13,6 +13,7 @@ Problem:
 - ADRs 88 and 89 add automated unit and daemon-integration coverage for reconnect tab order and non-default-width handoff replay. The matching interactive Flow 7 check still requires a real terminal on native macOS.
 - ADR 91 adds an automated two-window regression proving a path-scoped refresh no longer closes tabs whose live nodes are outside that window's projection, while confirmed deletion still closes them. The matching disjoint-root, two-tabs-per-process restart flow still needs native interactive verification.
 - ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the full interactive flow.
+- ADR 102 latches permanent daemon disconnection before focus takeover, so automated coverage proves repeated focus and late terminal errors preserve the reopen instruction instead of showing `broken pipe`. The matching post-update host-focus check still requires the native interactive Flow 7 run.
 - ADR 93 restores the pre-Microsandbox foreground-process-group invariant for interactive Lima shells. A real Linux/aarch64 Lima guest and controlling PTY verified Left, `Ctrl+a`, `Ctrl+e`, multiline bracketed paste, and guest `Ctrl+c`; `TestRunInteractiveCommandKeepsPTYInForeground` covers the underlying PTY ownership regression automatically. The same checks inside the complete native macOS Ghostty TUI flow remain part of this item.
 - ADR 94 redirects successful Lima-command diagnostics to the rotating TUI log, and ADR 95 replaces width-growth `Ctrl-L` injection with a supplemental process-group `SIGWINCH`. A focused Linux PTY run with a fake Lima boundary reproduced the exact unhealthy-instance warning, confirmed it appeared only as `source=limactl` in `_logs/codelima.log`, toggled Option+Backtick repeatedly without `^L`, and preserved earlier output across split/full-width changes. This development host has neither `limactl` nor `/dev/kvm`, so it cannot run QA's real QEMU/KVM lifecycle or substitute for the remaining native-host flow.
 
@@ -724,7 +725,8 @@ Problem:
 - Native macOS arm64 VZ/VirtioFS, Linux amd64, and the complete interactive
   Ghostty/agent matrix have not all run. Host reboot, macOS sleep/wake,
   five-minute idle CPU, explicit-port conflicts, two-node same-port routing,
-  and VirtioFS file-pressure behavior
+  VirtioFS file-pressure behavior, and ADR 101 nested-virtualization detection
+  on both supported and unsupported Apple silicon
   remain release qualification.
 - The Linux implementation run was nested and its checkout filesystem was 9p.
   It proved that `LIMA_HOME` on 9p fails OpenSSH control-socket creation and
@@ -740,6 +742,10 @@ Suggested solution:
   restoration, and observation/SSH reconnection.
 - On macOS, run the VirtioFS pressure flow at the QA threshold and production
   threshold while recording host descriptor counts.
+- On macOS, confirm `doctor` capability reporting, generated
+  `nestedVirtualization` YAML, and `/dev/kvm` inside both a new node and a node
+  created before ADR 101. Include an unsupported-host run that creates and
+  starts normally without the Lima flag.
 - Append exact versions, image digests, commands, outputs, and cleanup proof to
   the Lima spike report before publishing a release.
 
@@ -871,6 +877,10 @@ Problem:
   terminal input.
 - Asynchronous terminal input failures are now surfaced in the TUI instead of
   disappearing silently, but that diagnostic does not restore the connection.
+- ADR 102 now latches the disconnected state, keeps one actionable reopen
+  instruction, and prevents focus or late terminal errors from repeatedly
+  probing or obscuring the dead request connection. It deliberately does not
+  replace the request and event clients.
 - Blindly replaying a failed terminal mutation is forbidden because the old
   daemon may have applied it before the connection failure became observable.
 
@@ -911,19 +921,17 @@ Problem:
   `NodeList` runs concurrently with `NodeStop`/`NodeStart` (four failures in
   five isolated runs). This test and the node persistence paths were unchanged
   by priority 5.
-- Running the ordinary unit suite as root also invalidates two environment-
-  sensitive assertions: a PTY prompt is `#` instead of `$`, and root can write
-  through a read-only test directory. An unprivileged private-mount run avoids
-  both and passes every package except the refresh race above.
+- The root-sensitive PTY prompt and read-only-directory assertions are now
+  portable: the redraw fixture uses a literal prompt and the permission test
+  explicitly skips when root bypasses directory mode bits.
 
 Suggested solution:
 
 - Reproduce the refresh failure with filesystem tracing around `ListNodes` and
   `SaveNode`, then either take a read lock for the metadata snapshot or make
   enumeration tolerate a node that disappears after directory discovery.
-- Add a documented unprivileged test recipe or make the two permission/prompt
-  tests explicitly skip only when the effective user is root, so `make test`
-  has one reproducible contract in agent containers.
+- Keep the permission failure assertion running in every non-root test job;
+  root agent containers explicitly skip only that kernel-permission premise.
 
 Advantages:
 

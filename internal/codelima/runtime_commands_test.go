@@ -70,3 +70,17 @@ func TestDefaultRuntimeCommandsUseLima(t *testing.T) {
 		t.Fatalf("workspace seed preparation must return the target parent to Lima's SSH user: %q", prepare)
 	}
 }
+
+func TestDefaultRuntimeStartCanEnableNestedVirtualization(t *testing.T) {
+	t.Parallel()
+	commands, err := resolveConfiguredRuntimeCommands("limactl", defaultRuntimeCommandTemplates(), RuntimeCommandTemplates{}, runtimeCommandStart, map[string]string{
+		"sandbox_name":               shellQuote("demo"),
+		"nested_virtualization_flag": " --nested-virt",
+	})
+	if err != nil {
+		t.Fatalf("resolveConfiguredRuntimeCommands() error = %v", err)
+	}
+	if got := strings.Join(commands, "|"); got != "'limactl' start -y 'demo' --nested-virt" {
+		t.Fatalf("nested start commands = %q", got)
+	}
+}

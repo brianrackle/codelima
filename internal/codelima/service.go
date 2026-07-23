@@ -424,7 +424,11 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 		goos, _ := lima.platform()
 		switch goos {
 		case "darwin":
-			report.Checks = append(report.Checks, DoctorCheck{Name: "lima_driver", Status: "ok", Message: "VZ with VirtioFS"})
+			message := "VZ with VirtioFS; nested virtualization is unavailable"
+			if lima.supportsNestedVirtualization() {
+				message = "VZ with VirtioFS; nested virtualization is enabled automatically"
+			}
+			report.Checks = append(report.Checks, DoctorCheck{Name: "lima_driver", Status: "ok", Message: message})
 		case "linux":
 			kvm, kvmErr := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
 			if kvmErr != nil {

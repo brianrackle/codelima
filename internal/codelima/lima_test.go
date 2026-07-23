@@ -88,6 +88,34 @@ func TestDefaultServiceUsesLimaClient(t *testing.T) {
 	}
 }
 
+func TestLimaClientNestedVirtualizationSupportIsHostAware(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		goos      string
+		goarch    string
+		available bool
+		want      bool
+	}{
+		{name: "supported darwin arm64", goos: "darwin", goarch: "arm64", available: true, want: true},
+		{name: "unsupported darwin arm64", goos: "darwin", goarch: "arm64", available: false, want: false},
+		{name: "linux arm64", goos: "linux", goarch: "arm64", available: true, want: false},
+		{name: "darwin amd64", goos: "darwin", goarch: "amd64", available: true, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			client := NewLimaClient(t.TempDir())
+			client.GOOS = test.goos
+			client.GOARCH = test.goarch
+			client.nestedVirtualizationProbe = func() bool { return test.available }
+			if got := client.supportsNestedVirtualization(); got != test.want {
+				t.Fatalf("supportsNestedVirtualization() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestParseLimaVersionAndSupportedRange(t *testing.T) {
 	t.Parallel()
 
@@ -227,7 +255,7 @@ video:
 audio:
   device: default
 `)
-	data, err := renderLimaTemplate(base, node, "darwin", "arm64")
+	data, err := renderLimaTemplate(base, node, "darwin", "arm64", true)
 	if err != nil {
 		t.Fatalf("renderLimaTemplate() error = %v", err)
 	}
@@ -240,6 +268,9 @@ audio:
 	}
 	if rendered["vmType"] != "vz" || rendered["mountType"] != "virtiofs" || rendered["arch"] != "aarch64" {
 		t.Fatalf("platform selection = %#v", rendered)
+	}
+	if rendered["nestedVirtualization"] != true {
+		t.Fatalf("nested virtualization = %#v, want true", rendered["nestedVirtualization"])
 	}
 	mounts, ok := rendered["mounts"].([]any)
 	if !ok || len(mounts) != 1 {
@@ -274,7 +305,7 @@ audio:
 func TestRenderLimaTemplateCopyModeHasNoMounts(t *testing.T) {
 	t.Parallel()
 	node := Node{ID: "n", SandboxName: "copy", Image: "template:ubuntu", VCPUs: 2, MemoryMiB: 4096, DiskMiB: 20480, WorkspaceMode: WorkspaceModeCopy}
-	data, err := renderLimaTemplate([]byte("images: [{location: https://example.invalid/image}]\nmounts: [{location: /host}]\n"), node, "linux", "amd64")
+	data, err := renderLimaTemplate([]byte("images: [{location: https://example.invalid/image}]\nmounts: [{location: /host}]\n"), node, "linux", "amd64", true)
 	if err != nil {
 		t.Fatalf("renderLimaTemplate() error = %v", err)
 	}
@@ -287,6 +318,9 @@ func TestRenderLimaTemplateCopyModeHasNoMounts(t *testing.T) {
 	}
 	if rendered["vmType"] != "qemu" {
 		t.Fatalf("linux vmType = %#v", rendered["vmType"])
+	}
+	if rendered["nestedVirtualization"] != false {
+		t.Fatalf("linux nested virtualization = %#v, want false", rendered["nestedVirtualization"])
 	}
 }
 
@@ -440,6 +474,98 @@ func TestLimaClientLifecycleWithFakeLimactl(t *testing.T) {
 	if !strings.Contains(logText, "sudo -H -- printf hello") {
 		t.Fatalf("guest command did not preserve root execution:\n%s", logText)
 	}
+	if strings.Contains(logText, "--nested-virt") {
+		t.Fatalf("unsupported host enabled nested virtualization:\n%s", logText)
+	}
+}
+
+func TestLimaClientAutomaticallyEnablesNestedVirtualization(t *testing.T) {
+	t.Parallel()
+	home := testutil.TempDir(t, "n-")
+	binary := writeFakeLimactl(t, home)
+	client := NewLimaClient(home)
+	client.Binary = binary
+	client.GOOS = "darwin"
+	client.GOARCH = "arm64"
+	client.LimaHome = filepath.Join(filepath.Dir(filepath.Dir(home)), filepath.Base(home))
+	t.Cleanup(func() {
+		if err := os.RemoveAll(client.LimaHome); err != nil {
+			t.Errorf("remove short Lima home: %v", err)
+		}
+	})
+	client.UnixSocketProbe = func(string) error { return nil }
+	client.nestedVirtualizationProbe = func() bool { return true }
+	node := Node{
+		ID: "node-id", SandboxName: "nested", Image: "template:ubuntu",
+		VCPUs: 2, MemoryMiB: 4096, DiskMiB: 20480, WorkspaceMode: WorkspaceModeCopy,
+	}
+	ctx := context.Background()
+	if err := client.Create(ctx, node); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	data, err := os.ReadFile(client.templatePath(node))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered map[string]any
+	if err := yaml.Unmarshal(data, &rendered); err != nil {
+		t.Fatal(err)
+	}
+	if rendered["nestedVirtualization"] != true {
+		t.Fatalf("nested virtualization = %#v, want true", rendered["nestedVirtualization"])
+	}
+	if err := client.Start(ctx, node); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	logData, err := os.ReadFile(binary + ".log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "start -y nested --nested-virt") {
+		t.Fatalf("supported host start omitted --nested-virt:\n%s", logData)
+	}
+}
+
+func TestDoctorReportsAutomaticNestedVirtualization(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		available bool
+		want      string
+	}{
+		{name: "supported", available: true, want: "nested virtualization is enabled automatically"},
+		{name: "unsupported", available: false, want: "nested virtualization is unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			root := testutil.TempDir(t, "doctor-")
+			home := filepath.Join(root, "home")
+			binary := writeFakeLimactl(t, root)
+			client := NewLimaClient(home)
+			client.Binary = binary
+			client.GOOS = "darwin"
+			client.GOARCH = "arm64"
+			client.LimaHome = filepath.Join(home, "lima")
+			client.nestedVirtualizationProbe = func() bool { return test.available }
+
+			cfg := DefaultConfig(home)
+			service := NewService(cfg, client, strings.NewReader(""), io.Discard, io.Discard)
+			report, err := service.Doctor(context.Background(), false)
+			if err != nil {
+				t.Fatalf("Doctor() error = %v", err)
+			}
+			for _, check := range report.Checks {
+				if check.Name == "lima_driver" {
+					if !strings.Contains(check.Message, test.want) {
+						t.Fatalf("lima_driver message = %q, want %q", check.Message, test.want)
+					}
+					return
+				}
+			}
+			t.Fatal("Doctor() omitted lima_driver check")
+		})
+	}
 }
 
 func TestLimaCreateDoesNotDeletePreExistingInstance(t *testing.T) {
@@ -563,7 +689,7 @@ func TestNativeLimaTemplateValidation(t *testing.T) {
 		WorkspaceMode: WorkspaceModeMounted, WorkspaceMountPath: workspace, GuestWorkspacePath: "/workspace",
 		Ports: []string{"18080:8080"},
 	}
-	data, err := renderLimaTemplate(template, node, runtime.GOOS, runtime.GOARCH)
+	data, err := renderLimaTemplate(template, node, runtime.GOOS, runtime.GOARCH, false)
 	if err != nil {
 		t.Fatalf("render native template: %v", err)
 	}

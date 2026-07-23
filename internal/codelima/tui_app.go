@@ -32,6 +32,10 @@ type vaxisTUIApp struct {
 	operationOrder    []string
 	linkRegions       []tuiLinkRegion
 	terminalMouse     *tuiTerminalMouseGesture
+	// daemonDisconnected is latched after the daemon session ends or its
+	// request connection fails. Focus events must not probe a dead connection
+	// and replace the actionable reopen guidance with broken-pipe noise.
+	daemonDisconnected bool
 	// overlay is the single active right-pane override (dialog, menu,
 	// selector, or messages view); nil means no overlay is showing.
 	overlay          tuiOverlay
@@ -227,7 +231,19 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.handleTerminalClosed(event)
 		a.draw()
 		return false, nil
+	case tuiDaemonDisconnectedEvent:
+		a.daemonDisconnected = true
+		a.setStatus(slog.LevelError, event.Err.Error())
+		a.draw()
+		return false, nil
 	case tuiTerminalErrorEvent:
+		if a.daemonDisconnected {
+			if a.service != nil {
+				a.service.log().Error("terminal request failed after daemon disconnect", "error", event.Err.Error())
+			}
+			a.draw()
+			return false, nil
+		}
 		a.setStatus(slog.LevelError, event.Err.Error())
 		a.draw()
 		return false, nil
@@ -235,9 +251,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		// A newer TUI can revoke this request connection while both windows stay
 		// open. Window focus is an explicit user handoff, so reclaim ownership
 		// before the next key or mouse event can mutate a terminal.
-		if a.service != nil && a.service.daemonClient != nil {
+		if !a.daemonDisconnected && a.service != nil && a.service.daemonClient != nil {
 			if err := takeTUIDaemonInput(a.ctx, a.service.daemonClient); err != nil {
-				a.setStatus(slog.LevelError, fmt.Sprintf("reclaim terminal input ownership: %v", err))
+				a.service.log().Error("reclaim terminal input ownership failed", "error", err.Error())
+				a.daemonDisconnected = true
+				a.setStatus(slog.LevelError, "daemon connection lost; quit and reopen CodeLima to reconnect")
 			}
 		}
 		a.draw()

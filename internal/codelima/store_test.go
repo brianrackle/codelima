@@ -33,9 +33,10 @@ func TestEnsureLayoutCreatesSchemaV4WithoutProjectStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListConfigurations() error = %v", err)
 	}
-	wantSlugs := []string{"small", "medium", "large", "xlarge"}
+	wantSlugs := []string{"xsmall", "small", "medium", "large", "xlarge"}
 	wantResources := map[string][3]uint32{
-		"small":  {1, 1 * 1024, 10 * 1024},
+		"xsmall": {1, 1 * 1024, 10 * 1024},
+		"small":  {2, 4 * 1024, 25 * 1024},
 		"medium": {4, 8 * 1024, 50 * 1024},
 		"large":  {6, 16 * 1024, 75 * 1024},
 		"xlarge": {8, 32 * 1024, 100 * 1024},
@@ -57,6 +58,98 @@ func TestEnsureLayoutCreatesSchemaV4WithoutProjectStorage(t *testing.T) {
 	}
 	if _, err := store.ConfigurationByIDOrSlug("default"); !IsNotFound(err) {
 		t.Fatalf("fresh home still exposes legacy default configuration: %v", err)
+	}
+}
+
+func TestSeedAndRepairMigratesUntouchedLegacySmallAndAddsXSmall(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	store := NewStore(DefaultConfig(home))
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
+	}
+
+	small, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
+	if err != nil {
+		t.Fatalf("ConfigurationByIDOrSlug(small) error = %v", err)
+	}
+	small.VCPUs = 1
+	small.MemoryMiB = 1 * 1024
+	small.DiskMiB = 10 * 1024
+	if err := store.SaveConfiguration(small); err != nil {
+		t.Fatalf("SaveConfiguration(legacy small) error = %v", err)
+	}
+
+	if xsmall, err := store.ConfigurationByIDOrSlug("xsmall"); err == nil {
+		if err := os.RemoveAll(store.configurationDir(xsmall.ID)); err != nil {
+			t.Fatalf("RemoveAll(xsmall) error = %v", err)
+		}
+		if err := os.Remove(store.configurationSlugIndexPath(xsmall.Slug)); err != nil {
+			t.Fatalf("Remove(xsmall index) error = %v", err)
+		}
+	} else if !IsNotFound(err) {
+		t.Fatalf("ConfigurationByIDOrSlug(xsmall) error = %v", err)
+	}
+	if err := os.WriteFile(store.seedVersionPath(), []byte("3\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(seed.version) error = %v", err)
+	}
+
+	if err := store.seedAndRepair(time.Now().UTC(), false); err != nil {
+		t.Fatalf("seedAndRepair() error = %v", err)
+	}
+	migratedSmall, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
+	if err != nil {
+		t.Fatalf("ConfigurationByIDOrSlug(small) after repair error = %v", err)
+	}
+	if migratedSmall.ID != small.ID || migratedSmall.VCPUs != 2 || migratedSmall.MemoryMiB != 4*1024 || migratedSmall.DiskMiB != 25*1024 {
+		t.Fatalf("legacy small was not migrated in place: %+v", migratedSmall)
+	}
+	xsmall, err := store.ConfigurationByIDOrSlug("xsmall")
+	if err != nil {
+		t.Fatalf("ConfigurationByIDOrSlug(xsmall) after repair error = %v", err)
+	}
+	if xsmall.VCPUs != 1 || xsmall.MemoryMiB != 1*1024 || xsmall.DiskMiB != 10*1024 {
+		t.Fatalf("xsmall was not seeded with legacy small resources: %+v", xsmall)
+	}
+	seedMarker, err := os.ReadFile(store.seedVersionPath())
+	if err != nil || string(seedMarker) != "4\n" {
+		t.Fatalf("seed marker = %q, %v", seedMarker, err)
+	}
+}
+
+func TestSeedAndRepairPreservesCustomizedLegacySmall(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	store := NewStore(DefaultConfig(home))
+	if err := store.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
+	}
+	small, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
+	if err != nil {
+		t.Fatalf("ConfigurationByIDOrSlug(small) error = %v", err)
+	}
+	small.Image = "template:custom"
+	small.VCPUs = 1
+	small.MemoryMiB = 1 * 1024
+	small.DiskMiB = 10 * 1024
+	if err := store.SaveConfiguration(small); err != nil {
+		t.Fatalf("SaveConfiguration(custom small) error = %v", err)
+	}
+	if err := os.WriteFile(store.seedVersionPath(), []byte("3\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(seed.version) error = %v", err)
+	}
+
+	if err := store.seedAndRepair(time.Now().UTC(), false); err != nil {
+		t.Fatalf("seedAndRepair() error = %v", err)
+	}
+	preserved, err := store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
+	if err != nil {
+		t.Fatalf("ConfigurationByIDOrSlug(small) after repair error = %v", err)
+	}
+	if preserved.Image != "template:custom" || preserved.VCPUs != 1 || preserved.MemoryMiB != 1*1024 || preserved.DiskMiB != 10*1024 {
+		t.Fatalf("customized legacy small was overwritten: %+v", preserved)
 	}
 }
 

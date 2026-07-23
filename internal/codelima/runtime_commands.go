@@ -23,7 +23,7 @@ func defaultRuntimeCommandTemplates() RuntimeCommandTemplates {
 			"{{binary}} create -y --name {{sandbox_name}} {{template_path}}",
 		},
 		Start: []string{
-			"{{binary}} start -y {{sandbox_name}}",
+			"{{binary}} start -y {{sandbox_name}}{{nested_virtualization_flag}}",
 		},
 		Stop: []string{
 			"{{binary}} stop -y {{sandbox_name}}",

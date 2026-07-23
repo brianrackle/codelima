@@ -117,7 +117,7 @@ func (s *tuiSessionStore) startDaemonEvents() {
 		runDaemonEventLoop(ctx, client, s.handleDaemonEvent, func(err error) {
 			s.service.log().Error("daemon event stream disconnected", "error", err.Error())
 			if s.postEvent != nil {
-				s.postEvent(tuiTerminalErrorEvent{Err: fmt.Errorf("daemon event stream disconnected; quit and reopen CodeLima to reconnect: %w", err)})
+				s.postEvent(tuiDaemonDisconnectedEvent{Err: fmt.Errorf("daemon event stream disconnected; quit and reopen CodeLima to reconnect: %w", err)})
 			}
 		})
 	}()
@@ -147,11 +147,11 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		}
 	case "daemon.shutdown":
 		if s.postEvent != nil {
-			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("codelima daemon stopped")})
+			s.postEvent(tuiDaemonDisconnectedEvent{Err: errors.New("codelima daemon stopped")})
 		}
 	case "daemon.update_committed":
 		if s.postEvent != nil {
-			s.postEvent(tuiTerminalErrorEvent{Err: errors.New("codelima daemon updated; quit and reopen CodeLima to reconnect")})
+			s.postEvent(tuiDaemonDisconnectedEvent{Err: errors.New("codelima daemon updated; quit and reopen CodeLima to reconnect")})
 		}
 	}
 }

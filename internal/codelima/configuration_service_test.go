@@ -14,7 +14,7 @@ func TestDefaultConfigurationIsPersistedEditableAndProtected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigurationCreate() error = %v", err)
 	}
-	if created.VCPUs != 1 || created.MemoryMiB != 1024 || created.DiskMiB != 10240 {
+	if created.VCPUs != 2 || created.MemoryMiB != 4*1024 || created.DiskMiB != 25*1024 {
 		t.Fatalf("new configuration did not copy default: %+v", created)
 	}
 	if got := strings.Join(created.Environments, ","); got != "codex,claude-code" {
@@ -30,7 +30,7 @@ func TestDefaultConfigurationIsPersistedEditableAndProtected(t *testing.T) {
 		t.Fatalf("default update = %+v, %v", updatedDefault, err)
 	}
 	unchanged, err := service.ConfigurationShow(context.Background(), created.ID)
-	if err != nil || unchanged.MemoryMiB != 1024 {
+	if err != nil || unchanged.MemoryMiB != 4*1024 {
 		t.Fatalf("existing configuration changed with default: %+v, %v", unchanged, err)
 	}
 	if _, err := service.ConfigurationUpdate(context.Background(), defaultConfiguration.ID, ConfigurationUpdateInput{Slug: "renamed"}); err == nil {

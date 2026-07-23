@@ -12,7 +12,7 @@ A configuration is global to one metadata home and never owns a directory. It co
 
 Node creation resolves a configuration and copies every effective value into node/bootstrap metadata. Existing nodes never consult a mutable configuration for runtime behavior. This snapshot-at-creation boundary prevents an innocent configuration edit from changing or invalidating a running VM.
 
-The `small` configuration is the editable but non-renamable and non-deletable implicit default. It references the built-in `codex` and `claude-code` environments on a fresh home, so nodes created without an explicit configuration install both coding agents. Seed/repair never overwrites an existing `small` configuration. New configurations are deep copies of its current value rather than children that inherit future changes.
+The `small` configuration is the editable but non-renamable and non-deletable implicit default. It references the built-in `codex` and `claude-code` environments on a fresh home, so nodes created without an explicit configuration install both coding agents. Seed/repair preserves existing `small` values except for explicit, revision-gated migrations that match the complete former stock preset; seed revision 4 moves untouched 1/1/10 records to the new 2/4/25 default while customized records remain unchanged. New configurations are deep copies of its current value rather than children that inherit future changes.
 
 Built-in sizes are persisted configurations, not synthetic UI rows. Seed them through the store so CLI and TUI consumers agree, order them by size instead of alphabetically, and treat any existing record—including a soft-deleted tombstone—as user-owned. A seed-revision bump may add a genuinely missing size to an older home, but repair must never overwrite a customized configuration or resurrect a deleted optional size. If a formerly optional record becomes a required protected default, restore its tombstone in place so custom values and identity survive. Retire the former `default` configuration with a tombstone rather than removing its record: it disappears from live lists while existing nodes can still hydrate their historical configuration ID and slug.
 
@@ -45,6 +45,14 @@ modify parsed YAML structurally, atomically write mode `0600`, and require
 render only the selected workspace, use exact binary MiB values, and put a
 final ignore-all rule after explicit port mappings so CodeLima remains the host
 listener owner.
+
+Host-only runtime features are capability-derived at the Lima boundary, not
+stored as configuration preferences. Keep native detection behind a small
+platform adapter with conservative false stubs. When a supported capability
+must also apply to pre-existing Lima instances, encode it in newly rendered
+YAML and repeat it as an idempotent lifecycle flag; nested virtualization uses
+this pattern with Apple's authoritative VZ capability query and
+`limactl start --nested-virt`.
 
 Lima logs in as an unprivileged distribution user. Preserve CodeLima's existing
 root guest-command contract at one boundary by prefixing noninteractive
@@ -104,6 +112,15 @@ Runtime maps are never an ordering source. Before terminal states cross a daemon
 
 The private Unix-socket daemon protocol is newline-delimited JSON with an exact binary-version handshake, a bounded frame size, peer-credential checks, typed error responses, and explicit input ownership. Any request-shape change bumps the protocol version; semantic paste is protocol 3, preventing a stale daemon from accepting input it cannot interpret. Interactive TUI connection setup must finish by claiming input ownership, even when `hello` reports an existing owner; this makes the newest interactive TUI authoritative and prevents delayed terminal opens from discovering an observe-only connection. Because handshake ownership becomes stale when another TUI connects, every TUI window-focus event sends the separate idempotent `input.takeover` request before subsequent user input. Revocation is an expected internal handoff and must not be rendered as a TUI error; surface only a failed takeover. Do not recover by replaying a failed terminal mutation. Apply read deadlines to protocol phases that must make prompt progress: the initial handshake and event subscription. Clear the server-side deadline for authenticated request clients and subscribed event clients because a valid TUI session may be idle indefinitely. A client event reader may use bounded idle reads, but it retries only timeout errors; context cancellation, shutdown/update commit, and permanent socket errors terminate the reader once. Schema/session format changes bump their own version constants.
 
+Until coordinated automatic reconnection exists, daemon disconnection is a
+latched TUI lifecycle state. Send shutdown, update commit, and permanent event
+stream failure through a dedicated UI event; after the latch, do not probe the
+dead request socket on window focus and do not let late terminal-worker errors
+replace the actionable reopen instruction. A focus takeover failure must set
+the same latch because a timed-out or partially completed stream request is not
+safe to reuse. Keep the transport detail in structured logs and never replay an
+ambiguous terminal mutation.
+
 Daemon terminal sessions are recoverable cache state, not authoritative node metadata. `restore: forget` replaces that cache without parsing it. Under `restore: respawn`, an unsupported or malformed session is atomically renamed beside the live path, a fresh current-version session is written, and startup continues with a warning. Keep strict schema rejection for authoritative stores; use quarantine-and-reset only for state whose loss changes convenience rather than data truth.
 
 Live update transfers PTY file descriptors over an authenticated, length-prefixed Unix stream with SCM_RIGHTS. Never assume stream read boundaries equal writes: frame every bounded JSON payload and collect ancillary descriptors while reading the exact frame. Reject descriptors on control frames and duplicate or unknown terminal descriptors rather than ignoring or leaking them. The CLI resolves and sends its own executable even when no path is given; never resolve an omitted replacement inside the old daemon. Daemon lifecycle management alone may authenticate with the running daemon's persisted protocol-2-or-newer identity to cross an exact-version boundary: update explicitly takes input ownership, while startup recovery may only stop the matching daemon. Import is staged, acknowledged, and committed; a failed import rolls back to the old daemon. Only the exact legacy-Darwin `unixpacket` unsupported error may fall back to a clean stop/start; do not turn generic handoff errors into destructive restarts. Integration paths and unit tests that create Unix sockets use `internal/testutil.TempDir`, which keeps disposable paths short and under the project-rooted `tmp/tests` directory so Darwin's smaller `sun_path` limit is exercised portably.
@@ -126,4 +143,4 @@ The production TUI loads a flat node list, optionally scoped by canonical direct
 
 Resolve conditional UI defaults once, after the initial selection is known, and then preserve explicit operator state. A running initial node starts in terminal pane mode and may open or reconnect its one startup tab; a non-running initial node starts in info mode and opens no guest shell. After initialization, the `i` pane choice is sticky across selection and refresh rather than being recomputed from each node's status.
 
-Dialogs, selectors, menus, and messages occupy the right pane. Dialog key routing follows the active field's semantics: `Tab`/`Up`/`Down` move between fields, text inputs receive `Left` and `Right` for cursor movement, and `Right` is consumed as `choose` only when the field exposes a selector activation callback. Long runtime mutations execute as background operations with resource keys that reject conflicting work while navigation, refresh, and unrelated terminal tabs remain responsive.
+Dialogs, selectors, menus, and messages occupy the right pane. Dialog key routing follows the active field's semantics: `Tab`/`Up`/`Down` move between fields, text inputs receive `Left` and `Right` for cursor movement, and `Right` is consumed as `choose` only when the field exposes a selector activation callback. Selector option labels may carry decision context, but option values remain stable domain identifiers; configuration rows append formatted vCPU, RAM, and disk while still submitting the slug. Long runtime mutations execute as background operations with resource keys that reject conflicting work while navigation, refresh, and unrelated terminal tabs remain responsive.

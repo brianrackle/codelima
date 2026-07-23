@@ -58,6 +58,9 @@ func TestAtomicWriteFileRoundTripsContentAndMode(t *testing.T) {
 
 func TestAtomicWriteFileCleansUpTempOnReadOnlyDirFailure(t *testing.T) {
 	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root can write through directory permission bits")
+	}
 
 	dir := t.TempDir()
 	roDir := filepath.Join(dir, "readonly")

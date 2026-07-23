@@ -91,8 +91,8 @@ func TestActorReadReturnsVisibleText(t *testing.T) {
 			return false
 		}
 		visible = result.Text
-		return strings.Contains(visible, "hello-actor")
-	}, "echoed command output to reach the actor-read visible text")
+		return slices.Contains(visibleLines(visible), "hello-actor")
+	}, "exact command output line to reach the actor-read visible text")
 
 	// The echoed input line ("echo hello-actor", possibly prompt-prefixed) and
 	// the command output line ("hello-actor") both appear; assert the output
@@ -720,7 +720,7 @@ func TestGhosttyTerminalRedrawsCleanlyAfterWidthGrowth(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"TERM="+tuiEmbeddedTermEnv,
 		"BASH_SILENCE_DEPRECATION_WARNING=1",
-		`PS1=brianrackle@sandbox-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianrackle/Projects/codelima\$ `,
+		`PS1=brianrackle@sandbox-codelima-codex-codelima-codex-node-test-019d2fff:/Users/brianrackle/Projects/codelima$ `,
 	)
 	if err := ghostty.Start(cmd); err != nil {
 		t.Fatalf("ghostty.Start() error = %v", err)

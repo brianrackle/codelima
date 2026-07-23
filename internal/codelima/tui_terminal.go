@@ -32,6 +32,14 @@ type tuiTerminalErrorEvent struct {
 	Err       error
 }
 
+// tuiDaemonDisconnectedEvent reports that the TUI's daemon session cannot
+// service any more requests. The UI latches this state so routine focus events
+// do not keep writing ownership requests to a known-dead socket or overwrite
+// the recovery guidance with transport errors.
+type tuiDaemonDisconnectedEvent struct {
+	Err error
+}
+
 // tuiDaemonTerminalDirtyEvent crosses from the daemon event-reader goroutine
 // to the single-owner TUI event loop before it touches the terminal registry.
 type tuiDaemonTerminalDirtyEvent struct {

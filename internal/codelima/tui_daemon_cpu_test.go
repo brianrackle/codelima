@@ -125,6 +125,39 @@ func TestDaemonDirtyEventRequestsSnapshotOnTheUIEventLoop(t *testing.T) {
 	}
 }
 
+func TestDaemonLifecycleEventsMarkTheTUIConnectionDisconnected(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		event     string
+		wantError string
+	}{
+		{name: "shutdown", event: "daemon.shutdown", wantError: "codelima daemon stopped"},
+		{name: "update", event: "daemon.update_committed", wantError: "codelima daemon updated; quit and reopen CodeLima to reconnect"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			events := make(chan vaxis.Event, 1)
+			store := &tuiSessionStore{postEvent: func(event vaxis.Event) { events <- event }}
+			store.handleDaemonEvent(daemon.Event{Event: test.event})
+
+			select {
+			case event := <-events:
+				disconnected, ok := event.(tuiDaemonDisconnectedEvent)
+				if !ok {
+					t.Fatalf("posted event = %T, want tuiDaemonDisconnectedEvent", event)
+				}
+				if disconnected.Err == nil || disconnected.Err.Error() != test.wantError {
+					t.Fatalf("disconnect error = %v, want %q", disconnected.Err, test.wantError)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("daemon disconnect event was not posted")
+			}
+		})
+	}
+}
+
 type failingDaemonEventReader struct {
 	mu    sync.Mutex
 	calls int

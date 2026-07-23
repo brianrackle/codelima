@@ -30,10 +30,10 @@ Unix sockets; if the checkout is on 9p/NFS, use an isolated short local
 ./bin/codelima settings show
 ./bin/codelima doctor --repair
 cat "$CODELIMA_HOME/_config/schema.version"
+cat "$CODELIMA_HOME/_config/seed.version"
 find "$CODELIMA_HOME" -maxdepth 3 -type d | sort
 ./bin/codelima configuration list
-./bin/codelima configuration show small
-for preset in small medium large xlarge; do
+for preset in xsmall small medium large xlarge; do
   ./bin/codelima configuration show "$preset"
 done
 ```
@@ -42,9 +42,10 @@ Verify:
 
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
 - schema version is `4`
+- seed version is `4`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
-- `small` is the implicit default and exists with 1 CPU, 1024 MiB memory, 10240 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
-- the configuration list contains only `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments
+- `small` is the implicit default and exists with 2 CPUs, 4096 MiB memory, 25600 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
+- the configuration list contains only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 2/4096/25600, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments
 
 Check schema-v3 rejection without mutation:
 
@@ -145,6 +146,9 @@ Verify:
 
 ```sh
 ./bin/codelima node start qa-v3-root
+./bin/codelima doctor > "$QA_ROOT/doctor.txt"
+cat "$QA_ROOT/doctor.txt"
+grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ./bin/codelima shell qa-v3-root -- sh -lc 'test -f .qa-tools-installed && printf bootstrap-ok'
 ./bin/codelima node status qa-v3-root
 ./bin/codelima node stop qa-v3-root
@@ -152,6 +156,14 @@ Verify:
 ```
 
 Verify bootstrap prints `bootstrap-ok`, the first status is running, and the final status is stopped. Review runtime diagnostics to confirm the VM uses the node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must not invoke an `msb` subprocess.
+
+On a macOS arm64 host where `doctor` reports `nested virtualization is enabled automatically`, verify every rendered node template reports `nestedVirtualization: true` and, while the node is running, this succeeds:
+
+```sh
+./bin/codelima shell qa-v3-root -- sh -lc 'test -c /dev/kvm'
+```
+
+On an unsupported macOS arm64 host, verify `doctor` reports `nested virtualization is unavailable` and every rendered template reports `nestedVirtualization: false`. On Linux, verify every rendered template also reports `nestedVirtualization: false`; Linux continues to use the separately reported QEMU/KVM host path. Starting a pre-existing node on a supported Mac must also expose `/dev/kvm`, proving the start-time `--nested-virt` override covers nodes whose original template predates this feature.
 
 ## Flow 5: daemon terminals and node-host shell
 
@@ -277,7 +289,7 @@ inspect `$CODELIMA_HOME/_logs/codelima.log`; any Lima diagnostic emitted during
 initial load or refresh must appear there with `source=limactl` instead of on
 the TUI screen.
 
-While one TUI remains open, run `./bin/codelima --json daemon update` from the second real terminal. Confirm the open TUI reports that CodeLima was updated and must be reopened. Leave it at that message for at least 30 seconds and verify its `codelima` process remains idle instead of pinning a core on the closed event stream; then quit and reopen it before continuing.
+While one TUI remains open, run `./bin/codelima --json daemon update` from the second real terminal. Confirm the open TUI reports that CodeLima was updated and must be reopened. Return host focus to that window twice and confirm the reopen instruction remains visible without `reclaim terminal input ownership`, `broken pipe`, or `EOF` replacing it. Leave it at that message for at least 30 seconds and verify its `codelima` process remains idle instead of pinning a core on the closed event stream; then quit and reopen it before continuing.
 
 For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the same left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
 
@@ -295,7 +307,7 @@ Verify:
 - each row shows a configuration label
 - `n` opens node creation with a blank directory field and muted current-directory placeholder
 - `a` opens global configuration management and `g` opens global environment management titled `Environments`; its create, manage, and delete surfaces consistently call each reusable command bundle an environment
-- configuration selectors list only `small`, `medium`, `large`, `xlarge` in that order and select `small` by default
+- configuration selectors list only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order, select `small` by default, and render each row as `<name> (<vCPU> vCPU, <RAM> RAM, <disk> disk)` with the expected built-in resources
 - in the configuration update dialog, `Left` and `Right` move the cursor in every editable text and resource field; after moving left, moving right and typing inserts at the expected position, while `Right` still opens the Environments selector
 - `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
 - the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
@@ -307,7 +319,7 @@ Verify:
 - focus-driven terminal width growth neither prints `^L` nor clears earlier terminal history
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
-- an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream
+- an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream, and repeated host focus preserves that message without another dead-socket ownership request
 - quitting and reopening the TUI preserves surviving per-node tab order
 - quitting and reopening two disjoint path-scoped TUIs preserves both tabs in each process
 - reopening after daemon update preserves wrapped line spacing at the captured terminal width

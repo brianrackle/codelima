@@ -165,15 +165,18 @@ func (s *Store) ensureDirectories() error {
 // built-in profiles/environments/configurations, the config refresh
 // rules, or the node-file format change so existing homes re-run the full
 // pass exactly once instead of on every mutating command.
-const seedRevision = "3"
+const seedRevision = "4"
 
 func (s *Store) seedVersionPath() string {
 	return filepath.Join(s.cfg.MetadataRoot, "_config", "seed.version")
 }
 
-func (s *Store) seedVersionCurrent() bool {
+func (s *Store) seedVersion() string {
 	data, err := os.ReadFile(s.seedVersionPath())
-	return err == nil && strings.TrimSpace(string(data)) == seedRevision
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // seedAndRepair writes the global config when missing or stale, seeds built-in
@@ -185,7 +188,8 @@ func (s *Store) seedVersionCurrent() bool {
 // keeps no locking of its own — lock discipline lives at the Service
 // operation level).
 func (s *Store) seedAndRepair(now time.Time, force bool) error {
-	if !force && s.seedVersionCurrent() {
+	previousSeedRevision := s.seedVersion()
+	if !force && previousSeedRevision == seedRevision {
 		return nil
 	}
 	if err := s.ensureConfigFile(); err != nil {
@@ -206,7 +210,7 @@ func (s *Store) seedAndRepair(now time.Time, force bool) error {
 	if err := s.ensureBuiltInEnvironmentConfigs(now); err != nil {
 		return err
 	}
-	if err := s.ensureBuiltInConfigurations(now); err != nil {
+	if err := s.ensureBuiltInConfigurations(now, previousSeedRevision != seedRevision); err != nil {
 		return err
 	}
 	if err := s.retireLegacyDefaultConfiguration(now); err != nil {

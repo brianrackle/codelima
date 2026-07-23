@@ -174,7 +174,7 @@ func (a *vaxisTUIApp) openConfigurationSelector(current string, onSubmit func(st
 	}
 	options := make([]tuiSelectorOption, 0, len(configurations))
 	for _, configuration := range configurations {
-		options = append(options, tuiSelectorOption{Label: configuration.Slug, Value: configuration.Slug})
+		options = append(options, tuiSelectorOption{Label: configurationSelectorLabel(configuration), Value: configuration.Slug})
 	}
 	selector := newTUISelector("Select Configuration", nil, options, []string{coalesce(current, DefaultConfigurationSlug)}, false, func(values []string) error {
 		if len(values) != 1 {
@@ -185,6 +185,23 @@ func (a *vaxisTUIApp) openConfigurationSelector(current string, onSubmit func(st
 	selector.EmptyText = "No configurations configured."
 	a.showSelector(selector)
 	return nil
+}
+
+func configurationSelectorLabel(configuration Configuration) string {
+	return fmt.Sprintf(
+		"%s (%d vCPU, %s RAM, %s disk)",
+		configuration.Slug,
+		configuration.VCPUs,
+		formatTUIResourceSize(configuration.MemoryMiB),
+		formatTUIResourceSize(configuration.DiskMiB),
+	)
+}
+
+func formatTUIResourceSize(valueMiB uint32) string {
+	if valueMiB > 0 && valueMiB%1024 == 0 {
+		return fmt.Sprintf("%d GiB", valueMiB/1024)
+	}
+	return fmt.Sprintf("%d MiB", valueMiB)
 }
 
 func (a *vaxisTUIApp) openManageConfigurationSelector(current string) error {

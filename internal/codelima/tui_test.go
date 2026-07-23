@@ -3293,11 +3293,37 @@ func TestTUIConfigurationSelectorOrdersBuiltInSizes(t *testing.T) {
 		t.Fatal("expected configuration selector")
 	}
 	values := make([]string, 0, len(selector.Options))
+	labels := make([]string, 0, len(selector.Options))
 	for _, option := range selector.Options {
 		values = append(values, option.Value)
+		labels = append(labels, option.Label)
 	}
-	if got := strings.Join(values, ","); got != "small,medium,large,xlarge" {
+	if got := strings.Join(values, ","); got != "xsmall,small,medium,large,xlarge" {
 		t.Fatalf("configuration selector order = %q", got)
+	}
+	wantLabels := []string{
+		"xsmall (1 vCPU, 1 GiB RAM, 10 GiB disk)",
+		"small (2 vCPU, 4 GiB RAM, 25 GiB disk)",
+		"medium (4 vCPU, 8 GiB RAM, 50 GiB disk)",
+		"large (6 vCPU, 16 GiB RAM, 75 GiB disk)",
+		"xlarge (8 vCPU, 32 GiB RAM, 100 GiB disk)",
+	}
+	if got := strings.Join(labels, "\n"); got != strings.Join(wantLabels, "\n") {
+		t.Fatalf("configuration selector labels =\n%s\nwant:\n%s", got, strings.Join(wantLabels, "\n"))
+	}
+}
+
+func TestTUIConfigurationSelectorLabelPreservesPartialGiBValues(t *testing.T) {
+	t.Parallel()
+
+	configuration := Configuration{
+		Slug:      "custom",
+		VCPUs:     3,
+		MemoryMiB: 1536,
+		DiskMiB:   25 * 1024,
+	}
+	if got, want := configurationSelectorLabel(configuration), "custom (3 vCPU, 1536 MiB RAM, 25 GiB disk)"; got != want {
+		t.Fatalf("configurationSelectorLabel() = %q, want %q", got, want)
 	}
 }
 

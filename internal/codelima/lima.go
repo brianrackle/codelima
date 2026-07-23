@@ -43,6 +43,8 @@ type LimaClient struct {
 	LimaHome        string
 	UnixSocketProbe func(string) error
 
+	nestedVirtualizationProbe func() bool
+
 	observer *limaObservationService
 }
 
@@ -80,6 +82,18 @@ func (c *LimaClient) platform() (string, string) {
 		goarch = runtime.GOARCH
 	}
 	return goos, goarch
+}
+
+func (c *LimaClient) supportsNestedVirtualization() bool {
+	goos, goarch := c.platform()
+	if goos != "darwin" || goarch != "arm64" {
+		return false
+	}
+	probe := c.nestedVirtualizationProbe
+	if probe == nil {
+		probe = platformNestedVirtualizationSupported
+	}
+	return probe()
 }
 
 func (c *LimaClient) Version(ctx context.Context) (string, error) {
@@ -269,7 +283,7 @@ func (c *LimaClient) Create(ctx context.Context, node Node) error {
 		return err
 	}
 	goos, goarch := c.platform()
-	rendered, err := renderLimaTemplate(template, node, goos, goarch)
+	rendered, err := renderLimaTemplate(template, node, goos, goarch, c.supportsNestedVirtualization())
 	if err != nil {
 		return err
 	}
@@ -408,7 +422,7 @@ func probeUnixSocket(path string) error {
 	return nil
 }
 
-func renderLimaTemplate(template []byte, node Node, goos, goarch string) ([]byte, error) {
+func renderLimaTemplate(template []byte, node Node, goos, goarch string, nestedVirtualizationSupported bool) ([]byte, error) {
 	if err := validateLimaNode(node); err != nil {
 		return nil, err
 	}
@@ -443,7 +457,7 @@ func renderLimaTemplate(template []byte, node Node, goos, goarch string) ([]byte
 	settings["disk"] = fmt.Sprintf("%dMiB", node.DiskMiB)
 	settings["plain"] = false
 	settings["upgradePackages"] = false
-	settings["nestedVirtualization"] = false
+	settings["nestedVirtualization"] = goos == "darwin" && goarch == "arm64" && nestedVirtualizationSupported
 	settings["containerd"] = map[string]any{"system": false, "user": false, "archives": []any{}}
 	settings["ssh"] = map[string]any{
 		"localPort": 0, "loadDotSSHPubKeys": false, "forwardAgent": false,
@@ -504,7 +518,14 @@ func writeRenderedLimaTemplate(path string, data []byte) error {
 }
 
 func (c *LimaClient) Start(ctx context.Context, node Node) error {
-	commands, err := c.ResolveCommands(node, runtimeCommandStart, map[string]string{"sandbox_name": shellQuote(node.SandboxName)})
+	nestedVirtualizationFlag := ""
+	if c.supportsNestedVirtualization() {
+		nestedVirtualizationFlag = " --nested-virt"
+	}
+	commands, err := c.ResolveCommands(node, runtimeCommandStart, map[string]string{
+		"sandbox_name":               shellQuote(node.SandboxName),
+		"nested_virtualization_flag": nestedVirtualizationFlag,
+	})
 	if err != nil {
 		return err
 	}

@@ -66,14 +66,14 @@ lint: init
 	$(GOLANGCI_LINT) run ./...
 
 test: init
-	$(GO) test -parallel $(GO_TEST_PARALLEL) ./...
+	$(GO) test -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) ./...
 
 test-race: init
-	$(GO) test -race -parallel $(GO_RACE_TEST_PARALLEL) ./...
+	$(GO) test -race -p $(GO_RACE_TEST_PARALLEL) -parallel $(GO_RACE_TEST_PARALLEL) ./...
 
 test-integration: build
 	mkdir -p $(INTEGRATION_TMP)
-	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
+	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
 	rm -rf $(INTEGRATION_TMP)
 
 test-lima-native: init

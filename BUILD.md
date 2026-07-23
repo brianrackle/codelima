@@ -32,9 +32,10 @@ What each target does:
   - builds the real CLI and exercises daemon lifecycle, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
   - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path
 
-All test recipes run tests serially by default, avoiding filesystem-resource
-spikes on virtualized development hosts. Override `GO_TEST_PARALLEL` or
-`GO_RACE_TEST_PARALLEL` only after qualifying the host.
+All test recipes run packages and tests within each package serially by
+default, avoiding filesystem-resource spikes on virtualized development hosts.
+Override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` only after qualifying
+the host.
 
 The Ghostty terminal integration requires cgo. Make enables cgo for every recipe, uses a host `cc` when present, and otherwise uses the managed Zig compiler. Zig is installed before Go-based development tools so `make init` also succeeds in minimal sandboxes without a system C compiler.
 
@@ -60,6 +61,13 @@ sockets. Release qualification must include a warm guest-image cache and a
 clean cache so template resolution/download failures are visible. The gated
 `make test-lima-native` recipe resolves the Ubuntu template and validates the
 CodeLima-rendered YAML with the installed `limactl`.
+
+macOS release qualification must exercise nested virtualization on an Apple
+silicon host where Virtualization.framework reports it supported and an
+unsupported macOS case. Confirm `doctor`, newly rendered YAML, and `/dev/kvm`
+inside both a new node and a pre-existing restarted node agree with the host
+capability. Linux qualification confirms the rendered macOS-specific setting
+remains false while the ordinary QEMU/KVM host checks still pass.
 
 Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module and a
 persistent client per running node. Connection data comes only from Lima's
