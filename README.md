@@ -2,6 +2,11 @@
 
 **Give coding agents a machine of their own. Then run as many as you can use.**
 
+> **Disclaimer:** This project is 100% vibe-coded. I have never read a single
+> line of the code. However, I do 100% of my work within the codelima TUI and
+> shells, so it is actively tested for real-world use. It still has some issues
+> with daemon hangs and intermittent performance issues.
+
 Coding agents are at their best when they can install packages, run services,
 start containers, and change a project without stopping every few minutes to
 ask for permission. Giving an agent that freedom directly on your laptop is
@@ -48,6 +53,21 @@ codelima .
 `codelima .` opens a project-local view: only sandboxes attached to the current
 directory or its descendants appear. Run `codelima` with no path to see every
 sandbox across every project.
+
+Each node in the left pane uses a compact property block: the node name is
+followed by indented `Config`, `CWD`, and live `Status` lines. Scoped views show
+the working directory relative to the path used to open the TUI.
+
+Selecting a running node shows its terminal by default, reuses any existing
+node tab, and opens a guest tab when none exists. Selecting a stopped node shows
+its info view without opening a guest shell. Press `i` to inspect the alternate
+view for the current node.
+
+When the TUI opens, its fixed-width `CodeLima` wordmark briefly shuffles like a
+slot machine and settles from left to right. The effect runs independently of
+navigation and terminal startup, then stops completely. A standalone,
+dependency-free webpage version is available in
+[`examples/codelima-logo-animation.html`](examples/codelima-logo-animation.html).
 
 In the TUI:
 
@@ -192,6 +212,7 @@ codelima installs the built-in Codex and Claude Code environments.
 | `Option+t` | Open a guest terminal tab |
 | `Option+Shift+t` | Open a host terminal tab in the project directory |
 | `Option+Left` / `Option+Right` | Switch terminal tabs |
+| `Option+Shift+Left` / `Option+Shift+Right` | Move the active terminal tab |
 | `Option+w` | Close the active terminal tab |
 | `a` | Manage node configurations |
 | `g` | Manage environment bootstrap bundles |
@@ -328,6 +349,31 @@ the command or path:
 ```sh
 codelima --json node list
 codelima --home ~/.codelima-work .
+```
+
+### Troubleshoot a terminal freeze
+
+All TUIs using one `CODELIMA_HOME` share its daemon. If every tab and VM freezes
+together, capture the live daemon before restarting it:
+
+```sh
+make diagnose-terminal-freeze
+```
+
+The read-only capture records daemon status, terminal state, logs, process
+details, and a native macOS sample under `./tmp/terminal-freeze-*`. It does not
+stop, update, signal, or send input to the daemon. Review the bundle for
+sensitive paths, commands, logs, and metadata before sharing it. The target
+uses `CODELIMA_HOME` when set and otherwise defaults to `~/.codelima`.
+
+Agents can invoke the repository skill directly as
+`$diagnose-codelima-terminal-freezes`. Run the capture on the host that owns the
+daemon, not inside a guest VM, and prefer the platform-scoped binary when
+`./bin/codelima` may point at a guest build:
+
+```sh
+make diagnose-terminal-freeze \
+  DIAG_ARGS='--binary ./bin/darwin-arm64/codelima --terminal-id term_example'
 ```
 
 ## How codelima works

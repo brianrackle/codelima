@@ -53,6 +53,7 @@ type daemonHost struct {
 	session            string
 	mu                 sync.RWMutex
 	terminals          map[string]*daemonTerminalEntry
+	terminalOrder      []string
 	broadcast          func(string, any)
 	prepareReplacement func() error
 	resumeReplacement  func() error
@@ -138,6 +139,16 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 		var params terminalIDParams
 		_ = json.Unmarshal(raw, &params)
 		return map[string]bool{"closed": true}, h.close(params.TerminalID)
+	case "terminal.move":
+		var params struct {
+			TerminalID string `json:"terminal_id"`
+			Delta      int    `json:"delta"`
+		}
+		if err := json.Unmarshal(raw, &params); err != nil || params.TerminalID == "" || (params.Delta != -1 && params.Delta != 1) {
+			return nil, daemon.Error("InvalidArgument", "terminal.move requires a terminal id and delta -1 or 1", ExitInvalidArgument, nil)
+		}
+		moved, err := h.move(params.TerminalID, params.Delta)
+		return map[string]bool{"moved": moved}, err
 	case "terminal.resize":
 		var params struct {
 			TerminalID string `json:"terminal_id"`
@@ -350,7 +361,9 @@ func (h *daemonHost) open(ctx context.Context, params terminalOpenParams, termin
 	}
 	state := daemon.TerminalState{TerminalID: terminalID, TabID: params.Target + "#" + terminalID, Target: params.Target, Kind: kind.String(), Label: params.Label, CWD: spec.Dir, Argv: slices.Clone(spec.Argv), CreatedAt: time.Now().UTC(), Cols: cols, Rows: rows}
 	h.mu.Lock()
+	h.ensureTerminalOrderLocked()
 	h.terminals[terminalID] = &daemonTerminalEntry{state: state, term: runtime}
+	h.terminalOrder = append(h.terminalOrder, terminalID)
 	h.mu.Unlock()
 	if err := h.persist(); err != nil {
 		_ = h.close(terminalID)
@@ -365,7 +378,9 @@ func (h *daemonHost) close(id string) error {
 	h.mu.Lock()
 	entry, ok := h.terminals[id]
 	if ok {
+		h.ensureTerminalOrderLocked()
 		delete(h.terminals, id)
+		h.removeTerminalOrderLocked(id)
 	}
 	h.mu.Unlock()
 	if !ok {
@@ -376,6 +391,38 @@ func (h *daemonHost) close(id string) error {
 	h.broadcast("terminal.closed", entry.state)
 	h.broadcast("target.tabs_changed", map[string]string{"target": entry.state.Target})
 	return nil
+}
+
+func (h *daemonHost) move(id string, direction int) (bool, error) {
+	h.mu.Lock()
+	entry, ok := h.terminals[id]
+	if !ok {
+		h.mu.Unlock()
+		return false, daemon.Error("NotFound", "terminal not found", ExitNotFound, map[string]any{"terminal_id": id})
+	}
+	h.ensureTerminalOrderLocked()
+	index := slices.Index(h.terminalOrder, id)
+	neighbor := index + direction
+	for neighbor >= 0 && neighbor < len(h.terminalOrder) {
+		neighborEntry := h.terminals[h.terminalOrder[neighbor]]
+		if neighborEntry != nil && neighborEntry.state.Target == entry.state.Target {
+			h.terminalOrder[index], h.terminalOrder[neighbor] = h.terminalOrder[neighbor], h.terminalOrder[index]
+			break
+		}
+		neighbor += direction
+	}
+	moved := neighbor >= 0 && neighbor < len(h.terminalOrder)
+	target := entry.state.Target
+	h.mu.Unlock()
+
+	if !moved {
+		return false, nil
+	}
+	if err := h.persist(); err != nil {
+		return false, err
+	}
+	h.broadcast("target.tabs_changed", map[string]string{"target": target})
+	return true, nil
 }
 
 func (h *daemonHost) lookup(id string) (*daemonTerminalEntry, error) {
@@ -392,15 +439,57 @@ func (h *daemonHost) list() []daemon.TerminalState {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	states := make([]daemon.TerminalState, 0, len(h.terminals))
-	for _, entry := range h.terminals {
-		states = append(states, entry.state)
+	for _, id := range h.terminalIDsInOrderLocked() {
+		states = append(states, h.terminals[id].state)
 	}
-	slices.SortFunc(states, compareDaemonTerminalStateOrder)
 	return states
 }
 
-// compareDaemonTerminalStateOrder keeps every outward and persisted view of
-// tabs independent from the daemon's deliberately unordered runtime map.
+// terminalIDsInOrderLocked returns the explicit daemon-owned order plus any
+// map entries not yet tracked by older construction paths. Callers must hold at
+// least h.mu.RLock.
+func (h *daemonHost) terminalIDsInOrderLocked() []string {
+	ids := make([]string, 0, len(h.terminals))
+	seen := make(map[string]struct{}, len(h.terminals))
+	for _, id := range h.terminalOrder {
+		if _, ok := h.terminals[id]; !ok {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		ids = append(ids, id)
+		seen[id] = struct{}{}
+	}
+
+	missing := make([]string, 0, len(h.terminals)-len(ids))
+	for id := range h.terminals {
+		if _, ok := seen[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	slices.SortFunc(missing, func(left, right string) int {
+		return compareDaemonTerminalStateOrder(h.terminals[left].state, h.terminals[right].state)
+	})
+	return append(ids, missing...)
+}
+
+// ensureTerminalOrderLocked normalizes the explicit order before a mutation.
+// Callers must hold h.mu.Lock.
+func (h *daemonHost) ensureTerminalOrderLocked() {
+	h.terminalOrder = h.terminalIDsInOrderLocked()
+}
+
+// removeTerminalOrderLocked removes id from the explicit order. Callers must
+// hold h.mu.Lock.
+func (h *daemonHost) removeTerminalOrderLocked(id string) {
+	if index := slices.Index(h.terminalOrder, id); index >= 0 {
+		h.terminalOrder = slices.Delete(h.terminalOrder, index, index+1)
+	}
+}
+
+// compareDaemonTerminalStateOrder provides a deterministic creation-order
+// fallback for legacy construction paths that have no explicit order yet.
 func compareDaemonTerminalStateOrder(left, right daemon.TerminalState) int {
 	if order := left.CreatedAt.Compare(right.CreatedAt); order != 0 {
 		return order
@@ -548,7 +637,6 @@ func (h *daemonHost) restoreSession(ctx context.Context) error {
 			"version", session.Version,
 		)
 	}
-	slices.SortFunc(session.Terminals, compareDaemonTerminalStateOrder)
 	for _, state := range session.Terminals {
 		restored, openErr := h.open(ctx, terminalOpenParams{Target: state.Target, Kind: state.Kind, Label: state.Label, Cols: state.Cols, Rows: state.Rows}, state.TerminalID)
 		if openErr != nil {
@@ -608,7 +696,9 @@ func (h *daemonHost) handleTerminalEvent(id string, event vaxis.Event) {
 	case tuiTerminalClosedEvent:
 		h.mu.Lock()
 		entry := h.terminals[id]
+		h.ensureTerminalOrderLocked()
 		delete(h.terminals, id)
+		h.removeTerminalOrderLocked(id)
 		h.mu.Unlock()
 		_ = h.persist()
 		if entry != nil {
@@ -828,8 +918,8 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	h.broadcast("daemon.update_starting", nil)
 	h.mu.RLock()
 	entries := make([]*daemonTerminalEntry, 0, len(h.terminals))
-	for _, entry := range h.terminals {
-		entries = append(entries, entry)
+	for _, id := range h.terminalIDsInOrderLocked() {
+		entries = append(entries, h.terminals[id])
 	}
 	h.mu.RUnlock()
 	quiesced := make([]quiescedTerminal, 0, len(entries))
@@ -1061,6 +1151,11 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 		}
 		imported = append(imported, term.(handoffDaemonTerminal))
 		host.terminals[state.TerminalID] = &daemonTerminalEntry{state: state, term: term}
+	}
+	for _, state := range manifest.Session.Terminals {
+		if _, ok := host.terminals[state.TerminalID]; ok {
+			host.terminalOrder = append(host.terminalOrder, state.TerminalID)
+		}
 	}
 	if os.Getenv("CODELIMA_HANDOFF_FAIL_IMPORT") == "1" {
 		releaseImported()

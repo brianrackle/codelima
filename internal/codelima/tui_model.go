@@ -29,6 +29,7 @@ const (
 type tuiSessionManager interface {
 	HasSession(sessionKey string) bool
 	TargetSessionKeys(targetKey string) []string
+	MoveTab(targetKey, sessionKey string, direction int) error
 	OpenNodeTab(node Node) (string, error)
 	OpenNodeHostTab(node Node) (string, error)
 }
@@ -61,6 +62,10 @@ func (tuiNoopSessionManager) TargetSessionKeys(string) []string {
 	return nil
 }
 
+func (tuiNoopSessionManager) MoveTab(string, string, int) error {
+	return nil
+}
+
 func (tuiNoopSessionManager) OpenNodeTab(Node) (string, error) {
 	return "", nil
 }
@@ -69,8 +74,9 @@ func (tuiNoopSessionManager) OpenNodeHostTab(Node) (string, error) {
 	return "", nil
 }
 
-// tuiTreeEntry is one row in the flat node list. A zero entry (empty node ID)
-// is the "nothing selected" sentinel.
+// tuiTreeEntry is one selectable item in the flat node list. Rendering may use
+// multiple terminal rows for the item. A zero entry (empty node ID) is the
+// "nothing selected" sentinel.
 type tuiTreeEntry struct {
 	node Node
 }
@@ -195,9 +201,11 @@ func (s *tuiState) findEntryByKey(key string) int {
 func (s *tuiState) selectIndex(index int) error {
 	if len(s.entries) == 0 {
 		s.selection = -1
+		s.treePaneMode = tuiTreePaneModeInfo
 		return nil
 	}
 
+	previous := s.selectedEntry()
 	if index < 0 {
 		index = 0
 	}
@@ -205,10 +213,21 @@ func (s *tuiState) selectIndex(index int) error {
 		index = len(s.entries) - 1
 	}
 
-	// Selecting or visiting an entry never creates or activates terminal
-	// tabs; tabs are opened explicitly with the open-tab keybinding.
 	s.selection = index
+	s.applySelectedNodeDefault(previous)
 	return nil
+}
+
+// applySelectedNodeDefault chooses the useful pane whenever selection changes
+// or the selected VM crosses the running boundary. An explicit i toggle remains
+// stable while the same node retains the same runtime readiness.
+func (s *tuiState) applySelectedNodeDefault(previous tuiTreeEntry) {
+	current := s.selectedEntry()
+	if current.key() == previous.key() &&
+		nodeIsRunning(current.node) == nodeIsRunning(previous.node) {
+		return
+	}
+	s.treePaneMode = defaultTUITreePaneMode(current)
 }
 
 func (s *tuiState) moveSelection(delta int) error {
@@ -258,9 +277,10 @@ func (s *tuiState) ensureTargetTab(entry tuiTreeEntry) (string, error) {
 	return s.openTerminalTabEntry(entry)
 }
 
-// openInitialTerminalTab makes one terminal tab available for the initial
-// running-node selection without changing tree focus or its default pane mode.
-func (s *tuiState) openInitialTerminalTab() error {
+// ensureSelectedTerminalTab makes one terminal tab available for the selected
+// running node without changing tree focus or opening a shell for a stopped
+// node.
+func (s *tuiState) ensureSelectedTerminalTab() error {
 	entry := s.selectedEntry()
 	if !entry.valid() {
 		return nil
@@ -386,21 +406,21 @@ func (s *tuiState) toggleTreePaneMode() {
 	s.treePaneMode = tuiTreePaneModeTerminal
 }
 
-func (s *tuiState) visibleEntries(height int) []tuiTreeEntry {
-	if len(s.entries) == 0 || height <= 0 {
+func (s *tuiState) visibleEntries(capacity int) []tuiTreeEntry {
+	if len(s.entries) == 0 || capacity <= 0 {
 		return nil
 	}
 
-	start := s.viewportStart(height)
-	end := start + height
+	start := s.viewportStart(capacity)
+	end := start + capacity
 	if end > len(s.entries) {
 		end = len(s.entries)
 	}
 	return s.entries[start:end]
 }
 
-func (s *tuiState) selectTreeRow(row int, height int) error {
-	index := s.viewportStart(height) + row
+func (s *tuiState) selectTreeRow(row int, capacity int) error {
+	index := s.viewportStart(capacity) + row
 	if index < 0 || index >= len(s.entries) {
 		return nil
 	}
@@ -408,23 +428,23 @@ func (s *tuiState) selectTreeRow(row int, height int) error {
 	return s.selectIndex(index)
 }
 
-func (s *tuiState) viewportStart(height int) int {
-	if height <= 0 || len(s.entries) == 0 {
+func (s *tuiState) viewportStart(capacity int) int {
+	if capacity <= 0 || len(s.entries) == 0 {
 		return 0
 	}
 
 	if s.selection < s.scroll {
 		s.scroll = s.selection
 	}
-	if s.selection >= s.scroll+height {
-		s.scroll = s.selection - height + 1
+	if s.selection >= s.scroll+capacity {
+		s.scroll = s.selection - capacity + 1
 	}
 
 	if s.scroll < 0 {
 		s.scroll = 0
 	}
 
-	maxScroll := len(s.entries) - height
+	maxScroll := len(s.entries) - capacity
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
@@ -450,31 +470,41 @@ func (s *tuiState) activeNode() (Node, bool) {
 }
 
 func (s *tuiState) replaceNodes(nodes []Node, preferredKey string) error {
+	previous := s.selectedEntry()
 	selectedKey := preferredKey
 	if selectedKey == "" {
-		selectedKey = s.selectedEntry().key()
+		selectedKey = previous.key()
 	}
 	s.nodes = append([]Node(nil), nodes...)
 	s.indexNodes()
 	s.rebuildEntries()
 
+	selectIndex := func(index int) error {
+		if err := s.selectIndex(index); err != nil {
+			return err
+		}
+		s.applySelectedNodeDefault(previous)
+		return nil
+	}
+
 	if selectedKey != "" {
 		if index := s.findEntryByKey(selectedKey); index >= 0 {
-			return s.selectIndex(index)
+			return selectIndex(index)
 		}
 	}
 
 	if len(s.entries) == 0 {
 		s.selection = -1
 		s.terminalTarget = ""
+		s.treePaneMode = tuiTreePaneModeInfo
 		return nil
 	}
 
 	if s.selection < 0 || s.selection >= len(s.entries) {
-		return s.selectIndex(0)
+		return selectIndex(0)
 	}
 
-	return s.selectIndex(s.selection)
+	return selectIndex(s.selection)
 }
 
 func (s *tuiState) activeTerminalTargetKey() string {

@@ -61,6 +61,27 @@ func (s *TargetTerminalState) RemoveTab(id TabID) bool {
 	return false
 }
 
+// MoveTab swaps the tab with id with its adjacent neighbor in direction.
+// Direction must be -1 (left) or 1 (right). Moving beyond either edge is a
+// no-op; tabs do not wrap while being reordered.
+func (s *TargetTerminalState) MoveTab(id TabID, direction int) bool {
+	if direction != -1 && direction != 1 {
+		return false
+	}
+	for i, tab := range s.Tabs {
+		if tab.ID != id {
+			continue
+		}
+		next := i + direction
+		if next < 0 || next >= len(s.Tabs) {
+			return false
+		}
+		s.Tabs[i], s.Tabs[next] = s.Tabs[next], s.Tabs[i]
+		return true
+	}
+	return false
+}
+
 // HasTab reports whether a tab with id is open.
 func (s *TargetTerminalState) HasTab(id TabID) bool {
 	for _, tab := range s.Tabs {

@@ -4,9 +4,11 @@ package codelima
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
+	"github.com/brianrackle/codelima/internal/testutil"
 )
 
 func TestDaemonTerminalListPreservesCreationOrder(t *testing.T) {
@@ -42,6 +45,77 @@ func TestDaemonTerminalListPreservesCreationOrder(t *testing.T) {
 				t.Fatalf("terminal.list order = %v, want creation order %v", terminalStateIDs(states), want)
 			}
 		}
+	}
+}
+
+func TestDaemonTerminalMovePersistsTargetTabOrder(t *testing.T) {
+	createdAt := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
+	sessionPath := filepath.Join(testutil.TempDir(t, "dm-"), "session.json")
+	host := &daemonHost{
+		session: sessionPath,
+		terminals: map[string]*daemonTerminalEntry{
+			"a-1": {state: daemon.TerminalState{TerminalID: "a-1", Target: "node:a", CreatedAt: createdAt}},
+			"b-1": {state: daemon.TerminalState{TerminalID: "b-1", Target: "node:b", CreatedAt: createdAt.Add(time.Nanosecond)}},
+			"a-2": {state: daemon.TerminalState{TerminalID: "a-2", Target: "node:a", CreatedAt: createdAt.Add(2 * time.Nanosecond)}},
+			"a-3": {state: daemon.TerminalState{TerminalID: "a-3", Target: "node:a", CreatedAt: createdAt.Add(3 * time.Nanosecond)}},
+		},
+		broadcast: func(string, any) {},
+	}
+
+	move := func(terminalID string, delta int) error {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"terminal_id": terminalID, "delta": delta})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = host.Handle(context.Background(), daemon.ClientContext{}, "terminal.move", raw)
+		return err
+	}
+
+	if err := move("a-3", -1); err != nil {
+		t.Fatalf("move a-3 left: %v", err)
+	}
+	if got, want := terminalStateIDs(host.list()), []string{"a-1", "b-1", "a-3", "a-2"}; !slices.Equal(got, want) {
+		t.Fatalf("terminal.list after move = %v, want %v", got, want)
+	}
+	assertPersistedTerminalOrder(t, sessionPath, []string{"a-1", "b-1", "a-3", "a-2"})
+	if err := move("a-3", 1); err != nil {
+		t.Fatalf("move a-3 right: %v", err)
+	}
+	if got, want := terminalStateIDs(host.list()), []string{"a-1", "b-1", "a-2", "a-3"}; !slices.Equal(got, want) {
+		t.Fatalf("terminal.list after reverse move = %v, want %v", got, want)
+	}
+
+	// A boundary move is successful but keeps the tab in place.
+	if err := move("a-1", -1); err != nil {
+		t.Fatalf("move first tab left: %v", err)
+	}
+	if got, want := terminalStateIDs(host.list()), []string{"a-1", "b-1", "a-2", "a-3"}; !slices.Equal(got, want) {
+		t.Fatalf("terminal.list after boundary move = %v, want %v", got, want)
+	}
+
+	assertPersistedTerminalOrder(t, sessionPath, []string{"a-1", "b-1", "a-2", "a-3"})
+
+	if err := move("missing", 1); err == nil {
+		t.Fatalf("move missing terminal succeeded, want error")
+	}
+	if err := move("a-2", 2); err == nil {
+		t.Fatalf("move with delta 2 succeeded, want error")
+	}
+}
+
+func assertPersistedTerminalOrder(t *testing.T, sessionPath string, want []string) {
+	t.Helper()
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var session daemon.Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		t.Fatal(err)
+	}
+	if got := terminalStateIDs(session.Terminals); !slices.Equal(got, want) {
+		t.Fatalf("persisted terminal order = %v, want %v", got, want)
 	}
 }
 

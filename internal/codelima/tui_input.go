@@ -31,6 +31,8 @@ type tuiKeyBinding struct {
 var tuiKeyBindings = []tuiKeyBinding{
 	{match: isHostTerminalTabOpenKey, run: (*vaxisTUIApp).openHostTerminalTab},
 	{match: isTerminalTabOpenKey, run: (*vaxisTUIApp).openTerminalTab},
+	{match: isTerminalTabMoveNextKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(1) }},
+	{match: isTerminalTabMovePreviousKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(-1) }},
 	{match: isTerminalTabNextKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(1) }},
 	{match: isTerminalTabPreviousKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(-1) }},
 	{match: isTerminalTabCloseKey, run: (*vaxisTUIApp).closeTerminalTab},
@@ -116,6 +118,9 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 		return false
 	}
 
+	if err == nil {
+		err = a.ensureSelectedNodeTerminal()
+	}
 	if err != nil {
 		a.setStatus(slog.LevelError, err.Error())
 	} else {
@@ -239,9 +244,17 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 	if a.treeContentRect.contains(mouse.Col, mouse.Row) && mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
 		a.cancelTerminalMouseGesture()
 		a.state.focusTree()
-		if err := a.state.selectTreeRow(mouse.Row-a.treeContentRect.row, a.treeContentRect.height); err != nil {
-			a.setStatus(slog.LevelError, err.Error())
-			return
+		contentRow := mouse.Row - a.treeContentRect.row
+		entryCapacity := tuiTreeEntryCapacity(a.treeContentRect.height)
+		if contentRow < entryCapacity*tuiTreeEntryHeight {
+			if err := a.state.selectTreeRow(contentRow/tuiTreeEntryHeight, entryCapacity); err != nil {
+				a.setStatus(slog.LevelError, err.Error())
+				return
+			}
+			if err := a.ensureSelectedNodeTerminal(); err != nil {
+				a.setStatus(slog.LevelError, err.Error())
+				return
+			}
 		}
 		a.clearStatus()
 		a.syncSessionFocus()
@@ -448,6 +461,16 @@ func isTerminalTabPreviousKey(key vaxis.Key) bool {
 		keyMatchesTerminalModifier(key, 'b')
 }
 
+func isTerminalTabMoveNextKey(key vaxis.Key) bool {
+	return keyMatchesShiftedTerminalModifier(key, vaxis.KeyRight) ||
+		keyMatchesShiftedTerminalModifier(key, 'f')
+}
+
+func isTerminalTabMovePreviousKey(key vaxis.Key) bool {
+	return keyMatchesShiftedTerminalModifier(key, vaxis.KeyLeft) ||
+		keyMatchesShiftedTerminalModifier(key, 'b')
+}
+
 func isTerminalTabCloseKey(key vaxis.Key) bool {
 	return keyMatchesOptionShortcut(key, 'w', macOptionWGlyph)
 }
@@ -483,6 +506,12 @@ func keyMatchesTerminalModifier(key vaxis.Key, code rune) bool {
 	return key.Matches(code, vaxis.ModAlt) ||
 		key.Matches(code, vaxis.ModMeta) ||
 		key.Matches(code, vaxis.ModAlt|vaxis.ModMeta)
+}
+
+func keyMatchesShiftedTerminalModifier(key vaxis.Key, code rune) bool {
+	return key.Matches(code, vaxis.ModAlt|vaxis.ModShift) ||
+		key.Matches(code, vaxis.ModMeta|vaxis.ModShift) ||
+		key.Matches(code, vaxis.ModAlt|vaxis.ModMeta|vaxis.ModShift)
 }
 
 func hasTerminalModifier(modifiers vaxis.ModifierMask, extra vaxis.ModifierMask) bool {

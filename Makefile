@@ -28,7 +28,7 @@ export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 export CGO_ENABLED := 1
 export CC
 
-.PHONY: init ghostty-vt gopls tidy fmt lint test test-race test-integration test-lima-native build run tui smoke package package-formula verify clean
+.PHONY: init ghostty-vt gopls tidy fmt lint test test-race test-integration test-lima-native build run tui smoke diagnose-terminal-freeze package package-formula verify clean
 
 PACKAGE_VERSION ?= 0.0.0-dev
 VERSION_LDFLAGS := -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION)
@@ -40,6 +40,7 @@ INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
 GO_TEST_PARALLEL ?= 1
 GO_RACE_TEST_PARALLEL ?= 1
+DIAG_ARGS ?=
 
 init:
 	./scripts/install_go.sh $(GO_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
@@ -95,6 +96,9 @@ tui: build
 
 smoke: build
 	CODELIMA_BIN=$(CODELIMA_BIN) /bin/sh ./scripts/smoke_3_layers.sh
+
+diagnose-terminal-freeze:
+	/bin/sh ./.agents/skills/diagnose-codelima-terminal-freezes/scripts/capture.sh $(DIAG_ARGS)
 
 package: init
 	/bin/sh ./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG)

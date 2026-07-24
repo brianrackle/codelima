@@ -30,6 +30,14 @@ func TestProtocolRoundTripAndOversizeRejection(t *testing.T) {
 	}
 }
 
+func TestTerminalMoveRequiresInputOwnership(t *testing.T) {
+	t.Parallel()
+
+	if !mutatingInputMethod("terminal.move") {
+		t.Fatalf("terminal.move must be protected as a mutating input method")
+	}
+}
+
 func TestHomePathsStayUnderPrivateDaemonDirectory(t *testing.T) {
 	t.Parallel()
 	paths := HomePaths("/home/demo")

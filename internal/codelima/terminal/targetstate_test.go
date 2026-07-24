@@ -62,6 +62,45 @@ func TestTargetTerminalStateTabOrderingAndMembership(t *testing.T) {
 	}
 }
 
+func TestTargetTerminalStateMoveTabReordersAdjacentTabsWithoutWrapping(t *testing.T) {
+	t.Parallel()
+
+	st := &TargetTerminalState{Target: NodeTarget("n1")}
+	st.AppendTab(TerminalTabState{ID: "node:n1#1"})
+	st.AppendTab(TerminalTabState{ID: "node:n1#2"})
+	st.AppendTab(TerminalTabState{ID: "node:n1#3"})
+
+	if !st.MoveTab("node:n1#2", -1) {
+		t.Fatalf("MoveTab(#2, -1) = false, want true")
+	}
+	if got := st.TabIDs(); !equalTabIDs(got, []TabID{"node:n1#2", "node:n1#1", "node:n1#3"}) {
+		t.Fatalf("TabIDs after moving #2 left = %v", got)
+	}
+
+	if !st.MoveTab("node:n1#2", 1) {
+		t.Fatalf("MoveTab(#2, 1) = false, want true")
+	}
+	if got := st.TabIDs(); !equalTabIDs(got, []TabID{"node:n1#1", "node:n1#2", "node:n1#3"}) {
+		t.Fatalf("TabIDs after moving #2 right = %v", got)
+	}
+
+	if st.MoveTab("node:n1#1", -1) {
+		t.Fatalf("MoveTab(first, -1) = true, want boundary no-op")
+	}
+	if st.MoveTab("node:n1#3", 1) {
+		t.Fatalf("MoveTab(last, 1) = true, want boundary no-op")
+	}
+	if st.MoveTab("node:n1#missing", 1) {
+		t.Fatalf("MoveTab(missing, 1) = true, want false")
+	}
+	if st.MoveTab("node:n1#2", 0) {
+		t.Fatalf("MoveTab(#2, 0) = true, want false")
+	}
+	if got := st.TabIDs(); !equalTabIDs(got, []TabID{"node:n1#1", "node:n1#2", "node:n1#3"}) {
+		t.Fatalf("TabIDs after no-op moves = %v", got)
+	}
+}
+
 func TestTargetTerminalStateOpenErrorIsTargetScoped(t *testing.T) {
 	t.Parallel()
 

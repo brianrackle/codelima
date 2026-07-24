@@ -256,6 +256,12 @@ Run in a real terminal:
 ./bin/codelima "$QA_ROOT/work/root"
 ```
 
+On the initial frame, verify all eight top-left wordmark characters shuffle
+without moving the adjacent header fields. Starting with `C`, verify one
+additional `CodeLima` character settles from left to right about every third of
+a second, the complete word remains stable after roughly 2.67 seconds, and
+navigation remains responsive throughout.
+
 After the TUI renders, launch the same command from a second real terminal. Confirm the second TUI starts normally and the first does not show an input-ownership warning. Return host focus to the first window and open a terminal tab, then return host focus to the second window and open another terminal tab. Repeat the switch once more in each direction; every newly focused window must work immediately and neither window may show an ownership-revoked message. Quit one TUI, then leave the remaining TUI idle for at least 35 seconds before opening a new terminal tab or switching between guest and host terminals.
 
 Copy and paste these two lines into an active guest or host shell, without pressing Enter:
@@ -291,7 +297,7 @@ the TUI screen.
 
 While one TUI remains open, run `./bin/codelima --json daemon update` from the second real terminal. Confirm the open TUI reports that CodeLima was updated and must be reopened. Return host focus to that window twice and confirm the reopen instruction remains visible without `reclaim terminal input ownership`, `broken pipe`, or `EOF` replacing it. Leave it at that message for at least 30 seconds and verify its `codelima` process remains idle instead of pinning a core on the closed event stream; then quit and reopen it before continuing.
 
-For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the same left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
+For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. Move the active third tab left with `Option+Shift+Left`, verify it stays active in the second position, then move it right with `Option+Shift+Right`. Move it left once more so the final order differs from creation order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the reordered left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same reordered tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
 
 For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open through at least one two-second refresh, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
 
@@ -299,18 +305,21 @@ Verify:
 
 - the left pane title is `Nodes` and has no project rows
 - the initially selected running node renders `Info [Terminal]` in the right-pane border while keyboard focus remains in the node list
-- pressing `i` renders `[Info] Terminal`, moving to another node preserves that explicit info selection, and pressing `i` again restores terminal mode
+- pressing `i` renders `[Info] Terminal` for the current running node; moving to another running node restores `Info [Terminal]`, ensures exactly one initial guest tab for it, and revisiting that node reuses the tab
+- selecting a stopped node renders `[Info] Terminal` without opening a guest tab, and selecting it after its VM starts automatically switches to `Info [Terminal]` with a guest tab
 - after stopping the selected node and reopening the TUI, its default right-pane mode is info and no replacement guest shell is created
-- rows include `qa-v3-root`, `qa-v3-root-two`, `qa-v3-root-clone`, and `qa-v3-child`
-- rows do not include `qa-v3-prefix`
-- root rows show directory `.` and the child row shows `child`, not absolute paths
-- each row shows a configuration label
+- node blocks include `qa-v3-root`, `qa-v3-root-two`, `qa-v3-root-clone`, and `qa-v3-child`
+- node blocks do not include `qa-v3-prefix`
+- every node name is followed by separately indented `Config`, `CWD`, and `Status` property lines
+- root blocks show `CWD: .` and the child block shows `CWD: child`, not absolute paths
+- clicking any property line selects its owning node, and keyboard scrolling keeps complete four-line node blocks visible
 - `n` opens node creation with a blank directory field and muted current-directory placeholder
 - `a` opens global configuration management and `g` opens global environment management titled `Environments`; its create, manage, and delete surfaces consistently call each reusable command bundle an environment
 - configuration selectors list only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order, select `small` by default, and render each row as `<name> (<vCPU> vCPU, <RAM> RAM, <disk> disk)` with the expected built-in resources
 - in the configuration update dialog, `Left` and `Right` move the cursor in every editable text and resource field; after moving left, moving right and typing inserts at the expected position, while `Right` still opens the Environments selector
 - `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
 - the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
+- `Option+Shift+Left`/`Option+Shift+Right` move the active tab one position without changing the active tab, do not wrap at either edge, and work from both tree and terminal focus
 - `Option+Shift+Backtick` no longer opens or toggles a host terminal
 - routine focus handoffs do not show `terminal input ownership was taken by another client`
 - the first terminal action after every window-focus takeover and after the idle interval succeeds without a broken pipe or `client is observe-only` error
@@ -320,7 +329,7 @@ Verify:
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
 - an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream, and repeated host focus preserves that message without another dead-socket ownership request
-- quitting and reopening the TUI preserves surviving per-node tab order
+- quitting and reopening the TUI preserves surviving per-node operator-defined tab order
 - quitting and reopening two disjoint path-scoped TUIs preserves both tabs in each process
 - reopening after daemon update preserves wrapped line spacing at the captured terminal width
 
@@ -378,6 +387,31 @@ cp "$QA_ROOT/settings.yaml.before-vfs-qa" "$CODELIMA_HOME/_config/settings.yaml"
 rm -rf "$QA_ROOT/work/root/.qa-vfs-cache"
 rm -f "$QA_ROOT/work/root/.qa-vfs-live"
 ```
+
+## Flow 9: non-mutating terminal-freeze diagnostics
+
+Keep the daemon and at least one Flow 5 terminal running. Capture its PID and
+terminal list, then run the diagnostic skill without rebuilding:
+
+```sh
+QA_PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | tr '[:upper:]' '[:lower:]')"
+QA_DAEMON_PID_BEFORE="$(cat "$CODELIMA_HOME/_daemon/daemon.pid")"
+./bin/"$QA_PLATFORM"/codelima terminal list > "$QA_ROOT/terminals.before-diagnostics"
+make diagnose-terminal-freeze \
+  DIAG_ARGS="--home \"$CODELIMA_HOME\" --binary \"$PWD/bin/$QA_PLATFORM/codelima\" --output \"$QA_ROOT/terminal-freeze-capture\" --sample-seconds 2"
+QA_DAEMON_PID_AFTER="$(cat "$CODELIMA_HOME/_daemon/daemon.pid")"
+test "$QA_DAEMON_PID_BEFORE" = "$QA_DAEMON_PID_AFTER"
+./bin/"$QA_PLATFORM"/codelima terminal list > "$QA_ROOT/terminals.after-diagnostics"
+cmp "$QA_ROOT/terminals.before-diagnostics" "$QA_ROOT/terminals.after-diagnostics"
+```
+
+Verify `summary.md`, daemon status/list/snapshot probe outputs, exit-status
+files, metadata, and bounded log tails exist. Verify the summary reports a
+responsive control plane and terminal actor. On macOS, verify
+`daemon-sample.txt` exists and the daemon remained responsive during sampling;
+on Linux, verify the available `/proc` artifacts were captured instead. Confirm
+the command did not change daemon PID, terminal IDs, input ownership, or shell
+contents, and did not create artifacts outside `"$QA_ROOT"`.
 
 ## Cleanup
 

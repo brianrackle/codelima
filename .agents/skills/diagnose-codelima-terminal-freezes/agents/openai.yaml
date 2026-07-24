@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diagnose CodeLima Terminal Freezes"
+  short_description: "Capture live daemon evidence during terminal freezes"
+  default_prompt: "Use $diagnose-codelima-terminal-freezes to capture and analyze a live CodeLima terminal freeze without restarting the daemon."

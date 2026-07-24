@@ -10,7 +10,7 @@ import (
 
 const (
 	MaxMessageSize  = 1 << 20
-	ProtocolVersion = 3
+	ProtocolVersion = 4
 	SessionVersion  = 2
 	HandoffVersion  = 3
 

@@ -406,7 +406,7 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 
 func mutatingInputMethod(method string) bool {
 	switch method {
-	case "daemon.update", "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.resize", "terminal.focus", "terminal.scroll", "terminal.open", "terminal.close":
+	case "daemon.update", "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.resize", "terminal.focus", "terminal.scroll", "terminal.open", "terminal.close", "terminal.move":
 		return true
 	default:
 		return false

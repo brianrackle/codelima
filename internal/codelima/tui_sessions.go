@@ -206,7 +206,7 @@ func (s *tuiSessionStore) nextSessionKey(targetKey string) string {
 }
 
 // TargetSessionKeys lists the open terminal tabs that belong to a single
-// project or node target, in the order they were opened.
+// project or node target, in their current display order.
 func (s *tuiSessionStore) TargetSessionKeys(targetKey string) []string {
 	if targetKey == "" {
 		return nil
@@ -220,6 +220,34 @@ func (s *tuiSessionStore) TargetSessionKeys(targetKey string) []string {
 		keys = append(keys, string(id))
 	}
 	return keys
+}
+
+// MoveTab moves one terminal tab one position left or right within its target.
+// The daemon owns durable ordering when present; the local state changes only
+// after that mutation succeeds.
+func (s *tuiSessionStore) MoveTab(targetKey, sessionKey string, direction int) error {
+	if direction != -1 && direction != 1 {
+		return fmt.Errorf("terminal tab move direction must be -1 or 1")
+	}
+	session := s.sessions[sessionKey]
+	if session == nil || session.target != targetKey {
+		return fmt.Errorf("terminal tab is not open for the focused item")
+	}
+	st, ok := s.lookupTargetState(targetKey)
+	if !ok || !st.HasTab(terminal.TabID(sessionKey)) {
+		return fmt.Errorf("terminal tab is not open for the focused item")
+	}
+
+	if s.service != nil && s.service.daemonClient != nil {
+		if err := s.service.daemonClient.Call(s.ctx, "terminal.move", map[string]any{
+			"terminal_id": string(session.terminalID),
+			"delta":       direction,
+		}, nil); err != nil {
+			return fromDaemonError(err)
+		}
+	}
+	st.MoveTab(terminal.TabID(sessionKey), direction)
+	return nil
 }
 
 func (s *tuiSessionStore) SetPreferredTerminalSize(cols, rows int) {

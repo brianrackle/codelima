@@ -11,8 +11,8 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 3 (was 0.10): support kitty graphics protocol so I can get those sweet codex pets.
 4 (was 0.11) [partially complete]: bring in and wire up the latest libghostty improvements as demonstrated in https://github.com/ghostty-org/ghostling — Ghostling-pinned libghostty-vt and focus encoder are wired; full interactive QA remains in TODO.md
 5 (was 0.12): support CodeLima node renaming through the command line, including an explicit Lima clone/rename policy
-6 (was 0.15) [complete locally]: terminal is the default node view when the initially selected VM is running; stopped nodes remain info-first, and `i` remains sticky after startup (ADR 87; native interactive QA remains in TODO #0)
-7 (was 0.22) [partially complete]: open daemon terminal sessions and surviving terminal IDs reconnect after the TUI reopens, exited sessions are absent, per-node creation order is preserved across TUI restart, daemon persistence, and live update, and disjoint path-scoped TUI processes no longer close one another's restored tabs (ADRs 88, 89, and 91); restoring the previously active tab remains in TODO #34
+6 (was 0.15) [complete locally]: terminal is the default view whenever the selected VM is running and its first guest tab is ensured; stopped nodes remain info-first, while `i` remains explicit for the current node (ADRs 87 and 106; native interactive QA remains in TODO #0)
+7 (was 0.22) [partially complete]: open daemon terminal sessions and surviving terminal IDs reconnect after the TUI reopens, exited sessions are absent, per-node operator-defined order is preserved across TUI restart, daemon persistence, and live update, and disjoint path-scoped TUI processes no longer close one another's restored tabs (ADRs 88, 89, 91, and 104); restoring the previously active tab remains in TODO #34
 8 (was 1): Configurable key bindings
    Plan: [KEY_BINDINGS_PLAN.md](/Users/brianrackle/personal/codelima/KEY_BINDINGS_PLAN.md)
 9 (was 3): Unmanaged localhost or SSH nodes [needs a new node-scoped design]

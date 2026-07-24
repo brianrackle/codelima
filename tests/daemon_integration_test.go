@@ -3,6 +3,7 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/brianrackle/codelima/internal/codelima"
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 )
 
 type envelope struct {
@@ -273,6 +275,26 @@ func TestDaemonTerminalOrderSurvivesReconnectAndLiveHandoff(t *testing.T) {
 		want = append(want, terminal.TerminalID)
 	}
 
+	client, err := daemonclient.Dial(context.Background(), daemonclient.Options{
+		Home:      h.home,
+		Version:   codelima.Version,
+		WantInput: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Call(context.Background(), "terminal.move", map[string]any{
+		"terminal_id": want[4],
+		"delta":       -1,
+	}, nil); err != nil {
+		_ = client.Close()
+		t.Fatal(err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	want[3], want[4] = want[4], want[3]
+
 	assertOrder := func(phase string) {
 		t.Helper()
 		var terminals []struct {
@@ -296,6 +318,9 @@ func TestDaemonTerminalOrderSurvivesReconnectAndLiveHandoff(t *testing.T) {
 	}
 	h.run(true, "daemon", "update")
 	assertOrder("live handoff")
+	h.run(true, "daemon", "stop")
+	h.run(true, "daemon", "start")
+	assertOrder("daemon restart")
 
 	for _, terminalID := range want {
 		h.run(true, "terminal", "close", terminalID)

@@ -32,6 +32,10 @@ type vaxisTUIApp struct {
 	operationOrder    []string
 	linkRegions       []tuiLinkRegion
 	terminalMouse     *tuiTerminalMouseGesture
+	// logoAnimation is non-nil only during the bounded startup logo effect.
+	// It is owned by the UI event loop alongside every other presentation
+	// state; nil renders the stable product name.
+	logoAnimation *tuiLogoAnimation
 	// daemonDisconnected is latched after the daemon session ends or its
 	// request connection fails. Focus events must not probe a dead connection
 	// and replace the actionable reopen guidance with broken-pipe noise.
@@ -99,6 +103,8 @@ const (
 	terminalTabOpenFooterHint     = "Opt-t"
 	terminalTabNextFooterHint     = "Opt-Right"
 	terminalTabPrevFooterHint     = "Opt-Left"
+	terminalTabMoveNextFooterHint = "Opt-Shift-Right"
+	terminalTabMovePrevFooterHint = "Opt-Shift-Left"
 	terminalTabCloseFooterHint    = "Opt-w"
 	tuiAutoRefreshInterval        = 2 * time.Second
 )
@@ -142,16 +148,19 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		sessions:          sessions,
 		operations:        map[string]*tuiOperationState{},
 		messages:          newTUIMessageLog(tuiMessageLogDefaultCap),
+		logoAnimation:     newTUILogoAnimation(),
 	}
 	winWidth, winHeight := vx.Window().Size()
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
 	sessions.SetPreferredTerminalSize(cols, rows)
-	if err := state.openInitialTerminalTab(); err != nil {
+	if err := state.ensureSelectedTerminalTab(); err != nil {
 		app.setStatus(slog.LevelError, err.Error())
 	}
 	app.syncSessionFocus()
 	app.draw()
 
+	stopLogoAnimation := startTUILogoAnimation(ctx, vx.PostEvent)
+	defer stopLogoAnimation()
 	stopRefresh := startTUIAutoRefresh(ctx, vx.PostEvent, tuiAutoRefreshInterval)
 	defer stopRefresh()
 
@@ -201,6 +210,15 @@ func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) (
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case tuiLogoAnimationTickEvent:
+		if a.logoAnimation == nil {
+			return false, nil
+		}
+		if a.logoAnimation.advance(event.Elapsed) {
+			a.logoAnimation = nil
+		}
+		a.drawHeaderLogo()
+		return false, nil
 	case tuiDaemonTerminalDirtyEvent:
 		a.sessions.markDaemonTerminalDirty(event.TerminalID, a.state.activeSessionKey())
 		return false, nil
@@ -375,9 +393,16 @@ func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) erro
 		return err
 	}
 	a.sessions.PruneStaleSessions(a.targetKeyStillExists)
+	if err := a.ensureSelectedNodeTerminal(); err != nil {
+		return err
+	}
 
 	a.syncSessionFocus()
 	return nil
+}
+
+func (a *vaxisTUIApp) ensureSelectedNodeTerminal() error {
+	return a.state.ensureSelectedTerminalTab()
 }
 
 // targetKeyStillExists reports whether targetKey resolves to a live node in
@@ -538,6 +563,15 @@ func (a *vaxisTUIApp) switchTerminalTab(delta int) error {
 	}
 	a.state.setActiveTab(targetKey, keys[index])
 	return nil
+}
+
+func (a *vaxisTUIApp) moveTerminalTab(direction int) error {
+	targetKey := a.state.activeTerminalTargetKey()
+	sessionKey := a.state.activeSessionKey()
+	if targetKey == "" || sessionKey == "" {
+		return fmt.Errorf("no terminal tab is open for the focused item")
+	}
+	return a.sessions.MoveTab(targetKey, sessionKey, direction)
 }
 
 func (a *vaxisTUIApp) closeTerminalTab() error {

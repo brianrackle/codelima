@@ -14,6 +14,7 @@ make build
 make verify
 make test-race
 make test-integration
+make diagnose-terminal-freeze
 ```
 
 What each target does:
@@ -31,6 +32,9 @@ What each target does:
 - `make test-integration`
   - builds the real CLI and exercises daemon lifecycle, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
   - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path
+- `make diagnose-terminal-freeze`
+  - runs the repository `diagnose-codelima-terminal-freezes` skill's read-only capture script without rebuilding or restarting CodeLima
+  - writes incident evidence under `./tmp/terminal-freeze-*`; pass `DIAG_ARGS='--home PATH --binary PATH --terminal-id ID'` to override discovery
 
 All test recipes run packages and tests within each package serially by
 default, avoiding filesystem-resource spikes on virtualized development hosts.
@@ -239,6 +243,23 @@ Check:
 - the rendered formula URLs and SHA-256 values
 
 ## Troubleshooting
+
+### Every daemon-backed terminal freezes
+
+Do not rebuild, stop, update, or send `SIGQUIT` before capturing the live
+process. From the host that owns the daemon, run:
+
+```sh
+make diagnose-terminal-freeze
+```
+
+The target intentionally has no `build` or `init` prerequisite so incident
+capture cannot replace a binary or contend with the affected daemon. Its output
+includes independent control-plane probes, at most one read-only terminal actor
+probe, daemon metadata and logs, process state, and a non-terminating macOS
+`sample` stack capture when available. It uses `CODELIMA_HOME` when set and
+otherwise defaults to `~/.codelima`. Interpret the bundle with
+`.agents/skills/diagnose-codelima-terminal-freezes/references/interpretation.md`.
 
 ### `make init` fails when relinking Ghostty
 
