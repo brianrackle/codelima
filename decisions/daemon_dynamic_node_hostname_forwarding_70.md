@@ -1,6 +1,6 @@
 # Route dynamically discovered node HTTP ports through node.localhost
 
-Status: Accepted; extended by ADR 79
+Status: Accepted; extended by ADRs 79 and 109
 
 ## Context and Problem Statement
 
@@ -49,3 +49,4 @@ ADR 79 adds an ephemeral first-active claimant for generic `localhost:{port}` re
 * Replaces the guessed-port convenience described by [ADR 55](replace_lima_with_microsandbox_as_sole_runtime_55.md)
 * Extends daemon ownership from [ADR 64](daemon_owned_terminal_runtimes_64.md)
 * Extended by [ADR 79](expose_first_claimant_on_generic_localhost_79.md)
+* Extended by [ADR 109](bind_dynamic_forwarding_to_both_host_loopbacks_109.md)

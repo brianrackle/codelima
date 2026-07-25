@@ -3,8 +3,11 @@ package codelima
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 type delayedCloseDaemonTerminal struct {
@@ -57,5 +60,41 @@ func TestDaemonHostClosesTerminalRuntimesConcurrently(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("daemonHost.Close() error = %v", err)
+	}
+}
+
+func TestDaemonHostCloseHasBoundedTerminalDeadline(t *testing.T) {
+	t.Parallel()
+
+	home, err := os.MkdirTemp("../../tmp", "daemon-bounded-close-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	host := &daemonHost{
+		session: filepath.Join(home, "session.json"),
+		terminals: map[string]*daemonTerminalEntry{
+			"stuck": {
+				state: daemon.TerminalState{TerminalID: "stuck"},
+				term: &delayedCloseDaemonTerminal{
+					resizeCountingDaemonTerminal: &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()},
+					started:                      started,
+					release:                      release,
+				},
+			},
+		},
+		terminalCloseTimeout: 25 * time.Millisecond,
+	}
+	t.Cleanup(func() { close(release) })
+
+	start := time.Now()
+	err = host.Close()
+	if err == nil || !strings.Contains(err.Error(), "terminal shutdown exceeded") {
+		t.Fatalf("daemonHost.Close() error = %v, want bounded terminal shutdown error", err)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Fatalf("daemonHost.Close() elapsed = %s, want bounded completion", elapsed)
 	}
 }

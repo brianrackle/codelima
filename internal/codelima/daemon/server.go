@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,11 +34,26 @@ type Handler interface {
 	Close() error
 }
 
+// SynchronizationHandler may provide a compact authoritative reconnect cut.
+// Large immutable terminal cell grids are deliberately fetched per terminal
+// after this cut so one reconnect frame stays bounded as tab count grows.
+type SynchronizationHandler interface {
+	SynchronizationSnapshot(context.Context) (any, error)
+}
+
 type Config struct {
-	Home        string
-	Version     string
-	Handler     Handler
-	ReadTimeout time.Duration
+	Home              string
+	Version           string
+	Handler           Handler
+	Logger            *slog.Logger
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	RequestTimeout    time.Duration
+	MaxInFlight       int
+	MutationQueueSize int
+	OutboundMaxFrames int
+	OutboundMaxBytes  int
+	HeartbeatInterval time.Duration
 }
 
 type Server struct {
@@ -51,7 +68,9 @@ type Server struct {
 	wg       sync.WaitGroup
 	mu       sync.Mutex
 	clients  map[string]*clientConn
-	input    string
+	input    inputLease
+	revision uint64
+	nextConn atomic.Uint64
 	// baseCtx is derived from Run's context and cancelled when the server
 	// stops; every connection derives its handler context from it so in-flight
 	// handlers observe shutdown instead of running on a detached Background.
@@ -62,16 +81,59 @@ type Server struct {
 }
 
 type clientConn struct {
-	id         string
-	conn       net.Conn
-	encoder    *json.Encoder
-	writeMu    sync.Mutex
-	subscribed bool
+	id                   string
+	clientInstanceID     string
+	connectionID         uint64
+	connectionGeneration uint64
+	daemonEpoch          string
+	conn                 net.Conn
+	outbound             *outboundQueue
+	subscribed           atomic.Bool
+	cancel               context.CancelCauseFunc
+	failure              connectionFailure
+	closeOnce            sync.Once
+	writerDone           chan struct{}
+
+	lastReadUnixNano  atomic.Int64
+	lastWriteUnixNano atomic.Int64
+	inboundFrames     atomic.Uint64
+	outboundFrames    atomic.Uint64
+	inboundBytes      atomic.Uint64
+	outboundBytes     atomic.Uint64
+}
+
+type inputLease struct {
+	clientInstanceID string
+	connectionID     uint64
 }
 
 func NewServer(cfg Config) *Server {
 	if cfg.ReadTimeout <= 0 {
 		cfg.ReadTimeout = 30 * time.Second
+	}
+	if cfg.WriteTimeout <= 0 {
+		cfg.WriteTimeout = 5 * time.Second
+	}
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = 30 * time.Second
+	}
+	if cfg.MaxInFlight <= 0 {
+		cfg.MaxInFlight = 16
+	}
+	if cfg.MutationQueueSize <= 0 {
+		cfg.MutationQueueSize = 64
+	}
+	if cfg.OutboundMaxFrames <= 0 {
+		cfg.OutboundMaxFrames = 256
+	}
+	if cfg.OutboundMaxBytes <= 0 {
+		cfg.OutboundMaxBytes = 64 << 20
+	}
+	if cfg.HeartbeatInterval <= 0 {
+		cfg.HeartbeatInterval = 2 * time.Second
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &Server{cfg: cfg, paths: HomePaths(cfg.Home), stop: make(chan struct{}), clients: map[string]*clientConn{}}
 }
@@ -87,9 +149,10 @@ func (s *Server) Run(ctx context.Context) error {
 	s.baseCtx, s.baseCancel = context.WithCancel(ctx)
 	defer s.baseCancel()
 	s.accepting.Store(true)
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go s.acceptLoop(s.request, false)
 	go s.acceptLoop(s.events, true)
+	go s.heartbeatLoop(s.baseCtx)
 	select {
 	case <-ctx.Done():
 	case <-s.stop:
@@ -103,7 +166,63 @@ func (s *Server) Run(ctx context.Context) error {
 	return s.cfg.Handler.Close()
 }
 
+func (s *Server) heartbeatLoop(ctx context.Context) {
+	defer s.wg.Done()
+	ticker := time.NewTicker(s.cfg.HeartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		s.mu.Lock()
+		event := Event{
+			Event:         "daemon.heartbeat",
+			DaemonEpoch:   s.identity.Token,
+			StateSequence: s.revision,
+		}
+		clients := make([]*clientConn, 0, len(s.clients))
+		for _, client := range s.clients {
+			if client.subscribed.Load() {
+				clients = append(clients, client)
+			}
+		}
+		s.mu.Unlock()
+		frame, err := marshalLine(event)
+		if err != nil {
+			continue
+		}
+		for _, client := range clients {
+			if !client.outbound.TryPush(frame, outboundLow) {
+				client.fail("daemon", "ready", CloseQueueFull, errors.New("daemon client outbound queue is full during heartbeat"))
+			}
+		}
+	}
+}
+
 func (s *Server) Stop() { s.stopOnce.Do(func() { close(s.stop) }) }
+
+// DisconnectClient deliberately invalidates one physical connection without
+// changing daemon-owned terminal state. Diagnostics and deterministic fault
+// tests use this to exercise client reconnection by connection ID.
+func (s *Server) DisconnectClient(connectionID uint64, reason ConnectionCloseReason) bool {
+	s.mu.Lock()
+	var target *clientConn
+	for _, client := range s.clients {
+		if client.connectionID == connectionID {
+			target = client
+			break
+		}
+	}
+	s.mu.Unlock()
+	if target == nil {
+		return false
+	}
+	target.fail("daemon", "ready", reason, errors.New("daemon connection deliberately disconnected"))
+	return true
+}
 
 // stopAccepting closes the public listeners and removes their socket files so
 // new dials fail immediately, without touching existing connections. Run's
@@ -178,31 +297,27 @@ func (s *Server) ResumeAfterReplacement() error {
 
 func (s *Server) Broadcast(name string, data any) {
 	s.mu.Lock()
+	s.revision++
+	event := Event{Event: name, Data: data, DaemonEpoch: s.identity.Token, StateSequence: s.revision}
 	clients := make([]*clientConn, 0, len(s.clients))
 	for _, client := range s.clients {
-		if client.subscribed {
+		if client.subscribed.Load() {
 			clients = append(clients, client)
 		}
 	}
 	s.mu.Unlock()
+
+	frame, err := marshalLine(event)
+	if err != nil {
+		s.cfg.Logger.Error("encode daemon event failed", "event", name, "error", err)
+		return
+	}
 	for _, client := range clients {
-		client.writeMu.Lock()
-		// A bounded write deadline keeps one wedged subscriber from stalling
-		// event fan-out for everyone (Broadcast is called from terminal event
-		// callbacks). A deadline miss closes the laggard's connection.
-		_ = client.conn.SetWriteDeadline(time.Now().Add(broadcastWriteTimeout))
-		err := client.encoder.Encode(Event{Event: name, Data: data})
-		_ = client.conn.SetWriteDeadline(time.Time{})
-		client.writeMu.Unlock()
-		if err != nil {
-			_ = client.conn.Close()
+		if !client.outbound.TryPush(frame, outboundLow) {
+			client.fail("daemon", "ready", CloseQueueFull, errors.New("daemon client outbound queue is full"))
 		}
 	}
 }
-
-// broadcastWriteTimeout bounds one subscriber's event write; socket buffers
-// absorb normal bursts, so hitting it means the client stopped reading.
-const broadcastWriteTimeout = 5 * time.Second
 
 func (s *Server) prepare() (err error) {
 	// Unwind every acquired resource when a later step fails: without this a
@@ -295,49 +410,90 @@ func (s *Server) acceptLoop(listener net.Listener, eventSocket bool) {
 }
 
 func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
-	defer func() { _ = conn.Close() }()
-	// Handlers run under a per-connection context: it ends when this client
-	// disconnects and is a child of the server context, so daemon shutdown
-	// cancels in-flight work instead of waiting on it.
-	connCtx, connCancel := context.WithCancel(s.baseCtx)
-	defer connCancel()
-	client := &clientConn{id: randomToken(), conn: conn, encoder: json.NewEncoder(conn)}
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 64*1024), MaxMessageSize)
 	_ = conn.SetReadDeadline(time.Now().Add(s.cfg.ReadTimeout))
 	if !scanner.Scan() {
+		_ = conn.Close()
 		return
 	}
 	request, err := decodeRequest(scanner.Bytes())
 	if err != nil || request.Method != "hello" {
-		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "hello must be the first request", Code: CodeInvalidArgument}})
+		s.writeImmediate(conn, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "hello must be the first request", Code: CodeInvalidArgument}})
+		_ = conn.Close()
 		return
 	}
 	var hello HelloParams
 	if err := json.Unmarshal(request.Params, &hello); err != nil {
-		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "invalid hello params", Code: CodeInvalidArgument}})
+		s.writeImmediate(conn, Response{ID: request.ID, Error: &RPCError{Category: "InvalidArgument", Message: "invalid hello params", Code: CodeInvalidArgument}})
+		_ = conn.Close()
 		return
 	}
 	if hello.Version != s.cfg.Version || hello.Protocol != ProtocolVersion {
-		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "PreconditionFailed", Message: fmt.Sprintf("daemon version mismatch (daemon %s protocol %d, client %s protocol %d); restart the daemon", s.cfg.Version, ProtocolVersion, hello.Version, hello.Protocol), Code: CodePreconditionFailed}})
+		s.writeImmediate(conn, Response{ID: request.ID, Error: &RPCError{Category: "PreconditionFailed", Message: fmt.Sprintf("daemon version mismatch (daemon %s protocol %d, client %s protocol %d); restart the daemon", s.cfg.Version, ProtocolVersion, hello.Version, hello.Protocol), Code: CodePreconditionFailed}})
+		_ = conn.Close()
 		return
 	}
+
+	baseCtx := s.baseCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	connCtx, connCancel := context.WithCancelCause(baseCtx)
+	connectionID := s.nextConn.Add(1)
+	clientInstanceID := hello.ClientInstanceID
+	if clientInstanceID == "" {
+		clientInstanceID = randomToken()
+	}
+	client := &clientConn{
+		id:                   strconv.FormatUint(connectionID, 10),
+		clientInstanceID:     clientInstanceID,
+		connectionID:         connectionID,
+		connectionGeneration: hello.ConnectionGeneration,
+		daemonEpoch:          s.identity.Token,
+		conn:                 conn,
+		outbound:             newOutboundQueue(s.cfg.OutboundMaxFrames, s.cfg.OutboundMaxBytes),
+		cancel:               connCancel,
+		writerDone:           make(chan struct{}),
+	}
+	client.noteRead(len(scanner.Bytes()))
+	go client.writePump(connCtx, s.cfg.WriteTimeout)
+
 	s.mu.Lock()
-	if hello.WantInput && s.input == "" {
-		s.input = client.id
+	if hello.WantInput && (s.input.clientInstanceID == "" || s.input.clientInstanceID == client.clientInstanceID) {
+		s.input = inputLease{clientInstanceID: client.clientInstanceID, connectionID: client.connectionID}
 	}
 	s.clients[client.id] = client
-	owner := s.input == client.id
+	owner := s.input.clientInstanceID == client.clientInstanceID && s.input.connectionID == client.connectionID
+	revision := s.revision
 	s.mu.Unlock()
-	defer s.removeClient(client.id)
-	s.writeResult(client, request.ID, HelloResult{Version: s.cfg.Version, Protocol: ProtocolVersion, ClientID: client.id, InputOwner: owner})
+	defer func() {
+		if client.failure.Cause() == nil {
+			reason, cause := classifyReadClose(scanner.Err(), context.Cause(connCtx))
+			client.fail("kernel/peer", "ready", reason, cause)
+		}
+		s.removeClient(client.id)
+		<-client.writerDone
+	}()
+	s.writeResult(client, request.ID, HelloResult{
+		Version:       s.cfg.Version,
+		Protocol:      ProtocolVersion,
+		ClientID:      client.clientInstanceID,
+		ConnectionID:  connectionID,
+		DaemonEpoch:   s.identity.Token,
+		StateSequence: revision,
+		InputOwner:    owner,
+	})
+	mutations := make(chan Request, s.cfg.MutationQueueSize)
+	go s.runMutationLane(connCtx, client, mutations, eventSocket)
+	querySlots := make(chan struct{}, s.cfg.MaxInFlight)
 
 	for {
 		// ReadTimeout bounds the unauthenticated hello and the time an event
 		// client may occupy client.sock without subscribing. Authenticated RPC
 		// clients are intentionally persistent: the TUI can sit idle for an
 		// arbitrary amount of time before opening a terminal or changing a node.
-		if eventSocket && !client.subscribed {
+		if eventSocket && !client.subscribed.Load() {
 			_ = conn.SetReadDeadline(time.Now().Add(s.cfg.ReadTimeout))
 		} else {
 			_ = conn.SetReadDeadline(time.Time{})
@@ -345,28 +501,263 @@ func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 		if !scanner.Scan() {
 			break
 		}
+		client.noteRead(len(scanner.Bytes()))
 		request, err := decodeRequest(scanner.Bytes())
 		if err != nil {
-			s.writeResponse(client, Response{Error: AsRPCError(err)})
-			continue
+			client.fail("daemon", "ready", CloseProtocolError, err)
+			break
 		}
-		result, callErr := s.handle(connCtx, client, request, eventSocket)
-		if callErr != nil {
-			s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(callErr)})
-			continue
-		}
-		s.writeResult(client, request.ID, result)
 		if request.Method == "events.subscribe" {
-			s.mu.Lock()
-			client.subscribed = true
-			s.mu.Unlock()
+			s.subscribe(connCtx, client, request, eventSocket)
+			continue
+		}
+		if mutatingInputMethod(request.Method) {
+			select {
+			case mutations <- request:
+			default:
+				client.fail("daemon", "ready", CloseQueueFull, errors.New("daemon client mutation queue is full"))
+			}
+			continue
+		}
+		select {
+		case querySlots <- struct{}{}:
+			go func(request Request) {
+				defer func() { <-querySlots }()
+				s.dispatchRequest(connCtx, client, request, eventSocket)
+			}(request)
+		default:
+			s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{
+				Category: "PreconditionFailed",
+				Message:  "too many in-flight daemon requests",
+				Code:     CodePreconditionFailed,
+			}})
 		}
 	}
 }
 
+func (s *Server) runMutationLane(ctx context.Context, client *clientConn, requests <-chan Request, eventSocket bool) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case request := <-requests:
+			s.dispatchRequest(ctx, client, request, eventSocket)
+		}
+	}
+}
+
+func (s *Server) dispatchRequest(ctx context.Context, client *clientConn, request Request, eventSocket bool) {
+	requestCtx, requestCancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
+	defer requestCancel()
+	result, callErr := s.handle(requestCtx, client, request, eventSocket)
+	if callErr != nil {
+		s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(callErr)})
+		return
+	}
+	s.writeResult(client, request.ID, result)
+}
+
+func (s *Server) subscribe(ctx context.Context, client *clientConn, request Request, eventSocket bool) {
+	if !eventSocket {
+		s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(Error(
+			"PreconditionFailed",
+			"events.subscribe requires client.sock",
+			CodePreconditionFailed,
+			nil,
+		))})
+		return
+	}
+
+	// Capture a state snapshot across a stable event revision. The usual path
+	// performs no external I/O and succeeds on the first attempt. If state is
+	// changing continuously, the bounded fallback takes the server state lock
+	// for the final capture so the sync response and subsequent event stream
+	// still define one authoritative cut.
+	for attempt := 0; ; attempt++ {
+		s.mu.Lock()
+		before := s.revision
+		s.mu.Unlock()
+
+		var (
+			state any
+			err   error
+		)
+		if attempt < 8 {
+			state, err = s.synchronizationSnapshot(ctx)
+		} else {
+			s.mu.Lock()
+			state, err = s.synchronizationSnapshot(ctx)
+			if err == nil {
+				s.enqueueSyncLocked(client, request.ID, state, s.revision)
+			}
+			s.mu.Unlock()
+			if err != nil {
+				s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(err)})
+			}
+			return
+		}
+		if err != nil {
+			s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(err)})
+			return
+		}
+
+		s.mu.Lock()
+		if s.revision != before {
+			s.mu.Unlock()
+			continue
+		}
+		s.enqueueSyncLocked(client, request.ID, state, before)
+		s.mu.Unlock()
+		return
+	}
+}
+
+func (s *Server) enqueueSyncLocked(client *clientConn, requestID uint64, state any, revision uint64) {
+	data, err := json.Marshal(state)
+	if err != nil {
+		s.writeResponse(client, Response{ID: requestID, Error: AsRPCError(err)})
+		return
+	}
+	result, err := json.Marshal(SyncSnapshot{
+		ProtocolVersion: ProtocolVersion,
+		DaemonEpoch:     s.identity.Token,
+		StateSequence:   revision,
+		State:           data,
+	})
+	if err != nil {
+		s.writeResponse(client, Response{ID: requestID, Error: AsRPCError(err)})
+		return
+	}
+	frame, err := marshalLine(Response{ID: requestID, Result: result})
+	if err != nil {
+		client.fail("daemon", "synchronizing", CloseWriteError, err)
+		return
+	}
+	if !client.outbound.TryPush(frame, outboundHigh) {
+		client.fail("daemon", "synchronizing", CloseQueueFull, errors.New("daemon client sync queue is full"))
+		return
+	}
+	client.subscribed.Store(true)
+}
+
+func (s *Server) writeImmediate(conn net.Conn, response Response) {
+	frame, err := marshalLine(response)
+	if err != nil {
+		return
+	}
+	_ = conn.SetWriteDeadline(time.Now().Add(s.cfg.WriteTimeout))
+	_ = writeAll(conn, frame)
+}
+
+func marshalLine(value any) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func writeAll(writer io.Writer, data []byte) error {
+	for len(data) > 0 {
+		written, err := writer.Write(data)
+		if written > 0 {
+			data = data[written:]
+		}
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
+
+func (c *clientConn) writePump(ctx context.Context, timeout time.Duration) {
+	defer close(c.writerDone)
+	for {
+		frame, err := c.outbound.Pop(ctx)
+		if err != nil {
+			return
+		}
+		if err := c.conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			c.fail("daemon", "ready", CloseWriteError, err)
+			return
+		}
+		if err := writeAll(c.conn, frame); err != nil {
+			reason := CloseWriteError
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				reason = CloseWriteTimeout
+			}
+			c.fail("daemon", "ready", reason, err)
+			return
+		}
+		c.lastWriteUnixNano.Store(time.Now().UnixNano())
+		c.outboundFrames.Add(1)
+		c.outboundBytes.Add(uint64(len(frame)))
+	}
+}
+
+func (c *clientConn) noteRead(size int) {
+	c.lastReadUnixNano.Store(time.Now().UnixNano())
+	c.inboundFrames.Add(1)
+	c.inboundBytes.Add(uint64(size))
+}
+
+func (c *clientConn) fail(initiator, phase string, reason ConnectionCloseReason, cause error) {
+	depth, bytes, oldest := c.outbound.Stats()
+	record := ConnectionCloseRecord{
+		ConnectionID:     c.connectionID,
+		ClientInstanceID: c.clientInstanceID,
+		DaemonEpoch:      c.daemonEpoch,
+		Initiator:        initiator,
+		Phase:            phase,
+		Reason:           reason,
+		OutboundDepth:    depth,
+		OutboundBytesNow: bytes,
+		OldestOutbound:   oldest,
+		InboundFrames:    c.inboundFrames.Load(),
+		OutboundFrames:   c.outboundFrames.Load(),
+		InboundBytes:     c.inboundBytes.Load(),
+		OutboundBytes:    c.outboundBytes.Load(),
+	}
+	if value := c.lastReadUnixNano.Load(); value > 0 {
+		record.LastReadAt = time.Unix(0, value)
+	}
+	if value := c.lastWriteUnixNano.Load(); value > 0 {
+		record.LastWriteAt = time.Unix(0, value)
+	}
+	if cause != nil {
+		record.Underlying = cause.Error()
+	}
+	if !c.failure.Fail(record, cause) {
+		return
+	}
+	c.closeOnce.Do(func() {
+		c.outbound.Close()
+		c.cancel(cause)
+		_ = c.conn.Close()
+	})
+}
+
+func classifyReadClose(readErr, contextErr error) (ConnectionCloseReason, error) {
+	if readErr == nil {
+		if contextErr != nil {
+			return CloseContextCancelled, contextErr
+		}
+		return ClosePeerEOF, io.EOF
+	}
+	var netErr net.Error
+	if errors.As(readErr, &netErr) && netErr.Timeout() {
+		return CloseReadTimeout, readErr
+	}
+	return CloseReadError, readErr
+}
+
 func (s *Server) handle(ctx context.Context, client *clientConn, request Request, eventSocket bool) (any, error) {
 	s.mu.Lock()
-	owner := s.input == client.id
+	owner := s.input.clientInstanceID == client.clientInstanceID && s.input.connectionID == client.connectionID
 	s.mu.Unlock()
 	switch request.Method {
 	case "daemon.ping", "daemon.status":
@@ -388,13 +779,26 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 			return nil, Error("PreconditionFailed", "events.subscribe requires client.sock", CodePreconditionFailed, nil)
 		}
 		return map[string]bool{"subscribed": true}, nil
+	case "daemon.sync":
+		state, err := s.synchronizationSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		data, err := json.Marshal(state)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		snapshot := SyncSnapshot{ProtocolVersion: ProtocolVersion, DaemonEpoch: s.identity.Token, StateSequence: s.revision, State: data}
+		s.mu.Unlock()
+		return snapshot, nil
 	case "input.takeover":
 		s.mu.Lock()
 		previous := s.input
-		s.input = client.id
+		s.input = inputLease{clientInstanceID: client.clientInstanceID, connectionID: client.connectionID}
 		s.mu.Unlock()
-		if previous != "" && previous != client.id {
-			s.Broadcast("input.revoked", map[string]string{"client_id": previous})
+		if previous.clientInstanceID != "" && previous.clientInstanceID != client.clientInstanceID {
+			s.Broadcast("input.revoked", map[string]string{"client_id": previous.clientInstanceID})
 		}
 		return map[string]bool{"input_owner": true}, nil
 	}
@@ -404,9 +808,16 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 	return s.cfg.Handler.Handle(ctx, ClientContext{ID: client.id, InputOwner: owner}, request.Method, request.Params)
 }
 
+func (s *Server) synchronizationSnapshot(ctx context.Context) (any, error) {
+	if handler, ok := s.cfg.Handler.(SynchronizationHandler); ok {
+		return handler.SynchronizationSnapshot(ctx)
+	}
+	return s.cfg.Handler.Snapshot(ctx)
+}
+
 func mutatingInputMethod(method string) bool {
 	switch method {
-	case "daemon.update", "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.resize", "terminal.focus", "terminal.scroll", "terminal.open", "terminal.close", "terminal.move":
+	case "daemon.update", "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.resize", "terminal.focus", "terminal.scroll", "terminal.open", "terminal.close", "terminal.move", "input.takeover":
 		return true
 	default:
 		return false
@@ -416,7 +827,18 @@ func mutatingInputMethod(method string) bool {
 func (s *Server) status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return Status{Running: true, PID: s.identity.PID, Version: s.identity.Version, Protocol: ProtocolVersion, Identity: s.identity.Token, StartedAt: s.identity.StartedAt, TerminalCount: s.cfg.Handler.TerminalCount(), InputOwner: s.input}
+	return Status{
+		Running:       true,
+		PID:           s.identity.PID,
+		Version:       s.identity.Version,
+		Protocol:      ProtocolVersion,
+		Identity:      s.identity.Token,
+		StartedAt:     s.identity.StartedAt,
+		TerminalCount: s.cfg.Handler.TerminalCount(),
+		InputOwner:    s.input.clientInstanceID,
+		DaemonEpoch:   s.identity.Token,
+		StateSequence: s.revision,
+	}
 }
 
 func decodeRequest(data []byte) (Request, error) {
@@ -446,18 +868,41 @@ func (s *Server) writeResult(client *clientConn, id uint64, value any) {
 }
 
 func (s *Server) writeResponse(client *clientConn, response Response) {
-	client.writeMu.Lock()
-	_ = client.encoder.Encode(response)
-	client.writeMu.Unlock()
+	frame, err := marshalLine(response)
+	if err != nil {
+		client.fail("daemon", "ready", CloseWriteError, err)
+		return
+	}
+	if !client.outbound.TryPush(frame, outboundHigh) {
+		client.fail("daemon", "ready", CloseQueueFull, errors.New("daemon client response queue is full"))
+	}
 }
 
 func (s *Server) removeClient(id string) {
 	s.mu.Lock()
+	client := s.clients[id]
 	delete(s.clients, id)
-	if s.input == id {
-		s.input = ""
+	if client != nil && s.input.connectionID == client.connectionID {
+		s.input = inputLease{}
 	}
 	s.mu.Unlock()
+	if client != nil {
+		record := client.failure.Record()
+		s.cfg.Logger.LogAttrs(
+			context.Background(),
+			slog.LevelInfo,
+			"daemon connection closed",
+			slog.Uint64("connection_id", record.ConnectionID),
+			slog.String("client_instance_id", record.ClientInstanceID),
+			slog.String("daemon_epoch", record.DaemonEpoch),
+			slog.String("initiator", record.Initiator),
+			slog.String("phase", record.Phase),
+			slog.String("reason", string(record.Reason)),
+			slog.String("underlying", record.Underlying),
+			slog.Int("outbound_queue_depth", record.OutboundDepth),
+			slog.Int("outbound_queue_bytes", record.OutboundBytesNow),
+		)
+	}
 }
 
 func (s *Server) closeClients() {
@@ -468,7 +913,7 @@ func (s *Server) closeClients() {
 	}
 	s.mu.Unlock()
 	for _, client := range clients {
-		_ = client.conn.Close()
+		client.fail("daemon", "shutdown", CloseDaemonShutdown, errors.New("daemon shutting down"))
 	}
 }
 

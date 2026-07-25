@@ -21,7 +21,8 @@ func (c *recordingDaemonCaller) Call(_ context.Context, method string, _ any, _ 
 
 type resizeCountingDaemonTerminal struct {
 	*fakeTUITerminal
-	resizeCalls int
+	resizeCalls   int
+	snapshotCalls int
 }
 
 func (t *resizeCountingDaemonTerminal) Resize(width, height int) {
@@ -31,9 +32,12 @@ func (t *resizeCountingDaemonTerminal) Resize(width, height int) {
 
 func (*resizeCountingDaemonTerminal) ReadVisible(ReadFormat) ReadResult { return ReadResult{} }
 func (*resizeCountingDaemonTerminal) ReadRecent(ReadFormat) ReadResult  { return ReadResult{} }
-func (*resizeCountingDaemonTerminal) Snapshot() SnapshotResult          { return SnapshotResult{} }
-func (*resizeCountingDaemonTerminal) Scroll(int)                        {}
-func (*resizeCountingDaemonTerminal) SendInput([]byte)                  {}
+func (t *resizeCountingDaemonTerminal) Snapshot() SnapshotResult {
+	t.snapshotCalls++
+	return SnapshotResult{}
+}
+func (*resizeCountingDaemonTerminal) Scroll(int)       {}
+func (*resizeCountingDaemonTerminal) SendInput([]byte) {}
 
 func TestDaemonHostResizeSkipsUnchangedGeometry(t *testing.T) {
 	cwd, err := os.Getwd()
@@ -80,6 +84,36 @@ func TestDaemonHostResizeSkipsUnchangedGeometry(t *testing.T) {
 	}
 	if term.resizeCalls != 1 || broadcasts != 1 {
 		t.Fatalf("changed resize performed %d terminal resizes and %d broadcasts, want 1 each", term.resizeCalls, broadcasts)
+	}
+}
+
+func TestDaemonHostSnapshotReadsPublishedCacheWithoutCallingTerminal(t *testing.T) {
+	t.Parallel()
+
+	term := &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()}
+	entry := &daemonTerminalEntry{state: daemon.TerminalState{TerminalID: "term-1"}, term: term}
+	entry.cache.Store(&daemonTerminalCache{snapshot: daemon.Snapshot{
+		Cols:             80,
+		Rows:             24,
+		Generation:       9,
+		SnapshotSequence: 4,
+	}})
+	host := &daemonHost{terminals: map[string]*daemonTerminalEntry{"term-1": entry}}
+	params, err := json.Marshal(map[string]string{"terminal_id": "term-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := host.Handle(context.Background(), daemon.ClientContext{}, "terminal.snapshot", params)
+	if err != nil {
+		t.Fatalf("terminal.snapshot error = %v", err)
+	}
+	snapshot := result.(daemon.Snapshot)
+	if snapshot.Generation != 9 || snapshot.SnapshotSequence != 4 {
+		t.Fatalf("terminal.snapshot = %#v", snapshot)
+	}
+	if term.snapshotCalls != 0 {
+		t.Fatalf("terminal.snapshot called live terminal %d times, want cached local read", term.snapshotCalls)
 	}
 }
 

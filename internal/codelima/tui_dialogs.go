@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -329,8 +330,8 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 		"Create",
 		[]string{"Create a directory-bound node from a reusable configuration."},
 		[]tuiDialogField{
-			newTUIInputField("slug", "Node Slug", "", true),
-			newTUIInputField("directory", "Directory", "", false),
+			newTUIDefaultInputField("slug", "Node Slug", slugify(filepath.Base(cwd)), true),
+			newTUIDefaultInputField("directory", "Directory", cwd, false),
 			newTUIValueSelectorField("configuration", "Configuration", DefaultConfigurationSlug, true, func(value string) string { return value }, nil),
 			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, true, workspaceModeDisplay, nil),
 		},
@@ -360,8 +361,6 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 			})
 		},
 	)
-	dialog.Fields[1].Input.SetPrompt(cwd)
-	dialog.Fields[1].Input.Prompt = tuiMutedStyle()
 	dialog.Fields[2].Activate = func() error {
 		return a.openConfigurationSelector(dialog.Fields[2].rawValue(), func(value string) error {
 			dialog.SetFieldValue("configuration", value)

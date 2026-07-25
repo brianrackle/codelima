@@ -186,7 +186,7 @@ func (s *Service) TUI(ctx context.Context, workspaceRoot string) error {
 	// built-in agent profiles and environments in the TUI's pickers.
 	// This is idempotent, flock-guarded, and once per process — categorically
 	// different from the per-tick unlocked writes work item 0.3 removed (ADR
-	// 57). The 2s auto-refresh path stays a pure read, and no runtime
+	// 57). The one-second auto-refresh path stays a pure read, and no runtime
 	// dependencies are validated: launching the TUI must work without Lima.
 	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return err
@@ -229,7 +229,7 @@ func (s *Service) connectTUIDaemon(ctx context.Context) (*daemonclient.Client, e
 }
 
 func claimTUIDaemonInput(ctx context.Context, client *daemonclient.Client) (*daemonclient.Client, error) {
-	if client.Hello.InputOwner {
+	if client.HelloSnapshot().InputOwner {
 		return client, nil
 	}
 	if err := takeTUIDaemonInput(ctx, client); err != nil {
@@ -249,9 +249,9 @@ func takeTUIDaemonInput(ctx context.Context, client *daemonclient.Client) error 
 		return fromDaemonError(err)
 	}
 	if !result["input_owner"] {
-		return preconditionFailed("daemon did not grant TUI input ownership", map[string]any{"client_id": client.Hello.ClientID})
+		return preconditionFailed("daemon did not grant TUI input ownership", map[string]any{"client_id": client.HelloSnapshot().ClientID})
 	}
-	client.Hello.InputOwner = true
+	client.SetInputOwner(true)
 	return nil
 }
 
@@ -676,6 +676,10 @@ func (s *Service) NodeListByDirectoryRoot(ctx context.Context, directoryRoot str
 	if err != nil {
 		return nil, err
 	}
+	return filterNodesByDirectoryRoot(nodes, directoryRoot)
+}
+
+func filterNodesByDirectoryRoot(nodes []Node, directoryRoot string) ([]Node, error) {
 	if strings.TrimSpace(directoryRoot) == "" {
 		return nodes, nil
 	}

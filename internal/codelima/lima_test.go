@@ -408,6 +408,7 @@ func TestLimaClientLifecycleWithFakeLimactl(t *testing.T) {
 	client.Binary = binary
 	client.LimaHome = filepath.Join(home, "lima")
 	client.UnixSocketProbe = func(string) error { return nil }
+	client.nestedVirtualizationProbe = func() bool { return false }
 	client.RuntimeCommands = defaultRuntimeCommandTemplates()
 	var stdout bytes.Buffer
 	client.Stdout = &stdout

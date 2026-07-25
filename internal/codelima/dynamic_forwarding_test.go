@@ -36,6 +36,70 @@ malformed
 	}
 }
 
+func TestParseForwardingGuestObservationIncludesResourcesCPUAndListeners(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`cpu  100 10 30 500 20 5 5 10 40 2
+codelima-memory 4194304 1048576
+codelima-disk 33554432 8388608
+  sl  local_address rem_address   st
+   0: 0100007F:1F90 00000000:0000 0A
+   1: 00000000000000000000000000000001:1451 00000000000000000000000000000000:0000 0A
+`)
+	got := parseForwardingGuestObservation(input)
+	if got.CPU != (guestCPUCounters{Total: 680, Idle: 520}) {
+		t.Fatalf("CPU counters = %#v, want total 680 and idle 520", got.CPU)
+	}
+	if want := []int{5201, 8080}; !reflect.DeepEqual(got.Ports, want) {
+		t.Fatalf("ports = %v, want %v", got.Ports, want)
+	}
+	if want := (guestResourceUsage{UsedBytes: 3 << 30, TotalBytes: 4 << 30}); got.Memory != want {
+		t.Fatalf("memory usage = %#v, want %#v", got.Memory, want)
+	}
+	if want := (guestResourceUsage{UsedBytes: 8 << 30, TotalBytes: 32 << 30}); got.Disk != want {
+		t.Fatalf("disk usage = %#v, want %#v", got.Disk, want)
+	}
+}
+
+func TestParseForwardingGuestObservationRejectsInvalidResources(t *testing.T) {
+	t.Parallel()
+
+	input := []byte(`codelima-memory 1024 2048
+codelima-disk 1024 not-a-number
+`)
+	got := parseForwardingGuestObservation(input)
+	if got.Memory != (guestResourceUsage{}) || got.Disk != (guestResourceUsage{}) {
+		t.Fatalf("invalid resources = memory %#v, disk %#v; want unavailable", got.Memory, got.Disk)
+	}
+}
+
+func TestGuestCPUUsagePercentUsesCounterDeltas(t *testing.T) {
+	t.Parallel()
+
+	got, ok := guestCPUUsagePercent(
+		guestCPUCounters{Total: 1000, Idle: 700},
+		guestCPUCounters{Total: 1200, Idle: 750},
+	)
+	if !ok || got != 75 {
+		t.Fatalf("guestCPUUsagePercent() = (%v, %v), want (75, true)", got, ok)
+	}
+
+	for name, current := range map[string]guestCPUCounters{
+		"no elapsed ticks": {Total: 1000, Idle: 700},
+		"counter reset":    {Total: 900, Idle: 600},
+		"idle overflow":    {Total: 1200, Idle: 950},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if usage, valid := guestCPUUsagePercent(
+				guestCPUCounters{Total: 1000, Idle: 700},
+				current,
+			); valid {
+				t.Fatalf("guestCPUUsagePercent() = (%v, true), want unavailable", usage)
+			}
+		})
+	}
+}
+
 func TestNodeNameFromLocalhost(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -129,7 +193,7 @@ func TestDynamicForwardingHandlerRoutesSamePortByNodeHost(t *testing.T) {
 
 func TestDynamicForwardingHandlerRoutesGenericLocalhostToFirstActiveClaim(t *testing.T) {
 	t.Parallel()
-	port := reserveTCPPort(t)
+	port := reserveDualLoopbackPort(t)
 	upstreams := map[string]*httptest.Server{}
 	for _, node := range []string{"first", "second"} {
 		upstreams[node] = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -253,12 +317,12 @@ func TestDynamicForwardingHandlerPassesHTTPUpgrade(t *testing.T) {
 
 func TestDynamicForwarderReconcilesRoutesListenersAndStoppedNodes(t *testing.T) {
 	service, _ := newTestService(t)
-	node := saveForwardingTestNode(t, service, "test-node", "running")
+	node := saveForwardingTestNode(t, service, "test-node")
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = writer.Write([]byte("from-node"))
 	}))
 	defer upstream.Close()
-	port := reserveTCPPort(t)
+	port := reserveDualLoopbackPort(t)
 	peer := &controllableForwardingPeer{ports: []int{port}, address: strings.TrimPrefix(upstream.URL, "http://")}
 	factory := &fakeForwardingPeerFactory{peers: map[string]*controllableForwardingPeer{node.SandboxName: peer}}
 	forwarder := newTestDynamicForwarder(service, factory)
@@ -304,9 +368,153 @@ func TestDynamicForwarderReconcilesRoutesListenersAndStoppedNodes(t *testing.T) 
 	}
 }
 
+func TestDynamicForwarderAddsLiveResourceUsageToNodeObservations(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+	node := saveForwardingTestNode(t, service, "cpu-node")
+	peer := &controllableForwardingPeer{
+		observations: []forwardingGuestObservation{
+			{
+				CPU:    guestCPUCounters{Total: 1000, Idle: 700},
+				Memory: guestResourceUsage{UsedBytes: 2 << 30, TotalBytes: 4 << 30},
+				Disk:   guestResourceUsage{UsedBytes: 8 << 30, TotalBytes: 32 << 30},
+			},
+			{
+				CPU:    guestCPUCounters{Total: 1200, Idle: 750},
+				Memory: guestResourceUsage{UsedBytes: 3 << 30, TotalBytes: 4 << 30},
+				Disk:   guestResourceUsage{UsedBytes: 9 << 30, TotalBytes: 32 << 30},
+			},
+		},
+	}
+	forwarder := newTestDynamicForwarder(service, &fakeForwardingPeerFactory{
+		peers: map[string]*controllableForwardingPeer{node.SandboxName: peer},
+	})
+	forwarder.reconcile(context.Background())
+	forwarder.reconcile(context.Background())
+	defer func() { _ = forwarder.Close() }()
+
+	nodes, err := service.NodeList(context.Background(), false)
+	if err != nil {
+		t.Fatalf("NodeList() error = %v", err)
+	}
+	forwarder.addNodeUsage(nodes)
+	if len(nodes) != 1 || nodes[0].LastRuntimeObservation == nil {
+		t.Fatalf("enriched nodes = %#v, want one runtime observation", nodes)
+	}
+	observation := nodes[0].LastRuntimeObservation
+	if observation.CPUUsagePercent == nil || *observation.CPUUsagePercent != 75 {
+		t.Fatalf("CPU usage = %v, want 75", observation.CPUUsagePercent)
+	}
+	if observation.CPUUsageSampledAt == nil || observation.CPUUsageSampledAt.IsZero() {
+		t.Fatalf("CPU sample time = %v, want a timestamp", observation.CPUUsageSampledAt)
+	}
+	if observation.MemoryUsedBytes == nil || *observation.MemoryUsedBytes != 3<<30 ||
+		observation.MemoryTotalBytes == nil || *observation.MemoryTotalBytes != 4<<30 {
+		t.Fatalf("memory usage = %v/%v, want 3 GiB/4 GiB", observation.MemoryUsedBytes, observation.MemoryTotalBytes)
+	}
+	if observation.DiskUsedBytes == nil || *observation.DiskUsedBytes != 9<<30 ||
+		observation.DiskTotalBytes == nil || *observation.DiskTotalBytes != 32<<30 {
+		t.Fatalf("disk usage = %v/%v, want 9 GiB/32 GiB", observation.DiskUsedBytes, observation.DiskTotalBytes)
+	}
+	if observation.ResourceUsageSampledAt == nil || observation.ResourceUsageSampledAt.IsZero() {
+		t.Fatalf("resource sample time = %v, want a timestamp", observation.ResourceUsageSampledAt)
+	}
+}
+
+func TestDynamicForwarderServesHostnameRoutesOnIPv6Loopback(t *testing.T) {
+	service, _ := newTestService(t)
+	node := saveForwardingTestNode(t, service, "ipv6-host-route")
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_, _ = writer.Write([]byte("from-node"))
+	}))
+	defer upstream.Close()
+
+	port := reserveDualLoopbackPort(t)
+	peer := &controllableForwardingPeer{ports: []int{port}, address: strings.TrimPrefix(upstream.URL, "http://")}
+	forwarder := newTestDynamicForwarder(service, &fakeForwardingPeerFactory{
+		peers: map[string]*controllableForwardingPeer{node.SandboxName: peer},
+	})
+	forwarder.reconcile(context.Background())
+	defer func() { _ = forwarder.Close() }()
+
+	ports := forwarder.Snapshot()["ports"].([]map[string]any)
+	if len(ports) != 1 {
+		t.Fatalf("forwarding ports = %#v, want one port", ports)
+	}
+	addresses := ports[0]["addresses"].([]string)
+	if len(addresses) != 2 ||
+		!slices.Contains(addresses, net.JoinHostPort("127.0.0.1", strconv.Itoa(port))) ||
+		!slices.Contains(addresses, net.JoinHostPort("::1", strconv.Itoa(port))) {
+		t.Fatalf("forwarding addresses = %v, want both host loopbacks", addresses)
+	}
+
+	client := &http.Client{
+		Timeout:   time.Second,
+		Transport: &http.Transport{Proxy: nil},
+	}
+	for _, host := range []string{"localhost", node.SandboxName + ".localhost"} {
+		request, err := http.NewRequest(http.MethodGet, "http://"+net.JoinHostPort("::1", strconv.Itoa(port))+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = net.JoinHostPort(host, strconv.Itoa(port))
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("IPv6 loopback request for %s failed: %v", host, err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil {
+			t.Fatalf("read IPv6 loopback response for %s: %v", host, readErr)
+		}
+		if response.StatusCode != http.StatusOK || string(body) != "from-node" {
+			t.Fatalf("IPv6 loopback request for %s returned %d %q", host, response.StatusCode, body)
+		}
+	}
+}
+
+func TestDynamicForwarderRollsBackIPv4ListenerWhenIPv6PortConflicts(t *testing.T) {
+	service, _ := newTestService(t)
+	node := saveForwardingTestNode(t, service, "ipv6-conflict-node")
+	occupied, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback is unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = occupied.Close() })
+	port := occupied.Addr().(*net.TCPAddr).Port
+	peer := &controllableForwardingPeer{ports: []int{port}}
+	forwarder := newTestDynamicForwarder(service, &fakeForwardingPeerFactory{
+		peers: map[string]*controllableForwardingPeer{node.SandboxName: peer},
+	})
+	forwarder.reconcile(context.Background())
+	defer func() { _ = forwarder.Close() }()
+
+	ports := forwarder.Snapshot()["ports"].([]map[string]any)
+	if len(ports) != 1 || ports[0]["status"] != "conflicted" {
+		t.Fatalf("forwarding ports = %#v, want one conflicted port", ports)
+	}
+	ipv4, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatalf("IPv4 listener was not rolled back after IPv6 conflict: %v", err)
+	}
+	if err := ipv4.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := occupied.Close(); err != nil {
+		t.Fatal(err)
+	}
+	forwarder.reconcile(context.Background())
+	ports = forwarder.Snapshot()["ports"].([]map[string]any)
+	if len(ports) != 1 || ports[0]["status"] != "serving" {
+		t.Fatalf("forwarding ports after conflict release = %#v, want serving", ports)
+	}
+}
+
 func TestDynamicForwarderRecoversFromHostBindConflict(t *testing.T) {
 	service, _ := newTestService(t)
-	node := saveForwardingTestNode(t, service, "conflict-node", "running")
+	node := saveForwardingTestNode(t, service, "conflict-node")
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -360,7 +568,7 @@ func TestDynamicForwarderRetriesTransportPreparationWithoutBlockingDaemon(t *tes
 	t.Fatal("forwarder did not recover after authorization retry")
 }
 
-func saveForwardingTestNode(t *testing.T, service *Service, sandboxName string, status ObservationStatus) Node {
+func saveForwardingTestNode(t *testing.T, service *Service, sandboxName string) Node {
 	t.Helper()
 	node := Node{ID: newID(), Slug: sandboxName, DirectoryPath: t.TempDir(), SandboxName: sandboxName, Status: "created", LifecycleState: "created", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
@@ -368,22 +576,35 @@ func saveForwardingTestNode(t *testing.T, service *Service, sandboxName string, 
 	}
 	fake := service.sandbox.(*fakeSandbox)
 	fake.mu.Lock()
-	fake.observations[sandboxName] = RuntimeObservation{Name: sandboxName, Exists: true, Status: status}
+	fake.observations[sandboxName] = RuntimeObservation{Name: sandboxName, Exists: true, Status: "running"}
 	fake.mu.Unlock()
 	return node
 }
 
-func reserveTCPPort(t *testing.T) int {
+func reserveDualLoopbackPort(t *testing.T) int {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for range 20 {
+		ipv6, err := net.Listen("tcp6", "[::1]:0")
+		if err != nil {
+			t.Skipf("IPv6 loopback is unavailable: %v", err)
+		}
+		port := ipv6.Addr().(*net.TCPAddr).Port
+		ipv4, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			_ = ipv6.Close()
+			continue
+		}
+		if err := ipv4.Close(); err != nil {
+			_ = ipv6.Close()
+			t.Fatal(err)
+		}
+		if err := ipv6.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return port
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return port
+	t.Fatal("could not reserve a port on both loopback address families")
+	return 0
 }
 
 func newTestDynamicForwarder(service *Service, factory forwardingPeerFactory) *dynamicForwarder {
@@ -426,16 +647,24 @@ func (f *fakeForwardingPeerFactory) Connect(_ context.Context, node Node) (forwa
 }
 
 type controllableForwardingPeer struct {
-	mu      sync.Mutex
-	ports   []int
-	address string
-	closed  bool
+	mu           sync.Mutex
+	ports        []int
+	observations []forwardingGuestObservation
+	next         int
+	address      string
+	closed       bool
 }
 
-func (p *controllableForwardingPeer) Discover(context.Context) ([]int, error) {
+func (p *controllableForwardingPeer) Observe(context.Context) (forwardingGuestObservation, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return slices.Clone(p.ports), nil
+	if p.next < len(p.observations) {
+		observation := p.observations[p.next]
+		p.next++
+		observation.Ports = slices.Clone(observation.Ports)
+		return observation, nil
+	}
+	return forwardingGuestObservation{Ports: slices.Clone(p.ports)}, nil
 }
 func (p *controllableForwardingPeer) DialContext(ctx context.Context, network, _ string) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, network, p.address)
@@ -489,7 +718,9 @@ func waitForForwardingPortStatus(t *testing.T, forwarder *dynamicForwarder, port
 
 type dialAddressPeer struct{ address string }
 
-func (*dialAddressPeer) Discover(context.Context) ([]int, error) { return nil, nil }
+func (*dialAddressPeer) Observe(context.Context) (forwardingGuestObservation, error) {
+	return forwardingGuestObservation{}, nil
+}
 func (p *dialAddressPeer) DialContext(ctx context.Context, network, _ string) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, network, p.address)
 }
@@ -497,7 +728,9 @@ func (*dialAddressPeer) Close() error { return nil }
 
 type failingForwardingPeer struct{}
 
-func (failingForwardingPeer) Discover(context.Context) ([]int, error) { return nil, nil }
+func (failingForwardingPeer) Observe(context.Context) (forwardingGuestObservation, error) {
+	return forwardingGuestObservation{}, nil
+}
 func (failingForwardingPeer) DialContext(context.Context, string, string) (net.Conn, error) {
 	return nil, fmt.Errorf("injected tunnel failure")
 }
@@ -509,7 +742,9 @@ type ipv6OnlyForwardingPeer struct {
 	attempts        []string
 }
 
-func (*ipv6OnlyForwardingPeer) Discover(context.Context) ([]int, error) { return nil, nil }
+func (*ipv6OnlyForwardingPeer) Observe(context.Context) (forwardingGuestObservation, error) {
+	return forwardingGuestObservation{}, nil
+}
 func (p *ipv6OnlyForwardingPeer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	p.mu.Lock()
 	p.attempts = append(p.attempts, address)

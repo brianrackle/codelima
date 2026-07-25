@@ -22,13 +22,14 @@ type tuiOverlay interface {
 }
 
 type tuiDialogField struct {
-	Key      string
-	Label    string
-	Required bool
-	Input    *textinput.Model
-	Value    string
-	Display  func(string) string
-	Activate func() error
+	Key          string
+	Label        string
+	Required     bool
+	Input        *textinput.Model
+	DefaultValue string
+	Value        string
+	Display      func(string) string
+	Activate     func() error
 }
 
 type tuiDialog struct {
@@ -62,6 +63,19 @@ func newTUIInputField(key, label, value string, required bool) tuiDialogField {
 	}
 }
 
+// newTUIDefaultInputField creates an empty editable input whose implicit
+// value is displayed as a muted placeholder. The first typed character
+// replaces the placeholder because it is not part of the textinput content.
+func newTUIDefaultInputField(key, label, defaultValue string, required bool) tuiDialogField {
+	return tuiDialogField{
+		Key:          key,
+		Label:        label,
+		Required:     required,
+		Input:        textinput.New(),
+		DefaultValue: defaultValue,
+	}
+}
+
 func newTUISelectorField(key, label, value string, required bool, activate func() error) tuiDialogField {
 	return tuiDialogField{
 		Key:      key,
@@ -92,7 +106,11 @@ func newTUIValueSelectorField(key, label, value string, required bool, display f
 
 func (f *tuiDialogField) rawValue() string {
 	if f.Input != nil {
-		return strings.TrimSpace(f.Input.String())
+		value := f.Input.String()
+		if value == "" {
+			return strings.TrimSpace(f.DefaultValue)
+		}
+		return strings.TrimSpace(value)
 	}
 	return strings.TrimSpace(f.Value)
 }
@@ -229,6 +247,12 @@ func (d *tuiDialog) Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle v
 		row++
 		inputWin := body.New(0, row, -1, 1)
 		if field.Input != nil {
+			placeholder := ""
+			if field.Input.String() == "" {
+				placeholder = field.DefaultValue
+			}
+			field.Input.SetPrompt(placeholder)
+			field.Input.Prompt = mutedStyle
 			field.Input.HideCursor = index != d.FieldIndex
 			field.Input.Draw(inputWin)
 		} else {

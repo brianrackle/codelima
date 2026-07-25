@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,23 +42,39 @@ type handoffDaemonTerminal interface {
 type daemonTerminalEntry struct {
 	state daemon.TerminalState
 	term  daemonTerminal
+
+	cache            atomic.Pointer[daemonTerminalCache]
+	snapshotSequence atomic.Uint64
+	snapshotWake     chan struct{}
+	snapshotStop     chan struct{}
+	snapshotStopOnce sync.Once
+}
+
+type daemonTerminalCache struct {
+	snapshot    daemon.Snapshot
+	visibleText ReadResult
+	visibleANSI ReadResult
+	recentText  ReadResult
+	recentANSI  ReadResult
 }
 
 type daemonHost struct {
-	service            *Service
-	forwarder          *dynamicForwarder
-	observer           LimaObservationRuntime
-	virtioFSPressure   *virtioFSPressureController
-	virtioFSSupported  bool
-	restore            string
-	session            string
-	mu                 sync.RWMutex
-	terminals          map[string]*daemonTerminalEntry
-	terminalOrder      []string
-	broadcast          func(string, any)
-	prepareReplacement func() error
-	resumeReplacement  func() error
-	stopServer         func()
+	service              *Service
+	forwarder            *dynamicForwarder
+	observer             LimaObservationRuntime
+	virtioFSPressure     *virtioFSPressureController
+	virtioFSSupported    bool
+	restore              string
+	session              string
+	mu                   sync.RWMutex
+	terminals            map[string]*daemonTerminalEntry
+	terminalOrder        []string
+	broadcast            func(string, any)
+	prepareReplacement   func() error
+	resumeReplacement    func() error
+	stopServer           func()
+	terminalCloseTimeout time.Duration
+	terminalFactory      func(string, func(vaxis.Event)) tuiTerminal
 }
 
 func newDaemonHost(service *Service) *daemonHost {
@@ -65,9 +82,11 @@ func newDaemonHost(service *Service) *daemonHost {
 	host := &daemonHost{
 		service: service, restore: service.cfg.Daemon.Restore, session: paths.Session,
 		terminals: map[string]*daemonTerminalEntry{}, broadcast: func(string, any) {},
-		prepareReplacement: func() error { return errors.New("daemon replacement unavailable") },
-		resumeReplacement:  func() error { return errors.New("daemon replacement unavailable") },
-		stopServer:         func() {},
+		prepareReplacement:   func() error { return errors.New("daemon replacement unavailable") },
+		resumeReplacement:    func() error { return errors.New("daemon replacement unavailable") },
+		stopServer:           func() {},
+		terminalCloseTimeout: 5 * time.Second,
+		terminalFactory:      newIsolatedDaemonTerminal,
 	}
 	if runtime, ok := service.sandbox.(LimaSSHRuntime); ok {
 		host.forwarder = newDynamicForwarder(service, runtime)
@@ -89,6 +108,92 @@ func newDaemonHost(service *Service) *daemonHost {
 	return host
 }
 
+func (h *daemonHost) newTerminalEntry(state daemon.TerminalState, runtime daemonTerminal) *daemonTerminalEntry {
+	entry := &daemonTerminalEntry{
+		state:        state,
+		term:         runtime,
+		snapshotWake: make(chan struct{}, 1),
+		snapshotStop: make(chan struct{}),
+	}
+	go h.runTerminalSnapshotPublisher(entry)
+	entry.requestSnapshot()
+	return entry
+}
+
+func (e *daemonTerminalEntry) requestSnapshot() {
+	if e == nil || e.snapshotWake == nil {
+		return
+	}
+	select {
+	case e.snapshotWake <- struct{}{}:
+	default:
+	}
+}
+
+func (e *daemonTerminalEntry) stopSnapshotPublisher() {
+	if e == nil || e.snapshotStop == nil {
+		return
+	}
+	e.snapshotStopOnce.Do(func() { close(e.snapshotStop) })
+}
+
+func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
+	for {
+		select {
+		case <-entry.snapshotStop:
+			return
+		case <-entry.snapshotWake:
+		}
+
+		result := entry.term.Snapshot()
+		if result.Err != nil {
+			h.broadcast("terminal.error", map[string]string{
+				"terminal_id": entry.state.TerminalID,
+				"error":       result.Err.Error(),
+			})
+			continue
+		}
+
+		published := daemonSnapshot(result.Snapshot)
+		published.SnapshotSequence = entry.snapshotSequence.Add(1)
+		published.ProducedAt = time.Now().UTC()
+		cache := &daemonTerminalCache{
+			snapshot: published,
+			visibleText: ReadResult{
+				Text:       daemonSnapshotText(published),
+				Generation: published.Generation,
+			},
+		}
+		entry.cache.Store(cache)
+		h.broadcast("terminal.dirty", map[string]any{
+			"terminal_id":       entry.state.TerminalID,
+			"snapshot_sequence": published.SnapshotSequence,
+			"stale":             published.Stale,
+		})
+
+		// Read variants are also produced off the request path. If one of these
+		// native reads stalls, clients continue receiving the already-published
+		// immutable screen snapshot.
+		cacheCopy := *cache
+		cacheCopy.visibleANSI = entry.term.ReadVisible(ReadANSI)
+		cacheCopy.recentText = entry.term.ReadRecent(ReadText)
+		cacheCopy.recentANSI = entry.term.ReadRecent(ReadANSI)
+		entry.cache.Store(&cacheCopy)
+	}
+}
+
+func (e *daemonTerminalEntry) markSnapshotStale() {
+	if e == nil {
+		return
+	}
+	if current := e.cache.Load(); current != nil && !current.snapshot.Stale {
+		next := *current
+		next.snapshot.Stale = true
+		e.cache.Store(&next)
+	}
+	e.requestSnapshot()
+}
+
 func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
 	switch method {
 	case "daemon.update":
@@ -108,7 +213,14 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 			IncludeDeleted bool `json:"include_deleted"`
 		}
 		_ = json.Unmarshal(raw, &params)
-		return h.service.NodeList(ctx, params.IncludeDeleted)
+		nodes, err := h.service.NodeList(ctx, params.IncludeDeleted)
+		if err != nil {
+			return nil, toDaemonError(err)
+		}
+		if h.forwarder != nil {
+			h.forwarder.addNodeUsage(nodes)
+		}
+		return nodes, nil
 	case "node.start", "node.stop":
 		var params struct {
 			Node string `json:"node"`
@@ -138,7 +250,7 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 	case "terminal.close":
 		var params terminalIDParams
 		_ = json.Unmarshal(raw, &params)
-		return map[string]bool{"closed": true}, h.close(params.TerminalID)
+		return map[string]bool{"closed": true}, h.close(ctx, params.TerminalID)
 	case "terminal.move":
 		var params struct {
 			TerminalID string `json:"terminal_id"`
@@ -209,13 +321,21 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 		if err != nil {
 			return nil, err
 		}
-		format := ReadText
-		if params.Format == "ansi" {
-			format = ReadANSI
+		cache := entry.cache.Load()
+		if cache == nil {
+			return nil, daemon.Error("DependencyUnavailable", "terminal snapshot is not available yet", ExitDependencyUnavailable, map[string]any{"terminal_id": params.TerminalID})
 		}
-		result := entry.term.ReadVisible(format)
-		if params.Source == "recent" {
-			result = entry.term.ReadRecent(format)
+		result := cache.visibleText
+		switch {
+		case params.Source == "recent" && params.Format == "ansi":
+			result = cache.recentANSI
+		case params.Source == "recent":
+			result = cache.recentText
+		case params.Format == "ansi":
+			result = cache.visibleANSI
+		}
+		if result.Text == "" && result.Err == nil {
+			result = cache.visibleText
 		}
 		return result, toDaemonError(result.Err)
 	case "terminal.snapshot":
@@ -225,11 +345,11 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 		if err != nil {
 			return nil, err
 		}
-		result := entry.term.Snapshot()
-		if result.Err != nil {
-			return nil, toDaemonError(result.Err)
+		cache := entry.cache.Load()
+		if cache == nil {
+			return nil, daemon.Error("DependencyUnavailable", "terminal snapshot is not available yet", ExitDependencyUnavailable, map[string]any{"terminal_id": params.TerminalID})
 		}
-		return daemonSnapshot(result.Snapshot), nil
+		return cache.snapshot, nil
 	case "terminal.send_text", "terminal.send_input", "terminal.send_keys":
 		var params struct {
 			TerminalID string   `json:"terminal_id"`
@@ -346,7 +466,11 @@ func (h *daemonHost) open(ctx context.Context, params terminalOpenParams, termin
 	if rows <= 0 {
 		rows = 24
 	}
-	base := newTUITerminal(terminalID, func(event vaxis.Event) { h.handleTerminalEvent(terminalID, event) })
+	factory := h.terminalFactory
+	if factory == nil {
+		factory = newIsolatedDaemonTerminal
+	}
+	base := factory(terminalID, func(event vaxis.Event) { h.handleTerminalEvent(terminalID, event) })
 	runtime, ok := base.(daemonTerminal)
 	if !ok {
 		base.Close()
@@ -362,11 +486,11 @@ func (h *daemonHost) open(ctx context.Context, params terminalOpenParams, termin
 	state := daemon.TerminalState{TerminalID: terminalID, TabID: params.Target + "#" + terminalID, Target: params.Target, Kind: kind.String(), Label: params.Label, CWD: spec.Dir, Argv: slices.Clone(spec.Argv), CreatedAt: time.Now().UTC(), Cols: cols, Rows: rows}
 	h.mu.Lock()
 	h.ensureTerminalOrderLocked()
-	h.terminals[terminalID] = &daemonTerminalEntry{state: state, term: runtime}
+	h.terminals[terminalID] = h.newTerminalEntry(state, runtime)
 	h.terminalOrder = append(h.terminalOrder, terminalID)
 	h.mu.Unlock()
 	if err := h.persist(); err != nil {
-		_ = h.close(terminalID)
+		_ = h.close(context.Background(), terminalID)
 		return daemon.TerminalState{}, err
 	}
 	h.broadcast("terminal.created", state)
@@ -374,7 +498,7 @@ func (h *daemonHost) open(ctx context.Context, params terminalOpenParams, termin
 	return state, nil
 }
 
-func (h *daemonHost) close(id string) error {
+func (h *daemonHost) close(ctx context.Context, id string) error {
 	h.mu.Lock()
 	entry, ok := h.terminals[id]
 	if ok {
@@ -386,11 +510,34 @@ func (h *daemonHost) close(id string) error {
 	if !ok {
 		return daemon.Error("NotFound", "terminal not found", ExitNotFound, map[string]any{"terminal_id": id})
 	}
-	entry.term.Close()
-	_ = h.persist()
+	entry.stopSnapshotPublisher()
+	closeErr := h.closeTerminalRuntime(ctx, entry)
+	persistErr := h.persist()
 	h.broadcast("terminal.closed", entry.state)
 	h.broadcast("target.tabs_changed", map[string]string{"target": entry.state.Target})
-	return nil
+	return errors.Join(closeErr, persistErr)
+}
+
+func (h *daemonHost) closeTerminalRuntime(ctx context.Context, entry *daemonTerminalEntry) error {
+	done := make(chan struct{})
+	go func() {
+		entry.term.Close()
+		close(done)
+	}()
+	timeout := h.terminalCloseTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return daemon.Error("ExternalCommandFailed", "terminal close outcome is unknown after request cancellation", ExitExternalFailure, map[string]any{"terminal_id": entry.state.TerminalID})
+	case <-timer.C:
+		return daemon.Error("ExternalCommandFailed", "terminal close exceeded its bounded shutdown deadline", ExitExternalFailure, map[string]any{"terminal_id": entry.state.TerminalID})
+	}
 }
 
 func (h *daemonHost) move(id string, direction int) (bool, error) {
@@ -498,6 +645,18 @@ func compareDaemonTerminalStateOrder(left, right daemon.TerminalState) int {
 }
 
 func (h *daemonHost) Snapshot(context.Context) (any, error) {
+	terminalSnapshots := make(map[string]daemon.Snapshot)
+	terminalRuntimes := make(map[string]map[string]any)
+	h.mu.RLock()
+	for id, entry := range h.terminals {
+		if cache := entry.cache.Load(); cache != nil {
+			terminalSnapshots[id] = cache.snapshot
+		}
+		if runtime, ok := entry.term.(interface{ RuntimeDiagnostics() map[string]any }); ok {
+			terminalRuntimes[id] = runtime.RuntimeDiagnostics()
+		}
+	}
+	h.mu.RUnlock()
 	forwarding := map[string]any{"enabled": false}
 	if h.forwarder != nil {
 		forwarding = h.forwarder.Snapshot()
@@ -531,10 +690,18 @@ func (h *daemonHost) Snapshot(context.Context) (any, error) {
 		observation = h.observer.ObservationSnapshot()
 	}
 	return map[string]any{
-		"session":          daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()},
-		"forwarding":       forwarding,
-		"lima_observation": observation,
-		"virtiofs_reclaim": virtioFSReclaim,
+		"session":            daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()},
+		"terminal_snapshots": terminalSnapshots,
+		"terminal_runtimes":  terminalRuntimes,
+		"forwarding":         forwarding,
+		"lima_observation":   observation,
+		"virtiofs_reclaim":   virtioFSReclaim,
+	}, nil
+}
+
+func (h *daemonHost) SynchronizationSnapshot(context.Context) (any, error) {
+	return map[string]any{
+		"session": daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()},
 	}, nil
 }
 
@@ -568,12 +735,30 @@ func (h *daemonHost) Close() error {
 	var terminals sync.WaitGroup
 	terminals.Add(len(entries))
 	for _, entry := range entries {
+		entry.stopSnapshotPublisher()
 		go func() {
 			defer terminals.Done()
 			entry.term.Close()
 		}()
 	}
-	terminals.Wait()
+	terminalsDone := make(chan struct{})
+	go func() {
+		terminals.Wait()
+		close(terminalsDone)
+	}()
+	timeout := h.terminalCloseTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	select {
+	case <-terminalsDone:
+		if !timer.Stop() {
+			<-timer.C
+		}
+	case <-timer.C:
+		closeErr = errors.Join(closeErr, fmt.Errorf("terminal shutdown exceeded %s", timeout))
+	}
 	if value := os.Getenv("CODELIMA_TEST_DAEMON_SHUTDOWN_DELAY"); value != "" {
 		if delay, err := time.ParseDuration(value); err == nil && delay > 0 {
 			time.Sleep(delay)
@@ -686,7 +871,10 @@ func (h *daemonHost) quarantineSession(category, message string, attrs ...any) e
 func (h *daemonHost) handleTerminalEvent(id string, event vaxis.Event) {
 	switch value := event.(type) {
 	case vaxis.Redraw:
-		h.broadcast("terminal.dirty", map[string]string{"terminal_id": id})
+		if entry, err := h.lookup(id); err == nil {
+			entry.markSnapshotStale()
+		}
+		h.broadcast("terminal.dirty", map[string]any{"terminal_id": id, "stale": true})
 	case tuiClipboardEvent:
 		tabID := ""
 		if entry, err := h.lookup(id); err == nil {
@@ -700,6 +888,9 @@ func (h *daemonHost) handleTerminalEvent(id string, event vaxis.Event) {
 		delete(h.terminals, id)
 		h.removeTerminalOrderLocked(id)
 		h.mu.Unlock()
+		if entry != nil {
+			entry.stopSnapshotPublisher()
+		}
 		_ = h.persist()
 		if entry != nil {
 			h.broadcast("terminal.closed", entry.state)
@@ -714,7 +905,7 @@ func daemonSnapshot(snapshot TerminalSnapshot) daemon.Snapshot {
 	for i, cell := range snapshot.Cells {
 		cells[i] = daemon.SnapshotCell{Grapheme: cell.Grapheme, Width: cell.Width, FG: cell.FG, BG: cell.BG, FGDefault: cell.FGDefault, BGDefault: cell.BGDefault, Bold: cell.Bold, Faint: cell.Faint, Italic: cell.Italic, Underline: cell.Underline, Strikethrough: cell.Strikethrough, Inverse: cell.Inverse, Invisible: cell.Invisible, Blink: cell.Blink, Hyperlink: cell.Hyperlink}
 	}
-	return daemon.Snapshot{Cols: snapshot.Cols, Rows: snapshot.Rows, Cells: cells, CursorX: snapshot.CursorX, CursorY: snapshot.CursorY, CursorVisible: snapshot.CursorVisible, Generation: snapshot.Generation, CapturesMouse: snapshot.CapturesMouse}
+	return daemon.Snapshot{Cols: snapshot.Cols, Rows: snapshot.Rows, Cells: cells, CursorX: snapshot.CursorX, CursorY: snapshot.CursorY, CursorVisible: snapshot.CursorVisible, Generation: snapshot.Generation, CapturesMouse: snapshot.CapturesMouse, Stale: snapshot.Stale}
 }
 
 func encodeDaemonKeys(keys []string) ([]byte, error) {
@@ -766,7 +957,9 @@ func runDaemon(ctx context.Context, service *Service) error {
 		return err
 	}
 	host := newDaemonHost(service)
-	server := daemon.NewServer(daemon.Config{Home: service.cfg.MetadataRoot, Version: Version, Handler: host})
+	server := daemon.NewServer(daemon.Config{
+		Home: service.cfg.MetadataRoot, Version: Version, Handler: host, Logger: service.log(),
+	})
 	host.broadcast = server.Broadcast
 	host.prepareReplacement = server.PrepareReplacement
 	host.resumeReplacement = server.ResumeAfterReplacement
@@ -998,7 +1191,11 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	}
 	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
 	for _, item := range quiesced {
-		manifest.Runtimes = append(manifest.Runtimes, daemon.HandoffRuntime{TerminalID: item.id, ChildPID: item.state.ChildPID, Cols: item.state.Cols, Rows: item.state.Rows, Replay: item.state.Replay})
+		manifest.Runtimes = append(manifest.Runtimes, daemon.HandoffRuntime{
+			TerminalID: item.id, ChildPID: item.state.ChildPID,
+			Cols: item.state.Cols, Rows: item.state.Rows,
+			Replay: item.state.Replay, ReplayPartial: item.state.ReplayPartial,
+		})
 	}
 	if err := peer.WriteJSON(manifest, nil); err != nil {
 		return nil, rollback(err, false, process)
@@ -1142,7 +1339,16 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 		}
 		delete(fdsByID, runtimeState.TerminalID)
 		ptyFile := os.NewFile(uintptr(fd), "codelima-imported-pty")
-		term, adoptErr := adoptGhosttyTUITerminal(state.TabID, func(event vaxis.Event) { host.handleTerminalEvent(state.TerminalID, event) }, ptyFile, runtimeState.ChildPID, runtimeState.Cols, runtimeState.Rows, runtimeState.Replay)
+		term, adoptErr := adoptIsolatedDaemonTerminal(
+			state.TabID,
+			func(event vaxis.Event) { host.handleTerminalEvent(state.TerminalID, event) },
+			ptyFile,
+			runtimeState.ChildPID,
+			runtimeState.Cols,
+			runtimeState.Rows,
+			runtimeState.Replay,
+			runtimeState.ReplayPartial,
+		)
 		if adoptErr != nil {
 			_ = ptyFile.Close()
 			releaseImported()
@@ -1150,7 +1356,7 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 			return adoptErr
 		}
 		imported = append(imported, term.(handoffDaemonTerminal))
-		host.terminals[state.TerminalID] = &daemonTerminalEntry{state: state, term: term}
+		host.terminals[state.TerminalID] = host.newTerminalEntry(state, term)
 	}
 	for _, state := range manifest.Session.Terminals {
 		if _, ok := host.terminals[state.TerminalID]; ok {
@@ -1175,9 +1381,16 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 		return err
 	}
 	for _, term := range imported {
-		term.(*ghosttyTUITerminal).ActivateAfterHandoff()
+		activatable, ok := term.(interface{ ActivateAfterHandoff() })
+		if !ok {
+			releaseImported()
+			return errors.New("imported terminal cannot activate after handoff")
+		}
+		activatable.ActivateAfterHandoff()
 	}
-	server := daemon.NewServer(daemon.Config{Home: service.cfg.MetadataRoot, Version: Version, Handler: host})
+	server := daemon.NewServer(daemon.Config{
+		Home: service.cfg.MetadataRoot, Version: Version, Handler: host, Logger: service.log(),
+	})
 	host.broadcast = server.Broadcast
 	host.prepareReplacement = server.PrepareReplacement
 	host.resumeReplacement = server.ResumeAfterReplacement

@@ -3,6 +3,7 @@ package codelima
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,9 +17,9 @@ import (
 // tuiMessageLogDefaultCap bounds the message ring; older entries are evicted.
 const tuiMessageLogDefaultCap = 200
 
-// tuiTreeEntryHeight keeps each node's identity and three properties together
+// tuiTreeEntryHeight keeps each node's identity and six properties together
 // as one selectable block in the tree.
-const tuiTreeEntryHeight = 4
+const tuiTreeEntryHeight = 7
 
 // tuiMessage is one entry in the message surface: when it happened, its severity
 // (borrowed from slog so the view can colour it), and the human text.
@@ -807,6 +808,12 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		row++
 		win.Println(row, vaxis.Segment{Text: "Status: " + a.nodeStatusText(entry.node)})
 		row++
+		win.Println(row, vaxis.Segment{Text: "CPU usage: " + nodeCPUUsageText(entry.node)})
+		row++
+		win.Println(row, vaxis.Segment{Text: "Memory usage: " + nodeMemoryUsageText(entry.node)})
+		row++
+		win.Println(row, vaxis.Segment{Text: "Disk usage: " + nodeDiskUsageText(entry.node)})
+		row++
 		nodePath := ""
 		if a.service != nil && a.service.store != nil {
 			nodePath = a.service.store.nodePath(entry.node.ID)
@@ -865,6 +872,12 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 	switch {
 	case entry.valid():
 		win.Println(row, vaxis.Segment{Text: "Status: " + a.nodeStatusText(entry.node), Style: headerStyle})
+		row++
+		win.Println(row, vaxis.Segment{Text: "CPU usage: " + nodeCPUUsageText(entry.node), Style: mutedStyle})
+		row++
+		win.Println(row, vaxis.Segment{Text: "Memory usage: " + nodeMemoryUsageText(entry.node), Style: mutedStyle})
+		row++
+		win.Println(row, vaxis.Segment{Text: "Disk usage: " + nodeDiskUsageText(entry.node), Style: mutedStyle})
 		row += 2
 		if err := a.sessions.SessionError(entry.key()); err != nil {
 			win.Println(row, vaxis.Segment{Text: "Unable to start the node terminal.", Style: errorStyle})
@@ -979,5 +992,50 @@ func tuiEntryLinesWithStatus(entry tuiTreeEntry, statusOverride string) []string
 		"  Config: " + configuration,
 		"  CWD: " + directory,
 		"  Status: " + status,
+		"  CPU: " + nodeCPUUsageText(entry.node),
+		"  Memory: " + nodeMemoryUsageText(entry.node),
+		"  Disk: " + nodeDiskUsageText(entry.node),
 	}
+}
+
+func nodeCPUUsageText(node Node) string {
+	if !nodeIsRunning(node) || node.LastRuntimeObservation == nil || node.LastRuntimeObservation.CPUUsagePercent == nil {
+		return "--"
+	}
+	usage := *node.LastRuntimeObservation.CPUUsagePercent
+	if math.IsNaN(usage) || math.IsInf(usage, 0) || usage < 0 || usage > 100 {
+		return "--"
+	}
+	return fmt.Sprintf("%.1f%%", usage)
+}
+
+func nodeMemoryUsageText(node Node) string {
+	if node.LastRuntimeObservation == nil {
+		return "--"
+	}
+	return nodeByteUsageText(node, node.LastRuntimeObservation.MemoryUsedBytes, node.LastRuntimeObservation.MemoryTotalBytes)
+}
+
+func nodeDiskUsageText(node Node) string {
+	if node.LastRuntimeObservation == nil {
+		return "--"
+	}
+	return nodeByteUsageText(node, node.LastRuntimeObservation.DiskUsedBytes, node.LastRuntimeObservation.DiskTotalBytes)
+}
+
+func nodeByteUsageText(node Node, usedBytes, totalBytes *uint64) string {
+	if !nodeIsRunning(node) || usedBytes == nil || totalBytes == nil || *totalBytes == 0 || *usedBytes > *totalBytes {
+		return "--"
+	}
+	unitBytes, unitName := float64(1<<30), "GiB"
+	switch {
+	case *totalBytes >= 1<<30:
+	case *totalBytes >= 1<<20:
+		unitBytes, unitName = 1<<20, "MiB"
+	case *totalBytes >= 1<<10:
+		unitBytes, unitName = 1<<10, "KiB"
+	default:
+		unitBytes, unitName = 1, "B"
+	}
+	return fmt.Sprintf("%.1f/%.1f %s", float64(*usedBytes)/unitBytes, float64(*totalBytes)/unitBytes, unitName)
 }

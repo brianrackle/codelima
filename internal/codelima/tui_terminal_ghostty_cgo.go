@@ -7,11 +7,14 @@ package codelima
 #cgo linux LDFLAGS: -ldl
 #include <stdlib.h>
 #include "ghostty_bridge_compat.h"
+
+static void codelima_test_ghostty_hang_forever(void) {
+	for (;;) {}
+}
 */
 import "C"
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -110,19 +113,24 @@ func withGhosttyStderrSuppressed[T any](fn func() T) T {
 	return fn()
 }
 
-// drainGhosttyStderr forwards captured libghostty stderr lines to the package
-// logger. It runs for the process lifetime; the pipe's write end stays open
-// (dup2 keeps targeting it), so the scanner only returns at process teardown.
+// drainGhosttyStderr continuously consumes captured libghostty stderr. It must
+// treat stderr as a byte stream rather than a sequence of Scanner tokens:
+// Ghostty may emit an arbitrarily long record without a newline, and a Scanner
+// that exceeds its token limit stops permanently and eventually lets the pipe
+// fill, blocking the native call that owns ghosttyStderr.mu.
 func drainGhosttyStderr(reader *os.File) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r\n")
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		packageLog().Debug(line, "source", "libghostty")
+	defer func() { _ = reader.Close() }()
+	_, _ = io.CopyBuffer(ghosttyStderrLogWriter{}, reader, make([]byte, 64*1024))
+}
+
+type ghosttyStderrLogWriter struct{}
+
+func (ghosttyStderrLogWriter) Write(data []byte) (int, error) {
+	message := strings.TrimSpace(string(data))
+	if message != "" {
+		packageLog().Debug(message, "source", "libghostty")
 	}
+	return len(data), nil
 }
 
 func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTerminal, error) {
@@ -258,6 +266,9 @@ type ghosttyTUITerminal struct {
 	pty              *os.File
 	ptyWriter        *ghosttyPTYWriter
 	clipboardScanner *osc52ClipboardScanner
+	rendererOutput   func(eventID uint64, ordinal uint32, data []byte)
+	responseEventID  uint64
+	responseOrdinal  uint32
 	cols             int
 	rows             int
 	focused          bool
@@ -1434,6 +1445,10 @@ func (t *ghosttyTUITerminal) readPTY(buffer []byte) (int, error) {
 }
 
 func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
+	t.ingestPTYEvent(data, 0)
+}
+
+func (t *ghosttyTUITerminal) ingestPTYEvent(data []byte, eventID uint64) {
 	if t.clipboardScanner != nil {
 		t.clipboardScanner.Write(data)
 	}
@@ -1449,7 +1464,12 @@ func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
 		t.replay = append([]byte(nil), t.replay[len(t.replay)-8*1024:]...)
 	}
 
+	t.responseEventID = eventID
+	t.responseOrdinal = 0
 	withGhosttyStderrSuppressed(func() struct{} {
+		if os.Getenv("CODELIMA_TEST_GHOSTTY_HANG_OPERATION") == "output" {
+			C.codelima_test_ghostty_hang_forever()
+		}
 		C.ghostty_bridge_terminal_write(
 			t.term,
 			(*C.uint8_t)(unsafe.Pointer(&data[0])),
@@ -1862,7 +1882,7 @@ func (t *ghosttyTUITerminal) applyUpdate(event vaxis.Event) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if t.closed || t.term == nil || t.pty == nil {
+	if t.closed || t.term == nil || (t.pty == nil && t.rendererOutput == nil) {
 		return
 	}
 
@@ -2003,10 +2023,17 @@ func (t *ghosttyTUITerminal) writePTYLocked(value string) {
 }
 
 func (t *ghosttyTUITerminal) writePTYBytesLocked(data []byte) {
-	if len(data) == 0 || t.ptyWriter == nil {
+	if len(data) == 0 {
 		return
 	}
-	t.ptyWriter.Enqueue(data)
+	if t.rendererOutput != nil {
+		t.responseOrdinal++
+		t.rendererOutput(t.responseEventID, t.responseOrdinal, append([]byte(nil), data...))
+		return
+	}
+	if t.ptyWriter != nil {
+		t.ptyWriter.Enqueue(data)
+	}
 }
 
 func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {

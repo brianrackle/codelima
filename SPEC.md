@@ -131,12 +131,15 @@ Human output uses tables for lists and YAML for records. `--json` returns a stab
 
 ## TUI contract
 
-The left pane is a flat node list. Each row shows:
+The left pane is a flat node list. Each fixed-height node block shows:
 
 - node slug
 - configuration slug
 - directory relative to the active path scope when scoped
 - runtime/lifecycle status
+- aggregate guest CPU usage, normalized to `0..100%` and refreshed once per second
+- guest memory used/total, calculated as `MemTotal - MemAvailable`
+- guest root-filesystem disk used/total
 
 There are no project rows. Global actions manage configurations and environments. Node actions create, start, stop, clone, and delete nodes.
 
@@ -172,8 +175,15 @@ Stop is idempotent against an already-stopped instance. Delete marks termination
 
 Direct CLI reads reconcile from `limactl list --json`. The daemon seeds one
 list and then owns `limactl watch --json`; recurring TUI and forwarding reads
-use the observation cache and do not spawn a two-second list process. Runtime
-truth is not persisted by ordinary reads.
+use the observation cache and do not spawn a recurring list process. Runtime
+truth is not persisted by ordinary reads. Once per second, the daemon's
+existing persistent SSH peer for each running node reads aggregate Linux CPU
+counters, memory totals, and root-filesystem disk usage with listener discovery.
+Consecutive CPU samples produce normalized `0..100%` guest utilization; the
+first or an invalid CPU sample is unavailable. Memory is `MemTotal -
+MemAvailable`, while disk usage is taken from `df -Pk /` and does not represent
+the separately mounted host workspace. This telemetry is attached only to
+daemon `node.list` responses.
 
 ## Dynamic forwarding
 

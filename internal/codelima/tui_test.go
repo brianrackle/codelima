@@ -669,12 +669,25 @@ func TestTUITreeEntryLinesRenderIndentedNodeProperties(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
+	cpuUsage := 37.26
+	memoryUsed, memoryTotal := uint64(3<<30), uint64(4<<30)
+	diskUsed, diskTotal := uint64(8<<30), uint64(32<<30)
+	sampledAt := time.Now()
 	entry := tuiTreeEntry{node: Node{
 		ID:                "node-child",
 		Slug:              "child-node",
 		ConfigurationSlug: "large",
 		DirectoryPath:     filepath.Join(root, "child"),
 		Status:            NodeStatusRunning,
+		LastRuntimeObservation: &RuntimeObservation{
+			Status:            ObservationRunning,
+			CPUUsagePercent:   &cpuUsage,
+			CPUUsageSampledAt: &sampledAt,
+			MemoryUsedBytes:   &memoryUsed,
+			MemoryTotalBytes:  &memoryTotal,
+			DiskUsedBytes:     &diskUsed,
+			DiskTotalBytes:    &diskTotal,
+		},
 	}}
 	app := &vaxisTUIApp{treeWorkspaceRoot: root}
 
@@ -684,13 +697,16 @@ func TestTUITreeEntryLinesRenderIndentedNodeProperties(t *testing.T) {
 		"  Config: large",
 		"  CWD: child",
 		"  Status: RUNNING",
+		"  CPU: 37.3%",
+		"  Memory: 3.0/4.0 GiB",
+		"  Disk: 8.0/32.0 GiB",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("treeEntryLines() = %#v, want %#v", got, want)
 	}
 }
 
-func TestTUIDrawRendersAndHighlightsEachNodeAsFourLineBlock(t *testing.T) {
+func TestTUIDrawRendersAndHighlightsEachNodeAsSevenLineBlock(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -714,7 +730,7 @@ func TestTUIDrawRendersAndHighlightsEachNodeAsFourLineBlock(t *testing.T) {
 		t.Fatalf("newTUIState() error = %v", err)
 	}
 
-	vx := newRenderTestVaxis(t, 100, 14)
+	vx := newRenderTestVaxis(t, 100, 20)
 	defer vx.Close()
 
 	app := &vaxisTUIApp{
@@ -725,16 +741,22 @@ func TestTUIDrawRendersAndHighlightsEachNodeAsFourLineBlock(t *testing.T) {
 	}
 	app.draw()
 
-	lines := strings.Split(renderedScreenText(t, vx, 100, 14), "\n")
+	lines := strings.Split(renderedScreenText(t, vx, 100, 20), "\n")
 	want := []string{
 		"• root-node",
 		"  Config: small",
 		"  CWD: .",
 		"  Status: STOPPED",
+		"  CPU: --",
+		"  Memory: --",
+		"  Disk: --",
 		"• child-node",
 		"  Config: large",
 		"  CWD: child",
 		"  Status: RUNNING",
+		"  CPU: --",
+		"  Memory: --",
+		"  Disk: --",
 	}
 	for offset, text := range want {
 		row := 3 + offset
@@ -768,7 +790,7 @@ func TestTUIDrawScrollsByCompleteNodeBlocks(t *testing.T) {
 		t.Fatalf("selectIndex(2) error = %v", err)
 	}
 
-	vx := newRenderTestVaxis(t, 100, 14)
+	vx := newRenderTestVaxis(t, 100, 20)
 	defer vx.Close()
 
 	app := &vaxisTUIApp{
@@ -778,15 +800,15 @@ func TestTUIDrawScrollsByCompleteNodeBlocks(t *testing.T) {
 	}
 	app.draw()
 
-	lines := strings.Split(renderedScreenText(t, vx, 100, 14), "\n")
+	lines := strings.Split(renderedScreenText(t, vx, 100, 20), "\n")
 	if !strings.Contains(lines[3], "• node-two") {
 		t.Fatalf("first visible node row = %q, want node-two", lines[3])
 	}
 	if !strings.Contains(lines[3+tuiTreeEntryHeight], "• node-three") {
 		t.Fatalf("second visible node row = %q, want node-three", lines[3+tuiTreeEntryHeight])
 	}
-	if strings.Contains(strings.Join(lines[3:11], "\n"), "node-one") {
-		t.Fatalf("visible tree unexpectedly contains scrolled-out node-one:\n%s", strings.Join(lines[3:11], "\n"))
+	if strings.Contains(strings.Join(lines[3:17], "\n"), "node-one") {
+		t.Fatalf("visible tree unexpectedly contains scrolled-out node-one:\n%s", strings.Join(lines[3:17], "\n"))
 	}
 }
 
@@ -804,7 +826,7 @@ func TestTUIMouseClickOnNodePropertySelectsOwningNode(t *testing.T) {
 	app := &vaxisTUIApp{
 		state:           state,
 		sessions:        newTUISessionStore(context.Background(), nil, func(vaxis.Event) {}),
-		treeContentRect: tuiRect{col: 1, row: 3, width: 38, height: 9},
+		treeContentRect: tuiRect{col: 1, row: 3, width: 38, height: 14},
 		status:          "stale status",
 	}
 
@@ -1966,6 +1988,14 @@ func TestVaxisTUITerminalPreservesInitialOutputWhenStartedAtPaneSize(t *testing.
 	rendered := renderedScreenText(t, vx, 12, 3)
 	if !strings.Contains(rendered, "prompt") {
 		t.Fatalf("expected rendered terminal to preserve initial output, got:\n%s", rendered)
+	}
+}
+
+func TestTUIAutoRefreshSamplesNodeCPUOncePerSecond(t *testing.T) {
+	t.Parallel()
+
+	if tuiAutoRefreshInterval != time.Second {
+		t.Fatalf("tuiAutoRefreshInterval = %s, want 1s", tuiAutoRefreshInterval)
 	}
 }
 

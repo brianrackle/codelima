@@ -1,4 +1,33 @@
 
+# Implementation status
+
+Implemented locally on July 24, 2026:
+
+- connection close-cause correlation, first-cause preservation, heartbeats,
+  stable logical client identities, automatic reconnect, authoritative
+  epoch/sequence synchronization, and non-replayed uncertain mutations
+- bounded per-client outbound pumps, one socket writer, concurrent query
+  dispatch, an ordered mutation lane, and an ID-multiplexed client response
+  reader
+- asynchronous immutable terminal snapshots and compact reconnect state
+- token-independent Ghostty stderr draining and bounded daemon/terminal close
+- one pure-Go PTY/session actor plus one separately packaged, supervised
+  Ghostty renderer process per terminal, with generation fencing, bounded
+  replay journal, renderer-response deduplication, partial-recovery reporting,
+  and terminal-local restart budgets
+- deterministic tests for a real non-returning C renderer call, cross-terminal
+  and daemon responsiveness, shell-PID preservation, slow clients, blocked
+  requests, reconnect, delivery uncertainty, oversized frames, and stderr
+  records larger than Scanner limits
+
+ADRs 107 and 108 record the implemented decisions. A separate pure-Go session
+worker, PTY escrow, and unexpected-daemon worker adoption remain deliberately
+deferred: the observed native liveness boundary is isolated without them, and
+cooperative live update already preserves the PTY and shell. Native macOS
+sleep/resume and process-budget qualification remain in `TODO.md`.
+
+---
+
 The plan addresses the **failure outcome** very well:
 
 - The TUI automatically reconnects.

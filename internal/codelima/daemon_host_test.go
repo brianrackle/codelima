@@ -145,6 +145,7 @@ func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *t
 	}
 
 	host := newDaemonHost(service)
+	host.terminalFactory = newTUITerminal
 	state, err := host.open(context.Background(), terminalOpenParams{
 		Target: "node:" + node.ID,
 		Kind:   terminal.NodeHostShell.String(),
@@ -152,12 +153,54 @@ func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *t
 	if err != nil {
 		t.Fatalf("open(node host shell) error = %v", err)
 	}
-	t.Cleanup(func() { _ = host.close(state.TerminalID) })
+	t.Cleanup(func() { _ = host.close(context.Background(), state.TerminalID) })
 	if state.CWD != workspace {
 		t.Fatalf("node host terminal cwd = %q, want %q", state.CWD, workspace)
 	}
 	if fake.listCalls != 0 {
 		t.Fatalf("node host terminal queried runtime %d times", fake.listCalls)
+	}
+}
+
+func TestDaemonNodeListIncludesLiveResourceUsage(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+	node := saveForwardingTestNode(t, service, "cpu-node-list")
+	sampledAt := time.Now().UTC()
+	host := newDaemonHost(service)
+	host.forwarder = &dynamicForwarder{
+		cpu: map[string]nodeCPUUsageSample{
+			node.ID: {Percent: 42.5, SampledAt: sampledAt},
+		},
+		resources: map[string]nodeResourceUsageSample{
+			node.ID: {
+				Memory:    guestResourceUsage{UsedBytes: 3 << 30, TotalBytes: 4 << 30},
+				Disk:      guestResourceUsage{UsedBytes: 9 << 30, TotalBytes: 32 << 30},
+				SampledAt: sampledAt,
+			},
+		},
+	}
+
+	result, err := host.Handle(context.Background(), daemon.ClientContext{}, "node.list", json.RawMessage(`{"include_deleted":false}`))
+	if err != nil {
+		t.Fatalf("node.list error = %v", err)
+	}
+	nodes, ok := result.([]Node)
+	if !ok || len(nodes) != 1 || nodes[0].LastRuntimeObservation == nil {
+		t.Fatalf("node.list result = %#v, want one observed node", result)
+	}
+	if usage := nodes[0].LastRuntimeObservation.CPUUsagePercent; usage == nil || *usage != 42.5 {
+		t.Fatalf("node.list CPU usage = %v, want 42.5", usage)
+	}
+	observation := nodes[0].LastRuntimeObservation
+	if observation.MemoryUsedBytes == nil || *observation.MemoryUsedBytes != 3<<30 ||
+		observation.MemoryTotalBytes == nil || *observation.MemoryTotalBytes != 4<<30 {
+		t.Fatalf("node.list memory usage = %v/%v, want 3 GiB/4 GiB", observation.MemoryUsedBytes, observation.MemoryTotalBytes)
+	}
+	if observation.DiskUsedBytes == nil || *observation.DiskUsedBytes != 9<<30 ||
+		observation.DiskTotalBytes == nil || *observation.DiskTotalBytes != 32<<30 {
+		t.Fatalf("node.list disk usage = %v/%v, want 9 GiB/32 GiB", observation.DiskUsedBytes, observation.DiskTotalBytes)
 	}
 }
 
@@ -191,6 +234,7 @@ func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.
 		t.Fatalf("SaveNode() error = %v", err)
 	}
 	host := newDaemonHost(service)
+	host.terminalFactory = newTUITerminal
 	server := daemon.NewServer(daemon.Config{Home: service.cfg.MetadataRoot, Version: Version, Handler: host})
 	host.broadcast = server.Broadcast
 	ctx, cancel := context.WithCancel(context.Background())

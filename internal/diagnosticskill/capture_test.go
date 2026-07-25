@@ -59,7 +59,7 @@ case "$*" in
     printf '{"ok":true,"data":[{"terminal_id":"term_one"}]}\n'
     ;;
   *"daemon snapshot"*)
-    printf '{"ok":true,"data":{"session":{"terminals":[]}}}\n'
+    printf '{"ok":true,"data":{"session":{"terminals":[]},"terminal_runtimes":{"term_one":{"shell_pid":424244,"renderer_pid":424243,"renderer_generation":3,"renderer_state":"ready"},"term_two":{"shell_pid":424246,"renderer_pid":424245,"renderer_generation":2,"renderer_state":"ready"}}}}\n'
     ;;
   *"terminal read term_one"*)
     if [ "${CODELIMA_CAPTURE_TEST_READ_OK:-}" = "1" ]; then
@@ -100,6 +100,9 @@ esac
 		"daemon-status.json",
 		"terminal-list.json",
 		"daemon-snapshot.json",
+		"renderer-pids.txt",
+		"renderers-ps.txt",
+		"probed-renderer-pid.txt",
 		"terminal-read.json",
 		"terminal-read.err",
 		"terminal-read.exit",
@@ -121,12 +124,19 @@ esac
 	if got := strings.TrimSpace(string(exitData)); got != "7" {
 		t.Fatalf("terminal read exit = %q, want 7", got)
 	}
+	rendererPIDs, err := os.ReadFile(filepath.Join(output, "renderer-pids.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Fields(string(rendererPIDs)); len(got) != 2 || got[0] != "424243" || got[1] != "424245" {
+		t.Fatalf("renderer pids = %v, want both terminal-local renderers", got)
+	}
 
 	summary, err := os.ReadFile(filepath.Join(output, "summary.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(summary), "control plane responded but the terminal actor probe failed") {
+	if !strings.Contains(string(summary), "control plane responded but the selected cached terminal read failed") {
 		t.Fatalf("summary did not classify the failed actor probe:\n%s", summary)
 	}
 
@@ -176,7 +186,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(healthySummary), "control plane and selected terminal actor both responded") {
+	if !strings.Contains(string(healthySummary), "control plane and selected cached terminal read both responded") {
 		t.Fatalf("healthy summary did not classify the client-side boundary:\n%s", healthySummary)
 	}
 }

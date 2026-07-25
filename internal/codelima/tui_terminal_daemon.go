@@ -366,6 +366,18 @@ func (t *daemonTUITerminal) markSnapshotDirty() {
 	t.mu.Unlock()
 }
 
+func (t *daemonTUITerminal) installSnapshot(snapshot daemon.Snapshot) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return
+	}
+	t.snapshot = snapshot
+	t.generation = snapshot.Generation
+	t.text = daemonSnapshotText(snapshot)
+	t.snapshotReadVersion = t.snapshotVersion
+}
+
 func (t *daemonTUITerminal) requestSnapshot() {
 	t.mu.RLock()
 	dirty := !t.closed && t.snapshotVersion != t.snapshotReadVersion

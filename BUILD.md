@@ -30,7 +30,7 @@ What each target does:
 - `make test-race`
   - runs every Go package with the race detector serially by default
 - `make test-integration`
-  - builds the real CLI and exercises daemon lifecycle, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
+  - builds the real CLI and exercises daemon lifecycle, isolated renderer spawning, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
   - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path
 - `make diagnose-terminal-freeze`
   - runs the repository `diagnose-codelima-terminal-freezes` skill's read-only capture script without rebuilding or restarting CodeLima
@@ -42,6 +42,15 @@ Override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` only after qualifying
 the host.
 
 The Ghostty terminal integration requires cgo. Make enables cgo for every recipe, uses a host `cc` when present, and otherwise uses the managed Zig compiler. Zig is installed before Go-based development tools so `make init` also succeeds in minimal sandboxes without a system C compiler.
+
+`make build` produces both `codelima` and the private
+`codelima-renderer-worker` helper beside it. Release archives package both
+executables. The helper is not a user-facing command: a daemon-owned terminal
+starts it only through an inherited Unix socket descriptor, generation-fences
+the link, and kills that process when a native operation exceeds its deadline.
+Keeping the worker as a separate executable makes the native-code boundary
+visible in the package graph and prevents the daemon from entering Ghostty
+through a hidden mode of its own executable.
 
 Useful supporting targets:
 

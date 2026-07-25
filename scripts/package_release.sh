@@ -7,6 +7,7 @@ TOOLS_DIR="${3:?tools dir is required}"
 DIST_DIR="${4:?dist dir is required}"
 BUILD_BIN="${5:-}"
 PLATFORM_TAG="${6:-}"
+RENDERER_BIN="${7:-}"
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -26,6 +27,9 @@ if [ -z "$PLATFORM_TAG" ]; then
 fi
 if [ -z "$BUILD_BIN" ]; then
   BUILD_BIN="$ROOT_DIR/bin/$PLATFORM_TAG/codelima"
+fi
+if [ -z "$RENDERER_BIN" ]; then
+  RENDERER_BIN="$ROOT_DIR/bin/$PLATFORM_TAG/codelima-renderer-worker"
 fi
 COMPAT_BIN="$ROOT_DIR/bin/codelima"
 COMPAT_TARGET="$BUILD_BIN"
@@ -57,11 +61,13 @@ mkdir -p "$(dirname "$BUILD_BIN")" "$ROOT_DIR/bin" "$DIST_DIR"
 
 cd "$ROOT_DIR"
 "$GO_BIN" build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=$VERSION" -o "$BUILD_BIN" ./cmd/codelima
+"$GO_BIN" build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=$VERSION" -o "$RENDERER_BIN" ./cmd/codelima-renderer-worker
 ln -sfn "$COMPAT_TARGET" "$COMPAT_BIN"
 "$GO_BIN" run ./cmd/codelima-release archive \
   --version "$VERSION" \
   --goos "$GOOS" \
   --goarch "$GOARCH" \
   --binary "$BUILD_BIN" \
+  --renderer-binary "$RENDERER_BIN" \
   --ghostty-lib "$GHOSTTY_LIB" \
   --output-dir "$DIST_DIR"

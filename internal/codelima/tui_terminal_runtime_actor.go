@@ -34,6 +34,18 @@ type runtimeCommand interface{}
 // instead, because they need mode-aware encoding against the live emulator.
 type cmdInput struct{ Data []byte }
 
+// cmdRendererOutput applies one journaled PTY-output event in an isolated
+// renderer. EventID fences renderer-generated terminal responses across replay.
+type cmdRendererOutput struct {
+	EventID uint64
+	Data    []byte
+}
+
+// cmdRendererHealth crosses the same actor queue as native rendering work. A
+// worker-level socket ping would not prove that the Ghostty-owning actor can
+// make progress.
+type cmdRendererHealth struct{}
+
 // cmdResize changes the emulator + PTY window size.
 type cmdResize struct{ Cols, Rows int }
 
@@ -75,7 +87,11 @@ type handoffTerminalState struct {
 	Cols     int
 	Rows     int
 	Replay   []byte
-	Err      error
+	// ReplayPartial reports that bounded journal eviction prevents exact
+	// renderer recreation. The shell remains live, but the reconstructed
+	// screen is explicitly degraded rather than silently presented as exact.
+	ReplayPartial bool
+	Err           error
 }
 
 // cmdUpdate is the internal TUI-facing input command: a vaxis event that the
@@ -83,6 +99,11 @@ type handoffTerminalState struct {
 // keys, modifyOtherKeys, ...) before writing. It is deliberately not part of the
 // daemon command set.
 type cmdUpdate struct{ Event vaxis.Event }
+
+type cmdRendererUpdate struct {
+	EventID uint64
+	Event   vaxis.Event
+}
 
 // actorEnvelope wraps a command with an optional ack channel. When ack is
 // non-nil the actor closes it after the command is fully applied, which is how
@@ -167,6 +188,7 @@ type TerminalSnapshot struct {
 	CursorVisible bool
 	Generation    uint64
 	CapturesMouse bool
+	Stale         bool
 }
 
 // SnapshotResult is the reply to cmdSnapshot.
@@ -213,6 +235,17 @@ func (t *ghosttyTUITerminal) dispatch(env actorEnvelope) (exit bool) {
 	switch c := env.cmd.(type) {
 	case cmdUpdate:
 		t.applyUpdate(c.Event)
+	case cmdRendererUpdate:
+		t.mu.Lock()
+		t.responseEventID = c.EventID
+		t.responseOrdinal = 0
+		t.mu.Unlock()
+		t.applyUpdate(c.Event)
+	case cmdRendererOutput:
+		t.ingestPTYEvent(c.Data, c.EventID)
+	case cmdRendererHealth:
+		// Reaching this case and closing the envelope acknowledgement is the
+		// health result.
 	case cmdInput:
 		t.applyInput(c.Data)
 	case cmdResize:
@@ -273,6 +306,21 @@ func (t *ghosttyTUITerminal) sendSync(cmd runtimeCommand) {
 	select {
 	case <-ack:
 	case <-t.actorDone:
+	}
+}
+
+func (t *ghosttyTUITerminal) rendererHealth() bool {
+	ack := make(chan struct{})
+	select {
+	case t.commands <- actorEnvelope{cmd: cmdRendererHealth{}, ack: ack}:
+	case <-t.actorDone:
+		return false
+	}
+	select {
+	case <-ack:
+		return true
+	case <-t.actorDone:
+		return false
 	}
 }
 

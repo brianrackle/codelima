@@ -646,6 +646,12 @@ func withDaemonClient(ctx context.Context, service *Service, wantInput bool, fn 
 		return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
 	}
 	defer func() { _ = client.Close() }()
+	if wantInput && !client.HelloSnapshot().InputOwner {
+		if err := client.Call(ctx, "input.takeover", nil, nil); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		client.SetInputOwner(true)
+	}
 	return fn(client)
 }
 

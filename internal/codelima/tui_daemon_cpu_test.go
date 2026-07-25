@@ -125,34 +125,20 @@ func TestDaemonDirtyEventRequestsSnapshotOnTheUIEventLoop(t *testing.T) {
 	}
 }
 
-func TestDaemonLifecycleEventsMarkTheTUIConnectionDisconnected(t *testing.T) {
+func TestDaemonLifecycleEventsDeferReconnectStatusToConnectionSupervisor(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name      string
-		event     string
-		wantError string
-	}{
-		{name: "shutdown", event: "daemon.shutdown", wantError: "codelima daemon stopped"},
-		{name: "update", event: "daemon.update_committed", wantError: "codelima daemon updated; quit and reopen CodeLima to reconnect"},
-	}
+	tests := []string{"daemon.shutdown", "daemon.update_committed"}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(test, func(t *testing.T) {
 			events := make(chan vaxis.Event, 1)
 			store := &tuiSessionStore{postEvent: func(event vaxis.Event) { events <- event }}
-			store.handleDaemonEvent(daemon.Event{Event: test.event})
+			store.handleDaemonEvent(daemon.Event{Event: test})
 
 			select {
 			case event := <-events:
-				disconnected, ok := event.(tuiDaemonDisconnectedEvent)
-				if !ok {
-					t.Fatalf("posted event = %T, want tuiDaemonDisconnectedEvent", event)
-				}
-				if disconnected.Err == nil || disconnected.Err.Error() != test.wantError {
-					t.Fatalf("disconnect error = %v, want %q", disconnected.Err, test.wantError)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("daemon disconnect event was not posted")
+				t.Fatalf("handleDaemonEvent(%q) posted %T; supervisor owns reconnect status", test, event)
+			default:
 			}
 		})
 	}

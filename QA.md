@@ -186,7 +186,41 @@ NODE_ID="$(./bin/codelima --json node show qa-v3-root | sed -n 's/.*"id": *"\([^
 cat "$QA_ROOT/daemon-update.json"
 ```
 
-Verify daemon startup succeeds, `session.json` is version 2 with no terminals, exactly one version-1 quarantine file exists, and the recovery warning names that file. Then verify both terminals target the same `node:<id>` and have different kinds. The no-argument update must replace the daemon PID, report `live_handoff: true`, and preserve both terminal IDs. On macOS it must not report `protocol not supported`, `legacy daemon did not stop`, or `daemon exited before becoming ready`; temporary endpoint files are not shutdown readiness signals. Send `pwd` to the host terminal and verify it resolves to the node's host directory. Send `pwd` to the guest terminal and verify it resolves to the node workspace. Close both terminal IDs before continuing.
+Verify daemon startup succeeds, `session.json` is version 2 with no terminals, exactly one version-1 quarantine file exists, and the recovery warning names that file. Then verify both terminals target the same `node:<id>` and have different kinds. The no-argument update must replace the daemon PID, report `live_handoff: true`, and preserve both terminal IDs. On macOS it must not report `protocol not supported`, `legacy daemon did not stop`, or `daemon exited before becoming ready`; temporary endpoint files are not shutdown readiness signals. Send `pwd` to the host terminal and verify it resolves to the node's host directory. Send `pwd` to the guest terminal and verify it resolves to the node workspace.
+
+Before closing the host terminal, verify renderer containment. Extract its
+shell PID, renderer PID, and renderer generation from a daemon snapshot, stop
+only the renderer, then generate shell output:
+
+```sh
+HOST_TERMINAL_ID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); print $j->{data}{terminal_id}' "$QA_ROOT/host-terminal.json")"
+export HOST_TERMINAL_ID
+./bin/codelima --json daemon snapshot > "$QA_ROOT/renderer-before.json"
+QA_SHELL_PID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{shell_pid}' "$QA_ROOT/renderer-before.json")"
+QA_RENDERER_PID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_pid}' "$QA_ROOT/renderer-before.json")"
+QA_RENDERER_GENERATION="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_generation}' "$QA_ROOT/renderer-before.json")"
+kill -STOP "$QA_RENDERER_PID"
+./bin/codelima terminal send "$HOST_TERMINAL_ID" --text $'printf renderer-recovered\\n\r'
+attempt=0
+while :; do
+  ./bin/codelima --json daemon snapshot > "$QA_ROOT/renderer-after.json"
+  generation="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_generation}' "$QA_ROOT/renderer-after.json")"
+  [ "$generation" -gt "$QA_RENDERER_GENERATION" ] && break
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 20 ] || exit 1
+  sleep 0.25
+done
+test "$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{shell_pid}' "$QA_ROOT/renderer-after.json")" = "$QA_SHELL_PID"
+./bin/codelima terminal read "$HOST_TERMINAL_ID" --source recent
+./bin/codelima daemon status
+```
+
+Verify `renderer-recovered` appears, the renderer generation and PID changed,
+the shell PID did not change, daemon status stayed responsive, and the other
+terminal remained usable. The stopped renderer must be killed and reaped by
+the terminal-local supervisor without manual cleanup.
+
+Close both terminal IDs before continuing.
 
 ## Flow 6: dynamic generic and `{node}.localhost` forwarding
 
@@ -206,9 +240,17 @@ curl --retry 10 --retry-delay 1 --retry-connrefused \
   "http://localhost:18080/"
 curl --retry 10 --retry-delay 1 --retry-connrefused \
   "http://127.0.0.1:18080/"
+curl --resolve "localhost:18080:[::1]" \
+  "http://localhost:18080/"
+curl --resolve "qa-v3-root.localhost:18080:[::1]" \
+  "http://qa-v3-root.localhost:18080/"
 ```
 
-Verify all three responses contain `root`, proving the first listener claims both generic host forms. Start a second VM on the same guest port with a distinct response:
+Verify all five responses contain `root`, proving the first listener claims
+both generic host forms and both hostname routes work when forced through host
+IPv6 loopback. In `./bin/codelima --json daemon snapshot`, verify this port's
+forwarding `addresses` include both `127.0.0.1:18080` and `[::1]:18080`. Start
+a second VM on the same guest port with a distinct response:
 
 ```sh
 ./bin/codelima node start qa-v3-root-two
@@ -295,11 +337,47 @@ inspect `$CODELIMA_HOME/_logs/codelima.log`; any Lima diagnostic emitted during
 initial load or refresh must appear there with `source=limactl` instead of on
 the TUI screen.
 
-While one TUI remains open, run `./bin/codelima --json daemon update` from the second real terminal. Confirm the open TUI reports that CodeLima was updated and must be reopened. Return host focus to that window twice and confirm the reopen instruction remains visible without `reclaim terminal input ownership`, `broken pipe`, or `EOF` replacing it. Leave it at that message for at least 30 seconds and verify its `codelima` process remains idle instead of pinning a core on the closed event stream; then quit and reopen it before continuing.
+While one TUI remains open, run `./bin/codelima --json daemon update` from the
+second real terminal. Confirm the open TUI briefly reports reconnecting, then
+returns to ready without being reopened. Return host focus to that window
+twice, type a fresh command, and verify it runs exactly once in the original
+terminal ID. No `broken pipe`, `EOF`, ownership warning, or reopen instruction
+may remain. Leave it attached for at least 30 seconds and verify heartbeats do
+not pin a CPU core.
 
 For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. Move the active third tab left with `Option+Shift+Left`, verify it stays active in the second position, then move it right with `Option+Shift+Right`. Move it left once more so the final order differs from creation order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the reordered left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same reordered tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
 
-For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open through at least one two-second refresh, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
+For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open through at least one one-second refresh, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
+
+From a second real terminal, create a bounded CPU load inside the selected
+running node:
+
+```sh
+./bin/codelima shell qa-v3-root -- sh -lc \
+  'sh -c "while :; do :; done" & load_pid=$!; sleep 5; kill "$load_pid"; wait "$load_pid" || true'
+```
+
+Verify the node's `CPU` property changes on successive one-second samples,
+rises while the loop runs, and falls after it exits. A running node may show
+`CPU: --` only until two valid samples have been collected. Stopped nodes must
+show `CPU: --`.
+
+From the second real terminal, create bounded memory and root-disk loads:
+
+```sh
+./bin/codelima shell qa-v3-root -- perl -e \
+  '$buffer = "x" x (256 * 1024 * 1024); sleep 5'
+
+./bin/codelima shell qa-v3-root -- sh -lc \
+  'usage_file=$(mktemp /var/tmp/codelima-usage.XXXXXX); trap '\''rm -f "$usage_file"'\'' EXIT; dd if=/dev/zero of="$usage_file" bs=1M count=256 status=none; sleep 5'
+```
+
+Verify `Memory` rises while the allocation is resident and falls after the
+process exits. Verify `Disk` rises while the temporary file exists and falls
+after the trap removes it. Both lines must refresh on successive one-second
+samples and show used/total binary units. The disk total must describe the
+guest root filesystem, not the mounted host workspace. Confirm no
+`/var/tmp/codelima-usage.*` verification file remains in the guest.
 
 Verify:
 
@@ -310,10 +388,14 @@ Verify:
 - after stopping the selected node and reopening the TUI, its default right-pane mode is info and no replacement guest shell is created
 - node blocks include `qa-v3-root`, `qa-v3-root-two`, `qa-v3-root-clone`, and `qa-v3-child`
 - node blocks do not include `qa-v3-prefix`
-- every node name is followed by separately indented `Config`, `CWD`, and `Status` property lines
+- every node name is followed by separately indented `Config`, `CWD`, `Status`, `CPU`, `Memory`, and `Disk` property lines
 - root blocks show `CWD: .` and the child block shows `CWD: child`, not absolute paths
-- clicking any property line selects its owning node, and keyboard scrolling keeps complete four-line node blocks visible
-- `n` opens node creation with a blank directory field and muted current-directory placeholder
+- CPU percentages refresh once per second, rise under the bounded guest load, fall after it exits, and stay within `0.0%` to `100.0%`
+- memory and guest root-disk used/total values refresh once per second, respond to the bounded loads, and never exceed their displayed totals
+- clicking any property line selects its owning node, and keyboard scrolling keeps complete seven-line node blocks visible
+- `n` opens node creation with the slug-safe current-directory leaf as a muted
+  slug default and the current directory as a muted directory default; typing
+  in either field replaces its default instead of appending to it
 - `a` opens global configuration management and `g` opens global environment management titled `Environments`; its create, manage, and delete surfaces consistently call each reusable command bundle an environment
 - configuration selectors list only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order, select `small` by default, and render each row as `<name> (<vCPU> vCPU, <RAM> RAM, <disk> disk)` with the expected built-in resources
 - in the configuration update dialog, `Left` and `Right` move the cursor in every editable text and resource field; after moving left, moving right and typing inserts at the expected position, while `Right` still opens the Environments selector
@@ -328,7 +410,7 @@ Verify:
 - focus-driven terminal width growth neither prints `^L` nor clears earlier terminal history
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
-- an open TUI left at the post-update reconnect message remains idle rather than retrying the closed event stream, and repeated host focus preserves that message without another dead-socket ownership request
+- an open TUI automatically reconnects after daemon update, keeps the original terminal IDs, and accepts fresh input exactly once after authoritative synchronization
 - quitting and reopening the TUI preserves surviving per-node operator-defined tab order
 - quitting and reopening two disjoint path-scoped TUIs preserves both tabs in each process
 - reopening after daemon update preserves wrapped line spacing at the captured terminal width

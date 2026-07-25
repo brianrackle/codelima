@@ -193,6 +193,68 @@ if [ -n "$diag_terminal_id" ]; then
   run_probe "terminal-read" terminal read "$diag_terminal_id"
 fi
 
+renderer_pid=
+if [ -r "$diag_output/daemon-snapshot.json" ]; then
+  if command -v perl >/dev/null 2>&1 &&
+     perl -MJSON::PP -e 'exit 0' >/dev/null 2>&1; then
+    perl -MJSON::PP -0777 -ne '
+      $j = decode_json($_);
+      for $runtime (values %{$j->{data}{terminal_runtimes} || {}}) {
+        print "$runtime->{renderer_pid}\n" if $runtime->{renderer_pid};
+      }
+    ' "$diag_output/daemon-snapshot.json" 2>/dev/null |
+      sort -n -u >"$diag_output/renderer-pids.txt"
+  else
+    sed -n 's/.*"renderer_pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+      "$diag_output/daemon-snapshot.json" |
+      sort -n -u >"$diag_output/renderer-pids.txt"
+  fi
+  : >"$diag_output/renderers-ps.txt"
+  while IFS= read -r candidate_pid; do
+    case "$candidate_pid" in
+      ''|0|*[!0-9]*) continue ;;
+    esac
+    ps -p "$candidate_pid" -o pid,ppid,lstart,state,%cpu,%mem,command \
+      >>"$diag_output/renderers-ps.txt" 2>&1 || true
+  done <"$diag_output/renderer-pids.txt"
+
+  if [ -n "$diag_terminal_id" ] &&
+     command -v perl >/dev/null 2>&1 &&
+     perl -MJSON::PP -e 'exit 0' >/dev/null 2>&1; then
+    renderer_pid=$(
+      DIAG_TERMINAL_ID="$diag_terminal_id" perl -MJSON::PP -0777 -ne '
+        $j = decode_json($_);
+        $id = $ENV{DIAG_TERMINAL_ID};
+        $runtime = $j->{data}{terminal_runtimes}{$id};
+        print $runtime->{renderer_pid} if $runtime;
+      ' "$diag_output/daemon-snapshot.json" 2>/dev/null
+    )
+  fi
+fi
+
+case "$renderer_pid" in
+  ''|0|*[!0-9]*) renderer_pid= ;;
+  *)
+    printf '%s\n' "$renderer_pid" >"$diag_output/probed-renderer-pid.txt"
+    if command -v lsof >/dev/null 2>&1; then
+      lsof -p "$renderer_pid" >"$diag_output/renderer-lsof.txt" 2>&1 || true
+    fi
+    if [ -d "/proc/$renderer_pid" ]; then
+      copy_if_readable "/proc/$renderer_pid/status" "renderer-proc-status.txt"
+      copy_if_readable "/proc/$renderer_pid/limits" "renderer-proc-limits.txt"
+      copy_if_readable "/proc/$renderer_pid/stack" "renderer-proc-stack.txt"
+    fi
+    if [ "$host_os" = "Darwin" ] &&
+       [ "$diag_sample_seconds" -gt 0 ] &&
+       command -v sample >/dev/null 2>&1; then
+      sample "$renderer_pid" "$diag_sample_seconds" 1 \
+        -file "$diag_output/renderer-sample.txt" \
+        >"$diag_output/renderer-sample.stdout" \
+        2>"$diag_output/renderer-sample.err" || true
+    fi
+    ;;
+esac
+
 status_exit=$(cat "$diag_output/daemon-status.exit")
 list_exit=$(cat "$diag_output/terminal-list.exit")
 read_exit=not-run
@@ -204,6 +266,7 @@ fi
   printf '# CodeLima terminal-freeze capture\n\n'
   printf -- '- Capture directory: `%s`\n' "$diag_output"
   printf -- '- Daemon PID: `%s`\n' "${daemon_pid:-unavailable}"
+  printf -- '- Selected renderer PID: `%s`\n' "${renderer_pid:-unavailable}"
   printf -- '- Daemon status exit: `%s`\n' "$status_exit"
   printf -- '- Terminal list exit: `%s`\n' "$list_exit"
   printf -- '- Terminal read exit: `%s`\n\n' "$read_exit"
@@ -212,16 +275,16 @@ fi
     if [ "$read_exit" = "not-run" ]; then
       printf 'The daemon control plane responded; no terminal actor was available to probe.\n'
     elif [ "$read_exit" = "0" ]; then
-      printf 'The daemon control plane and selected terminal actor both responded; investigate event delivery and client snapshot/redraw handling.\n'
+      printf 'The daemon control plane and selected cached terminal read both responded; inspect renderer state/generation and then investigate event delivery or client snapshot/redraw handling.\n'
     else
-      printf 'The daemon control plane responded but the terminal actor probe failed; investigate the selected actor and process-wide Ghostty bridge serialization.\n'
+      printf 'The daemon control plane responded but the selected cached terminal read failed; inspect that terminal session, cache publisher, and renderer worker.\n'
     fi
   else
     printf 'The daemon control-plane probes failed; investigate the daemon server, socket state, or process-wide runtime blockage.\n'
   fi
-  if [ -r "$diag_output/daemon-sample.txt" ] &&
-     grep -q 'withGhosttyStderrSuppressed' "$diag_output/daemon-sample.txt"; then
-    printf '\nThe native sample contains `withGhosttyStderrSuppressed`; inspect the owning Ghostty bridge call and mutex waiters.\n'
+  if [ -r "$diag_output/renderer-sample.txt" ] &&
+     grep -q 'ghostty_bridge_' "$diag_output/renderer-sample.txt"; then
+    printf '\nThe selected renderer sample contains a Ghostty bridge call; correlate it with `renderer_current_operation`, pending age, generation, and restart count in the daemon snapshot.\n'
   fi
   printf '\n## Handling\n\n'
   printf 'Keep this bundle local. Review logs, argv, paths, and terminal metadata for sensitive information before sharing. No recovery action was performed.\n'

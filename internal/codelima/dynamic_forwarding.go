@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -20,8 +22,36 @@ import (
 
 const forwardingPollInterval = time.Second
 
+type guestCPUCounters struct {
+	Total uint64
+	Idle  uint64
+}
+
+type guestResourceUsage struct {
+	UsedBytes  uint64
+	TotalBytes uint64
+}
+
+type forwardingGuestObservation struct {
+	Ports  []int
+	CPU    guestCPUCounters
+	Memory guestResourceUsage
+	Disk   guestResourceUsage
+}
+
+type nodeCPUUsageSample struct {
+	Percent   float64
+	SampledAt time.Time
+}
+
+type nodeResourceUsageSample struct {
+	Memory    guestResourceUsage
+	Disk      guestResourceUsage
+	SampledAt time.Time
+}
+
 type forwardingPeer interface {
-	Discover(context.Context) ([]int, error)
+	Observe(context.Context) (forwardingGuestObservation, error)
 	DialContext(context.Context, string, string) (net.Conn, error)
 	Close() error
 }
@@ -33,10 +63,10 @@ type forwardingPeerFactory interface {
 
 type sshForwardingPeer struct{ client *ssh.Client }
 
-func (p *sshForwardingPeer) Discover(ctx context.Context) ([]int, error) {
+func (p *sshForwardingPeer) Observe(ctx context.Context) (forwardingGuestObservation, error) {
 	session, err := p.client.NewSession()
 	if err != nil {
-		return nil, err
+		return forwardingGuestObservation{}, err
 	}
 	defer func() { _ = session.Close() }()
 	type commandResult struct {
@@ -45,18 +75,21 @@ func (p *sshForwardingPeer) Discover(ctx context.Context) ([]int, error) {
 	}
 	result := make(chan commandResult, 1)
 	go func() {
-		output, runErr := session.CombinedOutput("cat /proc/net/tcp /proc/net/tcp6")
+		output, runErr := session.CombinedOutput(`head -n 1 /proc/stat
+awk '/^MemTotal:/ { total=$2 } /^MemAvailable:/ { available=$2 } END { if (total != "" && available != "") printf "codelima-memory %s %s\n", total, available }' /proc/meminfo
+df -Pk / | awk 'NR == 2 { printf "codelima-disk %s %s\n", $2, $3 }'
+cat /proc/net/tcp /proc/net/tcp6`)
 		result <- commandResult{output: output, err: runErr}
 	}()
 	select {
 	case <-ctx.Done():
 		_ = session.Close()
-		return nil, ctx.Err()
+		return forwardingGuestObservation{}, ctx.Err()
 	case outcome := <-result:
 		if outcome.err != nil {
-			return nil, outcome.err
+			return forwardingGuestObservation{}, outcome.err
 		}
-		return parseProcNetTCP(outcome.output), nil
+		return parseForwardingGuestObservation(outcome.output), nil
 	}
 }
 
@@ -85,6 +118,96 @@ func (p *sshForwardingPeer) DialContext(ctx context.Context, network, address st
 }
 
 func (p *sshForwardingPeer) Close() error { return p.client.Close() }
+
+func parseForwardingGuestObservation(data []byte) forwardingGuestObservation {
+	observation := forwardingGuestObservation{Ports: parseProcNetTCP(data)}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "cpu":
+			if counters, ok := parseGuestCPUCounters(fields); ok {
+				observation.CPU = counters
+			}
+		case "codelima-memory":
+			if usage, ok := parseGuestResourceUsage(fields, true); ok {
+				observation.Memory = usage
+			}
+		case "codelima-disk":
+			if usage, ok := parseGuestResourceUsage(fields, false); ok {
+				observation.Disk = usage
+			}
+		}
+	}
+	return observation
+}
+
+func parseGuestCPUCounters(fields []string) (guestCPUCounters, bool) {
+	if len(fields) < 6 {
+		return guestCPUCounters{}, false
+	}
+
+	// /proc/stat includes guest and guest_nice after steal, but those
+	// counters are already included in user and nice. Sum through steal
+	// only so guest CPU time is not counted twice.
+	count := min(len(fields)-1, 8)
+	values := make([]uint64, count)
+	for index := range count {
+		value, err := strconv.ParseUint(fields[index+1], 10, 64)
+		if err != nil {
+			return guestCPUCounters{}, false
+		}
+		values[index] = value
+	}
+
+	var total uint64
+	for _, value := range values {
+		if math.MaxUint64-total < value {
+			return guestCPUCounters{}, false
+		}
+		total += value
+	}
+	if math.MaxUint64-values[3] < values[4] {
+		return guestCPUCounters{}, false
+	}
+	return guestCPUCounters{Total: total, Idle: values[3] + values[4]}, true
+}
+
+func parseGuestResourceUsage(fields []string, secondValueIsAvailable bool) (guestResourceUsage, bool) {
+	if len(fields) != 3 {
+		return guestResourceUsage{}, false
+	}
+	totalKiB, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil || totalKiB == 0 || totalKiB > math.MaxUint64/1024 {
+		return guestResourceUsage{}, false
+	}
+	secondKiB, err := strconv.ParseUint(fields[2], 10, 64)
+	if err != nil || secondKiB > totalKiB {
+		return guestResourceUsage{}, false
+	}
+	usedKiB := secondKiB
+	if secondValueIsAvailable {
+		usedKiB = totalKiB - secondKiB
+	}
+	return guestResourceUsage{
+		UsedBytes:  usedKiB * 1024,
+		TotalBytes: totalKiB * 1024,
+	}, true
+}
+
+func guestCPUUsagePercent(previous, current guestCPUCounters) (float64, bool) {
+	if previous.Total == 0 || current.Total <= previous.Total || current.Idle < previous.Idle {
+		return 0, false
+	}
+	totalDelta := current.Total - previous.Total
+	idleDelta := current.Idle - previous.Idle
+	if idleDelta > totalDelta {
+		return 0, false
+	}
+	return float64(totalDelta-idleDelta) * 100 / float64(totalDelta), true
+}
 
 func parseProcNetTCP(data []byte) []int {
 	ports := map[int]struct{}{}
@@ -195,7 +318,7 @@ func (r *dynamicForwardingRoute) close() { r.transport.CloseIdleConnections() }
 
 type dynamicPortServer struct {
 	port        int
-	listener    net.Listener
+	listeners   []net.Listener
 	server      *http.Server
 	defaultNode string
 	status      string
@@ -209,17 +332,20 @@ type dynamicForwarder struct {
 	listen   func(string, string) (net.Listener, error)
 	logger   *slog.Logger
 
-	mu       sync.RWMutex
-	wg       sync.WaitGroup
-	cancel   context.CancelFunc
-	prepared bool
-	peers    map[string]forwardingPeer
-	failures map[string]int
-	routes   map[dynamicRouteKey]*dynamicForwardingRoute
-	known    map[string]bool
-	servers  map[int]*dynamicPortServer
-	lastErr  string
-	lastPoll time.Time
+	mu        sync.RWMutex
+	wg        sync.WaitGroup
+	cancel    context.CancelFunc
+	prepared  bool
+	peers     map[string]forwardingPeer
+	failures  map[string]int
+	routes    map[dynamicRouteKey]*dynamicForwardingRoute
+	known     map[string]bool
+	servers   map[int]*dynamicPortServer
+	cpu       map[string]nodeCPUUsageSample
+	resources map[string]nodeResourceUsageSample
+	counters  map[string]guestCPUCounters
+	lastErr   string
+	lastPoll  time.Time
 }
 
 func newDynamicForwarder(service *Service, runtime LimaSSHRuntime) *dynamicForwarder {
@@ -229,6 +355,8 @@ func newDynamicForwarder(service *Service, runtime LimaSSHRuntime) *dynamicForwa
 		service: service, factory: limaSSHForwardingPeerFactory{runtime: runtime}, interval: forwardingPollInterval,
 		listen: net.Listen, peers: map[string]forwardingPeer{}, failures: map[string]int{},
 		routes: map[dynamicRouteKey]*dynamicForwardingRoute{}, known: map[string]bool{}, servers: map[int]*dynamicPortServer{},
+		cpu: map[string]nodeCPUUsageSample{}, resources: map[string]nodeResourceUsageSample{},
+		counters: map[string]guestCPUCounters{},
 	}
 }
 
@@ -297,6 +425,9 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 		closing = append(closing, peer)
 		delete(f.peers, nodeID)
 		delete(f.failures, nodeID)
+		delete(f.cpu, nodeID)
+		delete(f.resources, nodeID)
+		delete(f.counters, nodeID)
 		f.removeNodeRoutesLocked(nodeID)
 	}
 	f.known = map[string]bool{}
@@ -325,13 +456,14 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 			f.log().Info("dynamic forwarding peer connected", "node", node.SandboxName)
 		}
 		discoveryCtx, cancelDiscovery := context.WithTimeout(ctx, 10*time.Second)
-		ports, discoverErr := peer.Discover(discoveryCtx)
+		observation, discoverErr := peer.Observe(discoveryCtx)
 		cancelDiscovery()
 		if discoverErr != nil {
 			f.handleDiscoveryFailure(node, peer, discoverErr)
 			continue
 		}
-		f.replaceNodeRoutes(node, peer, ports)
+		f.recordNodeUsage(node.ID, observation, time.Now().UTC())
+		f.replaceNodeRoutes(node, peer, observation.Ports)
 	}
 	f.reconcileServers()
 	f.mu.Lock()
@@ -343,17 +475,100 @@ func (f *dynamicForwarder) handleDiscoveryFailure(node Node, peer forwardingPeer
 	f.mu.Lock()
 	f.failures[node.ID]++
 	f.lastErr = err.Error()
+	delete(f.cpu, node.ID)
+	delete(f.resources, node.ID)
 	if f.failures[node.ID] < 2 {
 		f.mu.Unlock()
 		return
 	}
 	delete(f.peers, node.ID)
 	delete(f.failures, node.ID)
+	delete(f.counters, node.ID)
 	f.removeNodeRoutesLocked(node.ID)
 	f.mu.Unlock()
 	// Close outside the lock: ServeHTTP read-locks it and SSH teardown can be
 	// slow.
 	_ = peer.Close()
+}
+
+func (f *dynamicForwarder) recordNodeUsage(nodeID string, observation forwardingGuestObservation, sampledAt time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cpu == nil {
+		f.cpu = map[string]nodeCPUUsageSample{}
+	}
+	if f.resources == nil {
+		f.resources = map[string]nodeResourceUsageSample{}
+	}
+	if f.counters == nil {
+		f.counters = map[string]guestCPUCounters{}
+	}
+	if observation.CPU.Total == 0 {
+		delete(f.cpu, nodeID)
+		delete(f.counters, nodeID)
+	} else {
+		previous, hadPrevious := f.counters[nodeID]
+		f.counters[nodeID] = observation.CPU
+		percent, valid := guestCPUUsagePercent(previous, observation.CPU)
+		if !hadPrevious || !valid {
+			delete(f.cpu, nodeID)
+		} else {
+			f.cpu[nodeID] = nodeCPUUsageSample{Percent: percent, SampledAt: sampledAt}
+		}
+	}
+
+	sample := nodeResourceUsageSample{SampledAt: sampledAt}
+	if validGuestResourceUsage(observation.Memory) {
+		sample.Memory = observation.Memory
+	}
+	if validGuestResourceUsage(observation.Disk) {
+		sample.Disk = observation.Disk
+	}
+	if sample.Memory.TotalBytes == 0 && sample.Disk.TotalBytes == 0 {
+		delete(f.resources, nodeID)
+	} else {
+		f.resources[nodeID] = sample
+	}
+}
+
+func validGuestResourceUsage(usage guestResourceUsage) bool {
+	return usage.TotalBytes > 0 && usage.UsedBytes <= usage.TotalBytes
+}
+
+// addNodeUsage merges daemon-owned live telemetry into a node-list response.
+// The store never sees these fields, keeping ordinary reads free of metadata
+// writes and preventing a one-second metric from churning node.yaml.
+func (f *dynamicForwarder) addNodeUsage(nodes []Node) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for index := range nodes {
+		observation := nodes[index].LastRuntimeObservation
+		if observation == nil || observation.Status != ObservationRunning {
+			continue
+		}
+		enriched := *observation
+		if sample, ok := f.cpu[nodes[index].ID]; ok {
+			percent := sample.Percent
+			sampledAt := sample.SampledAt
+			enriched.CPUUsagePercent = &percent
+			enriched.CPUUsageSampledAt = &sampledAt
+		}
+		if sample, ok := f.resources[nodes[index].ID]; ok {
+			if validGuestResourceUsage(sample.Memory) {
+				used, total := sample.Memory.UsedBytes, sample.Memory.TotalBytes
+				enriched.MemoryUsedBytes = &used
+				enriched.MemoryTotalBytes = &total
+			}
+			if validGuestResourceUsage(sample.Disk) {
+				used, total := sample.Disk.UsedBytes, sample.Disk.TotalBytes
+				enriched.DiskUsedBytes = &used
+				enriched.DiskTotalBytes = &total
+			}
+			sampledAt := sample.SampledAt
+			enriched.ResourceUsageSampledAt = &sampledAt
+		}
+		nodes[index].LastRuntimeObservation = &enriched
+	}
 }
 
 func (f *dynamicForwarder) replaceNodeRoutes(node Node, peer forwardingPeer, ports []int) {
@@ -416,7 +631,7 @@ func (f *dynamicForwarder) reconcileServers() {
 		if current := f.servers[port]; current != nil && current.status == "serving" {
 			continue
 		}
-		listener, err := f.listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		listeners, err := f.listenLoopbacks(port)
 		if err != nil {
 			f.servers[port] = &dynamicPortServer{port: port, status: "conflicted", lastErr: err.Error()}
 			f.lastErr = err.Error()
@@ -424,18 +639,46 @@ func (f *dynamicForwarder) reconcileServers() {
 		}
 		server := &http.Server{Handler: &dynamicForwardingHandler{forwarder: f, port: port}, ReadHeaderTimeout: 10 * time.Second}
 		defaultNode := f.firstClaimantLocked(port)
-		f.servers[port] = &dynamicPortServer{port: port, listener: listener, server: server, defaultNode: defaultNode, status: "serving"}
-		go func() {
-			if serveErr := server.Serve(listener); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				f.recordError(serveErr)
-			}
-		}()
-		f.log().Info("dynamic forwarding listener serving", "address", listener.Addr().String())
+		f.servers[port] = &dynamicPortServer{port: port, listeners: listeners, server: server, defaultNode: defaultNode, status: "serving"}
+		for _, listener := range listeners {
+			go f.serveListener(server, listener)
+			f.log().Info("dynamic forwarding listener serving", "address", listener.Addr().String())
+		}
 		f.log().Info("dynamic forwarding generic route claimed", "port", port, "node", defaultNode)
 	}
 	f.mu.Unlock()
 	for _, server := range closing {
 		_ = server.Close()
+	}
+}
+
+func (f *dynamicForwarder) listenLoopbacks(port int) ([]net.Listener, error) {
+	portText := strconv.Itoa(port)
+	ipv4, err := f.listen("tcp4", net.JoinHostPort("127.0.0.1", portText))
+	if err != nil {
+		return nil, fmt.Errorf("listen on IPv4 loopback: %w", err)
+	}
+	listeners := []net.Listener{ipv4}
+	ipv6, err := f.listen("tcp6", net.JoinHostPort("::1", portText))
+	if err == nil {
+		return append(listeners, ipv6), nil
+	}
+	if ipv6LoopbackUnavailable(err) {
+		return listeners, nil
+	}
+	closeErr := ipv4.Close()
+	return nil, errors.Join(fmt.Errorf("listen on IPv6 loopback: %w", err), closeErr)
+}
+
+func ipv6LoopbackUnavailable(err error) bool {
+	return errors.Is(err, syscall.EAFNOSUPPORT) ||
+		errors.Is(err, syscall.EPROTONOSUPPORT) ||
+		errors.Is(err, syscall.EADDRNOTAVAIL)
+}
+
+func (f *dynamicForwarder) serveListener(server *http.Server, listener net.Listener) {
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		f.recordError(err)
 	}
 }
 
@@ -547,11 +790,15 @@ func (f *dynamicForwarder) Snapshot() map[string]any {
 	sort.Slice(routes, func(i, j int) bool { return routes[i]["url"].(string) < routes[j]["url"].(string) })
 	ports := make([]map[string]any, 0, len(f.servers))
 	for port, server := range f.servers {
-		address := ""
-		if server.listener != nil {
-			address = server.listener.Addr().String()
+		addresses := make([]string, 0, len(server.listeners))
+		for _, listener := range server.listeners {
+			addresses = append(addresses, listener.Addr().String())
 		}
-		ports = append(ports, map[string]any{"port": port, "address": address, "default_node": server.defaultNode, "status": server.status, "error": server.lastErr})
+		address := ""
+		if len(addresses) > 0 {
+			address = addresses[0]
+		}
+		ports = append(ports, map[string]any{"port": port, "address": address, "addresses": addresses, "default_node": server.defaultNode, "status": server.status, "error": server.lastErr})
 	}
 	sort.Slice(ports, func(i, j int) bool { return ports[i]["port"].(int) < ports[j]["port"].(int) })
 	return map[string]any{"enabled": true, "authorized": f.prepared, "routes": routes, "ports": ports, "peers": len(f.peers), "last_error": f.lastErr, "last_poll_at": f.lastPoll}
@@ -569,6 +816,9 @@ func (f *dynamicForwarder) Close() error {
 	peers := f.peers
 	f.servers = map[int]*dynamicPortServer{}
 	f.peers = map[string]forwardingPeer{}
+	f.cpu = map[string]nodeCPUUsageSample{}
+	f.resources = map[string]nodeResourceUsageSample{}
+	f.counters = map[string]guestCPUCounters{}
 	for _, route := range f.routes {
 		route.close()
 	}

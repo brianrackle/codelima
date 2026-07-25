@@ -87,7 +87,7 @@ func ValidateTarget(goos, goarch string) error {
 	}
 }
 
-func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath string) (Manifest, error) {
+func BuildArchive(version, goos, goarch, binaryPath, rendererPath, libraryPath, outputPath string) (Manifest, error) {
 	if err := ValidateTarget(goos, goarch); err != nil {
 		return Manifest{}, err
 	}
@@ -106,6 +106,9 @@ func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath str
 	if strings.TrimSpace(binaryPath) == "" {
 		return Manifest{}, fmt.Errorf("binary path is required")
 	}
+	if strings.TrimSpace(rendererPath) == "" {
+		return Manifest{}, fmt.Errorf("renderer binary path is required")
+	}
 	if strings.TrimSpace(libraryPath) == "" {
 		return Manifest{}, fmt.Errorf("ghostty library path is required")
 	}
@@ -116,6 +119,10 @@ func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath str
 	binaryData, _, err := readArchiveFile(binaryPath)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read binary: %w", err)
+	}
+	rendererData, _, err := readArchiveFile(rendererPath)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("read renderer binary: %w", err)
 	}
 	libraryData, libraryMode, err := readArchiveFile(libraryPath)
 	if err != nil {
@@ -142,6 +149,9 @@ func BuildArchive(version, goos, goarch, binaryPath, libraryPath, outputPath str
 		return Manifest{}, err
 	}
 	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima-real", binaryData, executableMode); err != nil {
+		return Manifest{}, err
+	}
+	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima-renderer-worker", rendererData, executableMode); err != nil {
 		return Manifest{}, err
 	}
 	if err := writeArchiveEntry(tarWriter, rootName+"/lib/"+libFilename, libraryData, libraryMode); err != nil {

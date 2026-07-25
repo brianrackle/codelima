@@ -112,6 +112,19 @@ type RuntimeObservation struct {
 	LimaHome      string            `json:"lima_home,omitempty" yaml:"lima_home,omitempty"`
 	LimaVersion   string            `json:"lima_version,omitempty" yaml:"lima_version,omitempty"`
 	VMType        string            `json:"vm_type,omitempty" yaml:"vm_type,omitempty"`
+	// CPUUsagePercent is the aggregate busy percentage across the node's
+	// vCPUs, normalized to 0..100 for the sampling interval. It is transient
+	// runtime telemetry and is never persisted in node.yaml.
+	CPUUsagePercent   *float64   `json:"cpu_usage_percent,omitempty" yaml:"cpu_usage_percent,omitempty"`
+	CPUUsageSampledAt *time.Time `json:"cpu_usage_sampled_at,omitempty" yaml:"cpu_usage_sampled_at,omitempty"`
+	// Memory and disk usage are transient guest observations. Memory uses
+	// MemTotal - MemAvailable; disk is the guest root filesystem reported by
+	// df, excluding the separately mounted host workspace.
+	MemoryUsedBytes        *uint64    `json:"memory_used_bytes,omitempty" yaml:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes       *uint64    `json:"memory_total_bytes,omitempty" yaml:"memory_total_bytes,omitempty"`
+	DiskUsedBytes          *uint64    `json:"disk_used_bytes,omitempty" yaml:"disk_used_bytes,omitempty"`
+	DiskTotalBytes         *uint64    `json:"disk_total_bytes,omitempty" yaml:"disk_total_bytes,omitempty"`
+	ResourceUsageSampledAt *time.Time `json:"resource_usage_sampled_at,omitempty" yaml:"resource_usage_sampled_at,omitempty"`
 }
 
 type Node struct {

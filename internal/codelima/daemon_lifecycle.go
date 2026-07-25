@@ -246,7 +246,7 @@ func dialDaemonUpdateClient(ctx context.Context, service *Service) (*daemonclien
 	if err != nil {
 		return nil, err
 	}
-	if !client.Hello.InputOwner {
+	if !client.HelloSnapshot().InputOwner {
 		if err := takeTUIDaemonInput(ctx, client); err != nil {
 			_ = client.Close()
 			return nil, err

@@ -106,7 +106,7 @@ const (
 	terminalTabMoveNextFooterHint = "Opt-Shift-Right"
 	terminalTabMovePrevFooterHint = "Opt-Shift-Left"
 	terminalTabCloseFooterHint    = "Opt-w"
-	tuiAutoRefreshInterval        = 2 * time.Second
+	tuiAutoRefreshInterval        = time.Second
 )
 
 func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoot string) error {
@@ -202,6 +202,13 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 }
 
 func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) ([]Node, error) {
+	if service != nil && service.daemonClient != nil {
+		var nodes []Node
+		if err := service.daemonClient.Call(ctx, "node.list", map[string]bool{"include_deleted": false}, &nodes); err != nil {
+			return nil, fromDaemonError(err)
+		}
+		return filterNodesByDirectoryRoot(nodes, workspaceRoot)
+	}
 	return service.NodeListByDirectoryRoot(ctx, workspaceRoot, false)
 }
 
@@ -254,6 +261,26 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.setStatus(slog.LevelError, event.Err.Error())
 		a.draw()
 		return false, nil
+	case tuiDaemonSynchronizedEvent:
+		var syncErr error
+		if a.sessions != nil {
+			syncErr = a.sessions.applyDaemonSynchronization(event.Snapshot)
+			if syncErr != nil {
+				event.complete(syncErr)
+				a.daemonDisconnected = true
+				a.setStatus(slog.LevelError, fmt.Sprintf("daemon synchronization failed; reconnecting: %v", syncErr))
+				a.draw()
+				return false, nil
+			}
+		}
+		event.complete(nil)
+		wasDisconnected := a.daemonDisconnected
+		a.daemonDisconnected = false
+		if wasDisconnected {
+			a.setStatus(slog.LevelInfo, "reconnected to daemon")
+		}
+		a.draw()
+		return false, nil
 	case tuiTerminalErrorEvent:
 		if a.daemonDisconnected {
 			if a.service != nil {
@@ -273,7 +300,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 			if err := takeTUIDaemonInput(a.ctx, a.service.daemonClient); err != nil {
 				a.service.log().Error("reclaim terminal input ownership failed", "error", err.Error())
 				a.daemonDisconnected = true
-				a.setStatus(slog.LevelError, "daemon connection lost; quit and reopen CodeLima to reconnect")
+				a.setStatus(slog.LevelError, "daemon connection lost; reconnecting")
 			}
 		}
 		a.draw()
@@ -463,7 +490,7 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		// the log seam (warn, not per-tick success) without disturbing the UI,
 		// and retain them in the message ring at their true level so a failed
 		// background refresh is visible in the messages view. A persistently
-		// failing 2s auto-refresh would flood the ring with identical entries,
+		// failing one-second auto-refresh would flood the ring with identical entries,
 		// so consecutive duplicates are collapsed.
 		a.service.log().Warn("tui refresh failed", "error", event.Err.Error())
 		message := "refresh failed: " + event.Err.Error()

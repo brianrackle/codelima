@@ -13,16 +13,30 @@ Problem:
 - ADRs 88, 89, and 104 add automated unit and daemon-integration coverage for reconnect tab order, operator reordering, and non-default-width handoff replay. The matching interactive Flow 7 check still requires a real terminal on native macOS.
 - ADR 91 adds an automated two-window regression proving a path-scoped refresh no longer closes tabs whose live nodes are outside that window's projection, while confirmed deletion still closes them. The matching disjoint-root, two-tabs-per-process restart flow still needs native interactive verification.
 - ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the full interactive flow.
-- ADR 102 latches permanent daemon disconnection before focus takeover, so automated coverage proves repeated focus and late terminal errors preserve the reopen instruction instead of showing `broken pipe`. The matching post-update host-focus check still requires the native interactive Flow 7 run.
+- ADR 107 replaces the permanent-disconnection latch with a reconnecting,
+  resynchronizing daemon session. Automated coverage proves that a forced
+  disconnect preserves terminal IDs, blocks mutations during synchronization,
+  and restores readiness from authoritative epoch/sequence state. Native
+  sleep/wake and live-update focus behavior still require the interactive Flow
+  7 run.
 - ADR 93 restores the pre-Microsandbox foreground-process-group invariant for interactive Lima shells. A real Linux/aarch64 Lima guest and controlling PTY verified Left, `Ctrl+a`, `Ctrl+e`, multiline bracketed paste, and guest `Ctrl+c`; `TestRunInteractiveCommandKeepsPTYInForeground` covers the underlying PTY ownership regression automatically. The same checks inside the complete native macOS Ghostty TUI flow remain part of this item.
 - ADR 94 redirects successful Lima-command diagnostics to the rotating TUI log, and ADR 95 replaces width-growth `Ctrl-L` injection with a supplemental process-group `SIGWINCH`. A focused Linux PTY run with a fake Lima boundary reproduced the exact unhealthy-instance warning, confirmed it appeared only as `source=limactl` in `_logs/codelima.log`, toggled Option+Backtick repeatedly without `^L`, and preserved earlier output across split/full-width changes. This development host now exposes `limactl` and `/dev/kvm`, but the Flow 4 `qa-large` QEMU guest cannot allocate its required 5120 MiB, so the full lifecycle flow still cannot substitute for the remaining native-host run.
-- The `diagnose-codelima-terminal-freezes` skill and its deterministic fake-daemon regression cover read-only status/list/snapshot collection, one failed actor probe, local evidence handling, and the prohibition on mutating RPCs. Flow 9 still needs a live macOS daemon run and, when the intermittent freeze recurs, a native sample that can confirm or reject process-wide Ghostty bridge serialization.
+- The `diagnose-codelima-terminal-freezes` skill and its deterministic
+  fake-daemon regression cover read-only status/list/snapshot collection,
+  renderer-process discovery, one failed actor probe, local evidence handling,
+  and the prohibition on mutating RPCs. Flow 9 still needs a live macOS daemon
+  run; a future incident bundle should distinguish reconnect/control-plane
+  faults from a terminal-local renderer restart.
 
 Suggested solution:
 
-- Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+Shift+Left`/`Option+Shift+Right`/`Option+w` movement and adjacent-close steps, with and without `macos-option-as-alt`.
+- Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+Shift+Left`/`Option+Shift+Right`/`Option+w` movement and adjacent-close steps, with and without `macos-option-as-alt`. In the Create Node form, confirm the muted slug default is the slug-safe current-directory leaf, both slug and directory defaults disappear on the first typed character, and submitting untouched defaults creates the expected node.
 - Launch the same path-scoped TUI from a second real terminal, repeatedly switch host focus in both directions, and verify each newly focused TUI can immediately open or control a guest/host tab without either window showing the ownership-revoked message. Also launch two TUIs at disjoint directory roots, open two tabs in each, wait through refresh, quit and reopen both, and verify all four tabs survive. Paste the multiline QA sample and confirm it appears promptly without executing, type the ordinary-input sample quickly and confirm it keeps pace without reordering, then leave the final owner idle for at least 35 seconds and verify its next terminal action also succeeds.
-- Open guest/host/guest tabs with wrapped output, verify all idle CodeLima processes settle instead of pinning cores, live-update while one TUI remains open and verify that disconnected client also stays idle, then quit and reopen at the captured width to verify tab order and line boundaries remain intact.
+- Open guest/host/guest tabs with wrapped output, verify all idle CodeLima
+  processes settle instead of pinning cores, live-update while one TUI remains
+  open and verify that it reconnects and resynchronizes without a CPU spike,
+  then quit and reopen at the captured width to verify tab order and line
+  boundaries remain intact.
 - On a real unhealthy Lima instance, leave the TUI open through several refreshes and confirm the structured warning stays out of the chrome while appearing in `_logs/codelima.log`; immediately after starting a node, repeat split/full-width focus changes and confirm no literal `^L` appears and earlier history remains visible.
 - Run Flow 9 against the same macOS daemon before recovery, verify `sample` is non-terminating and every tab survives unchanged, then retain one real frozen-state bundle long enough to classify the owning stack before removing the sensitive artifact.
 
@@ -727,6 +741,7 @@ Problem:
 - Native macOS arm64 VZ/VirtioFS, Linux amd64, and the complete interactive
   Ghostty/agent matrix have not all run. Host reboot, macOS sleep/wake,
   five-minute idle CPU, explicit-port conflicts, two-node same-port routing,
+  forced-IPv6 `localhost` and `{node}.localhost` routing,
   VirtioFS file-pressure behavior, and ADR 101 nested-virtualization detection
   on both supported and unsupported Apple silicon
   remain release qualification.
@@ -869,86 +884,6 @@ Disadvantages:
 - A capability probe adds a guest round trip unless its result is cached per
   node runtime.
 
-### 32. Reconnect an open TUI after daemon live update
-
-Problem:
-
-- Live update preserves daemon-owned PTYs, but the old daemon's request and
-  event sockets close at commit. An already-open TUI retains those dead client
-  connections and must currently be quit and reopened before it can send more
-  terminal input.
-- Asynchronous terminal input failures are now surfaced in the TUI instead of
-  disappearing silently, but that diagnostic does not restore the connection.
-- ADR 102 now latches the disconnected state, keeps one actionable reopen
-  instruction, and prevents focus or late terminal errors from repeatedly
-  probing or obscuring the dead request connection. It deliberately does not
-  replace the request and event clients.
-- Blindly replaying a failed terminal mutation is forbidden because the old
-  daemon may have applied it before the connection failure became observable.
-
-Suggested solution:
-
-- Treat `daemon.update_committed` followed by event-stream closure as a
-  reconnect signal. Redial and reclaim input, replace the shared request and
-  event clients, then reconcile existing daemon terminal IDs without creating
-  replacement shells.
-- Introduce a stable reconnecting client holder for daemon terminal adapters so
-  swapping the underlying connection does not require rebuilding every TUI
-  object. Never replay an RPC whose completion is ambiguous.
-- Add integration coverage with a TUI session attached across live handoff,
-  then send fresh input only after reconnection and verify the original PTY and
-  terminal ID remain active.
-
-Advantages:
-
-- Makes live update transparent to an active TUI as originally intended.
-- Preserves terminals while avoiding duplicate input after uncertain failures.
-- Removes the current quit-and-reopen recovery step.
-
-Disadvantages:
-
-- Requires coordinated replacement of request, event, snapshot-worker, and ownership
-  state while terminal workers may still be draining.
-- Reconnection and shutdown can race, so lifecycle ownership needs a dedicated
-  abstraction and race-detector coverage.
-
-### 33. Restore the repository-wide unit test gate
-
-Problem:
-
-- Focused CPU regressions, the race suite, formatting, lint, production build,
-  and `make test-integration` pass, but the ordinary unit suite is not fully
-  green.
-- `TestRefreshDoesNotRaceMutation` repeatedly reports `node not found` while
-  `NodeList` runs concurrently with `NodeStop`/`NodeStart` (four failures in
-  five isolated runs). This test and the node persistence paths were unchanged
-  by priority 5.
-- The root-sensitive PTY prompt and read-only-directory assertions are now
-  portable: the redraw fixture uses a literal prompt and the permission test
-  explicitly skips when root bypasses directory mode bits.
-
-Suggested solution:
-
-- Reproduce the refresh failure with filesystem tracing around `ListNodes` and
-  `SaveNode`, then either take a read lock for the metadata snapshot or make
-  enumeration tolerate a node that disappears after directory discovery.
-- Keep the permission failure assertion running in every non-root test job;
-  root agent containers explicitly skip only that kernel-permission premise.
-
-Advantages:
-
-- Restores a meaningful repository-wide green gate for future feature work.
-- Converts two environment-dependent false failures into an explicit test
-  environment contract.
-- Exercises the metadata concurrency guarantee directly.
-
-Disadvantages:
-
-- The refresh failure crosses storage ownership and should not be patched
-  speculatively as part of the terminal CPU change.
-- Making root-only skips too broad could hide real permission regressions, so
-  any skip must be limited to assertions that POSIX root intentionally bypasses.
-
 ### 34. Restore the active terminal tab when the TUI reopens
 
 Problem:
@@ -972,3 +907,70 @@ Disadvantages:
 
 - Requires a durable front-end identity or explicit conflict semantics for simultaneous TUI windows.
 - Adds persistence for UI preference state that must be pruned when tabs close.
+
+### 35. Qualify terminal fault containment on native release platforms
+
+Problem:
+
+- Automated tests prove reconnect, queue isolation, live handoff, and a real
+  non-returning C renderer call on Linux/aarch64, but release qualification
+  still needs native macOS sleep/resume, suspended-TUI, and process-budget
+  evidence.
+- The current Linux/aarch64 workspace runs as UID 0, and Lima refuses to run as
+  root. Retrying the smoke flow as the sandbox's unprivileged user with KVM
+  group access created the instance, but the nested QEMU driver exited before
+  SSH became available. The node, project smoke directory, and verification-only
+  Lima home were cleaned, so this environment still cannot substitute for the
+  native Flow 5/7/9 run.
+- One renderer process per terminal has an intentional RSS/process-count cost
+  that has not yet been recorded for 1, 10, and the expected maximum tab count.
+- The pure-Go PTY session actor remains in the daemon. A separate session
+  worker would add another fault boundary, but no observed incident currently
+  justifies its IPC, adoption, and descriptor-lifecycle complexity.
+
+Suggested solution:
+
+- Run QA Flows 5, 7, and 9 on macOS arm64 and Linux amd64/arm64, including
+  host sleep/resume and a TUI held under `SIGSTOP` past socket deadlines.
+- Record daemon, TUI, and renderer RSS plus process and descriptor counts at
+  1, 10, and the supported maximum terminal count; declare release bounds.
+- Capture one forced renderer `SIGSTOP` incident and verify the shell PID,
+  daemon PID, and other terminal remain unchanged after generation replacement.
+- Extract the Go session actor into a separate process only if production
+  evidence shows a terminal-local Go failure can still block unrelated daemon
+  control-plane work. Keep PTY escrow and unexpected-daemon adoption separate.
+
+Advantages:
+
+- Converts the remaining platform and capacity assumptions into release data.
+- Preserves the smaller renderer-only architecture unless evidence warrants a
+  second worker boundary.
+
+Disadvantages:
+
+- Sleep/resume and Activity Monitor measurements require real native hosts.
+- A future session-worker extraction would need a new ADR, worker adoption
+  protocol, and expanded live-handoff tests.
+
+### 36. Synchronize PTY handoff with the Ghostty read pump
+
+Problem:
+
+- `make test-race` reports `TestGhosttyTerminalHandoffTransfersPTYAndRollbackResumes` closing the `os.File` inside `ghosttyPTYWriter.Close` while the terminal read pump concurrently calls `os.File.Fd` through `currentPTYFD`.
+- The required `make verify` suite and the CPU telemetry race coverage pass; this race belongs to the existing terminal handoff implementation rather than live node CPU sampling.
+
+Suggested solution:
+
+- Give the read pump a handoff-aware PTY descriptor lease, or stop and acknowledge the read pump before closing/transferring the file.
+- Keep rollback able to install the returned PTY and restart reading exactly once.
+- Retain the race test in the full suite and add focused handoff/rollback cases for both EOF and active output.
+
+Advantages:
+
+- Removes undefined concurrent access to the Go file wrapper.
+- Makes the PTY ownership transition explicit and easier to reason about during live daemon update.
+
+Disadvantages:
+
+- Stopping the read pump adds another acknowledgement to the handoff state machine.
+- A descriptor-lease design must avoid delaying handoff indefinitely on a blocked reader.

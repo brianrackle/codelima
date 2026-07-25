@@ -283,6 +283,12 @@ func TestDaemonTerminalOrderSurvivesReconnectAndLiveHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !client.HelloSnapshot().InputOwner {
+		if err := client.Call(context.Background(), "input.takeover", nil, nil); err != nil {
+			_ = client.Close()
+			t.Fatal(err)
+		}
+	}
 	if err := client.Call(context.Background(), "terminal.move", map[string]any{
 		"terminal_id": want[4],
 		"delta":       -1,

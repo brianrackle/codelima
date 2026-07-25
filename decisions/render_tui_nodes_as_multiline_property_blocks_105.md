@@ -59,3 +59,4 @@ Each node occupies four terminal rows: a bullet-prefixed slug followed by indent
 
 * Refines [Streamline TUI Chrome](streamline_tui_chrome_12.md).
 * Extends [Periodically Refresh TUI Project Tree](periodically_refresh_tui_project_tree_44.md).
+* Refined by [Sample Live Node CPU over the Daemon SSH Peer](sample_live_node_cpu_over_daemon_ssh_110.md).

@@ -4,6 +4,8 @@ import (
 	"os/exec"
 
 	"git.sr.ht/~rockorager/vaxis"
+
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 type tuiTerminal interface {
@@ -32,12 +34,27 @@ type tuiTerminalErrorEvent struct {
 	Err       error
 }
 
-// tuiDaemonDisconnectedEvent reports that the TUI's daemon session cannot
-// service any more requests. The UI latches this state so routine focus events
-// do not keep writing ownership requests to a known-dead socket or overwrite
-// the recovery guidance with transport errors.
+// tuiDaemonDisconnectedEvent reports that the current physical daemon
+// connection failed. The logical TUI session remains alive and reconnects.
 type tuiDaemonDisconnectedEvent struct {
 	Err error
+}
+
+// tuiDaemonSynchronizedEvent installs one authoritative daemon state after a
+// physical connection has authenticated and subscribed.
+type tuiDaemonSynchronizedEvent struct {
+	Snapshot daemon.SyncSnapshot
+	applied  chan error
+}
+
+func (e tuiDaemonSynchronizedEvent) complete(err error) {
+	if e.applied == nil {
+		return
+	}
+	select {
+	case e.applied <- err:
+	default:
+	}
 }
 
 // tuiDaemonTerminalDirtyEvent crosses from the daemon event-reader goroutine

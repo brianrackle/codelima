@@ -2,11 +2,14 @@ package codelima
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,8 +39,10 @@ type tuiSessionStore struct {
 	// tabCounters/sessionOrder/sessionErrors maps (see ADR 61, Track 1 PR3).
 	targets     map[terminal.TargetKey]*terminal.TargetTerminalState
 	registry    *terminal.TerminalRuntimeRegistry[tuiTerminal]
+	eventMu     sync.Mutex
 	events      *daemonclient.Client
 	eventCancel context.CancelFunc
+	daemonReady atomic.Bool
 	// newTerminal builds the terminal backend for locally spawned tabs. It is
 	// a per-store field (defaulting to newTUITerminal) rather than a package
 	// variable so tests can swap in fakes without racing parallel tests.
@@ -90,6 +95,7 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 		newTerminal: newTUITerminal,
 	}
 	if service != nil && service.daemonClient != nil {
+		store.daemonReady.Store(true)
 		if err := store.restoreDaemonSessions(); err != nil {
 			service.log().Error("restore daemon terminal tabs failed", "error", err.Error())
 		}
@@ -100,27 +106,105 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 
 func (s *tuiSessionStore) startDaemonEvents() {
 	ctx, cancel := context.WithCancel(s.ctx)
-	client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: s.service.cfg.MetadataRoot, Version: Version, Events: true, Timeout: 2 * time.Second})
-	if err != nil {
-		cancel()
-		s.service.log().Error("connect daemon event stream failed", "error", err.Error())
-		return
-	}
-	if err := client.Subscribe(ctx, []string{"terminal", "target", "node", "daemon"}); err != nil {
-		_ = client.Close()
-		cancel()
-		s.service.log().Error("subscribe daemon events failed", "error", err.Error())
-		return
-	}
-	s.events, s.eventCancel = client, cancel
+	s.eventCancel = cancel
+	clientInstanceID := s.service.daemonClient.HelloSnapshot().ClientID
 	go func() {
-		runDaemonEventLoop(ctx, client, s.handleDaemonEvent, func(err error) {
-			s.service.log().Error("daemon event stream disconnected", "error", err.Error())
-			if s.postEvent != nil {
-				s.postEvent(tuiDaemonDisconnectedEvent{Err: fmt.Errorf("daemon event stream disconnected; quit and reopen CodeLima to reconnect: %w", err)})
-			}
+		_ = runDaemonConnectionSupervisor(ctx, daemonConnectionSupervisorOptions{
+			Dial: func(dialCtx context.Context) (daemonEventConnection, error) {
+				client, err := daemonclient.Dial(dialCtx, daemonclient.Options{
+					Home:             s.service.cfg.MetadataRoot,
+					Version:          Version,
+					Events:           true,
+					Timeout:          2 * time.Second,
+					ClientInstanceID: clientInstanceID,
+				})
+				if err != nil {
+					return nil, err
+				}
+				s.eventMu.Lock()
+				s.events = client
+				s.eventMu.Unlock()
+				return client, nil
+			},
+			OnSync:  s.prepareDaemonSynchronization,
+			OnEvent: s.handleDaemonEvent,
+			OnStatus: func(status daemonConnectionStatus) {
+				if status.State != daemonConnectionDisconnected {
+					return
+				}
+				s.daemonReady.Store(false)
+				s.service.log().Error(
+					"daemon event stream disconnected; reconnecting",
+					"generation", status.Generation,
+					"epoch", status.Epoch,
+					"sequence", status.Sequence,
+					"error", status.Err,
+					"connection_id", status.CloseRecord.ConnectionID,
+					"client_instance_id", status.CloseRecord.ClientInstanceID,
+					"initiator", status.CloseRecord.Initiator,
+					"phase", status.CloseRecord.Phase,
+					"reason", status.CloseRecord.Reason,
+					"underlying", status.CloseRecord.Underlying,
+				)
+				if s.postEvent != nil {
+					s.postEvent(tuiDaemonDisconnectedEvent{Err: fmt.Errorf("daemon connection lost; reconnecting: %w", status.Err)})
+				}
+			},
 		})
 	}()
+}
+
+func (s *tuiSessionStore) prepareDaemonSynchronization(ctx context.Context, snapshot daemon.SyncSnapshot) error {
+	if s.service == nil || s.service.daemonClient == nil {
+		return errors.New("daemon request client is unavailable")
+	}
+	requestClient := s.service.daemonClient
+	hello := requestClient.HelloSnapshot()
+	if hello.DaemonEpoch != snapshot.DaemonEpoch {
+		if err := requestClient.Reconnect(ctx); err != nil {
+			return fmt.Errorf("reconnect daemon request stream: %w", err)
+		}
+	} else {
+		var status daemon.Status
+		pingCtx, cancel := context.WithTimeout(ctx, daemonRPCTimeout)
+		err := requestClient.Call(pingCtx, "daemon.ping", nil, &status)
+		cancel()
+		if err != nil {
+			if reconnectErr := requestClient.Reconnect(ctx); reconnectErr != nil {
+				return fmt.Errorf("reconnect daemon request stream after failed ping: %w", reconnectErr)
+			}
+		}
+	}
+	if err := takeTUIDaemonInput(ctx, requestClient); err != nil {
+		return fmt.Errorf("reclaim daemon input after reconnect: %w", err)
+	}
+	if s.postEvent == nil {
+		return errors.New("TUI event sink is unavailable during daemon synchronization")
+	}
+	applied := make(chan error, 1)
+	s.postEvent(tuiDaemonSynchronizedEvent{Snapshot: snapshot, applied: applied})
+	select {
+	case err := <-applied:
+		return err
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+
+// Call is the reconnect-aware RPC seam used by daemon terminal adapters. It
+// rejects input and snapshots until the authoritative sync has been installed
+// on the TUI actor, preventing accidental mutation of a stale session.
+func (s *tuiSessionStore) Call(ctx context.Context, method string, params any, result any) error {
+	if !s.daemonReady.Load() {
+		return &daemonclient.DeliveryError{
+			Outcome: daemonclient.DeliveryNotSent,
+			Err:     errors.New("daemon connection is synchronizing"),
+		}
+	}
+	if s.service == nil || s.service.daemonClient == nil {
+		return errors.New("daemon request client is unavailable")
+	}
+	return s.service.daemonClient.Call(ctx, method, params, result)
 }
 
 func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
@@ -145,14 +229,9 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		if sessionKey != "" && s.postEvent != nil {
 			s.postEvent(tuiTerminalClosedEvent{SessionKey: sessionKey})
 		}
-	case "daemon.shutdown":
-		if s.postEvent != nil {
-			s.postEvent(tuiDaemonDisconnectedEvent{Err: errors.New("codelima daemon stopped")})
-		}
-	case "daemon.update_committed":
-		if s.postEvent != nil {
-			s.postEvent(tuiDaemonDisconnectedEvent{Err: errors.New("codelima daemon updated; quit and reopen CodeLima to reconnect")})
-		}
+	case "daemon.shutdown", "daemon.update_committed":
+		// The connection supervisor treats these as intentional reconnect
+		// boundaries and reports the resulting physical-link transition once.
 	}
 }
 
@@ -239,7 +318,7 @@ func (s *tuiSessionStore) MoveTab(targetKey, sessionKey string, direction int) e
 	}
 
 	if s.service != nil && s.service.daemonClient != nil {
-		if err := s.service.daemonClient.Call(s.ctx, "terminal.move", map[string]any{
+		if err := s.Call(s.ctx, "terminal.move", map[string]any{
 			"terminal_id": string(session.terminalID),
 			"delta":       direction,
 		}, nil); err != nil {
@@ -316,7 +395,7 @@ func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, s
 	if s.service.daemonClient != nil {
 		kind := session.shellKind.String()
 		var state daemon.TerminalState
-		err := s.service.daemonClient.Call(s.ctx, "terminal.open", map[string]any{
+		err := s.Call(s.ctx, "terminal.open", map[string]any{
 			"target": targetKey,
 			"kind":   kind,
 			"label":  session.label,
@@ -330,7 +409,7 @@ func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, s
 		if key == "" {
 			key = formatSessionKey(targetKey, s.targetState(targetKey).AllocateTabIndex())
 		}
-		remote := newDaemonTUITerminal(s.service.daemonClient, state.TerminalID, s.postEvent)
+		remote := newDaemonTUITerminal(s, state.TerminalID, s.postEvent)
 		runtime, ok := s.registry.Register(terminal.TerminalID(state.TerminalID), remote)
 		if !ok {
 			remote.Detach()
@@ -369,16 +448,61 @@ func (s *tuiSessionStore) launchTabFromSpec(targetKey string, spec LaunchSpec, s
 
 func (s *tuiSessionStore) restoreDaemonSessions() error {
 	var states []daemon.TerminalState
-	if err := s.service.daemonClient.Call(s.ctx, "terminal.list", nil, &states); err != nil {
+	if err := s.Call(s.ctx, "terminal.list", nil, &states); err != nil {
 		return fromDaemonError(err)
 	}
+	return s.replaceDaemonSessions(states)
+}
+
+func (s *tuiSessionStore) applyDaemonSynchronization(snapshot daemon.SyncSnapshot) error {
+	var state struct {
+		Session           daemon.Session             `json:"session"`
+		TerminalSnapshots map[string]daemon.Snapshot `json:"terminal_snapshots"`
+	}
+	if err := json.Unmarshal(snapshot.State, &state); err != nil {
+		return fmt.Errorf("decode daemon synchronization: %w", err)
+	}
+	if state.Session.Version != daemon.SessionVersion {
+		return fmt.Errorf("daemon synchronization session version %d, want %d", state.Session.Version, daemon.SessionVersion)
+	}
+	if err := s.replaceDaemonSessions(state.Session.Terminals); err != nil {
+		return err
+	}
+	for terminalID, snapshot := range state.TerminalSnapshots {
+		runtime, ok := s.registry.Lookup(terminal.TerminalID(terminalID))
+		if !ok {
+			continue
+		}
+		if view, ok := runtime.Backend.(*daemonTUITerminal); ok {
+			view.installSnapshot(snapshot)
+		}
+	}
+	s.daemonReady.Store(true)
+	return nil
+}
+
+func (s *tuiSessionStore) replaceDaemonSessions(states []daemon.TerminalState) error {
+	existingByTerminal := make(map[terminal.TerminalID]*tuiSession, len(s.sessions))
+	for _, session := range s.sessions {
+		existingByTerminal[session.terminalID] = session
+	}
+	keep := make(map[terminal.TerminalID]struct{}, len(states))
+
 	for _, state := range states {
 		key := state.TabID
 		if key == "" {
 			key = state.Target + "#" + state.TerminalID
 		}
 		shellKind := terminal.NodeShell
-		session := &tuiSession{key: key, target: state.Target, label: state.Label, terminalID: terminal.TerminalID(state.TerminalID)}
+		terminalID := terminal.TerminalID(state.TerminalID)
+		keep[terminalID] = struct{}{}
+		session := existingByTerminal[terminalID]
+		if session == nil {
+			session = &tuiSession{terminalID: terminalID}
+		} else if session.key != key {
+			delete(s.sessions, session.key)
+		}
+		session.key, session.target, session.label = key, state.Target, state.Label
 		target, err := terminal.ParseTargetKey(state.Target)
 		if err == nil && target.Kind == terminal.TargetNode {
 			if state.Kind == terminal.NodeHostShell.String() {
@@ -389,12 +513,41 @@ func (s *tuiSessionStore) restoreDaemonSessions() error {
 			}
 		}
 		session.shellKind = shellKind
-		remote := newDaemonTUITerminal(s.service.daemonClient, state.TerminalID, s.postEvent)
-		if _, ok := s.registry.Register(session.terminalID, remote); !ok {
-			remote.Detach()
+		if _, ok := s.registry.Lookup(terminalID); !ok {
+			remote := newDaemonTUITerminal(s, state.TerminalID, s.postEvent)
+			if _, registered := s.registry.Register(terminalID, remote); !registered {
+				remote.Detach()
+				return fmt.Errorf("register synchronized daemon terminal %q", state.TerminalID)
+			}
+		}
+		s.sessions[key] = session
+	}
+
+	for key, session := range s.sessions {
+		if _, ok := keep[session.terminalID]; ok {
 			continue
 		}
-		s.putSession(session)
+		delete(s.sessions, key)
+		if runtime, ok := s.registry.Remove(session.terminalID); ok {
+			if detachable, ok := runtime.Backend.(interface{ Detach() }); ok {
+				detachable.Detach()
+			}
+		}
+	}
+
+	for _, targetState := range s.targets {
+		targetState.Tabs = nil
+	}
+	for _, state := range states {
+		key := state.TabID
+		if key == "" {
+			key = state.Target + "#" + state.TerminalID
+		}
+		s.targetState(state.Target).AppendTab(terminal.TerminalTabState{
+			ID:         terminal.TabID(key),
+			Label:      state.Label,
+			TerminalID: terminal.TerminalID(state.TerminalID),
+		})
 	}
 	return nil
 }
@@ -552,10 +705,12 @@ func (s *tuiSessionStore) Close() {
 	if s.eventCancel != nil {
 		s.eventCancel()
 	}
+	s.eventMu.Lock()
 	if s.events != nil {
 		_ = s.events.Close()
 		s.events = nil
 	}
+	s.eventMu.Unlock()
 	for sessionKey, session := range s.sessions {
 		if runtime, ok := s.registry.Remove(session.terminalID); ok {
 			if detachable, ok := runtime.Backend.(interface{ Detach() }); ok {

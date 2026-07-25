@@ -43,7 +43,9 @@ Microsandbox published ports are immutable boot configuration. CodeLima currentl
 * `DynamicForwarder`: daemon-owned reconciliation loop and route registry.
 * `SandboxSSHRuntime`: narrow Microsandbox seam that authorizes the per-home key and opens `msb ssh serve {sandbox} --stdio` transports.
 * `SSHPeer`: one multiplexed SSH client per running sandbox, used for listener discovery and `direct-tcpip` connections.
-* `PortHTTPServer`: one host `127.0.0.1:{port}` HTTP server per discovered guest port across all nodes.
+* `PortHTTPServer`: one logical HTTP server with host
+  `127.0.0.1:{port}` and `[::1]:{port}` listeners per discovered guest port
+  across all nodes.
 * `NodePortRoute`: mapping from normalized node name plus guest port to an SSH peer.
 
 ### 4.2 External Dependencies
@@ -65,7 +67,9 @@ Invariants:
 
 1. Route identity is `(NodeName, GuestPort)`.
 2. A host listener is unique by `GuestPort` and may serve routes for many nodes.
-3. Host listeners bind `127.0.0.1` only.
+3. Host listeners bind `127.0.0.1` and `::1` only. A host without IPv6 support
+   may retain only the IPv4 listener; no listener may bind a wildcard or
+   non-loopback address.
 4. The route with the earliest `DiscoveredAt` for a port is its generic claimant while active; ties use normalized node name for deterministic recovery.
 5. Requests whose `Host` is `localhost`, case-insensitively and with an optional trailing dot, or the exact IPv4 address `127.0.0.1` use the generic claimant.
 6. Requests whose `Host` is exactly `{NodeName}.localhost` use that named route regardless of the generic claimant.
@@ -116,7 +120,15 @@ http://test-node.localhost:8080  -> test-node guest 127.0.0.1:8080
 http://api-node.localhost:8080   -> api-node guest 127.0.0.1:8080
 ```
 
-The host listener starts when the first route for a port appears and closes after the final route disappears. The first active route claims generic `localhost`; named hostnames always bypass that claim. If the claimant disappears, the earliest remaining active route takes over during reconciliation. If binding fails because another host process or a static Microsandbox publication owns the port, the daemon records a conflict and retries every one-second reconciliation without disrupting other ports.
+The host listeners start when the first route for a port appears and close
+after the final route disappears. The IPv4 and IPv6 binds form one transaction:
+a conflict on either family closes the other listener so the same logical port
+cannot have split ownership. The first active route claims generic `localhost`;
+named hostnames always bypass that claim. If the claimant disappears, the
+earliest remaining active route takes over during reconciliation. If binding
+fails because another host process or a static publication owns the port, the
+daemon records a conflict and retries every one-second reconciliation without
+disrupting other ports.
 
 ## 9. Lifecycle and Recovery
 
@@ -153,7 +165,8 @@ The daemon log must record peer connect/disconnect, route add/remove, listener b
 
 ## 12. Security and Operational Safety
 
-* Bind only `127.0.0.1`; never trust request headers to widen the bind address.
+* Bind only `127.0.0.1` and `::1`; never trust request headers to widen the
+  bind address.
 * Validate node hostnames against current CodeLima node metadata, not arbitrary `Host` input.
 * Do not forward privileged ports in v1.
 * Keep private keys and daemon forwarding state user-private.
@@ -172,6 +185,7 @@ Automated tests must cover:
 * unknown host, missing route, and tunnel failure status codes;
 * WebSocket/HTTP upgrade passthrough;
 * route add/remove and host listener lifecycle;
+* generic and node-qualified Host routing over both host loopback families;
 * bind conflict followed by recovery;
 * node stop and daemon close cleanup;
 * key generation permissions and idempotency;
@@ -189,7 +203,7 @@ Manual QA must verify on native macOS and Linux:
 6. Verify WebSocket hot reload.
 7. Stop/restart nodes and the daemon and observe route removal/recovery.
 8. Verify host bind conflicts are reported without affecting unrelated ports.
-9. Confirm no forwarding listener binds beyond `127.0.0.1`.
+9. Confirm forwarding listeners bind only `127.0.0.1` and `::1`.
 
 ## 14. Implementation Checklist
 

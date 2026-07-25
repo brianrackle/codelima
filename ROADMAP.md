@@ -26,8 +26,9 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
 
 - Backend return [partially complete]: Lima 2.x is the sole runtime; schema-v4 retains `image` and `sandbox_name`, renders private instance templates, automatically enables nested virtualization on capable macOS arm64 hosts, uses daemon-cached watch observations, preserves generic/node-qualified HTTP/WebSocket forwarding through persistent Go SSH, and keeps interactive SSH in the terminal foreground process group (ADRs 92–93 and 101). Automated and Linux/aarch64 QEMU/KVM lifecycle/clone/forwarding checks pass; macOS VZ and the full native release matrix remain in TODO.
 - Track 5: agent awareness — screen-snapshot detection engine, tree badges, wait primitives, agent SKILL.md (5.1 prototypable against Track 2's read seam)
-- Track 6: experience — keybindings/prefix mode, terminal-default node view (priority 6 complete locally), goto picker, theme fidelity, kitty graphics (priority 3), split panes, first-run polish
+- Track 6: experience — live node CPU, memory, and guest root-disk usage refreshed once per second and terminal-default node view are complete locally (ADRs 110–111 and priority 6); keybindings/prefix mode, goto picker, theme fidelity, kitty graphics (priority 3), split panes, and first-run polish remain
 - Track 7 [in progress via practice]: engineering system — characterization-test policy, integration test tier, visual verification harness, self-update, vendor patch discipline, docs versioning
+- Terminal stability [complete locally]: resumable TUI connections, authoritative epoch/sequence synchronization, multiplexed request delivery, bounded per-client daemon pumps, application heartbeats, asynchronous immutable snapshots, and one Ghostty renderer process per terminal preserve shells while containing a real non-returning cgo call (ADRs 107–108; native macOS sleep/resume and interactive qualification remain in TODO).
 
 ## Related Draft Plans
 

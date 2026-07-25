@@ -162,7 +162,7 @@ func TestTUIWindowFocusPreservesDaemonDisconnectGuidance(t *testing.T) {
 		service:  &Service{daemonClient: client},
 		messages: newTUIMessageLog(10),
 	}
-	disconnectErr := errors.New("codelima daemon updated; quit and reopen CodeLima to reconnect")
+	disconnectErr := errors.New("daemon connection lost; reconnecting")
 
 	if quit, err := app.handleEvent(tuiDaemonDisconnectedEvent{Err: disconnectErr}); err != nil || quit {
 		t.Fatalf("handleEvent(tuiDaemonDisconnectedEvent) = (%v, %v), want (false, nil)", quit, err)
@@ -181,7 +181,7 @@ func TestTUIWindowFocusPreservesDaemonDisconnectGuidance(t *testing.T) {
 	}
 }
 
-func TestTUIWindowFocusLatchesFailedDaemonRequestConnection(t *testing.T) {
+func TestTUIWindowFocusReportsReconnectAfterFailedDaemonRequest(t *testing.T) {
 	t.Parallel()
 
 	app := &vaxisTUIApp{
@@ -193,7 +193,7 @@ func TestTUIWindowFocusLatchesFailedDaemonRequestConnection(t *testing.T) {
 	if quit, err := app.handleEvent(vaxis.FocusIn{}); err != nil || quit {
 		t.Fatalf("handleEvent(FocusIn) = (%v, %v), want (false, nil)", quit, err)
 	}
-	const want = "daemon connection lost; quit and reopen CodeLima to reconnect"
+	const want = "daemon connection lost; reconnecting"
 	if app.status != want {
 		t.Fatalf("status after failed takeover = %q, want %q", app.status, want)
 	}

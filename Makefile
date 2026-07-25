@@ -4,6 +4,7 @@ TOOLS_DIR := $(TOOLS_ROOT)/$(PLATFORM_TAG)
 BIN_ROOT := $(CURDIR)/bin
 BIN_DIR := $(BIN_ROOT)/$(PLATFORM_TAG)
 CODELIMA_BIN := $(BIN_DIR)/codelima
+CODELIMA_RENDERER_BIN := $(BIN_DIR)/codelima-renderer-worker
 CODELIMA_COMPAT_BIN := $(BIN_ROOT)/codelima
 GO_VERSION ?= 1.24.1
 GOPLS_VERSION ?= v0.18.1
@@ -86,6 +87,7 @@ test-lima-native: init
 build: init
 	mkdir -p $(BIN_DIR)
 	$(GO) build -ldflags "$(VERSION_LDFLAGS)" -o $(CODELIMA_BIN) ./cmd/codelima
+	$(GO) build -ldflags "$(VERSION_LDFLAGS)" -o $(CODELIMA_RENDERER_BIN) ./cmd/codelima-renderer-worker
 	ln -sfn $(PLATFORM_TAG)/codelima $(CODELIMA_COMPAT_BIN)
 
 run: build
@@ -101,7 +103,7 @@ diagnose-terminal-freeze:
 	/bin/sh ./.agents/skills/diagnose-codelima-terminal-freezes/scripts/capture.sh $(DIAG_ARGS)
 
 package: init
-	/bin/sh ./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG)
+	/bin/sh ./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG) $(CODELIMA_RENDERER_BIN)
 
 package-formula: init
 	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)

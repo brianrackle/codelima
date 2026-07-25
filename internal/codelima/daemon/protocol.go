@@ -10,7 +10,7 @@ import (
 
 const (
 	MaxMessageSize  = 1 << 20
-	ProtocolVersion = 4
+	ProtocolVersion = 5
 	SessionVersion  = 2
 	HandoffVersion  = 3
 
@@ -50,8 +50,47 @@ type Response struct {
 }
 
 type Event struct {
-	Event string `json:"event"`
-	Data  any    `json:"data,omitempty"`
+	Event         string `json:"event"`
+	Data          any    `json:"data,omitempty"`
+	DaemonEpoch   string `json:"daemon_epoch,omitempty"`
+	StateSequence uint64 `json:"state_sequence,omitempty"`
+}
+
+type ConnectionCloseReason string
+
+const (
+	ClosePeerEOF          ConnectionCloseReason = "peer-eof"
+	CloseReadTimeout      ConnectionCloseReason = "read-timeout"
+	CloseWriteTimeout     ConnectionCloseReason = "write-timeout"
+	CloseReadError        ConnectionCloseReason = "read-error"
+	CloseWriteError       ConnectionCloseReason = "write-error"
+	CloseQueueFull        ConnectionCloseReason = "queue-full"
+	CloseProtocolError    ConnectionCloseReason = "protocol-error"
+	CloseAuthentication   ConnectionCloseReason = "authentication-failure"
+	CloseDaemonShutdown   ConnectionCloseReason = "daemon-shutdown"
+	CloseLiveUpdate       ConnectionCloseReason = "live-update"
+	CloseSuperseded       ConnectionCloseReason = "superseded"
+	CloseAdministrative   ConnectionCloseReason = "administrative-close"
+	CloseContextCancelled ConnectionCloseReason = "context-cancelled"
+)
+
+type ConnectionCloseRecord struct {
+	ConnectionID     uint64                `json:"connection_id"`
+	ClientInstanceID string                `json:"client_instance_id,omitempty"`
+	DaemonEpoch      string                `json:"daemon_epoch,omitempty"`
+	Initiator        string                `json:"initiator"`
+	Phase            string                `json:"phase"`
+	Reason           ConnectionCloseReason `json:"reason"`
+	Underlying       string                `json:"underlying,omitempty"`
+	LastReadAt       time.Time             `json:"last_read_at,omitempty"`
+	LastWriteAt      time.Time             `json:"last_write_at,omitempty"`
+	InboundFrames    uint64                `json:"inbound_frames"`
+	OutboundFrames   uint64                `json:"outbound_frames"`
+	InboundBytes     uint64                `json:"inbound_bytes"`
+	OutboundBytes    uint64                `json:"outbound_bytes"`
+	OutboundDepth    int                   `json:"outbound_queue_depth"`
+	OutboundBytesNow int                   `json:"outbound_queue_bytes"`
+	OldestOutbound   time.Duration         `json:"oldest_outbound_age,omitempty"`
 }
 
 type RPCError struct {
@@ -73,17 +112,24 @@ func Error(category, message string, code int, fields map[string]any) error {
 }
 
 type HelloParams struct {
-	Version      string   `json:"version"`
-	Protocol     int      `json:"protocol"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	WantInput    bool     `json:"want_input,omitempty"`
+	Version              string   `json:"version"`
+	Protocol             int      `json:"protocol"`
+	Capabilities         []string `json:"capabilities,omitempty"`
+	WantInput            bool     `json:"want_input,omitempty"`
+	ClientInstanceID     string   `json:"client_instance_id,omitempty"`
+	ConnectionGeneration uint64   `json:"connection_generation,omitempty"`
+	LastDaemonEpoch      string   `json:"last_daemon_epoch,omitempty"`
+	LastStateSequence    uint64   `json:"last_state_sequence,omitempty"`
 }
 
 type HelloResult struct {
-	Version    string `json:"version"`
-	Protocol   int    `json:"protocol"`
-	ClientID   string `json:"client_id"`
-	InputOwner bool   `json:"input_owner"`
+	Version       string `json:"version"`
+	Protocol      int    `json:"protocol"`
+	ClientID      string `json:"client_id"`
+	ConnectionID  uint64 `json:"connection_id"`
+	DaemonEpoch   string `json:"daemon_epoch"`
+	StateSequence uint64 `json:"state_sequence"`
+	InputOwner    bool   `json:"input_owner"`
 }
 
 type Status struct {
@@ -95,6 +141,15 @@ type Status struct {
 	StartedAt     time.Time `json:"started_at" yaml:"started_at"`
 	TerminalCount int       `json:"terminal_count" yaml:"terminal_count"`
 	InputOwner    string    `json:"input_owner,omitempty" yaml:"input_owner,omitempty"`
+	DaemonEpoch   string    `json:"daemon_epoch,omitempty" yaml:"daemon_epoch,omitempty"`
+	StateSequence uint64    `json:"state_sequence,omitempty" yaml:"state_sequence,omitempty"`
+}
+
+type SyncSnapshot struct {
+	ProtocolVersion int             `json:"protocol_version"`
+	DaemonEpoch     string          `json:"daemon_epoch"`
+	StateSequence   uint64          `json:"state_sequence"`
+	State           json.RawMessage `json:"state"`
 }
 
 type Identity struct {
@@ -186,22 +241,26 @@ type SnapshotCell struct {
 }
 
 type Snapshot struct {
-	Cols          int            `json:"cols"`
-	Rows          int            `json:"rows"`
-	Cells         []SnapshotCell `json:"cells"`
-	CursorX       int            `json:"cursor_x"`
-	CursorY       int            `json:"cursor_y"`
-	CursorVisible bool           `json:"cursor_visible"`
-	Generation    uint64         `json:"generation"`
-	CapturesMouse bool           `json:"captures_mouse"`
+	Cols             int            `json:"cols"`
+	Rows             int            `json:"rows"`
+	Cells            []SnapshotCell `json:"cells"`
+	CursorX          int            `json:"cursor_x"`
+	CursorY          int            `json:"cursor_y"`
+	CursorVisible    bool           `json:"cursor_visible"`
+	Generation       uint64         `json:"generation"`
+	CapturesMouse    bool           `json:"captures_mouse"`
+	SnapshotSequence uint64         `json:"snapshot_sequence,omitempty"`
+	ProducedAt       time.Time      `json:"produced_at,omitempty"`
+	Stale            bool           `json:"stale,omitempty"`
 }
 
 type HandoffRuntime struct {
-	TerminalID string `json:"terminal_id"`
-	ChildPID   int    `json:"child_pid"`
-	Cols       int    `json:"cols"`
-	Rows       int    `json:"rows"`
-	Replay     []byte `json:"replay"`
+	TerminalID    string `json:"terminal_id"`
+	ChildPID      int    `json:"child_pid"`
+	Cols          int    `json:"cols"`
+	Rows          int    `json:"rows"`
+	Replay        []byte `json:"replay"`
+	ReplayPartial bool   `json:"replay_partial,omitempty"`
 }
 
 type HandoffManifest struct {

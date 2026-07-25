@@ -1813,3 +1813,43 @@ func TestGhosttyStderrCaptureDoesNotDeadlock(t *testing.T) {
 		t.Fatal("ghostty stderr capture deadlocked: warning-generating bridge calls did not complete")
 	}
 }
+
+func TestDrainGhosttyStderrConsumesUnterminatedRecordsLargerThanScannerLimit(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+
+	original := packageLog()
+	setPackageLogger(discardLogger())
+	t.Cleanup(func() { setPackageLogger(original) })
+
+	drained := make(chan struct{})
+	go func() {
+		drainGhosttyStderr(reader)
+		close(drained)
+	}()
+
+	written := make(chan error, 1)
+	go func() {
+		_, writeErr := writer.Write(bytes.Repeat([]byte("x"), 2*1024*1024))
+		written <- errors.Join(writeErr, writer.Close())
+	}()
+
+	select {
+	case writeErr := <-written:
+		if writeErr != nil {
+			t.Fatalf("write oversized stderr record: %v", writeErr)
+		}
+	case <-time.After(5 * time.Second):
+		_ = writer.Close()
+		t.Fatal("oversized newline-free stderr record blocked because the drain stopped")
+	}
+
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		_ = reader.Close()
+		t.Fatal("stderr drain did not finish after EOF")
+	}
+}

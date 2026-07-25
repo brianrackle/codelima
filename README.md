@@ -55,8 +55,11 @@ directory or its descendants appear. Run `codelima` with no path to see every
 sandbox across every project.
 
 Each node in the left pane uses a compact property block: the node name is
-followed by indented `Config`, `CWD`, and live `Status` lines. Scoped views show
-the working directory relative to the path used to open the TUI.
+followed by indented `Config`, `CWD`, live `Status`, `CPU`, `Memory`, and `Disk`
+lines. Running-node usage is sampled once per second. CPU is normalized to
+`0..100%` across the node's vCPUs; memory and guest root-disk usage are shown as
+used/total binary units. Scoped views show the working directory relative to
+the path used to open the TUI.
 
 Selecting a running node shows its terminal by default, reuses any existing
 node tab, and opens a guest tab when none exists. Selecting a stopped node shows
@@ -121,6 +124,9 @@ If `api-redesign` is serving on port 8080:
 curl http://api-redesign.localhost:8080
 ```
 
+The daemon listens on both host loopback families, so these hostname routes
+work whether the client resolves them to `127.0.0.1` or `::1`.
+
 Two nodes can serve the same guest port at the same time. Their node-qualified
 hostnames keep the traffic separate, while the first active node on a port also
 claims the short `localhost` form.
@@ -154,6 +160,7 @@ layer. Linux uses Lima's QEMU/KVM path.
   shells, and experiments
 - Multiple independent sandboxes for one directory
 - Directory-scoped and all-project views
+- Per-node live CPU, memory, and guest root-disk usage refreshed once per second
 - Dynamic HTTP and WebSocket forwarding to the host
 - Node-qualified `*.localhost` routing when services share a port
 - Read/write mounted workspaces, with optional isolated copy mode
@@ -221,6 +228,10 @@ codelima installs the built-in Codex and Claude Code environments.
 
 Inside forms, use `Tab`, `Up`, and `Down` to move between fields, `Enter` or
 `Right` to open choices, `Ctrl+s` to submit, and `Esc` to cancel.
+
+The Create Node form proposes the slug-safe leaf name of the current directory
+as the node slug. The slug and current-directory defaults are shown in muted
+text and disappear when you type an explicit value.
 
 On macOS, configure the terminal with `macos-option-as-alt = true` when
 available. codelima also recognizes the standard US-layout Option glyphs for
@@ -376,6 +387,22 @@ make diagnose-terminal-freeze \
   DIAG_ARGS='--binary ./bin/darwin-arm64/codelima --terminal-id term_example'
 ```
 
+An attached TUI automatically reconnects and installs an authoritative daemon
+state after a socket failure or daemon live update. It does not replay terminal
+input whose outcome is uncertain. While synchronization is in progress, new
+terminal mutations are briefly rejected instead of being applied to stale
+state.
+
+Daemon-owned shells and PTYs remain in the Go control plane. Each terminal has
+its own separately packaged Ghostty renderer-worker process, immutable screen
+cache, bounded replay journal, and terminal-local restart budget. If a native
+renderer call hangs, CodeLima kills only that renderer and reconstructs its
+screen while preserving the shell PID and keeping other terminals and daemon
+status responsive.
+`codelima --json daemon snapshot` includes connection-independent
+`terminal_runtimes` diagnostics such as renderer PID, generation, queue depth,
+pending operation, restart count, journal size, and partial-recovery state.
+
 ## How codelima works
 
 codelima uses Lima as its VM runtime. VZ provides lightweight virtualization on
@@ -389,8 +416,11 @@ Three concepts make the system reusable:
   bootstrap commands, vCPUs, memory, and disk.
 - An **environment** is an ordered, reusable set of bootstrap commands.
 
-The persistent daemon owns terminal runtimes and discovers guest services. The
-TUI is a view onto that durable state, not the owner of it.
+The persistent daemon owns terminal sessions and discovers guest services. The
+TUI is a reconnectable view onto that durable state, not the owner of it.
+Physical TUI sockets are disposable; terminal identity and lifetime belong to
+the daemon. Ghostty rendering is isolated one process per terminal so native
+liveness is never a daemon-wide lock.
 
 Run `codelima doctor` to inspect Lima, host virtualization, nested
 virtualization, and configuration health.

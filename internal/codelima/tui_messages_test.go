@@ -203,7 +203,7 @@ func TestMessagesViewRendersNewestAndScrolls(t *testing.T) {
 
 // TestRefreshErrorRecordedInMessagesAtWarnLevel pins the architect-review gap:
 // a failed background refresh must land in the message ring at warn level (not
-// only in the slog seam), and a persistently-failing 2s auto-refresh must not
+// only in the slog seam), and a persistently failing auto-refresh must not
 // flood the ring with identical consecutive entries.
 func TestRefreshErrorRecordedInMessagesAtWarnLevel(t *testing.T) {
 	t.Parallel()

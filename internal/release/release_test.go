@@ -15,17 +15,21 @@ func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
 
 	tempDir := t.TempDir()
 	binaryPath := filepath.Join(tempDir, "codelima")
+	rendererPath := filepath.Join(tempDir, "codelima-renderer-worker")
 	libraryPath := filepath.Join(tempDir, "libghostty-vt.dylib")
 	outputPath := filepath.Join(tempDir, "dist", "artifact.tar.gz")
 
 	if err := os.WriteFile(binaryPath, []byte("binary-data"), 0o755); err != nil {
 		t.Fatalf("write binary: %v", err)
 	}
+	if err := os.WriteFile(rendererPath, []byte("renderer-data"), 0o755); err != nil {
+		t.Fatalf("write renderer: %v", err)
+	}
 	if err := os.WriteFile(libraryPath, []byte("ghostty-data"), 0o644); err != nil {
 		t.Fatalf("write ghostty library: %v", err)
 	}
 
-	manifest, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, libraryPath, outputPath)
+	manifest, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, rendererPath, libraryPath, outputPath)
 	if err != nil {
 		t.Fatalf("BuildArchive() error = %v", err)
 	}
@@ -40,6 +44,7 @@ func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
 	files := readArchiveFiles(t, outputPath)
 	wrapperPath := "codelima_1.2.3_darwin_arm64/bin/codelima"
 	binaryArchivePath := "codelima_1.2.3_darwin_arm64/bin/codelima-real"
+	rendererArchivePath := "codelima_1.2.3_darwin_arm64/bin/codelima-renderer-worker"
 	libArchivePath := "codelima_1.2.3_darwin_arm64/lib/libghostty-vt.dylib"
 
 	wrapper, ok := files[wrapperPath]
@@ -52,6 +57,9 @@ func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
 	if string(files[binaryArchivePath].data) != "binary-data" {
 		t.Fatalf("unexpected binary archive content %q", files[binaryArchivePath].data)
 	}
+	if string(files[rendererArchivePath].data) != "renderer-data" {
+		t.Fatalf("unexpected renderer archive content %q", files[rendererArchivePath].data)
+	}
 	if string(files[libArchivePath].data) != "ghostty-data" {
 		t.Fatalf("unexpected library archive content %q", files[libArchivePath].data)
 	}
@@ -62,17 +70,21 @@ func TestBuildArchiveForcesPackagedExecutablesExecutable(t *testing.T) {
 
 	tempDir := t.TempDir()
 	binaryPath := filepath.Join(tempDir, "codelima")
+	rendererPath := filepath.Join(tempDir, "codelima-renderer-worker")
 	libraryPath := filepath.Join(tempDir, "libghostty-vt.dylib")
 	outputPath := filepath.Join(tempDir, "dist", "artifact.tar.gz")
 
 	if err := os.WriteFile(binaryPath, []byte("binary-data"), 0o644); err != nil {
 		t.Fatalf("write binary: %v", err)
 	}
+	if err := os.WriteFile(rendererPath, []byte("renderer-data"), 0o644); err != nil {
+		t.Fatalf("write renderer: %v", err)
+	}
 	if err := os.WriteFile(libraryPath, []byte("ghostty-data"), 0o644); err != nil {
 		t.Fatalf("write ghostty library: %v", err)
 	}
 
-	if _, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, libraryPath, outputPath); err != nil {
+	if _, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, rendererPath, libraryPath, outputPath); err != nil {
 		t.Fatalf("BuildArchive() error = %v", err)
 	}
 
@@ -80,6 +92,7 @@ func TestBuildArchiveForcesPackagedExecutablesExecutable(t *testing.T) {
 	for _, archivePath := range []string{
 		"codelima_1.2.3_darwin_arm64/bin/codelima",
 		"codelima_1.2.3_darwin_arm64/bin/codelima-real",
+		"codelima_1.2.3_darwin_arm64/bin/codelima-renderer-worker",
 	} {
 		if got := files[archivePath].mode; got != 0o755 {
 			t.Fatalf("expected %s to be mode 0755, got %#o", archivePath, got)
