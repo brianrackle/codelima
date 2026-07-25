@@ -153,6 +153,8 @@ The forwarding implementation retains the existing `forwardingPeer` behavior but
 For every running node, the daemon must:
 
 - resolve the instance SSH config path from machine-readable `limactl list` output;
+- resolve the config's containment trust root from CodeLima's configured
+  `LIMA_HOME`, without requiring list output to repeat that process setting;
 - read only the generated instance SSH config owned by Lima;
 - obtain host, port, user, identity file, and host-key behavior from that config;
 - establish one persistent `golang.org/x/crypto/ssh` client;

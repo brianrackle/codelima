@@ -20,11 +20,20 @@ import (
 // instead of the error text.
 var ErrHandoffTransportUnsupported = errors.New("handoff transport unsupported")
 
-// MaxHandoffFDsPerFrame bounds how many descriptors one handoff frame may
-// carry. The sender batches terminal PTYs to this size and the receiver
-// allocates its ancillary-data buffer from the same constant, so the two sides
-// cannot drift apart.
-const MaxHandoffFDsPerFrame = 64
+const (
+	// MaxHandoffFDsPerFrame bounds how many descriptors one handoff frame may
+	// carry. The sender batches terminal PTYs to this size and the receiver
+	// allocates its ancillary-data buffer from the same constant, so the two
+	// sides cannot drift apart.
+	MaxHandoffFDsPerFrame = 64
+
+	// MaxHandoffReplayBytesPerTerminal matches the renderer journal bound.
+	// Replay travels in smaller JSON chunks because base64 expansion makes a
+	// full 1 MiB byte slice larger than MaxMessageSize on the wire.
+	MaxHandoffReplayBytesPerTerminal = 1 << 20
+	MaxHandoffReplayChunkBytes       = MaxMessageSize / 2
+	MaxHandoffTotalReplayBytes       = MaxHandoffFDsPerFrame * MaxHandoffReplayBytesPerTerminal
+)
 
 type HandoffFraming uint8
 
@@ -157,6 +166,67 @@ func (c *HandoffConnection) ReadManifest() (HandoffManifest, error) {
 		return HandoffManifest{}, err
 	}
 	return manifest, nil
+}
+
+func (c *HandoffConnection) WriteReplay(terminalID string, replay []byte) error {
+	if terminalID == "" {
+		return errors.New("handoff replay requires a terminal id")
+	}
+	if len(replay) > MaxHandoffReplayBytesPerTerminal {
+		return fmt.Errorf(
+			"handoff replay for %s is %d bytes, limit is %d",
+			terminalID,
+			len(replay),
+			MaxHandoffReplayBytesPerTerminal,
+		)
+	}
+	for offset := 0; offset < len(replay); offset += MaxHandoffReplayChunkBytes {
+		end := min(offset+MaxHandoffReplayChunkBytes, len(replay))
+		if err := c.WriteJSON(HandoffMessage{
+			Type:       "replay",
+			TerminalID: terminalID,
+			Offset:     offset,
+			Replay:     replay[offset:end],
+		}, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *HandoffConnection) ReadReplay(terminalID string, size int) ([]byte, error) {
+	if terminalID == "" {
+		return nil, errors.New("handoff replay requires a terminal id")
+	}
+	if size < 0 || size > MaxHandoffReplayBytesPerTerminal {
+		return nil, fmt.Errorf(
+			"handoff replay size for %s is %d, limit is %d",
+			terminalID,
+			size,
+			MaxHandoffReplayBytesPerTerminal,
+		)
+	}
+	replay := make([]byte, 0, size)
+	for len(replay) < size {
+		message, fds, err := c.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		if len(fds) != 0 {
+			CloseHandoffFDs(fds)
+			return nil, errors.New("handoff replay unexpectedly carried descriptors")
+		}
+		if message.Type != "replay" ||
+			message.TerminalID != terminalID ||
+			message.Offset != len(replay) ||
+			len(message.Replay) == 0 ||
+			len(message.Replay) > MaxHandoffReplayChunkBytes ||
+			len(replay)+len(message.Replay) > size {
+			return nil, fmt.Errorf("invalid handoff replay chunk for %s at offset %d", terminalID, len(replay))
+		}
+		replay = append(replay, message.Replay...)
+	}
+	return replay, nil
 }
 
 func (c *HandoffConnection) readPayload() ([]byte, []int, error) {

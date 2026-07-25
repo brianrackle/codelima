@@ -9,17 +9,21 @@ import (
 )
 
 const (
-	defaultAgentValidationCommand      = "command -v sh >/dev/null 2>&1"
-	defaultCodexPrerequisitesCommand   = "apt-get update && apt-get install -y ca-certificates curl git"
-	defaultCodexInstallCommand         = `curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`
-	defaultCodexValidationCommand      = `command -v codex >/dev/null 2>&1`
-	legacyCodexSnapNodeInstallCommand  = "sudo snap install node --classic"
-	legacyCodexAptNodeInstallCommand   = "apt-get update && apt-get install -y ca-certificates curl git nodejs npm"
-	legacyCodexNPMBinCommand           = `mkdir -p "$HOME/.local/bin"`
-	legacyCodexNPMPrefixCommand        = `npm config set prefix "$HOME/.local"`
-	legacyCodexPathCommand             = `for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`
-	legacyCodexUserNPMInstallCommand   = `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`
-	legacyCodexGlobalNPMInstallCommand = "sudo npm install -g @openai/codex"
+	defaultAgentValidationCommand        = "command -v sh >/dev/null 2>&1"
+	defaultNodeJSPrerequisitesCommand    = `apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`
+	defaultNPMUserPrefixCommand          = `guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`
+	defaultCodexValidationCommand        = `command -v codex >/dev/null 2>&1`
+	defaultClaudeCodeValidationCommand   = `command -v claude >/dev/null 2>&1`
+	legacyCodexPrerequisitesCommand      = "apt-get update && apt-get install -y ca-certificates curl git"
+	legacyCodexStandaloneInstallCommand  = `curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`
+	legacyClaudeCodeNativeInstallCommand = "curl -fsSL https://claude.ai/install.sh | bash"
+	legacyCodexSnapNodeInstallCommand    = "sudo snap install node --classic"
+	legacyCodexAptNodeInstallCommand     = "apt-get update && apt-get install -y ca-certificates curl git nodejs npm"
+	legacyCodexNPMBinCommand             = `mkdir -p "$HOME/.local/bin"`
+	legacyCodexNPMPrefixCommand          = `npm config set prefix "$HOME/.local"`
+	legacyCodexPathCommand               = `for profile in "$HOME/.profile" "$HOME/.bashrc"; do grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"; done`
+	legacyCodexUserNPMInstallCommand     = `PATH="$HOME/.local/bin:$PATH" npm install -g @openai/codex`
+	legacyCodexGlobalNPMInstallCommand   = "sudo npm install -g @openai/codex"
 )
 
 var legacyGuessedDefaultPorts = []string{"3000:3000", "5173:5173", "8000:8000", "8080:8080"}
@@ -189,29 +193,43 @@ func builtInEnvironmentConfigs() []builtInEnvironmentConfigSpec {
 		{
 			Slug: "codex",
 			BootstrapCommands: []string{
-				defaultCodexPrerequisitesCommand,
-				defaultCodexInstallCommand,
+				defaultNodeJSPrerequisitesCommand,
+				defaultNPMUserPrefixCommand,
+				defaultNPMInstallCommand("@openai/codex", "codex"),
 				defaultCodexValidationCommand,
 			},
 		},
 		{
 			Slug: "claude-code",
 			BootstrapCommands: []string{
-				"curl -fsSL https://claude.ai/install.sh | bash",
+				defaultNodeJSPrerequisitesCommand,
+				defaultNPMUserPrefixCommand,
+				defaultNPMInstallCommand("@anthropic-ai/claude-code", "claude"),
+				defaultClaudeCodeValidationCommand,
 			},
 		},
 	}
 }
 
+func defaultNPMInstallCommand(packageName, executable string) string {
+	return fmt.Sprintf(
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g %s && ln -sfn "$guest_home/.local/bin/%s" /usr/local/bin/%s`,
+		packageName,
+		executable,
+		executable,
+	)
+}
+
 func legacyBuiltInEnvironmentConfigs() map[string][]builtInEnvironmentConfigSpec {
 	return map[string][]builtInEnvironmentConfigSpec{
 		"codex": {
+			{Slug: "codex", BootstrapCommands: []string{legacyCodexPrerequisitesCommand, legacyCodexStandaloneInstallCommand, defaultCodexValidationCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexGlobalNPMInstallCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexAptNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
 		},
 		"claude-code": {
-			{Slug: "claude-code", BootstrapCommands: []string{"curl -fsSL https://claude.ai/install.sh | bash"}},
+			{Slug: "claude-code", BootstrapCommands: []string{legacyClaudeCodeNativeInstallCommand}},
 		},
 	}
 }

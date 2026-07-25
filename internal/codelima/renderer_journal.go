@@ -3,9 +3,11 @@ package codelima
 import (
 	"slices"
 	"sync"
+
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
-const defaultRendererJournalBytes = 1024 * 1024
+const defaultRendererJournalBytes = daemon.MaxHandoffReplayBytesPerTerminal
 
 type rendererJournalEvent struct {
 	ID   uint64 `json:"id"`

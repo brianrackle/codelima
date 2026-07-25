@@ -1093,20 +1093,36 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	}
 
 	assertEnvironmentConfigCommands(t, configs, "codex",
-		"apt-get update && apt-get install -y ca-certificates curl git",
-		`curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`,
+		`apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`,
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`,
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g @openai/codex && ln -sfn "$guest_home/.local/bin/codex" /usr/local/bin/codex`,
 		`command -v codex >/dev/null 2>&1`,
 	)
 	assertEnvironmentConfigCommands(t, configs, "claude-code",
-		"curl -fsSL https://claude.ai/install.sh | bash",
+		`apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`,
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`,
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g @anthropic-ai/claude-code && ln -sfn "$guest_home/.local/bin/claude" /usr/local/bin/claude`,
+		`command -v claude >/dev/null 2>&1`,
 	)
 
 	config, err := service.EnvironmentConfigShow(context.Background(), "codex")
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}
-	if containsSubstring(config.BootstrapCommands, "npm") {
-		t.Fatalf("expected codex bootstrap to use the official standalone installer instead of npm, got %q", strings.Join(config.BootstrapCommands, "|"))
+	if !containsSubstring(config.BootstrapCommands, "npm install -g @openai/codex") ||
+		containsSubstring(config.BootstrapCommands, "chatgpt.com/codex/install.sh") ||
+		containsSubstring(config.BootstrapCommands, "sudo npm") {
+		t.Fatalf("expected codex bootstrap to use a user-owned npm installation, got %q", strings.Join(config.BootstrapCommands, "|"))
+	}
+
+	config, err = service.EnvironmentConfigShow(context.Background(), "claude-code")
+	if err != nil {
+		t.Fatalf("EnvironmentConfigShow(claude-code) error = %v", err)
+	}
+	if !containsSubstring(config.BootstrapCommands, "npm install -g @anthropic-ai/claude-code") ||
+		containsSubstring(config.BootstrapCommands, "claude.ai/install.sh") ||
+		containsSubstring(config.BootstrapCommands, "sudo npm") {
+		t.Fatalf("expected claude-code bootstrap to use a user-owned npm installation, got %q", strings.Join(config.BootstrapCommands, "|"))
 	}
 
 	if _, err := service.EnvironmentConfigUpdate(context.Background(), "codex", EnvironmentConfigUpdateInput{
@@ -1128,38 +1144,90 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	}
 }
 
-func TestCodexEnvironmentBootstrapCannotCompleteWithoutCodexExecutable(t *testing.T) {
+func TestAgentEnvironmentBootstrapCannotCompleteWithoutExecutable(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name       string
+		executable string
+	}{
+		{name: "codex", executable: "codex"},
+		{name: "claude-code", executable: "claude"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			service, workspace := newTestService(t)
+			writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+			node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: test.name + "-node"})
+			if err != nil {
+				t.Fatalf("NodeCreate() error = %v", err)
+			}
+
+			service.sandbox.(*fakeSandbox).failCommand = "command -v " + test.executable
+			if _, err := service.NodeStart(ctx, node.ID); err == nil {
+				t.Fatalf("NodeStart() succeeded without the selected %s executable", test.executable)
+			}
+
+			bootstrap, err := service.store.LoadBootstrapState(node.ID)
+			if err != nil {
+				t.Fatalf("LoadBootstrapState() error = %v", err)
+			}
+			if bootstrap.Completed {
+				t.Fatalf("%s bootstrap was marked complete after executable validation failed", test.name)
+			}
+			stored, err := service.store.NodeByID(node.ID)
+			if err != nil {
+				t.Fatalf("NodeByID() error = %v", err)
+			}
+			if stored.Status != NodeStatusFailed || stored.BootstrapCompleted {
+				t.Fatalf("failed %s bootstrap node = %#v", test.name, stored)
+			}
+		})
+	}
+}
+
+func TestUntouchedNativeAgentInstallersMigrateToUserOwnedNPM(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	service, workspace := newTestService(t)
-	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
-
-	// The default configuration includes the codex environment, whose final
-	// bootstrap command validates that the codex executable is installed.
-	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "codex-node"})
-	if err != nil {
-		t.Fatalf("NodeCreate() error = %v", err)
+	service, _ := newTestService(t)
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true) error = %v", err)
 	}
 
-	service.sandbox.(*fakeSandbox).failCommand = "command -v codex"
-	if _, err := service.NodeStart(ctx, node.ID); err == nil {
-		t.Fatal("NodeStart() succeeded without the selected codex executable")
+	legacyCommands := map[string][]string{
+		"codex": {
+			"apt-get update && apt-get install -y ca-certificates curl git",
+			`curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`,
+			`command -v codex >/dev/null 2>&1`,
+		},
+		"claude-code": {
+			"curl -fsSL https://claude.ai/install.sh | bash",
+		},
+	}
+	for slug, commands := range legacyCommands {
+		if _, err := service.EnvironmentConfigUpdate(ctx, slug, EnvironmentConfigUpdateInput{BootstrapCommands: commands}); err != nil {
+			t.Fatalf("EnvironmentConfigUpdate(%s) error = %v", slug, err)
+		}
+	}
+	writeFile(t, service.store.seedVersionPath(), "4\n")
+
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true, migrate) error = %v", err)
 	}
 
-	bootstrap, err := service.store.LoadBootstrapState(node.ID)
-	if err != nil {
-		t.Fatalf("LoadBootstrapState() error = %v", err)
-	}
-	if bootstrap.Completed {
-		t.Fatal("codex bootstrap was marked complete after executable validation failed")
-	}
-	stored, err := service.store.NodeByID(node.ID)
-	if err != nil {
-		t.Fatalf("NodeByID() error = %v", err)
-	}
-	if stored.Status != NodeStatusFailed || stored.BootstrapCompleted {
-		t.Fatalf("failed codex bootstrap node = %#v", stored)
+	for slug, packageName := range map[string]string{
+		"codex":       "@openai/codex",
+		"claude-code": "@anthropic-ai/claude-code",
+	} {
+		config, err := service.EnvironmentConfigShow(ctx, slug)
+		if err != nil {
+			t.Fatalf("EnvironmentConfigShow(%s) error = %v", slug, err)
+		}
+		if !containsSubstring(config.BootstrapCommands, "npm install -g "+packageName) {
+			t.Fatalf("expected %s native installer to migrate to npm, got %q", slug, strings.Join(config.BootstrapCommands, "|"))
+		}
 	}
 }
 

@@ -42,7 +42,7 @@ Verify:
 
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
 - schema version is `4`
-- seed version is `4`
+- seed version is `5`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
 - `small` is the implicit default and exists with 2 CPUs, 4096 MiB memory, 25600 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
 - the configuration list contains only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 2/4096/25600, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments
@@ -150,12 +150,31 @@ Verify:
 cat "$QA_ROOT/doctor.txt"
 grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ./bin/codelima shell qa-v3-root -- sh -lc 'test -f .qa-tools-installed && printf bootstrap-ok'
+./bin/codelima shell qa-v3-root -- sh -lc '
+  test "$(node -p '\''process.versions.node.split(".")[0]'\'')" -ge 22
+  guest_user="${SUDO_USER:-$(id -un)}"
+  guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"
+  test -n "$guest_home"
+  test "$(sudo -u "$guest_user" -H env HOME="$guest_home" npm config get prefix)" = "$guest_home/.local"
+  test "$(stat -c %U "$guest_home/.local/lib/node_modules/@openai/codex")" = "$guest_user"
+  test "$(stat -c %U "$guest_home/.local/lib/node_modules/@anthropic-ai/claude-code")" = "$guest_user"
+  test "$(readlink /usr/local/bin/codex)" = "$guest_home/.local/bin/codex"
+  test "$(readlink /usr/local/bin/claude)" = "$guest_home/.local/bin/claude"
+  codex --version
+  claude --version
+'
 ./bin/codelima node status qa-v3-root
 ./bin/codelima node stop qa-v3-root
 ./bin/codelima node status qa-v3-root
 ```
 
-Verify bootstrap prints `bootstrap-ok`, the first status is running, and the final status is stopped. Review runtime diagnostics to confirm the VM uses the node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must not invoke an `msb` subprocess.
+Verify bootstrap prints `bootstrap-ok`; Node reports major version 22 or newer;
+both agent version commands succeed; both npm package trees are owned by the
+Lima login user; the npm prefix is that user's `~/.local`; the two
+`/usr/local/bin` links target that prefix; the first status is running; and the
+final status is stopped. Review runtime diagnostics to confirm the VM uses the
+node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must not invoke an
+`msb` subprocess.
 
 On a macOS arm64 host where `doctor` reports `nested virtualization is enabled automatically`, verify every rendered node template reports `nestedVirtualization: true` and, while the node is running, this succeeds:
 
@@ -182,19 +201,34 @@ NODE_ID="$(./bin/codelima --json node show qa-v3-root | sed -n 's/.*"id": *"\([^
 ./bin/codelima --json terminal open "node:$NODE_ID" --kind node-host-shell > "$QA_ROOT/host-terminal.json"
 ./bin/codelima terminal list
 ./bin/codelima daemon status
+HOST_TERMINAL_ID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); print $j->{data}{terminal_id}' "$QA_ROOT/host-terminal.json")"
+export HOST_TERMINAL_ID
+./bin/codelima terminal send "$HOST_TERMINAL_ID" --text \
+  $'head -c 1100000 /dev/zero | tr \'\\0\' x; printf \'\\nlarge-handoff-ready\\n\'; sleep 30\r'
+attempt=0
+while :; do
+  ./bin/codelima terminal read "$HOST_TERMINAL_ID" --source recent > "$QA_ROOT/large-handoff-read.txt"
+  grep -q 'large-handoff-ready' "$QA_ROOT/large-handoff-read.txt" && break
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 40 ] || exit 1
+  sleep 0.25
+done
+./bin/codelima --json daemon snapshot > "$QA_ROOT/large-handoff-before.json"
+QA_HANDOFF_JOURNAL_BYTES="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{journal_bytes}' "$QA_ROOT/large-handoff-before.json")"
+test "$QA_HANDOFF_JOURNAL_BYTES" -ge 900000
 ./bin/codelima --json daemon update > "$QA_ROOT/daemon-update.json"
 cat "$QA_ROOT/daemon-update.json"
 ```
 
 Verify daemon startup succeeds, `session.json` is version 2 with no terminals, exactly one version-1 quarantine file exists, and the recovery warning names that file. Then verify both terminals target the same `node:<id>` and have different kinds. The no-argument update must replace the daemon PID, report `live_handoff: true`, and preserve both terminal IDs. On macOS it must not report `protocol not supported`, `legacy daemon did not stop`, or `daemon exited before becoming ready`; temporary endpoint files are not shutdown readiness signals. Send `pwd` to the host terminal and verify it resolves to the node's host directory. Send `pwd` to the guest terminal and verify it resolves to the node workspace.
+The update must also preserve `large-handoff-ready` from the host terminal whose
+renderer journal exceeded 900 KiB; no `handoff message size` error is allowed.
 
 Before closing the host terminal, verify renderer containment. Extract its
 shell PID, renderer PID, and renderer generation from a daemon snapshot, stop
 only the renderer, then generate shell output:
 
 ```sh
-HOST_TERMINAL_ID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); print $j->{data}{terminal_id}' "$QA_ROOT/host-terminal.json")"
-export HOST_TERMINAL_ID
 ./bin/codelima --json daemon snapshot > "$QA_ROOT/renderer-before.json"
 QA_SHELL_PID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{shell_pid}' "$QA_ROOT/renderer-before.json")"
 QA_RENDERER_PID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{HOST_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_pid}' "$QA_ROOT/renderer-before.json")"
@@ -328,8 +362,55 @@ clean without typing literal `^L` characters or clearing earlier terminal
 history.
 
 Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
+The cursor must advance with each echoed character without first jumping to an
+older position, jumping backward, or briefly appearing ahead of the echo.
+
+In that terminal, run `cmatrix -u 0`. From the second real terminal, identify
+the active terminal ID with `./bin/codelima terminal list`, leave `cmatrix`
+running for at least 15 seconds, and compare its renderer diagnostics:
+
+```sh
+export QA_CMATRIX_TERMINAL_ID='<active-terminal-id>'
+./bin/codelima --json daemon snapshot > "$QA_ROOT/cmatrix-before.json"
+sleep 15
+./bin/codelima --json daemon snapshot > "$QA_ROOT/cmatrix-after.json"
+test "$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{QA_CMATRIX_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_pid}' "$QA_ROOT/cmatrix-before.json")" = \
+  "$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{QA_CMATRIX_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_pid}' "$QA_ROOT/cmatrix-after.json")"
+test "$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{QA_CMATRIX_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_restart_count}' "$QA_ROOT/cmatrix-before.json")" = \
+  "$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{QA_CMATRIX_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_restart_count}' "$QA_ROOT/cmatrix-after.json")"
+test "$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); $id=$ENV{QA_CMATRIX_TERMINAL_ID}; print $j->{data}{terminal_runtimes}{$id}{renderer_state}' "$QA_ROOT/cmatrix-after.json")" = ready
+```
+
+Verify the animation keeps moving, the TUI chrome and another terminal remain
+responsive, and no repeated daemon-disconnected/reconnected message appears.
+Press `Ctrl+c`; it must stop only `cmatrix` and return to the existing prompt.
+
+Ensure the node has an adjacent terminal tab, run `cmatrix -u 0` again in the
+active tab, and press `Option+w` while its output is still unthrottled. The busy
+tab must disappear on the next frame, focus must move to the adjacent tab, and
+typing `printf 'close-responsive\n'` there must work immediately. From the
+second real terminal, verify the closed terminal ID disappears from
+`./bin/codelima terminal list` after its bounded daemon cleanup. Repeating the
+close shortcut must not produce a reconnect message or close the newly active
+tab.
 
 Leave both TUIs and all their terminal tabs idle for at least 30 seconds. In Activity Monitor, inspect every `codelima` process (the daemon and both TUI clients): none may remain near 100% CPU, and idle clients should settle near zero rather than consuming CPU in proportion to their open tab count. `msb` and the Virtual Machine Service are separate VM-runtime processes and are not part of this client/daemon idle assertion.
+
+After that idle interval, inspect the isolated QA logs:
+
+```sh
+if grep -q 'tui refresh failed.*i/o timeout' "$CODELIMA_HOME/_logs/codelima.log"; then
+  exit 1
+fi
+if grep -Eq 'renderer call (started|completed)' "$CODELIMA_HOME/_daemon/daemon.log"; then
+  exit 1
+fi
+```
+
+Verify the next terminal action still succeeds on the attached TUI, proving the
+request connection outlived its handshake timeout. Normal renderer calls must
+not emit per-operation info logs; renderer failures and calls slower than the
+diagnostic threshold may still appear.
 
 During that idle interval, verify no structured Lima warning or other
 subprocess diagnostic overwrites the TUI chrome. From the second terminal,
@@ -409,7 +490,14 @@ Verify:
 - arrows and `Ctrl+a`/`Ctrl+e` edit the guest command line without printing control sequences, `Ctrl+c` interrupts the guest job without closing its tab, and bracketed-paste markers never appear as text
 - focus-driven terminal width growth neither prints `^L` nor clears earlier terminal history
 - ordinary typed characters keep pace with input, remain ordered, and do not cause stale-screen flicker
+- the cursor follows echoed output monotonically without pre-echo or backward jumps
+- `cmatrix -u 0` runs for at least 15 seconds without renderer replacement,
+  terminal error floods, daemon reconnect messages, or loss of `Ctrl+c`
+- `Option+w` removes a busy terminal on the next frame, selects the adjacent
+  tab, and allows immediate input without a duplicate close or reconnect
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
+- an idle TUI request connection survives beyond its handshake timeout without recurring `tui refresh failed` socket timeouts
+- normal renderer operations do not emit per-call start/completion log pairs
 - an open TUI automatically reconnects after daemon update, keeps the original terminal IDs, and accepts fresh input exactly once after authoritative synchronization
 - quitting and reopening the TUI preserves surviving per-node operator-defined tab order
 - quitting and reopening two disjoint path-scoped TUIs preserves both tabs in each process

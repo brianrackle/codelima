@@ -330,22 +330,7 @@ func TestParseLimaSSHConfigRestrictsPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	instanceDir := filepath.Join(home, "demo")
-	if err := os.MkdirAll(instanceDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	identity := filepath.Join(home, "_config", "user")
-	if err := os.MkdirAll(filepath.Dir(identity), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(identity, []byte("private"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	configPath := filepath.Join(instanceDir, "ssh.config")
-	config := "Host lima-demo\n  IdentityFile \"" + identity + "\"\n  User lima\n  Hostname 127.0.0.1\n  Port 60022\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n"
-	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	configPath, identity, config := writeTestLimaSSHConfig(t, home, "demo")
 	got, err := parseLimaSSHConfig(configPath, home)
 	if err != nil {
 		t.Fatalf("parseLimaSSHConfig() error = %v", err)
@@ -361,6 +346,55 @@ func TestParseLimaSSHConfigRestrictsPaths(t *testing.T) {
 	if _, err := parseLimaSSHConfig(outside, home); err == nil {
 		t.Fatal("outside SSH config unexpectedly accepted")
 	}
+}
+
+func TestForwardingSSHConfigUsesConfiguredLimaHome(t *testing.T) {
+	t.Parallel()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath, identity, _ := writeTestLimaSSHConfig(t, home, "demo")
+	client := NewLimaClient(t.TempDir())
+	client.LimaHome = home
+	client.observer.mu.Lock()
+	client.observer.started = true
+	client.observer.observations["demo"] = RuntimeObservation{
+		Name:          "demo",
+		Exists:        true,
+		Status:        ObservationRunning,
+		SSHConfigFile: configPath,
+	}
+	client.observer.mu.Unlock()
+
+	got, err := client.ForwardingSSHConfig(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("ForwardingSSHConfig() error = %v", err)
+	}
+	if got.User != "lima" || got.Host != "127.0.0.1" || got.Port != 60022 || got.IdentityFile != identity {
+		t.Fatalf("ForwardingSSHConfig() = %#v", got)
+	}
+}
+
+func writeTestLimaSSHConfig(t *testing.T, home, instance string) (string, string, string) {
+	t.Helper()
+	instanceDir := filepath.Join(home, instance)
+	if err := os.MkdirAll(instanceDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	identity := filepath.Join(home, "_config", "user")
+	if err := os.MkdirAll(filepath.Dir(identity), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(identity, []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(instanceDir, "ssh.config")
+	config := "Host lima-" + instance + "\n  IdentityFile \"" + identity + "\"\n  User lima\n  Hostname 127.0.0.1\n  Port 60022\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return configPath, identity, config
 }
 
 func TestLimaCommandErrorMapping(t *testing.T) {

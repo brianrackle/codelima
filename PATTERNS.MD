@@ -14,6 +14,16 @@ Node creation resolves a configuration and copies every effective value into nod
 
 The `small` configuration is the editable but non-renamable and non-deletable implicit default. It references the built-in `codex` and `claude-code` environments on a fresh home, so nodes created without an explicit configuration install both coding agents. Seed/repair preserves existing `small` values except for explicit, revision-gated migrations that match the complete former stock preset; seed revision 4 moves untouched 1/1/10 records to the new 2/4/25 default while customized records remain unchanged. New configurations are deep copies of its current value rather than children that inherit future changes.
 
+Built-in coding-agent environments share a user-owned npm installation pattern:
+install their system Node.js prerequisite at the root bootstrap boundary,
+resolve Lima's login user from `SUDO_USER`, configure that user's npm prefix
+under `~/.local`, run npm after dropping privileges, and publish a stable
+`/usr/local/bin` link. Validate the public command before bootstrap completes.
+Keep each environment independently installable. Seed revision 5 migrates only
+environment records that exactly match a known prior built-in; customized and
+deleted records remain authoritative, and already-created nodes keep their
+frozen bootstrap snapshots.
+
 Built-in sizes are persisted configurations, not synthetic UI rows. Seed them through the store so CLI and TUI consumers agree, order them by size instead of alphabetically, and treat any existing record—including a soft-deleted tombstone—as user-owned. A seed-revision bump may add a genuinely missing size to an older home, but repair must never overwrite a customized configuration or resurrect a deleted optional size. If a formerly optional record becomes a required protected default, restore its tombstone in place so custom values and identity survive. Retire the former `default` configuration with a tombstone rather than removing its record: it disappears from live lists while existing nodes can still hydrate their historical configuration ID and slug.
 
 ## Canonical directory binding
@@ -78,7 +88,7 @@ when regular files work.
 
 The daemon owns HTTP/WebSocket forwarding for discovered guest listeners. The earliest active route on a port claims both `localhost:{guest-port}` and `127.0.0.1:{guest-port}` until that guest listener disappears; the next active claimant takes over during the one-second reconciliation loop. Bind each logical host port on both `127.0.0.1` and `::1`, serve both sockets from the same route registry, and roll back the other socket when either address family has a real bind conflict so hostname resolution cannot select a different owner. An unavailable IPv6 stack may fall back to IPv4; never replace explicit loopback binds with a wildcard listener. Treat only the exact IPv4 loopback address as a generic Host alias, preserve the original request `Host` upstream, and keep the claim ephemeral rather than persisting it.
 
-Host routing at `{node-slug}.localhost:{guest-port}` always chooses the named node, so several nodes can use the same guest port regardless of the generic claimant. Traffic travels over one persistent Go SSH client per running Lima node. Resolve the localhost endpoint and identity only from the Lima-owned `ssh.config`, validate its ownership, permissions, and containment under `LIMA_HOME`, and do not modify global SSH configuration. Discovery accepts IPv4 and IPv6 guest-loopback listeners, so each new tunnel connection tries `127.0.0.1` and then `::1`; keep accepted discovery addresses and dial targets aligned. Host bind conflicts remain observable and are retried every reconciliation.
+Host routing at `{node-slug}.localhost:{guest-port}` always chooses the named node, so several nodes can use the same guest port regardless of the generic claimant. Traffic travels over one persistent Go SSH client per running Lima node. Take the generated `ssh.config` path from Lima's machine-readable instance observation, but resolve its containment trust root from CodeLima's configured `LIMA_HOME`; `limactl list --json` does not own or need to repeat that process configuration. Parse the localhost endpoint and identity only from that Lima-owned config, validate its ownership, permissions, and containment under the resolved home, and do not modify global SSH configuration. Discovery accepts IPv4 and IPv6 guest-loopback listeners, so each new tunnel connection tries `127.0.0.1` and then `::1`; keep accepted discovery addresses and dial targets aligned. Host bind conflicts remain observable and are retried every reconciliation.
 
 Reuse that same one-second SSH observation for per-node guest telemetry instead
 of starting another runtime process or multiplying samples by TUI client count.
@@ -116,32 +126,58 @@ Every managed terminal starts from `Service.TerminalLaunchSpec`. Guest shells re
 Daemon terminal sessions are serialized, pure-Go owners of the shell, PTY,
 ordered renderer journal, and immutable snapshot cache. Every Ghostty instance
 runs in a dedicated, separately packaged renderer-worker process. The PTY
-reader must never wait for renderer IPC: enqueue a bounded output event or let
-the terminal-local supervisor kill and rebuild that renderer from the journal.
+reader applies backpressure only to its own PTY when the bounded renderer
+mutation lane is full; do not convert ordinary producer pressure into renderer
+failure or broadcast one terminal error per rejected chunk. Keep tracked health
+and lifecycle calls on a separate control lane so a non-returning native call
+still causes terminal-local replacement while daemon control and other
+terminals remain independent.
 Fence renderer frames by role generation, use stable journal-event IDs, and
 deduplicate renderer-generated PTY writes by source event plus ordinal before
 committing them. Suppress renderer-generated application responses while
 replaying old output; an omitted uncertain response is safer than duplicating
-input to the live application. Periodic health requests must cross the same
-actor queue as Ghostty calls; a socket-only worker ping does not prove native
-progress. A renderer failure may stale one cached screen; it must not change
-that terminal's shell PID or delay another terminal or daemon status.
+input to the live application. Fire-and-forget mutations retain unique IDs for
+that deduplication but emit no response frame. Periodic health requests must
+reach the same actor as Ghostty calls; a socket-only worker ping does not prove
+native progress. Track the journal replay high-water mark across replacement so
+a waiting PTY chunk is applied either by replay or by the new live link, never
+both. A renderer failure may stale one cached screen; it must not change that
+terminal's shell PID or delay another terminal or daemon status.
+Renderer mutations acknowledge after applying to the actor and enqueue a
+capacity-one dirty edge only when the renderer invalidates visual state; key
+encoding must not publish an unchanged pre-echo screen. A separate publisher
+builds the full immutable snapshot/read bundle at a bounded active cadence and
+does not tick while idle.
+Publish initialization and explicit recovery requests immediately. Work that
+arrives during publication must retain one trailing edge so the newest state is
+eventually visible. Log renderer failures and latency outliers, not normal
+per-call start/completion pairs.
 
 Clients send commands for input, resize, snapshot, focus, clipboard, and close;
 they do not call Ghostty or PTY state concurrently. Normal read and snapshot
 RPCs return immutable cache data only. Dirty notifications are edge-triggered
-and clients pull snapshots, preventing redraw loops. Never poll immutable
+and clients pull snapshots, preventing redraw loops. Broadcast the fresh cache
+publication once; do not precede it with a second stale dirty notification.
+Focus RPCs are transition-driven rather than repeated by periodic TUI refresh.
+Treat snapshot sequence, not only output generation or geometry, as the client
+redraw identity so cursor- and viewport-only changes remain visible.
+Never poll immutable
 terminal grids on an idle timer: route dirty notifications through the
 single-owner UI loop, retain only a dirty version for hidden tabs, and let the
 active tab wake a capacity-one snapshot worker with a bounded frame cadence.
 Keep terminal input off the TUI event loop: enqueue semantic events onto one
 FIFO worker per daemon terminal, stop admission and drain accepted input on
 detach, surface asynchronous delivery failures, and redraw payload input only
-after a fresh snapshot arrives. Preserve semantic input boundaries across the
-client/daemon seam: buffer Vaxis paste keys until `PasteEndEvent`, send bounded
-UTF-8-safe semantic paste chunks, and let the isolated renderer re-create
-paste-start/payload/paste-end so Ghostty remains the owner of bracketed-paste
-mode. Preserve LF in paste data; a pasted newline is text, not an Enter key.
+after a fresh snapshot arrives. Explicit tab close also stops admission
+synchronously, but its accepted-input drain and bounded, single-shot daemon
+close request run after the client-owned tab has been removed so remote latency
+never holds the TUI event loop. Detach remains a synchronous drain because it
+preserves the daemon-owned terminal. Preserve semantic input boundaries across
+the client/daemon seam: buffer Vaxis paste keys until `PasteEndEvent`, send
+bounded UTF-8-safe semantic paste chunks, and let the isolated renderer
+re-create paste-start/payload/paste-end so Ghostty remains the owner of
+bracketed-paste mode. Preserve LF in paste data; a pasted newline is text, not
+an Enter key.
 
 Terminal tabs are independent terminal instances attached to one node target. Per-target state keeps ordered tab IDs, a monotonic counter, active selection, and the last open error. Selecting a running node ensures a terminal tab, reusing any existing node tab and opening a guest tab only when none exists. `Option+t` adds another guest tab and `Option+Shift+t` adds a host tab; all use the same switch, move, close, refresh, and active-tab paths. Moving swaps the active identity with one adjacent same-target tab without wrapping or changing activation. Never open a guest tab for a stopped node.
 
@@ -168,7 +204,7 @@ event delivery and snapshot/redraw handling.
 
 ## Exact daemon protocol and live update
 
-The private Unix-socket daemon protocol is newline-delimited JSON with an exact binary-version handshake, a bounded frame size, peer-credential checks, typed error responses, and explicit input ownership. Any request-shape change bumps the protocol version; semantic paste was introduced in protocol 3, and daemon-owned tab movement is protocol 4, preventing stale daemons from accepting mutations they cannot interpret. Interactive TUI connection setup must finish by claiming input ownership, even when `hello` reports an existing owner; this makes the newest interactive TUI authoritative and prevents delayed terminal opens from discovering an observe-only connection. Because handshake ownership becomes stale when another TUI connects, every TUI window-focus event sends the separate idempotent `input.takeover` request before subsequent user input. Revocation is an expected internal handoff and must not be rendered as a TUI error; surface only a failed takeover. Do not recover by replaying a failed terminal mutation. Apply read deadlines to protocol phases that must make prompt progress: the initial handshake and event subscription. Clear the server-side deadline for authenticated request clients and subscribed event clients because a valid TUI session may be idle indefinitely. A client event reader may use bounded idle reads, but it retries only timeout errors; context cancellation, shutdown/update commit, and permanent socket errors terminate the reader once. Schema/session format changes bump their own version constants.
+The private Unix-socket daemon protocol is newline-delimited JSON with an exact binary-version handshake, a bounded frame size, peer-credential checks, typed error responses, and explicit input ownership. Any request-shape change bumps the protocol version; semantic paste was introduced in protocol 3, and daemon-owned tab movement is protocol 4, preventing stale daemons from accepting mutations they cannot interpret. Interactive TUI connection setup must finish by claiming input ownership, even when `hello` reports an existing owner; this makes the newest interactive TUI authoritative and prevents delayed terminal opens from discovering an observe-only connection. Because handshake ownership becomes stale when another TUI connects, every TUI window-focus event sends the separate idempotent `input.takeover` request before subsequent user input. Revocation is an expected internal handoff and must not be rendered as a TUI error; surface only a failed takeover. Do not recover by replaying a failed terminal mutation. Apply read deadlines to protocol phases that must make prompt progress: the initial handshake and event subscription. Clear the server-side deadline for authenticated request clients and subscribed event clients because a valid TUI session may be idle indefinitely. The request client must likewise clear its connection-wide handshake deadline before starting the long-lived response reader; an absolute deadline applies to future reads until explicitly cleared. Bound established request writes and pending calls individually. A client event reader may use bounded idle reads, but it retries only timeout errors; context cancellation, shutdown/update commit, and permanent socket errors terminate the reader once. Schema/session format changes bump their own version constants.
 
 Treat every physical daemon connection as disposable. One stable logical
 client identity may advance through many connection generations. After EOF,
@@ -200,7 +236,7 @@ for the first record.
 
 Daemon terminal sessions are recoverable cache state, not authoritative node metadata. `restore: forget` replaces that cache without parsing it. Under `restore: respawn`, an unsupported or malformed session is atomically renamed beside the live path, a fresh current-version session is written, and startup continues with a warning. Keep strict schema rejection for authoritative stores; use quarantine-and-reset only for state whose loss changes convenience rather than data truth.
 
-Live update transfers PTY file descriptors over an authenticated, length-prefixed Unix stream with SCM_RIGHTS. Never assume stream read boundaries equal writes: frame every bounded JSON payload and collect ancillary descriptors while reading the exact frame. Reject descriptors on control frames and duplicate or unknown terminal descriptors rather than ignoring or leaking them. The CLI resolves and sends its own executable even when no path is given; never resolve an omitted replacement inside the old daemon. Daemon lifecycle management alone may authenticate with the running daemon's persisted protocol-2-or-newer identity to cross an exact-version boundary: update explicitly takes input ownership, while startup recovery may only stop the matching daemon. Import is staged, acknowledged, and committed; a failed import rolls back to the old daemon. Only the exact legacy-Darwin `unixpacket` unsupported error may fall back to a clean stop/start; do not turn generic handoff errors into destructive restarts. Integration paths and unit tests that create Unix sockets use `internal/testutil.TempDir`, which keeps disposable paths short and under the project-rooted `tmp/tests` directory so Darwin's smaller `sun_path` limit is exercised portably.
+Live update transfers PTY file descriptors over an authenticated, length-prefixed Unix stream with SCM_RIGHTS. Never assume stream read boundaries equal writes: frame every bounded JSON payload and collect ancillary descriptors while reading the exact frame. Keep the manifest metadata-only and transfer bounded renderer replay in ordered per-terminal chunks; raw replay that fits its journal can exceed one frame after JSON base64 expansion. Validate per-terminal and total replay allocation before accepting chunks, require contiguous offsets, and reject descriptors on replay or control frames. Reject duplicate or unknown terminal descriptors rather than ignoring or leaking them. The CLI resolves and sends its own executable even when no path is given; never resolve an omitted replacement inside the old daemon. Daemon lifecycle management alone may authenticate with the running daemon's persisted protocol-2-or-newer identity to cross an exact-version boundary: update explicitly takes input ownership, while startup recovery may only stop the matching daemon. Import is staged, acknowledged, and committed; a failed import rolls back to the old daemon. Only the exact legacy-Darwin `unixpacket` unsupported error may fall back to a clean stop/start; do not turn generic handoff errors into destructive restarts. Integration paths and unit tests that create Unix sockets use `internal/testutil.TempDir`, which keeps disposable paths short and under the project-rooted `tmp/tests` directory so Darwin's smaller `sun_path` limit is exercised portably.
 
 Treat terminal geometry as one invariant across the wrapper, emulator, and PTY. A handoff replacement must resize the emulator to the captured dimensions before attaching the transferred PTY and replaying output; assigning wrapper fields alone corrupts cell-row strides, while resizing after attachment can send an unnecessary `SIGWINCH` to the child.
 

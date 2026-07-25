@@ -23,6 +23,7 @@ type rendererWorkerFrame struct {
 	Type       string          `json:"type"`
 	ID         uint64          `json:"id,omitempty"`
 	Generation uint64          `json:"generation"`
+	NoReply    bool            `json:"no_reply,omitempty"`
 	Method     string          `json:"method,omitempty"`
 	Params     json.RawMessage `json:"params,omitempty"`
 	Result     json.RawMessage `json:"result,omitempty"`

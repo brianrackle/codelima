@@ -48,9 +48,25 @@ The Ghostty terminal integration requires cgo. Make enables cgo for every recipe
 executables. The helper is not a user-facing command: a daemon-owned terminal
 starts it only through an inherited Unix socket descriptor, generation-fences
 the link, and kills that process when a native operation exceeds its deadline.
+Applied renderer mutations publish immutable screen/read bundles through a
+capacity-one dirty edge at no more than 20 FPS; initialization and explicit
+recovery snapshots remain immediate. Normal renderer calls do not write
+start/completion info records, while failures and calls exceeding 250
+milliseconds remain logged. Bulk output and ordered input share a bounded
+mutation lane that backpressures only the owning PTY. Tracked health and
+lifecycle calls use a separate control lane, and fire-and-forget mutations keep
+unique event IDs without generating response frames.
 Keeping the worker as a separate executable makes the native-code boundary
 visible in the package graph and prevents the daemon from entering Ghostty
 through a hidden mode of its own executable.
+
+Handoff version 4 keeps terminal metadata in the manifest and transfers each
+renderer replay through ordered 512 KiB raw chunks. JSON base64 expansion keeps
+every encoded chunk below the 1 MiB frame limit. Import caps one terminal at 1
+MiB and the complete handoff at 64 MiB before allocating or accepting replay.
+A new importer accepts a version-3 stream manifest when that old daemon can
+encode it below its compiled limit; an already-oversized version-3 sender
+requires closing high-history tabs or one terminal-restarting stop/start.
 
 Useful supporting targets:
 
@@ -75,6 +91,16 @@ clean cache so template resolution/download failures are visible. The gated
 `make test-lima-native` recipe resolves the Ubuntu template and validates the
 CodeLima-rendered YAML with the installed `limactl`.
 
+The built-in `codex` and `claude-code` environments share one Node.js 22
+prerequisite and user-owned npm-prefix pattern. Noninteractive Lima commands
+still cross the single root boundary in `LimaClient.Shell`; the agent installers
+then resolve `SUDO_USER`, run npm as that login user, and expose only stable
+links in `/usr/local/bin`. Keep the two npm package commands independently
+usable because either environment may be selected without the other. A new
+installer definition requires a seed-revision bump plus exact legacy specs so
+untouched environment records upgrade while customized and deleted records do
+not. Existing node bootstrap snapshots remain frozen.
+
 macOS release qualification must exercise nested virtualization on an Apple
 silicon host where Virtualization.framework reports it supported and an
 unsupported macOS case. Confirm `doctor`, newly rendered YAML, and `/dev/kvm`
@@ -85,11 +111,14 @@ remains false while the ordinary QEMU/KVM host checks still pass.
 Dynamic forwarding uses the pinned `golang.org/x/crypto/ssh` module and a
 persistent client per running node. Connection data comes only from Lima's
 generated instance `ssh.config`; no hidden runtime helper or host OpenSSH
-process is launched per node. The daemon also owns one `limactl watch --json`
-observation process. Release qualification must verify generic `localhost` and
-`127.0.0.1` claimant selection, one-second bind retry and claimant transfer,
-and `{node}.localhost` HTTP and Upgrade traffic on both native platforms,
-including two nodes sharing one guest port and a guest-loopback-only service.
+process is launched per node. The config path comes from Lima's machine output,
+while its ownership and containment trust root comes from CodeLima's resolved
+`LIMA_HOME`; do not require a `LimaHome` field in `limactl list --json`. The
+daemon also owns one `limactl watch --json` observation process. Release
+qualification must verify generic `localhost` and `127.0.0.1` claimant
+selection, one-second bind retry and claimant transfer, and
+`{node}.localhost` HTTP and Upgrade traffic on both native platforms, including
+two nodes sharing one guest port and a guest-loopback-only service.
 
 ## Self-Hosted Development Metadata
 
@@ -207,9 +236,23 @@ Standard release flow:
 1. Ensure `make verify` passes locally.
 2. Ensure `make test-race` and `make test-integration` pass locally.
 3. Complete every flow in `QA.md`, including native macOS VZ, Linux QEMU/KVM, Lima observation/forwarding, and interactive TUI checks.
-4. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
-5. Ensure the tap repo settings and token are configured.
-6. Create and push the release tag:
+4. Leave an attached TUI idle beyond the request timeout, then verify its next
+   terminal action uses the existing connection without a `tui refresh failed`
+   timeout. Generate sustained terminal output and verify rendering remains
+   responsive, renderer snapshots stay within the 20 FPS ceiling, and the
+   daemon log contains neither normal per-call renderer records nor repeated
+   stale/fresh dirty pairs. Run `cmatrix -u 0` for at least 15 seconds and
+   verify the renderer PID/generation stays ready, the prompt returns after
+   `Ctrl+c`, and no `queue-full` connection closure or repeated daemon
+   reconnection appears. Start it once more in a terminal with an adjacent tab,
+   press `Option+w`, and verify the busy tab disappears immediately without
+   freezing cursor or tab selection while daemon cleanup completes.
+5. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
+   Fill at least one renderer journal above 900 KiB before one update and
+   verify handoff version 4 preserves its terminal ID, shell PID, final replay
+   marker, and responsive daemon.
+6. Ensure the tap repo settings and token are configured.
+7. Create and push the release tag:
 
 ```sh
 git tag v1.2.3

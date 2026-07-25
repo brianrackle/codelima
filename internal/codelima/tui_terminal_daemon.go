@@ -52,9 +52,11 @@ type daemonTUITerminal struct {
 	snapshot            daemon.Snapshot
 	text                string
 	focused             bool
+	focusVersion        uint64
 	closed              bool
 	stop                chan struct{}
 	stopOnce            sync.Once
+	closeOnce           sync.Once
 	generation          uint64
 	snapshotWake        chan struct{}
 	snapshotVersion     uint64
@@ -287,41 +289,74 @@ func daemonCellStyle(cell daemon.SnapshotCell) vaxis.Style {
 }
 
 func (t *daemonTUITerminal) Close() {
-	t.detach()
-	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
-	defer cancel()
-	_ = t.client.Call(ctx, "terminal.close", map[string]string{"terminal_id": t.id}, nil)
+	// CloseSession runs on the Vaxis event loop. Stop local input admission
+	// before returning, but let already accepted input and the bounded daemon
+	// close request finish without holding that UI actor.
+	inputDone := t.beginDetach()
+	t.closeOnce.Do(func() {
+		go func() {
+			if inputDone != nil {
+				<-inputDone
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
+			defer cancel()
+			_ = t.client.Call(ctx, "terminal.close", map[string]string{"terminal_id": t.id}, nil)
+		}()
+	})
 }
 
 func (t *daemonTUITerminal) Detach() { t.detach() }
 
 func (t *daemonTUITerminal) detach() {
+	inputDone := t.beginDetach()
+	if inputDone != nil {
+		<-inputDone
+	}
+}
+
+func (t *daemonTUITerminal) beginDetach() <-chan struct{} {
 	t.stopOnce.Do(func() {
 		t.inputMu.Lock()
 		t.mu.Lock()
 		t.closed = true
 		t.mu.Unlock()
 		close(t.stop)
-		inputDone := t.inputDone
 		t.inputMu.Unlock()
-		if inputDone != nil {
-			<-inputDone
-		}
 	})
+	t.inputMu.Lock()
+	defer t.inputMu.Unlock()
+	return t.inputDone
 }
 
 func (t *daemonTUITerminal) Focus() {
 	t.mu.Lock()
+	if t.closed || t.focused {
+		t.mu.Unlock()
+		return
+	}
 	t.focused = true
+	t.focusVersion++
+	focusVersion := t.focusVersion
 	t.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
 	defer cancel()
-	_ = t.client.Call(ctx, "terminal.focus", map[string]string{"terminal_id": t.id}, nil)
+	if err := t.client.Call(ctx, "terminal.focus", map[string]string{"terminal_id": t.id}, nil); err != nil {
+		t.mu.Lock()
+		if t.focused && t.focusVersion == focusVersion {
+			t.focused = false
+		}
+		t.mu.Unlock()
+	}
 }
 
 func (t *daemonTUITerminal) Blur() {
 	t.mu.Lock()
+	if !t.focused {
+		t.mu.Unlock()
+		return
+	}
 	t.focused = false
+	t.focusVersion++
 	t.mu.Unlock()
 }
 
@@ -428,7 +463,10 @@ func (t *daemonTUITerminal) snapshotLoop() {
 			continue
 		}
 		t.mu.Lock()
-		changed := snapshot.Generation != t.generation || snapshot.Cols != t.snapshot.Cols || snapshot.Rows != t.snapshot.Rows
+		changed := snapshot.SnapshotSequence != t.snapshot.SnapshotSequence ||
+			snapshot.Generation != t.generation ||
+			snapshot.Cols != t.snapshot.Cols ||
+			snapshot.Rows != t.snapshot.Rows
 		t.snapshot = snapshot
 		t.generation = snapshot.Generation
 		t.text = daemonSnapshotText(snapshot)

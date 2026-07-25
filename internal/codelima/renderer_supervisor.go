@@ -28,6 +28,11 @@ const (
 	rendererWorkerExecutableName  = "codelima-renderer-worker"
 )
 
+var (
+	errRendererLinkClosed        = errors.New("renderer link closed")
+	errRendererOutboundQueueFull = errors.New("renderer outbound queue full")
+)
+
 type rendererProcessOptions struct {
 	Executable     string
 	Args           []string
@@ -68,18 +73,20 @@ type rendererSupervisor struct {
 	onEvent    func(uint64, rendererWorkerFrame)
 	onRestart  func()
 
-	mu           sync.Mutex
-	link         *rendererLink
-	generation   uint64
-	acceptFrames bool
-	closed       bool
-	restarts     []time.Time
-	lastError    string
-	lastProbe    time.Time
-	restartWake  chan struct{}
-	shutdown     chan struct{}
-	done         chan struct{}
-	status       atomic.Pointer[rendererSupervisorStatus]
+	mu            sync.Mutex
+	ready         *sync.Cond
+	link          *rendererLink
+	generation    uint64
+	replayThrough uint64
+	acceptFrames  bool
+	closed        bool
+	restarts      []time.Time
+	lastError     string
+	lastProbe     time.Time
+	restartWake   chan struct{}
+	shutdown      chan struct{}
+	done          chan struct{}
+	status        atomic.Pointer[rendererSupervisorStatus]
 }
 
 func newRendererSupervisor(
@@ -109,6 +116,7 @@ func newRendererSupervisor(
 		shutdown:    make(chan struct{}),
 		done:        make(chan struct{}),
 	}
+	supervisor.ready = sync.NewCond(&supervisor.mu)
 	supervisor.publishStatus("starting", 0, "")
 	go supervisor.run()
 	return supervisor
@@ -166,6 +174,7 @@ func (s *rendererSupervisor) startRenderer(ctx context.Context, cols, rows int) 
 		}
 		s.lastError = err.Error()
 		s.publishStatusLocked("degraded", 0)
+		s.ready.Broadcast()
 		s.mu.Unlock()
 		return err
 	}
@@ -176,14 +185,47 @@ func (s *rendererSupervisor) startRenderer(ctx context.Context, cols, rows int) 
 		return errors.New("renderer generation superseded during startup")
 	}
 	s.link = link
+	if len(journal.Events) > 0 {
+		s.replayThrough = journal.Events[len(journal.Events)-1].ID
+	}
 	s.lastProbe = time.Now()
 	s.lastError = ""
 	s.publishStatusLocked("ready", link.PID())
+	s.ready.Broadcast()
 	return nil
 }
 
-func (s *rendererSupervisor) TryOutput(event rendererJournalEvent) error {
-	return s.trySend("output", rendererOutputParams{EventID: event.ID, Data: event.Data})
+func (s *rendererSupervisor) SendOutput(event rendererJournalEvent) error {
+	for {
+		s.mu.Lock()
+		for !s.closed && (s.link == nil || !s.acceptFrames) {
+			s.ready.Wait()
+		}
+		if s.closed {
+			s.mu.Unlock()
+			return errTerminalClosed
+		}
+		if event.ID <= s.replayThrough {
+			s.mu.Unlock()
+			return nil
+		}
+		link := s.link
+		s.mu.Unlock()
+
+		err := link.NotifyOutput(s.shutdown, rendererOutputParams{EventID: event.ID, Data: event.Data})
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errRendererLinkClosed) {
+			return err
+		}
+
+		s.mu.Lock()
+		for !s.closed && s.link == link && s.acceptFrames {
+			s.ready.Wait()
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *rendererSupervisor) TryResize(event rendererJournalEvent) error {
@@ -215,14 +257,9 @@ func (s *rendererSupervisor) trySend(method string, params any) error {
 		return errTerminalClosed
 	}
 	if link == nil {
-		s.requestRestart(errors.New("renderer is not connected"))
 		return errors.New("renderer is not connected")
 	}
-	if _, err := link.TryCall(method, params); err != nil {
-		s.requestRestart(err)
-		return err
-	}
-	return nil
+	return link.Notify(s.shutdown, method, params)
 }
 
 func (s *rendererSupervisor) handleFrame(frame rendererWorkerFrame) {
@@ -259,11 +296,16 @@ func (s *rendererSupervisor) requestRestart(err error) {
 		s.mu.Unlock()
 		return
 	}
+	if !s.acceptFrames {
+		s.mu.Unlock()
+		return
+	}
 	if err != nil {
 		s.lastError = err.Error()
 	}
 	s.acceptFrames = false
 	s.publishStatusLocked("restarting", 0)
+	s.ready.Broadcast()
 	onRestart := s.onRestart
 	s.mu.Unlock()
 	if onRestart != nil {
@@ -338,6 +380,7 @@ func (s *rendererSupervisor) restart() {
 			s.link = nil
 		}
 		s.publishStatusLocked("degraded", 0)
+		s.ready.Broadcast()
 		s.mu.Unlock()
 		return
 	}
@@ -346,6 +389,7 @@ func (s *rendererSupervisor) restart() {
 	s.link = nil
 	s.acceptFrames = false
 	s.publishStatusLocked("restarting", 0)
+	s.ready.Broadcast()
 	s.mu.Unlock()
 	if old != nil {
 		old.Fail(errors.New("renderer replaced by supervisor"))
@@ -395,6 +439,7 @@ func (s *rendererSupervisor) Close() {
 	s.closed = true
 	s.acceptFrames = false
 	close(s.shutdown)
+	s.ready.Broadcast()
 	link := s.link
 	s.link = nil
 	s.publishStatusLocked("closed", 0)
@@ -463,6 +508,7 @@ type rendererLink struct {
 	onFrame    func(rendererWorkerFrame)
 
 	outbound chan rendererWorkerFrame
+	control  chan rendererWorkerFrame
 	done     chan struct{}
 	stop     chan struct{}
 	failOnce sync.Once
@@ -516,6 +562,7 @@ func startRendererLink(options rendererProcessOptions, generation uint64, onFram
 		command:    command,
 		onFrame:    onFrame,
 		outbound:   make(chan rendererWorkerFrame, options.QueueFrames),
+		control:    make(chan rendererWorkerFrame, options.QueueFrames),
 		done:       make(chan struct{}),
 		stop:       make(chan struct{}),
 		pending:    make(map[uint64]rendererPending),
@@ -561,6 +608,34 @@ func (l *rendererLink) TryCall(method string, params any) (uint64, error) {
 	return l.enqueue(method, params, nil)
 }
 
+func (l *rendererLink) Notify(stop <-chan struct{}, method string, params any) error {
+	raw, err := marshalRendererParams(params)
+	if err != nil {
+		return err
+	}
+	id := l.nextID.Add(1)
+	frame := rendererWorkerFrame{
+		Type:       rendererFrameRequest,
+		ID:         id,
+		Generation: l.generation,
+		NoReply:    true,
+		Method:     method,
+		Params:     raw,
+	}
+	select {
+	case l.outbound <- frame:
+		return nil
+	case <-l.stop:
+		return errRendererLinkClosed
+	case <-stop:
+		return errTerminalClosed
+	}
+}
+
+func (l *rendererLink) NotifyOutput(stop <-chan struct{}, params rendererOutputParams) error {
+	return l.Notify(stop, "output", params)
+}
+
 func (l *rendererLink) Call(ctx context.Context, method string, params any) error {
 	waiter := make(chan error, 1)
 	_, err := l.enqueue(method, params, waiter)
@@ -597,27 +672,33 @@ func (l *rendererLink) enqueue(method string, params any, waiter chan error) (ui
 	}
 	l.mu.Unlock()
 	select {
-	case l.outbound <- frame:
+	case l.control <- frame:
 		return id, nil
 	case <-l.stop:
 		l.removePending(id)
-		return 0, errors.New("renderer link closed")
+		return 0, errRendererLinkClosed
 	default:
 		l.removePending(id)
-		return 0, errors.New("renderer outbound queue full")
+		return 0, errRendererOutboundQueueFull
 	}
 }
 
 func (l *rendererLink) writer() {
 	for {
+		var frame rendererWorkerFrame
 		select {
-		case frame := <-l.outbound:
-			_ = l.conn.SetWriteDeadline(time.Now().Add(defaultRendererCommandTimeout))
-			if err := writeRendererFrame(l.conn, frame); err != nil {
-				l.Fail(fmt.Errorf("write renderer frame: %w", err))
+		case frame = <-l.control:
+		default:
+			select {
+			case frame = <-l.control:
+			case frame = <-l.outbound:
+			case <-l.stop:
 				return
 			}
-		case <-l.stop:
+		}
+		_ = l.conn.SetWriteDeadline(time.Now().Add(defaultRendererCommandTimeout))
+		if err := writeRendererFrame(l.conn, frame); err != nil {
+			l.Fail(fmt.Errorf("write renderer frame: %w", err))
 			return
 		}
 	}
@@ -671,7 +752,7 @@ func (l *rendererLink) HealthError(timeout time.Duration) error {
 
 func (l *rendererLink) Stats() rendererLinkStats {
 	now := time.Now()
-	stats := rendererLinkStats{OutboundDepth: len(l.outbound)}
+	stats := rendererLinkStats{OutboundDepth: len(l.control) + len(l.outbound)}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	stats.PendingRequests = len(l.pending)

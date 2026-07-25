@@ -259,6 +259,68 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 	})
 }
 
+func TestDaemonLiveHandoffWithFullRendererJournal(t *testing.T) {
+	h := newHarness(t)
+	nodeID := h.createNode()
+	h.run(true, "daemon", "start")
+	var terminal struct {
+		TerminalID string `json:"terminal_id"`
+	}
+	if err := json.Unmarshal(h.json("terminal", "open", "node:"+nodeID, "--kind", "node-host-shell"), &terminal); err != nil {
+		t.Fatal(err)
+	}
+	h.run(
+		true,
+		"terminal",
+		"send",
+		terminal.TerminalID,
+		"--text",
+		"head -c 1100000 /dev/zero | tr '\\0' x; printf '\\nLARGE_HANDOFF_DONE\\n'; sleep 30\r",
+	)
+
+	type rendererStatus struct {
+		JournalBytes int `json:"journal_bytes"`
+	}
+	var before struct {
+		TerminalRuntimes map[string]rendererStatus `json:"terminal_runtimes"`
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := json.Unmarshal(h.json("daemon", "snapshot"), &before); err != nil {
+			t.Fatal(err)
+		}
+		if before.TerminalRuntimes[terminal.TerminalID].JournalBytes >= 900_000 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("renderer journal did not fill: %#v", before.TerminalRuntimes[terminal.TerminalID])
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	var update struct {
+		Updated     bool `json:"updated"`
+		LiveHandoff bool `json:"live_handoff"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "update"), &update); err != nil {
+		t.Fatal(err)
+	}
+	if !update.Updated || !update.LiveHandoff {
+		t.Fatalf("large-journal live update = %#v", update)
+	}
+
+	var read struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(h.json("terminal", "read", terminal.TerminalID, "--source", "recent"), &read); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(read.Text, "LARGE_HANDOFF_DONE") {
+		t.Fatalf("large-journal replay lost final output:\n%s", read.Text)
+	}
+	h.run(true, "terminal", "close", terminal.TerminalID)
+}
+
 func TestDaemonTerminalOrderSurvivesReconnectAndLiveHandoff(t *testing.T) {
 	h := newHarness(t)
 	nodeID := h.createNode()

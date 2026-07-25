@@ -389,6 +389,16 @@ func (c *Client) connectLocked(ctx context.Context) error {
 		_ = c.invalidateLocked()
 		return err
 	}
+	// callLocked applies a connection-wide deadline for the bounded handshake.
+	// Deadlines are absolute and affect future I/O, so clear it before the
+	// long-lived response pump starts. Individual request writes retain their
+	// own bounded write deadlines.
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		clearErr := fmt.Errorf("clear daemon handshake deadline: %w", err)
+		c.recordClose("client", "handshake", daemon.CloseReadError, clearErr)
+		_ = c.invalidateLocked()
+		return clearErr
+	}
 	c.helloMu.Lock()
 	c.Hello = hello
 	c.helloMu.Unlock()

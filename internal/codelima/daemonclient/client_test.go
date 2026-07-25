@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,6 +48,73 @@ func TestClientExactVersionHandshake(t *testing.T) {
 	defer func() { _ = client.Close() }()
 	if client.Hello.ClientID != "client" {
 		t.Fatalf("hello = %#v", client.Hello)
+	}
+}
+
+func TestRequestConnectionSurvivesIdlePastHandshakeTimeout(t *testing.T) {
+	t.Parallel()
+
+	home := testutil.TempDir(t, "dc-idle-")
+	paths := daemon.HomePaths(home)
+	if err := os.MkdirAll(paths.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", paths.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	var accepted atomic.Int32
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			accepted.Add(1)
+			go func() {
+				defer func() { _ = conn.Close() }()
+				decoder, encoder := json.NewDecoder(conn), json.NewEncoder(conn)
+				for {
+					var request daemon.Request
+					if decoder.Decode(&request) != nil {
+						return
+					}
+					var result any = map[string]bool{"ok": true}
+					if request.Method == "hello" {
+						result = daemon.HelloResult{
+							Version: "1.2.3", Protocol: daemon.ProtocolVersion, ClientID: "idle-client",
+						}
+					}
+					data, marshalErr := json.Marshal(result)
+					if marshalErr != nil || encoder.Encode(daemon.Response{ID: request.ID, Result: data}) != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+
+	const requestTimeout = 75 * time.Millisecond
+	client, err := Dial(context.Background(), Options{
+		Home: filepath.Clean(home), Version: "1.2.3", Timeout: requestTimeout,
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	time.Sleep(3 * requestTimeout)
+	var result map[string]bool
+	if err := client.Call(context.Background(), "daemon.ping", nil, &result); err != nil {
+		t.Fatalf("Call() after idle error = %v", err)
+	}
+	if !result["ok"] {
+		t.Fatalf("Call() after idle result = %#v", result)
+	}
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("accepted connections = %d, want the original request connection", got)
 	}
 }
 

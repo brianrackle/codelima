@@ -5,11 +5,14 @@ package codelima
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -68,7 +71,7 @@ func TestHungCgoRendererIsTerminalLocalAndPreservesShell(t *testing.T) {
 		Executable:     executable,
 		Args:           []string{"-test.run=^TestRendererWorkerProcess$"},
 		Env:            []string{rendererWorkerHelperEnv + "=1"},
-		CommandTimeout: 150 * time.Millisecond,
+		CommandTimeout: 500 * time.Millisecond,
 		QueueFrames:    16,
 	}
 	hungOptions := helper
@@ -158,6 +161,255 @@ func TestRendererPTYResponsesAreDeduplicatedAcrossReplay(t *testing.T) {
 	defer terminal.responseMu.Unlock()
 	if got := len(terminal.responses); got != 4 {
 		t.Fatalf("dedupe response keys = %d, want 4", got)
+	}
+}
+
+func TestRendererWorkerCoalescesRapidOutputPublications(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := rendererProcessOptions{
+		Executable:     executable,
+		Args:           []string{"-test.run=^TestRendererWorkerProcess$"},
+		Env:            []string{rendererWorkerHelperEnv + "=1"},
+		CommandTimeout: time.Second,
+		QueueFrames:    128,
+	}
+
+	var (
+		snapshotCount atomic.Int32
+		latestMu      sync.Mutex
+		latest        rendererPublishedState
+	)
+	link, err := startRendererLink(helper, 1, func(frame rendererWorkerFrame) {
+		if frame.Type != rendererFrameSnapshot {
+			return
+		}
+		var state rendererPublishedState
+		if json.Unmarshal(frame.Result, &state) != nil {
+			return
+		}
+		latestMu.Lock()
+		latest = state
+		latestMu.Unlock()
+		snapshotCount.Add(1)
+	})
+	if err != nil {
+		t.Fatalf("start renderer worker: %v", err)
+	}
+	t.Cleanup(func() { link.Fail(errors.New("renderer coalescing test complete")) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := link.Call(ctx, "init", rendererInitParams{
+		TerminalID: "coalesced-output",
+		Cols:       160,
+		Rows:       24,
+	}); err != nil {
+		t.Fatalf("initialize renderer worker: %v", err)
+	}
+	baseline := snapshotCount.Load()
+
+	const outputCount = 64
+	for index := 1; index <= outputCount; index++ {
+		data := []byte("x")
+		if index == outputCount {
+			data = []byte("publication-complete\r\n")
+		}
+		if _, err := link.TryCall("output", rendererOutputParams{
+			EventID: uint64(index),
+			Data:    data,
+		}); err != nil {
+			t.Fatalf("queue renderer output %d: %v", index, err)
+		}
+	}
+	if err := link.Call(ctx, "snapshot", nil); err != nil {
+		t.Fatalf("publish final renderer snapshot: %v", err)
+	}
+	latestMu.Lock()
+	visibleText := latest.VisibleText.Text
+	latestMu.Unlock()
+	if !strings.Contains(visibleText, "publication-complete") {
+		t.Fatalf("final renderer snapshot = %q, want final output", visibleText)
+	}
+
+	if publications := snapshotCount.Load() - baseline; publications >= outputCount {
+		t.Fatalf("rapid output produced %d snapshots for %d mutations, want coalescing", publications, outputCount)
+	}
+}
+
+func TestRendererWorkerKeyEncodingDoesNotPublishUnchangedSnapshot(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := rendererProcessOptions{
+		Executable:     executable,
+		Args:           []string{"-test.run=^TestRendererWorkerProcess$"},
+		Env:            []string{rendererWorkerHelperEnv + "=1"},
+		CommandTimeout: time.Second,
+		QueueFrames:    16,
+	}
+
+	var snapshotCount, ptyWriteCount atomic.Int32
+	link, err := startRendererLink(helper, 1, func(frame rendererWorkerFrame) {
+		switch frame.Type {
+		case rendererFrameSnapshot:
+			snapshotCount.Add(1)
+		case rendererFramePTYWrite:
+			ptyWriteCount.Add(1)
+		}
+	})
+	if err != nil {
+		t.Fatalf("start renderer worker: %v", err)
+	}
+	t.Cleanup(func() { link.Fail(errors.New("renderer key publication test complete")) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := link.Call(ctx, "init", rendererInitParams{
+		TerminalID: "key-without-screen-change",
+		Cols:       80,
+		Rows:       24,
+	}); err != nil {
+		t.Fatalf("initialize renderer worker: %v", err)
+	}
+	time.Sleep(3 * rendererPublishMinInterval)
+	baseline := snapshotCount.Load()
+
+	if err := link.Call(ctx, "update", rendererUpdateParams{Event: rendererInputEvent{
+		Type:      "key",
+		Keycode:   'x',
+		Text:      "x",
+		EventType: uint8(vaxis.EventPress),
+	}}); err != nil {
+		t.Fatalf("encode renderer key: %v", err)
+	}
+	waitForCondition(t, time.Second, func() bool {
+		return ptyWriteCount.Load() == 1
+	}, "renderer key PTY write")
+	time.Sleep(3 * rendererPublishMinInterval)
+
+	if got := snapshotCount.Load(); got != baseline {
+		t.Fatalf("key encoding snapshots = %d -> %d, want unchanged until PTY output", baseline, got)
+	}
+}
+
+func TestRendererWorkerFireAndForgetInputsKeepDistinctEventIDs(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := rendererProcessOptions{
+		Executable:     executable,
+		Args:           []string{"-test.run=^TestRendererWorkerProcess$"},
+		Env:            []string{rendererWorkerHelperEnv + "=1"},
+		CommandTimeout: time.Second,
+		QueueFrames:    16,
+	}
+
+	var (
+		eventIDsMu sync.Mutex
+		eventIDs   []uint64
+	)
+	link, err := startRendererLink(helper, 1, func(frame rendererWorkerFrame) {
+		if frame.Type != rendererFramePTYWrite {
+			return
+		}
+		eventIDsMu.Lock()
+		eventIDs = append(eventIDs, frame.EventID)
+		eventIDsMu.Unlock()
+	})
+	if err != nil {
+		t.Fatalf("start renderer worker: %v", err)
+	}
+	t.Cleanup(func() { link.Fail(errors.New("renderer notification ID test complete")) })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := link.Call(ctx, "init", rendererInitParams{
+		TerminalID: "notification-event-ids",
+		Cols:       80,
+		Rows:       24,
+	}); err != nil {
+		t.Fatalf("initialize renderer worker: %v", err)
+	}
+	stop := make(chan struct{})
+	for _, text := range []string{"x", "y"} {
+		if err := link.Notify(stop, "update", rendererUpdateParams{Event: rendererInputEvent{
+			Type:      "key",
+			Keycode:   rune(text[0]),
+			Text:      text,
+			EventType: uint8(vaxis.EventPress),
+		}}); err != nil {
+			t.Fatalf("notify renderer input %q: %v", text, err)
+		}
+	}
+	waitForCondition(t, time.Second, func() bool {
+		eventIDsMu.Lock()
+		defer eventIDsMu.Unlock()
+		return len(eventIDs) == 2
+	}, "two fire-and-forget renderer input writes")
+
+	eventIDsMu.Lock()
+	got := slices.Clone(eventIDs)
+	eventIDsMu.Unlock()
+	if got[0] == got[1] || got[0]&rendererInputEventBit == 0 || got[1]&rendererInputEventBit == 0 {
+		t.Fatalf("renderer notification event IDs = %#v, want distinct input-scoped IDs", got)
+	}
+	if pending := link.Stats().PendingRequests; pending != 0 {
+		t.Fatalf("fire-and-forget renderer inputs left %d pending responses", pending)
+	}
+}
+
+func TestSustainedFullscreenOutputDoesNotRestartRendererOrEmitQueueErrors(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := rendererProcessOptions{
+		Executable:     executable,
+		Args:           []string{"-test.run=^TestRendererWorkerProcess$"},
+		Env:            []string{rendererWorkerHelperEnv + "=1"},
+		CommandTimeout: defaultRendererCommandTimeout,
+		QueueFrames:    defaultRendererQueueFrames,
+	}
+
+	var terminalErrors atomic.Int32
+	terminal := newIsolatedDaemonTerminalWithOptions("sustained-output", func(event vaxis.Event) {
+		if _, ok := event.(tuiTerminalErrorEvent); ok {
+			terminalErrors.Add(1)
+		}
+	}, options)
+	command := exec.Command(
+		"/usr/bin/perl",
+		"-e",
+		`$frame = "\e[H\e[2J\e[32m" . ("X" x 1920); print $frame for 1..10000; print "\e[0m\e[2J\e[HCMATRIX_BURST_DONE\n"; sleep 30`,
+	)
+	if err := terminal.Start(command); err != nil {
+		t.Fatalf("start sustained-output terminal: %v", err)
+	}
+	t.Cleanup(terminal.Close)
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(terminal.ReadVisible(ReadText).Text, "CMATRIX_BURST_DONE") {
+		if time.Now().After(deadline) {
+			t.Fatalf(
+				"final sustained-output renderer snapshot timed out: status=%#v terminal_errors=%d",
+				terminal.RendererStatus(),
+				terminalErrors.Load(),
+			)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	status := terminal.RendererStatus()
+	if status.RestartCount != 0 || status.State != "ready" {
+		t.Fatalf("sustained output renderer status = %#v, want ready without restarts", status)
+	}
+	if got := terminalErrors.Load(); got != 0 {
+		t.Fatalf("sustained output emitted %d terminal errors, want none", got)
 	}
 }
 

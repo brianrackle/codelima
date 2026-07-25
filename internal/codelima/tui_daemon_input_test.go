@@ -56,6 +56,118 @@ func TestDaemonTUITerminalKeyInputDoesNotBlockOnDaemonRPC(t *testing.T) {
 	}
 }
 
+type closeAwareBlockingDaemonCaller struct {
+	inputStarted chan struct{}
+	releaseInput chan struct{}
+	closeStarted chan struct{}
+	releaseClose chan struct{}
+	inputOnce    sync.Once
+	callMu       sync.Mutex
+	inputCalls   int
+	closeCalls   int
+}
+
+func (c *closeAwareBlockingDaemonCaller) Call(ctx context.Context, method string, _ any, _ any) error {
+	switch method {
+	case "terminal.send_event":
+		c.callMu.Lock()
+		c.inputCalls++
+		c.callMu.Unlock()
+		c.inputOnce.Do(func() { close(c.inputStarted) })
+		select {
+		case <-c.releaseInput:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	case "terminal.close":
+		c.callMu.Lock()
+		c.closeCalls++
+		c.callMu.Unlock()
+		select {
+		case c.closeStarted <- struct{}{}:
+		default:
+		}
+		select {
+		case <-c.releaseClose:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	default:
+		return nil
+	}
+}
+
+func (c *closeAwareBlockingDaemonCaller) closeCallCount() int {
+	c.callMu.Lock()
+	defer c.callMu.Unlock()
+	return c.closeCalls
+}
+
+func (c *closeAwareBlockingDaemonCaller) inputCallCount() int {
+	c.callMu.Lock()
+	defer c.callMu.Unlock()
+	return c.inputCalls
+}
+
+func TestDaemonTUITerminalCloseDoesNotBlockOnInputAndRunsOnce(t *testing.T) {
+	t.Parallel()
+
+	caller := &closeAwareBlockingDaemonCaller{
+		inputStarted: make(chan struct{}),
+		releaseInput: make(chan struct{}),
+		closeStarted: make(chan struct{}, 2),
+		releaseClose: make(chan struct{}),
+	}
+	var releaseInputOnce sync.Once
+	var releaseCloseOnce sync.Once
+	t.Cleanup(func() {
+		releaseInputOnce.Do(func() { close(caller.releaseInput) })
+		releaseCloseOnce.Do(func() { close(caller.releaseClose) })
+	})
+
+	term := &daemonTUITerminal{client: caller, id: "term-1", stop: make(chan struct{})}
+	term.Update(vaxis.Key{Text: "a", Keycode: 'a'})
+	select {
+	case <-caller.inputStarted:
+	case <-time.After(time.Second):
+		t.Fatal("terminal input RPC did not start")
+	}
+
+	for attempt := range 2 {
+		closeReturned := make(chan struct{})
+		go func() {
+			term.Close()
+			close(closeReturned)
+		}()
+		select {
+		case <-closeReturned:
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("terminal Close attempt %d blocked the TUI event loop", attempt+1)
+		}
+	}
+	term.Update(vaxis.Key{Text: "b", Keycode: 'b'})
+
+	releaseInputOnce.Do(func() { close(caller.releaseInput) })
+	select {
+	case <-caller.closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("terminal close RPC did not start after accepted input drained")
+	}
+	select {
+	case <-caller.closeStarted:
+		t.Fatal("terminal close RPC started more than once")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := caller.closeCallCount(); got != 1 {
+		t.Fatalf("terminal close RPC calls = %d, want 1", got)
+	}
+	if got := caller.inputCallCount(); got != 1 {
+		t.Fatalf("terminal input RPC calls = %d, want 1 after close stopped admission", got)
+	}
+}
+
 type orderedDaemonInputCaller struct {
 	mu     sync.Mutex
 	calls  []daemonPasteCall

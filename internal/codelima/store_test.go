@@ -113,7 +113,7 @@ func TestSeedAndRepairMigratesUntouchedLegacySmallAndAddsXSmall(t *testing.T) {
 		t.Fatalf("xsmall was not seeded with legacy small resources: %+v", xsmall)
 	}
 	seedMarker, err := os.ReadFile(store.seedVersionPath())
-	if err != nil || string(seedMarker) != "4\n" {
+	if err != nil || string(seedMarker) != "5\n" {
 		t.Fatalf("seed marker = %q, %v", seedMarker, err)
 	}
 }

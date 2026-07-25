@@ -32,10 +32,14 @@ func (c *LimaClient) ForwardingSSHConfig(ctx context.Context, sandboxName string
 	if observation.Status != ObservationRunning {
 		return LimaSSHConfig{}, preconditionFailed("Lima instance must be running for dynamic forwarding", map[string]any{"sandbox_name": sandboxName})
 	}
-	if observation.SSHConfigFile == "" || observation.LimaHome == "" {
-		return LimaSSHConfig{}, metadataCorruption("limactl list omitted SSH connection metadata", nil, map[string]any{"sandbox_name": sandboxName})
+	if observation.SSHConfigFile == "" {
+		return LimaSSHConfig{}, metadataCorruption("limactl list omitted the SSH config path", nil, map[string]any{"sandbox_name": sandboxName})
 	}
-	return parseLimaSSHConfig(observation.SSHConfigFile, observation.LimaHome)
+	limaHome, err := c.resolvedLimaHome()
+	if err != nil {
+		return LimaSSHConfig{}, err
+	}
+	return parseLimaSSHConfig(observation.SSHConfigFile, limaHome)
 }
 
 type limaSSHForwardingPeerFactory struct{ runtime LimaSSHRuntime }

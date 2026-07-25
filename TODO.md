@@ -13,6 +13,39 @@ Problem:
 - ADRs 88, 89, and 104 add automated unit and daemon-integration coverage for reconnect tab order, operator reordering, and non-default-width handoff replay. The matching interactive Flow 7 check still requires a real terminal on native macOS.
 - ADR 91 adds an automated two-window regression proving a path-scoped refresh no longer closes tabs whose live nodes are outside that window's projection, while confirmed deletion still closes them. The matching disjoint-root, two-tabs-per-process restart flow still needs native interactive verification.
 - ADR 90 removes the two CPU-amplifying paths with automated regressions: idle and hidden daemon tabs no longer poll full cell grids, and an event reader stops after one permanent `EOF` while retaining normal idle-timeout behavior. Native macOS Activity Monitor verification with multiple TUIs, active/hidden tabs, and an already-open post-update TUI is still required; this Linux/aarch64 environment cannot observe macOS process CPU or run the full interactive flow.
+- ADR 112 clears the client-side handshake deadline before the long-lived
+  request response pump, coalesces renderer snapshot/read publication at the
+  existing 20 FPS ceiling, removes repeated refresh focus calls, emits one
+  fresh daemon dirty event, and limits renderer operation logging to failures
+  and latency outliers. Automated coverage keeps one request socket alive past
+  its timeout and drives a real renderer worker through a 64-output burst.
+  Native macOS Flow 7 must still confirm the captured recurring
+  `tui refresh failed` timeouts are absent after a 30-second idle interval and
+  that Activity Monitor plus the daemon log remain quiet under real typing and
+  sustained output. It must also confirm ordinary typing has no pre-echo or
+  backward cursor jumps.
+- ADR 113 moves renderer replay out of the monolithic handoff manifest and
+  transfers it as validated 512 KiB chunks. Unit coverage round-trips the full
+  1 MiB journal, and integration coverage fills a real renderer above 900 KiB
+  before preserving its terminal through live update. A native macOS Flow 5
+  pass must still qualify descriptor transfer and the cursor/typing fix. A
+  running version-3 daemon whose old sender already exceeds 1 MiB cannot
+  self-upgrade; preserve it until the operator chooses between closing
+  high-history tabs or one terminal-restarting daemon stop/start.
+- ADR 114 backpressures an unthrottled producer at its terminal-local PTY,
+  keeps renderer health/lifecycle traffic independent, and removes mutation
+  response amplification. A deterministic fullscreen ANSI regression and a
+  five-second Linux/aarch64 `cmatrix -u 0` run complete without renderer
+  restart or terminal errors. Native macOS Flow 7 must still confirm the
+  original TUI no longer freezes or emits repeated reconnect messages, and a
+  host-side freeze capture is still needed to record the original event
+  connection close reason and native renderer stack.
+- ADR 115 removes accepted-input drain and `terminal.close` latency from the
+  Vaxis event loop while keeping close admission synchronous and daemon cleanup
+  single-shot. Automated coverage holds an input RPC open while repeated close
+  calls return immediately, then verifies exactly one daemon close request.
+  Native macOS Flow 7 must still confirm `Option+w` removes a busy `cmatrix`
+  tab immediately, selects the adjacent tab, and produces no reconnect churn.
 - ADR 107 replaces the permanent-disconnection latch with a reconnecting,
   resynchronizing daemon session. Automated coverage proves that a forced
   disconnect preserves terminal IDs, blocks mutations during synchronization,
@@ -974,3 +1007,46 @@ Disadvantages:
 
 - Stopping the read pump adds another acknowledgement to the handoff state machine.
 - A descriptor-lease design must avoid delaying handoff indefinitely on a blocked reader.
+
+### 37. Complete native npm agent-bootstrap verification
+
+Problem:
+
+- Automated tests, lint, race tests, and build verification cover the
+  user-owned npm definitions, exact migration rules, seed revision 5, and
+  executable validation for both built-in agents.
+- The available Linux/aarch64 workspace runs as root, so native Lima was
+  launched under the workspace's unprivileged user with process-local KVM group
+  access. The disposable Ubuntu 25.10 guest reached early kernel boot but
+  stopped advancing before SSH: the 1 GiB VM stalled at 4.8 seconds of guest
+  boot time, the 2 GiB VM stalled at 6.1 seconds, and the normal 4 GiB `small`
+  VM could not allocate memory on the 3.8 GiB host.
+- Because SSH never became available, QA Flow 4 could not execute the Node 22,
+  npm-prefix ownership, `/usr/local/bin` symlink, `codex --version`, or
+  `claude --version` assertions. The disposable VMs, metadata home, Lima home,
+  and workspace were removed.
+
+Suggested solution:
+
+- Run `make verify` and every `QA.md` flow on a native supported host with
+  enough memory for the `small` profile.
+- Pay particular attention to Flow 4: prove Node.js 22 or newer, both package
+  trees owned by Lima's login user, npm prefix `~/.local`, both stable symlinks,
+  and successful Codex/Claude version commands.
+- Repeat with a seed-revision-4 home containing the untouched ADR 69 Codex
+  installer and the old Claude native installer, run `doctor --repair`, and
+  confirm both environment records migrate while a customized record remains
+  unchanged.
+
+Advantages:
+
+- Provides real network, package-registry, guest-user, and PATH evidence beyond
+  command-shape tests.
+- Qualifies both a fresh home and the existing-home repair path operators will
+  use.
+
+Disadvantages:
+
+- Requires a native virtualization host with enough memory and cannot be
+  completed reliably in the current nested 3.8 GiB workspace.
+- Downloads a full Ubuntu image plus current Node and agent packages.

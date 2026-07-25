@@ -165,7 +165,7 @@ func (s *Store) ensureDirectories() error {
 // built-in profiles/environments/configurations, the config refresh
 // rules, or the node-file format change so existing homes re-run the full
 // pass exactly once instead of on every mutating command.
-const seedRevision = "4"
+const seedRevision = "5"
 
 func (s *Store) seedVersionPath() string {
 	return filepath.Join(s.cfg.MetadataRoot, "_config", "seed.version")

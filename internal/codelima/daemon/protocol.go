@@ -12,7 +12,12 @@ const (
 	MaxMessageSize  = 1 << 20
 	ProtocolVersion = 5
 	SessionVersion  = 2
-	HandoffVersion  = 3
+	HandoffVersion  = 4
+
+	// PreviousStreamHandoffVersion is accepted by a new importer so a daemon
+	// using the first length-prefixed stream format can update when its inline
+	// replay manifest still fits the legacy frame bound.
+	PreviousStreamHandoffVersion = 3
 
 	// LegacyHandoffVersion is accepted only by a new importer connecting to
 	// the immediately previous Linux unixpacket transport.
@@ -259,7 +264,8 @@ type HandoffRuntime struct {
 	ChildPID      int    `json:"child_pid"`
 	Cols          int    `json:"cols"`
 	Rows          int    `json:"rows"`
-	Replay        []byte `json:"replay"`
+	Replay        []byte `json:"replay,omitempty"`
+	ReplaySize    int    `json:"replay_size,omitempty"`
 	ReplayPartial bool   `json:"replay_partial,omitempty"`
 }
 
@@ -275,6 +281,9 @@ type HandoffMessage struct {
 	Type        string   `json:"type"`
 	Token       string   `json:"token,omitempty"`
 	TerminalIDs []string `json:"terminal_ids,omitempty"`
+	TerminalID  string   `json:"terminal_id,omitempty"`
+	Offset      int      `json:"offset,omitempty"`
+	Replay      []byte   `json:"replay,omitempty"`
 	PID         int      `json:"pid,omitempty"`
 	Error       string   `json:"error,omitempty"`
 }

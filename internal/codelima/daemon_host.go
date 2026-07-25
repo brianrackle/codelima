@@ -874,7 +874,6 @@ func (h *daemonHost) handleTerminalEvent(id string, event vaxis.Event) {
 		if entry, err := h.lookup(id); err == nil {
 			entry.markSnapshotStale()
 		}
-		h.broadcast("terminal.dirty", map[string]any{"terminal_id": id, "stale": true})
 	case tuiClipboardEvent:
 		tabID := ""
 		if entry, err := h.lookup(id); err == nil {
@@ -1190,15 +1189,37 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 		return nil, rollback(err, false, process)
 	}
 	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
+	totalReplayBytes := 0
 	for _, item := range quiesced {
+		if len(item.state.Replay) > daemon.MaxHandoffReplayBytesPerTerminal {
+			return nil, rollback(fmt.Errorf(
+				"handoff replay for %s is %d bytes, limit is %d",
+				item.id,
+				len(item.state.Replay),
+				daemon.MaxHandoffReplayBytesPerTerminal,
+			), false, process)
+		}
+		totalReplayBytes += len(item.state.Replay)
+		if totalReplayBytes > daemon.MaxHandoffTotalReplayBytes {
+			return nil, rollback(fmt.Errorf(
+				"handoff replay is %d bytes, total limit is %d",
+				totalReplayBytes,
+				daemon.MaxHandoffTotalReplayBytes,
+			), false, process)
+		}
 		manifest.Runtimes = append(manifest.Runtimes, daemon.HandoffRuntime{
 			TerminalID: item.id, ChildPID: item.state.ChildPID,
 			Cols: item.state.Cols, Rows: item.state.Rows,
-			Replay: item.state.Replay, ReplayPartial: item.state.ReplayPartial,
+			ReplaySize: len(item.state.Replay), ReplayPartial: item.state.ReplayPartial,
 		})
 	}
 	if err := peer.WriteJSON(manifest, nil); err != nil {
 		return nil, rollback(err, false, process)
+	}
+	for _, item := range quiesced {
+		if err := peer.WriteReplay(item.id, item.state.Replay); err != nil {
+			return nil, rollback(err, false, process)
+		}
 	}
 	for start := 0; start < len(quiesced); start += daemon.MaxHandoffFDsPerFrame {
 		end := min(start+daemon.MaxHandoffFDsPerFrame, len(quiesced))
@@ -1264,16 +1285,20 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 	if err != nil {
 		return err
 	}
-	wantHandoffVersion := daemon.HandoffVersion
-	if peer.Framing == daemon.HandoffFramingLegacyPacket {
-		wantHandoffVersion = daemon.LegacyHandoffVersion
+	validHandoffVersion := manifest.Version == daemon.HandoffVersion
+	if peer.Framing == daemon.HandoffFramingLengthPrefixed {
+		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion
+	} else {
+		validHandoffVersion = manifest.Version == daemon.LegacyHandoffVersion
 	}
-	if manifest.Version != wantHandoffVersion || manifest.Token != token || manifest.Session.Version != daemon.SessionVersion {
+	if !validHandoffVersion || manifest.Token != token || manifest.Session.Version != daemon.SessionVersion {
 		_ = peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: "invalid handoff manifest"}, nil)
 		return errors.New("invalid handoff manifest")
 	}
 	runtimeIDs := make(map[string]struct{}, len(manifest.Runtimes))
-	for _, runtimeState := range manifest.Runtimes {
+	totalReplayBytes := 0
+	for index := range manifest.Runtimes {
+		runtimeState := &manifest.Runtimes[index]
 		if runtimeState.TerminalID == "" {
 			return errors.New("handoff runtime has an empty terminal id")
 		}
@@ -1281,6 +1306,39 @@ func importDaemon(ctx context.Context, service *Service, handoffPath, token stri
 			return errors.New("handoff manifest has duplicate terminal runtimes")
 		}
 		runtimeIDs[runtimeState.TerminalID] = struct{}{}
+		replayBytes := len(runtimeState.Replay)
+		if manifest.Version == daemon.HandoffVersion {
+			if replayBytes != 0 {
+				return errors.New("chunked handoff manifest contains inline replay")
+			}
+			replayBytes = runtimeState.ReplaySize
+		}
+		if replayBytes < 0 || replayBytes > daemon.MaxHandoffReplayBytesPerTerminal {
+			return fmt.Errorf(
+				"handoff replay for %s is %d bytes, limit is %d",
+				runtimeState.TerminalID,
+				replayBytes,
+				daemon.MaxHandoffReplayBytesPerTerminal,
+			)
+		}
+		totalReplayBytes += replayBytes
+		if totalReplayBytes > daemon.MaxHandoffTotalReplayBytes {
+			return fmt.Errorf(
+				"handoff replay is %d bytes, total limit is %d",
+				totalReplayBytes,
+				daemon.MaxHandoffTotalReplayBytes,
+			)
+		}
+	}
+	if manifest.Version == daemon.HandoffVersion {
+		for index := range manifest.Runtimes {
+			runtimeState := &manifest.Runtimes[index]
+			replay, readErr := peer.ReadReplay(runtimeState.TerminalID, runtimeState.ReplaySize)
+			if readErr != nil {
+				return readErr
+			}
+			runtimeState.Replay = replay
+		}
 	}
 	fdsByID := map[string]int{}
 	closePendingFDs := func() {

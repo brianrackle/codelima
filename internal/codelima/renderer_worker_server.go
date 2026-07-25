@@ -17,12 +17,18 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 )
 
-const rendererWorkerFD = 3
+const (
+	rendererWorkerFD             = 3
+	rendererPublishMinInterval   = 50 * time.Millisecond
+	rendererSlowCallLogThreshold = 250 * time.Millisecond
+)
 
 type rendererWorkerServer struct {
 	ctx        context.Context
 	conn       net.Conn
 	writeMu    sync.Mutex
+	publishMu  sync.Mutex
+	publisher  *coalescedPublisher
 	generation uint64
 	terminalID string
 	terminal   *ghosttyTUITerminal
@@ -55,6 +61,17 @@ func (s *rendererWorkerServer) run() error {
 			s.terminal.Close()
 		}
 	}()
+	publishCtx, cancelPublish := context.WithCancel(s.ctx)
+	publishDone := make(chan struct{})
+	s.publisher = newCoalescedPublisher(rendererPublishMinInterval, s.publish)
+	go func() {
+		s.publisher.Run(publishCtx)
+		close(publishDone)
+	}()
+	defer func() {
+		cancelPublish()
+		<-publishDone
+	}()
 
 	for {
 		frame, err := readRendererFrame(s.conn)
@@ -71,24 +88,29 @@ func (s *rendererWorkerServer) run() error {
 			continue
 		}
 		started := time.Now()
-		slog.Info(
-			"renderer call started",
-			"terminal_id", s.terminalID,
-			"renderer_generation", frame.Generation,
-			"operation", frame.Method,
-			"request_id", frame.ID,
-		)
 		result, requestErr := s.handle(frame)
-		slog.Info(
-			"renderer call completed",
-			"terminal_id", s.terminalID,
-			"renderer_generation", frame.Generation,
-			"operation", frame.Method,
-			"request_id", frame.ID,
-			"elapsed", time.Since(started),
-			"error", requestErr,
-		)
-		if frame.ID == 0 {
+		elapsed := time.Since(started)
+		if requestErr != nil {
+			slog.Error(
+				"renderer call failed",
+				"terminal_id", s.terminalID,
+				"renderer_generation", frame.Generation,
+				"operation", frame.Method,
+				"request_id", frame.ID,
+				"elapsed", elapsed,
+				"error", requestErr,
+			)
+		} else if elapsed >= rendererSlowCallLogThreshold {
+			slog.Warn(
+				"renderer call slow",
+				"terminal_id", s.terminalID,
+				"renderer_generation", frame.Generation,
+				"operation", frame.Method,
+				"request_id", frame.ID,
+				"elapsed", elapsed,
+			)
+		}
+		if frame.ID == 0 || frame.NoReply {
 			continue
 		}
 		response := rendererWorkerFrame{
@@ -106,6 +128,9 @@ func (s *rendererWorkerServer) run() error {
 		}
 		if err := s.write(response); err != nil {
 			return err
+		}
+		if frame.Method == "close" {
+			return nil
 		}
 	}
 }
@@ -152,7 +177,6 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 			return nil, err
 		}
 		s.terminal.sendSync(cmdRendererOutput(params))
-		s.publish()
 		return map[string]bool{"applied": true}, nil
 	case "resize":
 		var params rendererResizeParams
@@ -160,7 +184,6 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 			return nil, err
 		}
 		s.terminal.Resize(params.Cols, params.Rows)
-		s.publish()
 		return map[string]bool{"applied": true}, nil
 	case "update":
 		var params rendererUpdateParams
@@ -172,7 +195,6 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 			return nil, err
 		}
 		s.terminal.sendSync(cmdRendererUpdate{EventID: rendererInputEventID(frame.ID), Event: event})
-		s.publish()
 		return map[string]bool{"applied": true}, nil
 	case "focus":
 		var params rendererInputEvent
@@ -184,7 +206,6 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 		} else {
 			s.terminal.Blur()
 		}
-		s.publish()
 		return map[string]bool{"applied": true}, nil
 	case "scroll":
 		var params rendererInputEvent
@@ -192,7 +213,6 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 			return nil, err
 		}
 		s.terminal.Scroll(params.Delta)
-		s.publish()
 		return map[string]bool{"applied": true}, nil
 	case "snapshot":
 		s.publish()
@@ -206,8 +226,10 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 		}
 		return map[string]bool{"healthy": true}, nil
 	case "close":
+		s.publishMu.Lock()
 		s.terminal.Close()
 		s.terminal = nil
+		s.publishMu.Unlock()
 		return map[string]bool{"closed": true}, nil
 	default:
 		return nil, fmt.Errorf("unknown renderer method %q", frame.Method)
@@ -223,7 +245,17 @@ func (s *rendererWorkerServer) applyJournalEvent(event rendererJournalEvent) {
 	}
 }
 
+func (s *rendererWorkerServer) requestPublish() {
+	if s.publisher == nil {
+		s.publish()
+		return
+	}
+	s.publisher.Request()
+}
+
 func (s *rendererWorkerServer) publish() {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	if s.terminal == nil {
 		return
 	}
@@ -273,6 +305,9 @@ func (s *rendererWorkerServer) postPTYWrite(eventID uint64, ordinal uint32, data
 func (s *rendererWorkerServer) postEvent(event vaxis.Event) {
 	frame := rendererWorkerFrame{Type: rendererFrameEvent, Generation: s.generation}
 	switch value := event.(type) {
+	case vaxis.Redraw:
+		s.requestPublish()
+		return
 	case tuiClipboardEvent:
 		frame.Event = "clipboard"
 		frame.Result, _ = json.Marshal(value.Text)

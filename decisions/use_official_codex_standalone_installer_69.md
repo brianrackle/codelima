@@ -1,6 +1,6 @@
 # Use the official Codex standalone installer for built-in environments
 
-Status: Accepted
+Status: Superseded by [ADR 116](install_built_in_coding_agents_through_user_owned_npm_116.md)
 
 ## Context and Problem Statement
 

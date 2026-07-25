@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,5 +120,55 @@ func TestHandoffTransportRejectsDescriptorsOnControlMessage(t *testing.T) {
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHandoffTransportChunksFullTerminalReplay(t *testing.T) {
+	root := handoffTestTempDir(t, "hf-replay-")
+	path := filepath.Join(root, "handoff.sock")
+
+	listener, err := ListenHandoff(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	replay := make([]byte, MaxHandoffReplayBytesPerTerminal)
+	for index := range replay {
+		replay[index] = byte(index % 251)
+	}
+	serverDone := make(chan error, 1)
+	go func() {
+		conn, acceptErr := listener.AcceptUnix()
+		if acceptErr != nil {
+			serverDone <- acceptErr
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		serverDone <- NewHandoffConnection(conn, HandoffFramingLengthPrefixed).WriteReplay("term-large", replay)
+	}()
+
+	peer, err := DialHandoff(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = peer.Close() }()
+	got, err := peer.ReadReplay("term-large", len(replay))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, replay) {
+		t.Fatalf("chunked replay differs: got %d bytes, want %d", len(got), len(replay))
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHandoffTransportRejectsOversizedTerminalReplay(t *testing.T) {
+	connection := &HandoffConnection{}
+	err := connection.WriteReplay("term-oversized", make([]byte, MaxHandoffReplayBytesPerTerminal+1))
+	if err == nil || !strings.Contains(err.Error(), "limit is") {
+		t.Fatalf("WriteReplay() error = %v, want explicit replay limit", err)
 	}
 }

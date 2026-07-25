@@ -67,6 +67,73 @@ func TestDaemonTUITerminalIdleDoesNotPollSnapshots(t *testing.T) {
 	}
 }
 
+type sequenceDaemonSnapshotCaller struct {
+	mu     sync.Mutex
+	calls  int
+	called chan struct{}
+}
+
+func (c *sequenceDaemonSnapshotCaller) Call(_ context.Context, method string, _ any, result any) error {
+	if method != "terminal.snapshot" {
+		return nil
+	}
+	c.mu.Lock()
+	c.calls++
+	sequence := c.calls
+	c.mu.Unlock()
+	if snapshot, ok := result.(*daemon.Snapshot); ok {
+		*snapshot = daemon.Snapshot{
+			Cols:             80,
+			Rows:             24,
+			Generation:       7,
+			SnapshotSequence: uint64(sequence),
+			CursorX:          sequence,
+			CursorVisible:    true,
+		}
+	}
+	c.called <- struct{}{}
+	return nil
+}
+
+func TestDaemonTUITerminalRedrawsNewSnapshotSequenceAtSameGeneration(t *testing.T) {
+	t.Parallel()
+
+	caller := &sequenceDaemonSnapshotCaller{called: make(chan struct{}, 2)}
+	events := make(chan vaxis.Event, 2)
+	term := newDaemonTUITerminal(caller, "term-sequence", func(event vaxis.Event) {
+		events <- event
+	})
+	t.Cleanup(term.Detach)
+
+	requestAndWait := func() {
+		t.Helper()
+		term.markSnapshotDirty()
+		term.requestSnapshot()
+		select {
+		case <-caller.called:
+		case <-time.After(time.Second):
+			t.Fatal("terminal snapshot was not requested")
+		}
+		select {
+		case event := <-events:
+			if _, ok := event.(vaxis.Redraw); !ok {
+				t.Fatalf("snapshot event = %T, want vaxis.Redraw", event)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("new snapshot sequence did not request a redraw")
+		}
+	}
+
+	requestAndWait()
+	requestAndWait()
+
+	term.mu.RLock()
+	defer term.mu.RUnlock()
+	if term.snapshot.SnapshotSequence != 2 || term.snapshot.CursorX != 2 {
+		t.Fatalf("installed snapshot = %#v, want sequence and cursor 2", term.snapshot)
+	}
+}
+
 type fakeDaemonSnapshotView struct {
 	*fakeTUITerminal
 	dirty   int

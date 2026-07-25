@@ -430,10 +430,13 @@ func (t *isolatedDaemonTerminal) readPump() {
 			renderer := t.renderer
 			t.mu.Unlock()
 			if renderer != nil {
-				// Never wait for renderer IPC. The bounded link either accepts
-				// this event immediately or the supervisor replaces that one
-				// renderer while the PTY drain continues into the journal.
-				if sendErr := renderer.TryOutput(event); sendErr != nil {
+				// Apply bounded backpressure when a producer outruns its
+				// renderer. The terminal-local PTY may pause, but daemon
+				// control, other terminals, and high-priority renderer health
+				// traffic remain independent. A renderer replacement replays
+				// this journaled event instead of dropping it.
+				if sendErr := renderer.SendOutput(event); sendErr != nil &&
+					!errors.Is(sendErr, errTerminalClosed) {
 					t.postTerminalError(fmt.Errorf("queue renderer output: %w", sendErr))
 				}
 			}

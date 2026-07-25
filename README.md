@@ -203,6 +203,26 @@ codelima doctor --repair
 The first start may take longer while Lima downloads the Ubuntu image and
 codelima installs the built-in Codex and Claude Code environments.
 
+Both built-in agents use their supported npm packages. CodeLima installs
+Node.js 22, configures npm's global prefix as `~/.local` for Lima's
+unprivileged login user, and installs `@openai/codex` plus
+`@anthropic-ai/claude-code` without root-owned npm state. Stable links under
+`/usr/local/bin` keep `codex` and `claude` available in ordinary guest shells.
+
+After upgrading an existing CodeLima installation, run:
+
+```sh
+codelima doctor --repair
+codelima environment show codex
+codelima environment show claude-code
+```
+
+Seed revision 5 replaces untouched older built-in installer definitions.
+Customized or deleted environments remain user-controlled. Node bootstrap is
+frozen at creation, so a node that already captured and failed the old Claude
+installer must be deleted and recreated after the repair; retrying that same
+node intentionally keeps its historical command list.
+
 ## Guide
 
 ### The TUI
@@ -391,17 +411,34 @@ An attached TUI automatically reconnects and installs an authoritative daemon
 state after a socket failure or daemon live update. It does not replay terminal
 input whose outcome is uncertain. While synchronization is in progress, new
 terminal mutations are briefly rejected instead of being applied to stale
-state.
+state. Healthy request connections may remain idle indefinitely; handshake
+timeouts are cleared before their long-lived response readers start.
 
 Daemon-owned shells and PTYs remain in the Go control plane. Each terminal has
 its own separately packaged Ghostty renderer-worker process, immutable screen
 cache, bounded replay journal, and terminal-local restart budget. If a native
 renderer call hangs, CodeLima kills only that renderer and reconstructs its
 screen while preserving the shell PID and keeping other terminals and daemon
-status responsive.
+status responsive. Active renderer changes coalesce behind a 20 FPS publication
+ceiling, while idle terminals run no snapshot timer. Key encoding does not
+publish an unchanged screen before the shell echoes it, and snapshot sequence
+changes preserve cursor- and viewport-only redraws. If an unthrottled
+fullscreen program produces output faster than its renderer consumes it,
+CodeLima backpressures only that terminal's PTY instead of restarting the
+renderer or flooding TUI event connections; daemon control and other terminals
+remain responsive.
 `codelima --json daemon snapshot` includes connection-independent
 `terminal_runtimes` diagnostics such as renderer PID, generation, queue depth,
 pending operation, restart count, journal size, and partial-recovery state.
+
+If a daemon built with handoff version 3 reports `handoff message size ... is
+outside 1..1048576`, the update rolled back and its terminals are still owned
+by the old daemon. Inspect `terminal_runtimes.*.journal_bytes` in `daemon
+snapshot`. To preserve as many live shells as possible, close only expendable
+high-history tabs until the old inline manifest fits, then retry the update.
+The alternative is `daemon stop` followed by `daemon start`, which deploys the
+new binary but restarts terminal child processes. Handoff version 4 chunks
+replay so later updates do not have this limitation.
 
 ## How codelima works
 
@@ -420,7 +457,16 @@ The persistent daemon owns terminal sessions and discovers guest services. The
 TUI is a reconnectable view onto that durable state, not the owner of it.
 Physical TUI sockets are disposable; terminal identity and lifetime belong to
 the daemon. Ghostty rendering is isolated one process per terminal so native
-liveness is never a daemon-wide lock.
+liveness is never a daemon-wide lock. Full renderer snapshots are dirty-driven
+and coalesced; the one-second node CPU, memory, and disk sampler does not force
+per-terminal snapshot work. Sustained output uses ordered terminal-local
+backpressure with a separate renderer health lane, so queue pressure does not
+become restart or reconnect churn. Live update transfers bounded renderer
+history in multiple frames, so a full journal cannot overflow the 1 MiB
+handoff frame limit. Closing a daemon-backed tab removes it from the local TUI
+immediately; accepted input drain and the bounded daemon cleanup complete in
+the background so a slow connection cannot freeze the cursor or adjacent-tab
+selection.
 
 Run `codelima doctor` to inspect Lima, host virtualization, nested
 virtualization, and configuration health.

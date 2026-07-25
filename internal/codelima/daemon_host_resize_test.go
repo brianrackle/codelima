@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"git.sr.ht/~rockorager/vaxis"
+
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
@@ -133,5 +135,55 @@ func TestDaemonTUITerminalResizeSendsOnlyGeometryChanges(t *testing.T) {
 		if method != "terminal.resize" {
 			t.Fatalf("resize RPC method = %q", method)
 		}
+	}
+}
+
+func TestDaemonTUITerminalFocusSendsOnlyFocusTransitions(t *testing.T) {
+	caller := &recordingDaemonCaller{}
+	term := &daemonTUITerminal{client: caller, id: "term-1", stop: make(chan struct{})}
+
+	term.Focus()
+	term.Focus()
+	term.Blur()
+	term.Blur()
+	term.Focus()
+
+	if got := len(caller.methods); got != 2 {
+		t.Fatalf("focus RPC calls = %d, want 2 for two transitions into focus", got)
+	}
+	for _, method := range caller.methods {
+		if method != "terminal.focus" {
+			t.Fatalf("focus RPC method = %q", method)
+		}
+	}
+}
+
+func TestDaemonHostRedrawDefersDirtyNotificationUntilFreshSnapshot(t *testing.T) {
+	entry := &daemonTerminalEntry{
+		state:        daemon.TerminalState{TerminalID: "term-1"},
+		term:         &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()},
+		snapshotWake: make(chan struct{}, 1),
+	}
+	entry.cache.Store(&daemonTerminalCache{snapshot: daemon.Snapshot{Cols: 80, Rows: 24}})
+	broadcasts := 0
+	host := &daemonHost{
+		terminals: map[string]*daemonTerminalEntry{"term-1": entry},
+		broadcast: func(string, any) {
+			broadcasts++
+		},
+	}
+
+	host.handleTerminalEvent("term-1", vaxis.Redraw{})
+
+	if broadcasts != 0 {
+		t.Fatalf("redraw broadcasts = %d, want publication to emit the only dirty event", broadcasts)
+	}
+	if current := entry.cache.Load(); current == nil || !current.snapshot.Stale {
+		t.Fatal("redraw did not mark the cached snapshot stale")
+	}
+	select {
+	case <-entry.snapshotWake:
+	default:
+		t.Fatal("redraw did not schedule a fresh snapshot")
 	}
 }
