@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -153,7 +155,7 @@ func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *t
 	if err != nil {
 		t.Fatalf("open(node host shell) error = %v", err)
 	}
-	t.Cleanup(func() { _ = host.close(context.Background(), state.TerminalID) })
+	t.Cleanup(func() { _ = host.close(state.TerminalID) })
 	if state.CWD != workspace {
 		t.Fatalf("node host terminal cwd = %q, want %q", state.CWD, workspace)
 	}
@@ -205,16 +207,12 @@ func TestDaemonNodeListIncludesLiveResourceUsage(t *testing.T) {
 }
 
 func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	home := filepath.Join(cwd, "..", "..", "tmp", "d-"+newID()[:8])
-	workspace := filepath.Join(cwd, "..", "..", "tmp", "w-"+newID()[:8])
+	root := newDaemonTestRoot(t, "d-")
+	home := filepath.Join(root, "home")
+	workspace := filepath.Join(root, "work")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(home); _ = os.RemoveAll(workspace) })
 	cfg := DefaultConfig(home)
 	service := NewService(cfg, newFakeSandbox(), strings.NewReader(""), ioDiscard{}, ioDiscard{})
 	service.localTerminals = true
@@ -307,4 +305,302 @@ func waitForDaemonPing(t *testing.T, home string) {
 		_, err := daemonclient.Ping(context.Background(), home, Version)
 		return err == nil
 	}, "daemon ping")
+}
+
+// restartRecordingDaemonTerminal is a daemon terminal whose renderer restarts
+// and read-variant renderings are both countable, so the manual restart RPC and
+// the publisher's cost can be asserted without a renderer worker process.
+type restartRecordingDaemonTerminal struct {
+	*fakeTUITerminal
+
+	mu          sync.Mutex
+	visibleText string
+	restarts    int
+	restartErr  error
+	snapshots   int
+	visible     map[ReadFormat]int
+	recent      map[ReadFormat]int
+}
+
+func newRestartRecordingDaemonTerminal(visibleText string) *restartRecordingDaemonTerminal {
+	return &restartRecordingDaemonTerminal{
+		fakeTUITerminal: newFakeTUITerminal(),
+		visibleText:     visibleText,
+		visible:         map[ReadFormat]int{},
+		recent:          map[ReadFormat]int{},
+	}
+}
+
+func (t *restartRecordingDaemonTerminal) RestartRenderer() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.restarts++
+	return t.restartErr
+}
+
+func (t *restartRecordingDaemonTerminal) ReadVisible(format ReadFormat) ReadResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.visible[format]++
+	return ReadResult{Text: "visible-" + readFormatTestName(format)}
+}
+
+func (t *restartRecordingDaemonTerminal) ReadRecent(format ReadFormat) ReadResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.recent[format]++
+	return ReadResult{Text: "recent-" + readFormatTestName(format)}
+}
+
+func (t *restartRecordingDaemonTerminal) Snapshot() SnapshotResult {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.snapshots++
+	cells := make([]SnapshotCell, 0, len(t.visibleText))
+	for _, grapheme := range t.visibleText {
+		cells = append(cells, SnapshotCell{Grapheme: string(grapheme), Width: 1})
+	}
+	return SnapshotResult{Snapshot: TerminalSnapshot{Cols: len(cells), Rows: 1, Cells: cells, Generation: 7}}
+}
+
+func (*restartRecordingDaemonTerminal) Scroll(int)       {}
+func (*restartRecordingDaemonTerminal) SendInput([]byte) {}
+
+func (t *restartRecordingDaemonTerminal) counts() (restarts, snapshots int, visible, recent map[ReadFormat]int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.restarts, t.snapshots, maps.Clone(t.visible), maps.Clone(t.recent)
+}
+
+func (t *restartRecordingDaemonTerminal) restartCount() int {
+	restarts, _, _, _ := t.counts()
+	return restarts
+}
+
+func (t *restartRecordingDaemonTerminal) variantRenders() int {
+	_, _, visible, recent := t.counts()
+	total := 0
+	for _, count := range visible {
+		total += count
+	}
+	for _, count := range recent {
+		total += count
+	}
+	return total
+}
+
+func readFormatTestName(format ReadFormat) string {
+	if format == ReadANSI {
+		return "ansi"
+	}
+	return "text"
+}
+
+// TestDaemonRestartRendererRPCReachesTheTerminalAndRequiresInputOwnership drives
+// terminal.restart_renderer over a real daemon server, so the method's delivery
+// class, the server's ownership gate and the client call are all exercised on
+// the path a TUI or CLI would take.
+func TestDaemonRestartRendererRPCReachesTheTerminalAndRequiresInputOwnership(t *testing.T) {
+	root := newDaemonTestRoot(t, "drr-")
+	cfg := DefaultConfig(filepath.Join(root, "home"))
+	service := NewService(cfg, newFakeSandbox(), strings.NewReader(""), ioDiscard{}, ioDiscard{})
+	service.localTerminals = true
+	if err := service.ensureDirectories(); err != nil {
+		t.Fatal(err)
+	}
+
+	term := newRestartRecordingDaemonTerminal("restartable")
+	host := newDaemonHost(service)
+	host.terminals["term-1"] = &daemonTerminalEntry{state: daemon.TerminalState{TerminalID: "term-1"}, term: term}
+	server := daemon.NewServer(daemon.Config{Home: service.cfg.MetadataRoot, Version: Version, Handler: host})
+	host.wireServerLinks(server)
+	host.markServing()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Run(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("server.Run() error = %v", err)
+		}
+	}()
+	waitForDaemonPing(t, service.cfg.MetadataRoot)
+
+	owner, err := daemonclient.Dial(context.Background(), daemonclient.Options{
+		Home: service.cfg.MetadataRoot, Version: Version, WantInput: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close() }()
+	if !owner.Hello.InputOwner {
+		t.Fatal("first client did not take the input lease")
+	}
+	if err := owner.RestartRenderer(context.Background(), "term-1"); err != nil {
+		t.Fatalf("RestartRenderer() error = %v", err)
+	}
+	if got := term.restartCount(); got != 1 {
+		t.Fatalf("renderer restarts = %d, want 1", got)
+	}
+
+	// The lease holder is the only client allowed to restart a renderer: it
+	// replaces a process every other viewer is watching.
+	observer, err := daemonclient.Dial(context.Background(), daemonclient.Options{
+		Home: service.cfg.MetadataRoot, Version: Version, WantInput: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = observer.Close() }()
+	if observer.Hello.InputOwner {
+		t.Fatal("second client unexpectedly became input owner")
+	}
+	restartErr := observer.RestartRenderer(context.Background(), "term-1")
+	if restartErr == nil {
+		t.Fatal("observe-only client restarted a renderer without the input lease")
+	}
+	if !strings.Contains(restartErr.Error(), "observe-only") {
+		t.Fatalf("observe-only restart error = %v, want the ownership gate", restartErr)
+	}
+	if got := term.restartCount(); got != 1 {
+		t.Fatalf("renderer restarts after a rejected request = %d, want 1", got)
+	}
+
+	var rpcErr *daemon.RPCError
+	missingErr := owner.RestartRenderer(context.Background(), "term-missing")
+	if !errors.As(missingErr, &rpcErr) || rpcErr.Category != "NotFound" {
+		t.Fatalf("restart of an unknown terminal = %v, want NotFound", missingErr)
+	}
+}
+
+// A terminal runtime with no renderer process has nothing to restart, and must
+// say so rather than silently succeeding.
+func TestDaemonRestartRendererReportsRuntimesWithoutARenderer(t *testing.T) {
+	t.Parallel()
+
+	host := &daemonHost{terminals: map[string]*daemonTerminalEntry{
+		"term-1": {
+			state: daemon.TerminalState{TerminalID: "term-1"},
+			term:  &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()},
+		},
+	}}
+	params, err := json.Marshal(map[string]string{"terminal_id": "term-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, handleErr := host.Handle(context.Background(), daemon.ClientContext{}, "terminal.restart_renderer", params)
+	var rpcErr *daemon.RPCError
+	if !errors.As(handleErr, &rpcErr) || rpcErr.Category != string(CategoryUnsupportedFeature) {
+		t.Fatalf("restart on a rendererless runtime = %v, want UnsupportedFeature", handleErr)
+	}
+}
+
+// A renderer restart and a live handoff are two ways of replacing the same
+// renderer, so restart_renderer takes the update barrier like every other
+// terminal mutation: it waits for an update in flight, and once one commits it
+// is rejected as retryable against the successor daemon.
+func TestDaemonRestartRendererWaitsForALiveUpdateAndIsRetryableAfterIt(t *testing.T) {
+	t.Parallel()
+
+	term := newRestartRecordingDaemonTerminal("barrier")
+	host := &daemonHost{terminals: map[string]*daemonTerminalEntry{
+		"term-1": {state: daemon.TerminalState{TerminalID: "term-1"}, term: term},
+	}}
+
+	host.updateGate.Lock()
+	restarted := make(chan error, 1)
+	go func() { restarted <- host.restartRenderer("term-1") }()
+	select {
+	case err := <-restarted:
+		t.Fatalf("restart_renderer ran while a live update held the barrier: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if got := term.restartCount(); got != 0 {
+		t.Fatalf("renderer restarts during a live update = %d, want 0", got)
+	}
+
+	host.replaced.Store(true)
+	host.updateGate.Unlock()
+	var err error
+	select {
+	case err = <-restarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("restart_renderer never resolved after the live update finished")
+	}
+	var rpcErr *daemon.RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Category != "PreconditionFailed" {
+		t.Fatalf("restart after a committed update = %v, want a retryable PreconditionFailed", err)
+	}
+	if replaced, _ := rpcErr.Fields["daemon_replaced"].(bool); !replaced {
+		t.Fatalf("restart error fields = %v, want daemon_replaced", rpcErr.Fields)
+	}
+	if got := term.restartCount(); got != 0 {
+		t.Fatalf("renderer restarts after a committed update = %d, want 0", got)
+	}
+}
+
+// Publication used to re-render the ANSI viewport and both scrollback variants
+// on every wake, up to 20 times a second per terminal, whether or not anything
+// ever called terminal.read. Only the plain visible text rides along with the
+// published screen now; the rest are pulled by terminal.read itself.
+func TestDaemonSnapshotPublicationDoesNotRenderReadVariants(t *testing.T) {
+	t.Parallel()
+
+	term := newRestartRecordingDaemonTerminal("published")
+	host := &daemonHost{terminals: map[string]*daemonTerminalEntry{}, broadcast: func(string, any) {}}
+	entry := host.newTerminalEntry(daemon.TerminalState{TerminalID: "term-1"}, term)
+	t.Cleanup(entry.stopSnapshotPublisher)
+	host.terminals["term-1"] = entry
+
+	waitForCondition(t, 5*time.Second, func() bool { return entry.cache.Load() != nil }, "first published screen")
+	for range 32 {
+		entry.requestSnapshot()
+	}
+	waitForCondition(t, 5*time.Second, func() bool {
+		_, snapshots, _, _ := term.counts()
+		return snapshots >= 2
+	}, "repeated publication")
+	if got := term.variantRenders(); got != 0 {
+		t.Fatalf("publication rendered %d read variants with no terminal.read issued, want 0", got)
+	}
+
+	read := func(source, format string) ReadResult {
+		t.Helper()
+		params, err := json.Marshal(map[string]string{"terminal_id": "term-1", "source": source, "format": format})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, handleErr := host.Handle(context.Background(), daemon.ClientContext{}, "terminal.read", params)
+		if handleErr != nil {
+			t.Fatalf("terminal.read(%s,%s) error = %v", source, format, handleErr)
+		}
+		return result.(ReadResult)
+	}
+
+	// The default variant is the published screen's own text and still costs the
+	// terminal nothing.
+	if got := read("visible", "text"); got.Text != "published" {
+		t.Fatalf("terminal.read(visible,text) = %q, want the published screen text", got.Text)
+	}
+	if got := term.variantRenders(); got != 0 {
+		t.Fatalf("plain visible text cost %d renderings, want 0", got)
+	}
+
+	for _, testCase := range []struct{ source, format, want string }{
+		{"recent", "text", "recent-text"},
+		{"recent", "ansi", "recent-ansi"},
+		{"visible", "ansi", "visible-ansi"},
+	} {
+		if got := read(testCase.source, testCase.format); got.Text != testCase.want {
+			t.Fatalf("terminal.read(%s,%s) = %q, want %q", testCase.source, testCase.format, got.Text, testCase.want)
+		}
+	}
+	_, _, visible, recent := term.counts()
+	if visible[ReadText] != 0 {
+		t.Fatalf("terminal.read pulled the plain visible text %d times, want it served from the published frame", visible[ReadText])
+	}
+	if visible[ReadANSI] != 1 || recent[ReadText] != 1 || recent[ReadANSI] != 1 {
+		t.Fatalf("variant renderings = visible%v recent%v, want exactly one per requested variant", visible, recent)
+	}
 }

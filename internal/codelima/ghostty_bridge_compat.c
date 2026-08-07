@@ -745,7 +745,12 @@ int ghostty_bridge_render_state_get_viewport(GhosttyBridgeTerminal term, Ghostty
 		!ghostty_bridge_result_ok(ghostty.render_state_get(bridge->render_state, GHOSTTY_RENDER_STATE_DATA_ROWS, &rows))) {
 		return -1;
 	}
-	if (buffer_size < (size_t)cols * (size_t)rows) {
+	// capacity is what the caller's buffer is allowed to hold, cross-checked
+	// against what libghostty just said its viewport is. Both numbers matter:
+	// the caller sized its buffer from its own cols/rows, and libghostty is
+	// dlopen'd, so the two can disagree across a library upgrade.
+	size_t capacity = (size_t)cols * (size_t)rows;
+	if (buffer_size < capacity) {
 		return -1;
 	}
 
@@ -764,6 +769,17 @@ int ghostty_bridge_render_state_get_viewport(GhosttyBridgeTerminal term, Ghostty
 			return -1;
 		}
 		for (uint16_t x = 0; x < cols; x++) {
+			// Per-write bound, not just the up-front one. The row count that
+			// sized capacity came from render_state_get(ROWS); the loop is
+			// driven by the row iterator, and nothing in the C API promises the
+			// two agree. A library that yields one row more than it reported
+			// would otherwise write past the end of a Go-allocated buffer, which
+			// is memory corruption in the host process rather than a render
+			// glitch. Refusing the frame is the same failure the caller already
+			// handles for every other inconsistency here.
+			if (count >= capacity) {
+				return -1;
+			}
 			if (!ghostty_bridge_result_ok(ghostty.render_state_row_cells_select(bridge->row_cells, x))) {
 				return -1;
 			}
@@ -781,6 +797,12 @@ static int ghostty_bridge_grid_ref_grapheme(const GhosttyGridRef* ref, uint32_t*
 	size_t out_len = 0;
 	GhosttyResult result = ghostty.grid_ref_graphemes(ref, out_buffer, buffer_size, &out_len);
 	if (result != GHOSTTY_SUCCESS) {
+		return -1;
+	}
+	// The success contract is out_len <= buffer_size, but the count is handed
+	// straight back to Go as a slice length. Verifying it here keeps a skewed
+	// library from turning into an out-of-range read on the caller's side.
+	if (out_len > buffer_size) {
 		return -1;
 	}
 	return (int)out_len;
@@ -982,20 +1004,40 @@ bool ghostty_bridge_terminal_is_row_wrapped(GhosttyBridgeTerminal term, int row)
 	return ghostty_bridge_result_ok(ghostty.row_get(raw_row, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &wrapped)) && wrapped;
 }
 
-int ghostty_bridge_terminal_get_hyperlink_uri(GhosttyBridgeTerminal term, int row, int col, uint8_t* out_buffer, size_t buffer_size) {
-	struct ghostty_bridge_terminal* bridge = term;
-	if (bridge == NULL || bridge->terminal == NULL || ghostty.terminal_get_hyperlink_uri == NULL) {
+// ghostty_bridge_clamp_written validates a byte count a library call claims to
+// have written into a caller-provided buffer. The count is handed back to Go as
+// a slice length, so a skewed library returning more than it was given must
+// become this file's -1 rather than an out-of-range read on the caller's side.
+static int ghostty_bridge_clamp_written(int written, size_t buffer_size) {
+	if (written < 0) {
 		return -1;
 	}
-	return ghostty.terminal_get_hyperlink_uri(bridge->terminal, row, col, out_buffer, buffer_size);
+	if ((size_t)written > buffer_size) {
+		return -1;
+	}
+	return written;
+}
+
+int ghostty_bridge_terminal_get_hyperlink_uri(GhosttyBridgeTerminal term, int row, int col, uint8_t* out_buffer, size_t buffer_size) {
+	struct ghostty_bridge_terminal* bridge = term;
+	if (bridge == NULL || bridge->terminal == NULL || out_buffer == NULL || ghostty.terminal_get_hyperlink_uri == NULL) {
+		return -1;
+	}
+	return ghostty_bridge_clamp_written(
+		ghostty.terminal_get_hyperlink_uri(bridge->terminal, row, col, out_buffer, buffer_size),
+		buffer_size
+	);
 }
 
 int ghostty_bridge_terminal_get_scrollback_hyperlink_uri(GhosttyBridgeTerminal term, int offset, int col, uint8_t* out_buffer, size_t buffer_size) {
 	struct ghostty_bridge_terminal* bridge = term;
-	if (bridge == NULL || bridge->terminal == NULL || ghostty.terminal_get_scrollback_hyperlink_uri == NULL) {
+	if (bridge == NULL || bridge->terminal == NULL || out_buffer == NULL || ghostty.terminal_get_scrollback_hyperlink_uri == NULL) {
 		return -1;
 	}
-	return ghostty.terminal_get_scrollback_hyperlink_uri(bridge->terminal, offset, col, out_buffer, buffer_size);
+	return ghostty_bridge_clamp_written(
+		ghostty.terminal_get_scrollback_hyperlink_uri(bridge->terminal, offset, col, out_buffer, buffer_size),
+		buffer_size
+	);
 }
 
 bool ghostty_bridge_terminal_has_response(GhosttyBridgeTerminal term) {

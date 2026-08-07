@@ -3,6 +3,7 @@ package codelima
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
 	}
 
 	operationID := newID()
-	a.operations[operationID] = &tuiOperationState{
+	operation := &tuiOperationState{
 		ID:            operationID,
 		Title:         request.Title,
 		DisplayStatus: request.DisplayStatus,
@@ -39,6 +40,7 @@ func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
 		ResourceKeys:  append([]string(nil), request.ResourceKeys...),
 		Lines:         []string{"waiting for command output..."},
 	}
+	a.operations[operationID] = operation
 	a.operationOrder = append(a.operationOrder, operationID)
 
 	go func() {
@@ -46,7 +48,9 @@ func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
 		service := a.service.withIO(progress, progress)
 		result, err := request.Run(a.ctx, service)
 		progress.Flush()
-		a.postEvent(tuiOperationCompleteEvent{OperationID: operationID, Result: result, Err: err})
+		completion := tuiOperationCompleteEvent{OperationID: operationID, Result: result, Err: err}
+		operation.completion.Store(&completion)
+		a.postCompletion(completion)
 	}()
 
 	return nil
@@ -57,9 +61,9 @@ func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperati
 		a.sessions.CloseNode(result.CloseNodeID)
 	}
 	if result.ReloadData {
-		if err := a.reloadData(selectedKey); err != nil {
-			return err
-		}
+		// The reload is a daemon RPC or a store read; it runs off the event
+		// loop and applies through tuiRefreshCompleteEvent (invariant I1).
+		a.startDataRefresh(selectedKey)
 	}
 	if result.ShowTerminalPane {
 		a.state.treePaneMode = tuiTreePaneModeTerminal
@@ -67,9 +71,16 @@ func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperati
 	if result.Status != "" {
 		a.setStatus(slog.LevelInfo, result.Status)
 	}
+	if result.Apply != nil {
+		return result.Apply(a)
+	}
 	return nil
 }
 
+// conflictingOperation reports the active operation that owns one of
+// resourceKeys. Operations that already recorded a completion are skipped:
+// their event may still be in flight (or lost), and a finished operation must
+// never keep blocking a retry.
 func (a *vaxisTUIApp) conflictingOperation(resourceKeys []string) *tuiOperationState {
 	if len(resourceKeys) == 0 {
 		return nil
@@ -77,7 +88,7 @@ func (a *vaxisTUIApp) conflictingOperation(resourceKeys []string) *tuiOperationS
 
 	for _, operationID := range a.operationOrder {
 		operation := a.operations[operationID]
-		if operation == nil {
+		if operation == nil || operation.completion.Load() != nil {
 			continue
 		}
 		if operationConflicts(operation.ResourceKeys, resourceKeys) {
@@ -86,6 +97,22 @@ func (a *vaxisTUIApp) conflictingOperation(resourceKeys []string) *tuiOperationS
 	}
 
 	return nil
+}
+
+// reapCompletedOperations applies every background operation that finished but
+// whose tuiOperationCompleteEvent never reached the loop. vaxis silently drops
+// posted events when its queue is full — precisely when the loop is busy — and
+// a lost completion would otherwise leave the operation latched forever.
+func (a *vaxisTUIApp) reapCompletedOperations() {
+	for _, operationID := range slices.Clone(a.operationOrder) {
+		operation := a.operations[operationID]
+		if operation == nil {
+			continue
+		}
+		if completion := operation.completion.Load(); completion != nil {
+			a.finishOperation(*completion)
+		}
+	}
 }
 
 func operationConflicts(active []string, requested []string) bool {
@@ -124,7 +151,13 @@ func (a *vaxisTUIApp) appendOperationLine(operationID string, line string) {
 }
 
 func (a *vaxisTUIApp) finishOperation(event tuiOperationCompleteEvent) {
-	operation := a.operations[event.OperationID]
+	operation, tracked := a.operations[event.OperationID]
+	if !tracked {
+		// reapCompletedOperations already applied this completion (or the
+		// posted event arrived twice); replaying it would repeat its status,
+		// its reload, and its message-ring entries.
+		return
+	}
 	delete(a.operations, event.OperationID)
 	for index, operationID := range a.operationOrder {
 		if operationID != event.OperationID {

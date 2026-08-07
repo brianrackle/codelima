@@ -60,4 +60,4 @@ Keep the existing auto-open timing, but let the session store remember the curre
 
 ## Links
 
-* Pattern [PATTERNS.MD](/Users/brianrackle/Projects/codelima/PATTERNS.MD)
+* Pattern [PATTERNS.MD](../PATTERNS.MD)

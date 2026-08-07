@@ -68,5 +68,5 @@ The export/sync capability that a patch-like flow was once imagined to serve (TO
 
 ## Links
 
-* Relates to [ADR 5](/Users/brianrackle/projects/codelima/decisions/defer_project_snapshots_and_runtime_validation_5.md) — the snapshot machinery this decision preserves for `ProjectFork`.
+* Relates to [ADR 5](defer_project_snapshots_and_runtime_validation_5.md) — the snapshot machinery this decision preserves for `ProjectFork`.
 * Refined-by TODO #8 — the node export/sync replacement is designed fresh, not resurrected from the patch model.

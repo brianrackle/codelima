@@ -10,11 +10,13 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -38,6 +40,19 @@ type rendererWorkerServer struct {
 // RunRendererWorker serves one Ghostty renderer over the inherited descriptor
 // passed by the daemon-side terminal supervisor.
 func RunRendererWorker(ctx context.Context) error {
+	// Fatal-error tracebacks must not disappear into the capture pipe installed
+	// below, so point the runtime's crash output at a private duplicate of the
+	// inherited stderr (daemon.log) before fd 2 is taken over.
+	if saved, err := unix.Dup(int(os.Stderr.Fd())); err == nil {
+		_ = debug.SetCrashOutput(os.NewFile(uintptr(saved), "codelima-renderer-crash"), debug.CrashOptions{})
+	}
+	// This process exists to run exactly one libghostty terminal, so the stderr
+	// capture is installed once here instead of around every bridge call. It
+	// covers library load and terminal construction diagnostics too, and is
+	// released before returning so the worker's own startup failure still
+	// reaches the inherited stderr.
+	acquireGhosttyStderrCapture()
+	defer releaseGhosttyStderrCapture()
 	file := os.NewFile(rendererWorkerFD, "codelima-renderer-control")
 	if file == nil {
 		return errors.New("renderer control descriptor is unavailable")
@@ -170,7 +185,10 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 		}
 		s.replaying.Store(false)
 		s.publish()
-		return map[string]bool{"ready": true}, nil
+		// The version rides the init reply, so the supervisor learns it before
+		// it installs the link and before this worker's first snapshot frame is
+		// interpreted.
+		return rendererInitResult{Protocol: rendererWorkerProtocolVersion, Ready: true}, nil
 	case "output":
 		var params rendererOutputParams
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
@@ -217,6 +235,19 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 	case "snapshot":
 		s.publish()
 		return map[string]bool{"published": true}, nil
+	case "read":
+		if s.terminal == nil {
+			return nil, errors.New("renderer is not initialized")
+		}
+		var params rendererReadParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return nil, err
+		}
+		source, format := params.selectors()
+		if source == ReadRecent {
+			return readResultDTO(s.terminal.ReadRecent(format)), nil
+		}
+		return readResultDTO(s.terminal.ReadVisible(format)), nil
 	case "health":
 		if s.terminal == nil {
 			return nil, errors.New("renderer is not initialized")
@@ -266,9 +297,6 @@ func (s *rendererWorkerServer) publish() {
 	state := rendererPublishedState{
 		Snapshot:    snapshot.Snapshot,
 		VisibleText: readResultDTO(s.terminal.ReadVisible(ReadText)),
-		VisibleANSI: readResultDTO(s.terminal.ReadVisible(ReadANSI)),
-		RecentText:  readResultDTO(s.terminal.ReadRecent(ReadText)),
-		RecentANSI:  readResultDTO(s.terminal.ReadRecent(ReadANSI)),
 	}
 	result, err := json.Marshal(state)
 	if err != nil {

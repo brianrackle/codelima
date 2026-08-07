@@ -35,3 +35,16 @@ jobs:
       - uses: actions/checkout@v6
       - name: Race detector
         run: make test-race
+
+  # Integration tier (tests/, -tags=integration). Every test drives the built
+  # codelima binary through daemon start/stop/update and node-host-shell
+  # terminals, which are plain host shells - no Lima VM, no limactl, and no
+  # network are required, so the whole tier is GitHub-runner safe. Linux only:
+  # nothing in the tier is macOS-gated and the daemon paths under test are
+  # platform independent.
+  integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Integration tier
+        run: make test-integration

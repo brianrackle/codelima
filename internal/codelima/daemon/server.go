@@ -42,14 +42,23 @@ type SynchronizationHandler interface {
 }
 
 type Config struct {
-	Home              string
-	Version           string
-	Handler           Handler
-	Logger            *slog.Logger
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	RequestTimeout    time.Duration
-	MaxInFlight       int
+	Home         string
+	Version      string
+	Handler      Handler
+	Logger       *slog.Logger
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+	// RequestTimeout bounds every method outside the lifecycle class.
+	RequestTimeout time.Duration
+	// LifecycleRequestTimeout bounds the lifecycle class (node.start,
+	// node.stop, daemon.update). Zero applies no daemon-imposed deadline:
+	// those operations own their internal budgets (VM boot, guest commands,
+	// live handoff) and are already bounded by the client connection's
+	// lifetime. A blanket short deadline here cancels a legitimate node boot
+	// mid-flight and persists the node as failed.
+	LifecycleRequestTimeout time.Duration
+	MaxInFlight             int
+	// MutationQueueSize is the depth of each per-terminal serial input lane.
 	MutationQueueSize int
 	OutboundMaxFrames int
 	OutboundMaxBytes  int
@@ -67,10 +76,14 @@ type Server struct {
 	stopOnce sync.Once
 	wg       sync.WaitGroup
 	mu       sync.Mutex
-	clients  map[string]*clientConn
-	input    inputLease
-	revision uint64
-	nextConn atomic.Uint64
+	// publication is the event-publication barrier. Broadcast holds it shared;
+	// the bounded events.subscribe fallback holds it exclusively so its capture
+	// observes one stable revision without freezing the rest of the server.
+	publication sync.RWMutex
+	clients     map[string]*clientConn
+	input       inputLease
+	revision    uint64
+	nextConn    atomic.Uint64
 	// baseCtx is derived from Run's context and cancelled when the server
 	// stops; every connection derives its handler context from it so in-flight
 	// handlers observe shutdown instead of running on a detached Background.
@@ -78,6 +91,113 @@ type Server struct {
 	baseCancel context.CancelFunc
 	accepting  atomic.Bool
 	replaced   atomic.Bool
+	snapshots  snapshotBodyCache
+}
+
+// maxSnapshotBodyCacheEntries bounds memoized snapshot bodies by terminal, and
+// maxSnapshotBodyCacheBytes bounds their total retained size. A published grid
+// is large, so the cache keeps only what active pullers are asking for.
+const (
+	maxSnapshotBodyCacheEntries = 16
+	maxSnapshotBodyCacheBytes   = 32 << 20
+)
+
+// snapshotBodyRevision identifies one immutable published screen. Terminal
+// snapshots are produced once and never mutated in place (ADRs 112-115): the
+// sequence advances per publication and the staleness flag is the only field
+// that can be re-stamped onto an existing sequence, so the two together name
+// exactly one encodable value.
+type snapshotBodyRevision struct {
+	sequence   uint64
+	generation uint64
+	stale      bool
+}
+
+type snapshotBodyEntry struct {
+	revision snapshotBodyRevision
+	data     []byte
+	usedAt   uint64
+}
+
+// snapshotBodyCache encodes each published terminal snapshot at most once and
+// shares the bytes across every client that pulls it. Without it a full-grid
+// JSON marshal ran per client per pull, so a second attached window doubled the
+// daemon's encoding cost for a screen that is byte-for-byte identical.
+type snapshotBodyCache struct {
+	mu      sync.Mutex
+	entries map[string]*snapshotBodyEntry
+	clock   uint64
+	bytes   int
+
+	// encodes counts full marshals and reuses counts cache hits. Both are test
+	// observability only; nothing in the serving path reads them.
+	encodes atomic.Uint64
+	reuses  atomic.Uint64
+}
+
+func (c *snapshotBodyCache) body(terminal string, snapshot Snapshot) ([]byte, error) {
+	revision := snapshotBodyRevision{
+		sequence:   snapshot.SnapshotSequence,
+		generation: snapshot.Generation,
+		stale:      snapshot.Stale,
+	}
+	c.mu.Lock()
+	c.clock++
+	now := c.clock
+	if entry, ok := c.entries[terminal]; ok && entry.revision == revision {
+		entry.usedAt = now
+		data := entry.data
+		c.mu.Unlock()
+		c.reuses.Add(1)
+		return data, nil
+	}
+	c.mu.Unlock()
+
+	// Encode outside the cache mutex: a concurrent pull of a different terminal
+	// must not queue behind a multi-megabyte marshal.
+	data, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	c.encodes.Add(1)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = map[string]*snapshotBodyEntry{}
+	}
+	if previous, ok := c.entries[terminal]; ok {
+		c.bytes -= len(previous.data)
+	}
+	c.entries[terminal] = &snapshotBodyEntry{revision: revision, data: data, usedAt: now}
+	c.bytes += len(data)
+	c.evictLocked()
+	return data, nil
+}
+
+// evictLocked drops least-recently-used terminals until the cache is back
+// inside both bounds. Evicted bytes are still safe to serve: callers hold their
+// own reference to an immutable slice.
+func (c *snapshotBodyCache) evictLocked() {
+	for len(c.entries) > maxSnapshotBodyCacheEntries || c.bytes > maxSnapshotBodyCacheBytes {
+		var (
+			oldestKey   string
+			oldestUsed  uint64
+			oldestFound bool
+		)
+		for key, entry := range c.entries {
+			if !oldestFound || entry.usedAt < oldestUsed {
+				oldestKey, oldestUsed, oldestFound = key, entry.usedAt, true
+			}
+		}
+		if !oldestFound || len(c.entries) == 1 {
+			// Never evict the only entry: a single snapshot larger than the byte
+			// bound would otherwise be re-encoded on every pull.
+			return
+		}
+		c.bytes -= len(c.entries[oldestKey].data)
+		delete(c.entries, oldestKey)
+	}
 }
 
 type clientConn struct {
@@ -89,6 +209,7 @@ type clientConn struct {
 	conn                 net.Conn
 	outbound             *outboundQueue
 	subscribed           atomic.Bool
+	subscribing          atomic.Bool
 	cancel               context.CancelCauseFunc
 	failure              connectionFailure
 	closeOnce            sync.Once
@@ -179,7 +300,7 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 
 		s.mu.Lock()
 		event := Event{
-			Event:         "daemon.heartbeat",
+			Event:         EventDaemonHeartbeat,
 			DaemonEpoch:   s.identity.Token,
 			StateSequence: s.revision,
 		}
@@ -190,8 +311,12 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 			}
 		}
 		s.mu.Unlock()
+		// The heartbeat carries no payload, so this marshal is total, and it
+		// reports s.revision rather than consuming one: a dropped heartbeat can
+		// never open the sequence gap that Broadcast guards against.
 		frame, err := marshalLine(event)
 		if err != nil {
+			s.cfg.Logger.Error("encode daemon heartbeat failed", "error", err)
 			continue
 		}
 		for _, client := range clients {
@@ -264,6 +389,14 @@ func (s *Server) PrepareReplacement() error {
 }
 
 func (s *Server) ResumeAfterReplacement() error {
+	// Re-assert the directory mode rather than assume prepare's: this runs after
+	// an aborted handoff, arbitrarily long after the original bind, and the
+	// importing daemon may have recreated the directory in between.
+	for _, dir := range []string{s.paths.Dir, filepath.Dir(s.paths.Lock)} {
+		if err := ensurePrivateDir(dir); err != nil {
+			return err
+		}
+	}
 	lock, err := os.OpenFile(s.paths.Lock, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
@@ -272,12 +405,10 @@ func (s *Server) ResumeAfterReplacement() error {
 		_ = lock.Close()
 		return err
 	}
-	oldUmask := syscall.Umask(0o177)
-	request, err := net.Listen("unix", s.paths.Socket)
+	request, err := listenPrivate(s.paths.Socket)
 	if err == nil {
-		s.events, err = net.Listen("unix", s.paths.Client)
+		s.events, err = listenPrivate(s.paths.Client)
 	}
-	syscall.Umask(oldUmask)
 	if err != nil {
 		if request != nil {
 			_ = request.Close()
@@ -296,9 +427,33 @@ func (s *Server) ResumeAfterReplacement() error {
 }
 
 func (s *Server) Broadcast(name string, data any) {
+	// Encode the caller's payload before taking s.mu, and before consuming a
+	// state sequence.
+	//
+	// The payload is the only part of the envelope that can fail to encode: the
+	// remaining fields are a string, a string and a uint64, and a
+	// json.RawMessage produced here is by construction valid JSON, so the
+	// envelope marshal below is total. Consuming s.revision for an event that is
+	// then dropped would show every subscriber a sequence gap on the next
+	// successful event, and a gap is answered with a full resync reconnect —
+	// exactly the storm the epoch/sequence supervision in ADR 107 exists to
+	// avoid. Encoding first also keeps the encoder out of the critical section
+	// that heartbeatLoop shares.
+	var payload json.RawMessage
+	if data != nil {
+		encoded, err := json.Marshal(data)
+		if err != nil {
+			s.cfg.Logger.Error("encode daemon event failed", "event", name, "error", err)
+			return
+		}
+		payload = encoded
+	}
+
+	s.publication.RLock()
+	defer s.publication.RUnlock()
 	s.mu.Lock()
 	s.revision++
-	event := Event{Event: name, Data: data, DaemonEpoch: s.identity.Token, StateSequence: s.revision}
+	event := Event{Event: name, Data: payload, DaemonEpoch: s.identity.Token, StateSequence: s.revision}
 	clients := make([]*clientConn, 0, len(s.clients))
 	for _, client := range s.clients {
 		if client.subscribed.Load() {
@@ -309,7 +464,9 @@ func (s *Server) Broadcast(name string, data any) {
 
 	frame, err := marshalLine(event)
 	if err != nil {
-		s.cfg.Logger.Error("encode daemon event failed", "event", name, "error", err)
+		// Unreachable given the pre-encoded payload; kept as a loud record
+		// rather than a silent drop if a future envelope field breaks that.
+		s.cfg.Logger.Error("encode daemon event envelope failed", "event", name, "error", err)
 		return
 	}
 	for _, client := range clients {
@@ -317,6 +474,76 @@ func (s *Server) Broadcast(name string, data any) {
 			client.fail("daemon", "ready", CloseQueueFull, errors.New("daemon client outbound queue is full"))
 		}
 	}
+}
+
+// ensurePrivateDir creates dir when missing and forces it to 0700.
+//
+// The explicit Chmod is the part that matters: MkdirAll's mode argument is
+// masked by the process umask, and it is ignored outright when the directory
+// already exists, so a _daemon or _locks directory left group-readable by an
+// older build, a loose umask, or a restore from backup would otherwise keep
+// that mode forever. This directory is the outer layer of the socket's
+// protection, so it is re-asserted on every bind rather than trusted.
+func ensurePrivateDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o700)
+}
+
+// listenPrivate binds a Unix socket and restricts it to its owner.
+//
+// This deliberately does not bracket the Listen with syscall.Umask. umask is
+// process-global mutable state, not a property of this call: for as long as
+// such a bracket is held, every *other* goroutine in the process silently
+// loses permission bits on anything it creates. That is not only a test
+// problem -- a store write or log directory created concurrently with a daemon
+// bind would come out with the execute bit stripped -- but it showed up first
+// as an isolation bug: a concurrent t.TempDir() got a 0600 base directory
+// (0700 &^ 0177) and every later write beneath it failed with EACCES, which is
+// why the test suite could only be run with -p 1 -parallel 1. Chmod after
+// Listen is scoped to this one path and races nothing.
+//
+// The socket does exist with the process umask's default mode for the instant
+// between Listen and Chmod. Two layers close that window: the socket is bound
+// inside a 0700 directory owned by this user (ensurePrivateDir above), so no
+// other user can reach the path at all, and RequireSameUserPeer rejects any
+// connection whose peer uid is not ours even when the mode is ignored entirely.
+//
+// Some filesystems -- virtiofs, and some network mounts -- refuse chmod on a
+// socket inode outright (EINVAL) while allowing it on regular files, so the
+// 0600 cannot be treated as guaranteed. Rather than assume the directory saves
+// us there, verify it and fail closed: the daemon binds only if the socket
+// ended up 0600 or is provably inside a directory no other user can traverse.
+func listenPrivate(path string) (net.Listener, error) {
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		if !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+			_ = listener.Close()
+			return nil, err
+		}
+		if dirErr := verifyPrivateDir(filepath.Dir(path)); dirErr != nil {
+			_ = listener.Close()
+			return nil, fmt.Errorf("socket %s could not be restricted (%w): %w", path, err, dirErr)
+		}
+	}
+	return listener, nil
+}
+
+// verifyPrivateDir reports whether dir denies all access to group and other,
+// which is what makes an unrestrictable socket inside it unreachable.
+func verifyPrivateDir(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		return fmt.Errorf("directory %s has mode %#o, which other users can reach", dir, mode)
+	}
+	return nil
 }
 
 func (s *Server) prepare() (err error) {
@@ -342,7 +569,7 @@ func (s *Server) prepare() (err error) {
 	}()
 
 	for _, dir := range []string{s.paths.Dir, filepath.Dir(s.paths.Lock)} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := ensurePrivateDir(dir); err != nil {
 			return err
 		}
 	}
@@ -361,24 +588,25 @@ func (s *Server) prepare() (err error) {
 	for _, path := range []string{s.paths.Socket, s.paths.Client} {
 		_ = os.Remove(path)
 	}
-	oldUmask := syscall.Umask(0o177)
-	s.request, err = net.Listen("unix", s.paths.Socket)
-	if err != nil {
-		syscall.Umask(oldUmask)
-		return err
-	}
-	s.events, err = net.Listen("unix", s.paths.Client)
-	syscall.Umask(oldUmask)
+	s.request, err = listenPrivate(s.paths.Socket)
 	if err != nil {
 		return err
 	}
-	for _, path := range []string{s.paths.Socket, s.paths.Client} {
-		if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
-			return err
-		}
+	s.events, err = listenPrivate(s.paths.Client)
+	if err != nil {
+		return err
 	}
-	s.identity = Identity{Token: randomToken(), Version: s.cfg.Version, Protocol: ProtocolVersion, PID: os.Getpid(), StartedAt: time.Now().UTC()}
-	if err := writeJSONAtomic(s.paths.Identity, s.identity, 0o600); err != nil {
+	// Publish the identity under the state lock. Event publishers are wired to
+	// the server before Run reaches prepare -- a terminal snapshot or node
+	// status change can be broadcast while the daemon is still binding its
+	// sockets -- and Broadcast, the heartbeat and status all read the identity
+	// token under s.mu. An unsynchronized assignment here raced every one of
+	// them at startup and again on the live-update import path.
+	identity := Identity{Token: randomToken(), Version: s.cfg.Version, Protocol: ProtocolVersion, PID: os.Getpid(), StartedAt: time.Now().UTC()}
+	s.mu.Lock()
+	s.identity = identity
+	s.mu.Unlock()
+	if err := writeJSONAtomic(s.paths.Identity, identity, 0o600); err != nil {
 		return err
 	}
 	return writeAtomic(s.paths.PID, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
@@ -484,16 +712,15 @@ func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 		StateSequence: revision,
 		InputOwner:    owner,
 	})
-	mutations := make(chan Request, s.cfg.MutationQueueSize)
-	go s.runMutationLane(connCtx, client, mutations, eventSocket)
-	querySlots := make(chan struct{}, s.cfg.MaxInFlight)
+	lanes := newConnectionLanes(s, client, connCtx, eventSocket)
+	defer lanes.close()
 
 	for {
 		// ReadTimeout bounds the unauthenticated hello and the time an event
 		// client may occupy client.sock without subscribing. Authenticated RPC
 		// clients are intentionally persistent: the TUI can sit idle for an
 		// arbitrary amount of time before opening a terminal or changing a node.
-		if eventSocket && !client.subscribed.Load() {
+		if eventSocket && !client.subscribed.Load() && !client.subscribing.Load() {
 			_ = conn.SetReadDeadline(time.Now().Add(s.cfg.ReadTimeout))
 		} else {
 			_ = conn.SetReadDeadline(time.Time{})
@@ -508,56 +735,86 @@ func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 			break
 		}
 		if request.Method == "events.subscribe" {
-			s.subscribe(connCtx, client, request, eventSocket)
+			s.beginSubscribe(connCtx, client, request, eventSocket)
 			continue
 		}
-		if mutatingInputMethod(request.Method) {
-			select {
-			case mutations <- request:
-			default:
-				client.fail("daemon", "ready", CloseQueueFull, errors.New("daemon client mutation queue is full"))
-			}
-			continue
-		}
-		select {
-		case querySlots <- struct{}{}:
-			go func(request Request) {
-				defer func() { <-querySlots }()
-				s.dispatchRequest(connCtx, client, request, eventSocket)
-			}(request)
-		default:
-			s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{
-				Category: "PreconditionFailed",
-				Message:  "too many in-flight daemon requests",
-				Code:     CodePreconditionFailed,
-			}})
-		}
-	}
-}
-
-func (s *Server) runMutationLane(ctx context.Context, client *clientConn, requests <-chan Request, eventSocket bool) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case request := <-requests:
-			s.dispatchRequest(ctx, client, request, eventSocket)
-		}
+		lanes.dispatch(request)
 	}
 }
 
 func (s *Server) dispatchRequest(ctx context.Context, client *clientConn, request Request, eventSocket bool) {
-	requestCtx, requestCancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
+	requestCtx, requestCancel := s.requestContext(ctx, request.Method)
 	defer requestCancel()
 	result, callErr := s.handle(requestCtx, client, request, eventSocket)
 	if callErr != nil {
 		s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(callErr)})
 		return
 	}
-	s.writeResult(client, request.ID, result)
+	s.writeRequestResult(client, request, result)
 }
 
-func (s *Server) subscribe(ctx context.Context, client *clientConn, request Request, eventSocket bool) {
+// writeRequestResult answers one request, reusing an already-encoded body when
+// the result is an immutable terminal snapshot. Everything else marshals
+// normally.
+func (s *Server) writeRequestResult(client *clientConn, request Request, value any) {
+	snapshot, ok := value.(Snapshot)
+	if !ok || snapshot.SnapshotSequence == 0 {
+		s.writeResult(client, request.ID, value)
+		return
+	}
+	terminal := requestTerminalKey(request.Params)
+	if terminal == "" {
+		s.writeResult(client, request.ID, value)
+		return
+	}
+	data, err := s.snapshots.body(terminal, snapshot)
+	if err != nil {
+		s.writeResponse(client, Response{ID: request.ID, Error: &RPCError{Category: "Internal", Message: err.Error(), Code: CodeInternalFailure}})
+		return
+	}
+	s.writeResponse(client, Response{ID: request.ID, Result: data})
+}
+
+// dispatchLatestValueRequest applies one replaceable value and answers every
+// request it superseded with the same outcome, so coalescing never leaves a
+// caller without a response.
+func (s *Server) dispatchLatestValueRequest(ctx context.Context, client *clientConn, pending pendingLatestValue, eventSocket bool) {
+	requestCtx, requestCancel := s.requestContext(ctx, pending.request.Method)
+	defer requestCancel()
+	result, callErr := s.handle(requestCtx, client, pending.request, eventSocket)
+	ids := make([]uint64, 0, len(pending.superseded)+1)
+	ids = append(ids, pending.request.ID)
+	ids = append(ids, pending.superseded...)
+	for _, id := range ids {
+		if callErr != nil {
+			s.writeResponse(client, Response{ID: id, Error: AsRPCError(callErr)})
+			continue
+		}
+		s.writeRequestResult(client, Request{ID: id, Method: pending.request.Method, Params: pending.request.Params}, result)
+	}
+}
+
+// requestContext applies the timeout class of the method. Fast control and
+// query work keeps the short RequestTimeout; lifecycle work keeps whatever
+// LifecycleRequestTimeout allows, which is unbounded by default.
+func (s *Server) requestContext(ctx context.Context, method string) (context.Context, context.CancelFunc) {
+	timeout := s.cfg.RequestTimeout
+	if ClassifyMethod(method) == ClassLifecycle {
+		timeout = s.cfg.LifecycleRequestTimeout
+	}
+	if timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+// beginSubscribe answers events.subscribe without occupying the connection
+// reader. The capture walks daemon-owned state through the handler and can take
+// arbitrarily long, while the reader's only remaining job is to observe the peer
+// going away; running one on the other made a slow capture look like a dead
+// connection. The reader keeps its liveness deadline disarmed while a capture is
+// in flight, so an in-progress subscribe is never mistaken for an idle client.
+func (s *Server) beginSubscribe(ctx context.Context, client *clientConn, request Request, eventSocket bool) {
 	if !eventSocket {
 		s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(Error(
 			"PreconditionFailed",
@@ -567,35 +824,44 @@ func (s *Server) subscribe(ctx context.Context, client *clientConn, request Requ
 		))})
 		return
 	}
+	if !client.subscribing.CompareAndSwap(false, true) {
+		s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(Error(
+			"PreconditionFailed",
+			"events.subscribe is already in progress on this connection",
+			CodePreconditionFailed,
+			nil,
+		))})
+		return
+	}
+	// Tracked by the server wait group so shutdown never closes the handler out
+	// from under an in-flight capture. The counter is already positive here (the
+	// connection this ran from holds one), and the capture observes the
+	// connection context, so Run's Wait always drains.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer client.subscribing.Store(false)
+		s.subscribe(ctx, client, request)
+	}()
+}
 
+func (s *Server) subscribe(ctx context.Context, client *clientConn, request Request) {
 	// Capture a state snapshot across a stable event revision. The usual path
 	// performs no external I/O and succeeds on the first attempt. If state is
-	// changing continuously, the bounded fallback takes the server state lock
-	// for the final capture so the sync response and subsequent event stream
-	// still define one authoritative cut.
+	// changing continuously, the bounded fallback quiesces event publication for
+	// the final capture so the sync response and subsequent event stream still
+	// define one authoritative cut.
 	for attempt := 0; ; attempt++ {
+		if attempt >= 8 {
+			s.captureSynchronizedCut(ctx, client, request)
+			return
+		}
+
 		s.mu.Lock()
 		before := s.revision
 		s.mu.Unlock()
 
-		var (
-			state any
-			err   error
-		)
-		if attempt < 8 {
-			state, err = s.synchronizationSnapshot(ctx)
-		} else {
-			s.mu.Lock()
-			state, err = s.synchronizationSnapshot(ctx)
-			if err == nil {
-				s.enqueueSyncLocked(client, request.ID, state, s.revision)
-			}
-			s.mu.Unlock()
-			if err != nil {
-				s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(err)})
-			}
-			return
-		}
+		state, err := s.synchronizationSnapshot(ctx)
 		if err != nil {
 			s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(err)})
 			return
@@ -610,6 +876,24 @@ func (s *Server) subscribe(ctx context.Context, client *clientConn, request Requ
 		s.mu.Unlock()
 		return
 	}
+}
+
+// captureSynchronizedCut is the bounded fallback for state that never stops
+// changing. It holds only the publication barrier across the handler call: the
+// server state lock guards ownership leases, connection bookkeeping and the
+// heartbeat too, so holding that one across a capture stalled every connection
+// on the daemon, not just the event publisher this cut actually has to freeze.
+func (s *Server) captureSynchronizedCut(ctx context.Context, client *clientConn, request Request) {
+	s.publication.Lock()
+	defer s.publication.Unlock()
+	state, err := s.synchronizationSnapshot(ctx)
+	if err != nil {
+		s.writeResponse(client, Response{ID: request.ID, Error: AsRPCError(err)})
+		return
+	}
+	s.mu.Lock()
+	s.enqueueSyncLocked(client, request.ID, state, s.revision)
+	s.mu.Unlock()
 }
 
 func (s *Server) enqueueSyncLocked(client *clientConn, requestID uint64, state any, revision uint64) {
@@ -763,7 +1047,7 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 	case "daemon.ping", "daemon.status":
 		return s.status(), nil
 	case "daemon.stop":
-		s.Broadcast("daemon.shutdown", nil)
+		s.Broadcast(EventDaemonShutdown, nil)
 		// Stop accepting BEFORE responding so a client that saw this response
 		// can never ping a daemon that still looks alive: the response rides
 		// the already-accepted connection, so closing the listeners here is
@@ -798,11 +1082,11 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 		s.input = inputLease{clientInstanceID: client.clientInstanceID, connectionID: client.connectionID}
 		s.mu.Unlock()
 		if previous.clientInstanceID != "" && previous.clientInstanceID != client.clientInstanceID {
-			s.Broadcast("input.revoked", map[string]string{"client_id": previous.clientInstanceID})
+			s.Broadcast(EventInputRevoked, InputRevokedEvent{ClientID: previous.clientInstanceID})
 		}
 		return map[string]bool{"input_owner": true}, nil
 	}
-	if mutatingInputMethod(request.Method) && !owner {
+	if MutatingInputMethod(request.Method) && !owner {
 		return nil, Error("PreconditionFailed", "client is observe-only; request input.takeover first", 5, map[string]any{"client_id": client.id})
 	}
 	return s.cfg.Handler.Handle(ctx, ClientContext{ID: client.id, InputOwner: owner}, request.Method, request.Params)
@@ -813,15 +1097,6 @@ func (s *Server) synchronizationSnapshot(ctx context.Context) (any, error) {
 		return handler.SynchronizationSnapshot(ctx)
 	}
 	return s.cfg.Handler.Snapshot(ctx)
-}
-
-func mutatingInputMethod(method string) bool {
-	switch method {
-	case "daemon.update", "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.resize", "terminal.focus", "terminal.scroll", "terminal.open", "terminal.close", "terminal.move", "input.takeover":
-		return true
-	default:
-		return false
-	}
 }
 
 func (s *Server) status() Status {

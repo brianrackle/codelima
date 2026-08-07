@@ -3,7 +3,6 @@ package codelima
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -140,13 +139,33 @@ func moveCommand(commands []string, index int, delta int) []string {
 	return moved
 }
 
-func (a *vaxisTUIApp) reopenEnvironmentConfigCommandMenu(configID string) error {
-	config, err := a.service.EnvironmentConfigShow(a.ctx, configID)
-	if err != nil {
-		return err
-	}
-	a.openEnvironmentConfigCommandMenu(config)
-	return nil
+// startMetadataOperation runs one configuration or environment mutation as a
+// background operation. Every such call acquires a global flock, so running it
+// inline would freeze the event loop for as long as the daemon or a CLI holds
+// that lock — with raw mode swallowing Ctrl+C (invariant I1).
+func (a *vaxisTUIApp) startMetadataOperation(title string, resourceKey string, run func(context.Context, *Service) (tuiOperationResult, error)) error {
+	return a.startOperation(tuiOperationRequest{
+		Title:        title,
+		ResourceKeys: []string{resourceKey},
+		Run:          run,
+	})
+}
+
+// startEnvironmentConfigUpdate runs one environment mutation off the event loop
+// and reopens the environment's command menu once it lands. The updated record
+// the service returns is the same one the old inline flow re-read from disk, so
+// no second service call is needed on the loop.
+func (a *vaxisTUIApp) startEnvironmentConfigUpdate(config EnvironmentConfig, title, statusVerb string, input EnvironmentConfigUpdateInput) error {
+	return a.startMetadataOperation(title, "environments", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+		updated, err := service.EnvironmentConfigUpdate(ctx, config.ID, input)
+		if err != nil {
+			return tuiOperationResult{}, err
+		}
+		return tuiOperationResult{
+			Status: statusVerb + " environment " + updated.Slug,
+			Apply:  func(a *vaxisTUIApp) error { a.openEnvironmentConfigCommandMenu(updated); return nil },
+		}, nil
+	})
 }
 
 func (a *vaxisTUIApp) openConfigurationsMenu() error {
@@ -241,13 +260,16 @@ func (a *vaxisTUIApp) openCreateConfigurationDialog() {
 	a.overlay = newTUIDialog("Create Configuration", "Create", []string{"New configurations copy the current default configuration once."}, []tuiDialogField{
 		newTUIInputField("slug", "Configuration Slug", "", true),
 	}, func(values map[string]string) error {
-		configuration, err := a.service.ConfigurationCreate(a.ctx, ConfigurationCreateInput{Slug: values["slug"]})
-		if err != nil {
-			return err
-		}
-		a.setStatus(slog.LevelInfo, "created configuration "+configuration.Slug)
-		a.openConfigurationMenu(configuration)
-		return nil
+		return a.startMetadataOperation("Creating configuration "+values["slug"], "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			configuration, err := service.ConfigurationCreate(ctx, ConfigurationCreateInput{Slug: values["slug"]})
+			if err != nil {
+				return tuiOperationResult{}, err
+			}
+			return tuiOperationResult{
+				Status: "created configuration " + configuration.Slug,
+				Apply:  func(a *vaxisTUIApp) error { a.openConfigurationMenu(configuration); return nil },
+			}, nil
+		})
 	})
 }
 
@@ -274,16 +296,20 @@ func (a *vaxisTUIApp) openUpdateConfigurationDialog(configuration Configuration)
 			return fmt.Errorf("disk must be a positive MiB value")
 		}
 		image, agent, vcpus := values["image"], values["agent"], uint8(vcpus64)
-		updated, err := a.service.ConfigurationUpdate(a.ctx, configuration.ID, ConfigurationUpdateInput{
-			Slug: values["slug"], Image: &image, AgentProfile: &agent,
-			Environments: parseCommaSeparatedValues(values["environments"]), VCPUs: &vcpus, MemoryMiB: &memory, DiskMiB: &disk,
+		return a.startMetadataOperation("Updating configuration "+configuration.Slug, "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			updated, err := service.ConfigurationUpdate(ctx, configuration.ID, ConfigurationUpdateInput{
+				Slug: values["slug"], Image: &image, AgentProfile: &agent,
+				Environments: parseCommaSeparatedValues(values["environments"]), VCPUs: &vcpus, MemoryMiB: &memory, DiskMiB: &disk,
+			})
+			if err != nil {
+				return tuiOperationResult{}, err
+			}
+			return tuiOperationResult{
+				Status:     "updated configuration " + updated.Slug,
+				ReloadData: true,
+				Apply:      func(a *vaxisTUIApp) error { a.openConfigurationMenu(updated); return nil },
+			}, nil
 		})
-		if err != nil {
-			return err
-		}
-		a.setStatus(slog.LevelInfo, "updated configuration "+updated.Slug)
-		a.openConfigurationMenu(updated)
-		return a.reloadData(a.state.selectedEntry().key())
 	})
 	dialog.Fields[6].Display = func(value string) string { return environmentConfigSelectionSummary(parseCommaSeparatedValues(value)) }
 	dialog.Fields[6].Activate = func() error {
@@ -299,24 +325,28 @@ func (a *vaxisTUIApp) openCloneConfigurationDialog(configuration Configuration) 
 	a.overlay = newTUIDialog("Clone Configuration", "Clone", []string{"Copy this reusable configuration under a new slug."}, []tuiDialogField{
 		newTUIInputField("slug", "New Configuration Slug", "", true),
 	}, func(values map[string]string) error {
-		cloned, err := a.service.ConfigurationClone(a.ctx, ConfigurationCloneInput{Source: configuration.ID, Slug: values["slug"]})
-		if err != nil {
-			return err
-		}
-		a.setStatus(slog.LevelInfo, "cloned configuration "+cloned.Slug)
-		a.openConfigurationMenu(cloned)
-		return nil
+		return a.startMetadataOperation("Cloning configuration "+configuration.Slug, "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			cloned, err := service.ConfigurationClone(ctx, ConfigurationCloneInput{Source: configuration.ID, Slug: values["slug"]})
+			if err != nil {
+				return tuiOperationResult{}, err
+			}
+			return tuiOperationResult{
+				Status: "cloned configuration " + cloned.Slug,
+				Apply:  func(a *vaxisTUIApp) error { a.openConfigurationMenu(cloned); return nil },
+			}, nil
+		})
 	})
 }
 
 func (a *vaxisTUIApp) openDeleteConfigurationDialog(configuration Configuration) {
 	a.overlay = newTUIDialog("Delete Configuration", "Delete", []string{"Delete configuration " + configuration.Slug + ". Referenced configurations cannot be deleted."}, nil, func(map[string]string) error {
-		deleted, err := a.service.ConfigurationDelete(a.ctx, configuration.ID)
-		if err != nil {
-			return err
-		}
-		a.setStatus(slog.LevelInfo, "deleted configuration "+deleted.Slug)
-		return a.reloadData(a.state.selectedEntry().key())
+		return a.startMetadataOperation("Deleting configuration "+configuration.Slug, "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			deleted, err := service.ConfigurationDelete(ctx, configuration.ID)
+			if err != nil {
+				return tuiOperationResult{}, err
+			}
+			return tuiOperationResult{Status: "deleted configuration " + deleted.Slug, ReloadData: true}, nil
+		})
 	})
 }
 
@@ -457,15 +487,16 @@ func (a *vaxisTUIApp) openCreateEnvironmentConfigDialog() {
 			newTUIInputField("slug", "Environment Slug", "", true),
 		},
 		func(values map[string]string) error {
-			config, err := a.service.EnvironmentConfigCreate(a.ctx, EnvironmentConfigCreateInput{
-				Slug: values["slug"],
+			return a.startMetadataOperation("Creating environment "+values["slug"], "environments", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+				config, err := service.EnvironmentConfigCreate(ctx, EnvironmentConfigCreateInput{Slug: values["slug"]})
+				if err != nil {
+					return tuiOperationResult{}, err
+				}
+				return tuiOperationResult{
+					Status: "created environment " + config.Slug,
+					Apply:  func(a *vaxisTUIApp) error { a.openEnvironmentConfigCommandMenu(config); return nil },
+				}, nil
 			})
-			if err != nil {
-				return err
-			}
-			a.setStatus(slog.LevelInfo, "created environment "+config.Slug)
-			a.openEnvironmentConfigCommandMenu(config)
-			return nil
 		},
 	)
 }
@@ -531,12 +562,8 @@ func (a *vaxisTUIApp) openAddEnvironmentConfigCommandDialog(config EnvironmentCo
 		},
 		func(values map[string]string) error {
 			commands := append(append([]string(nil), config.BootstrapCommands...), values["command"])
-			updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{BootstrapCommands: commands})
-			if err != nil {
-				return err
-			}
-			a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
-			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+			return a.startEnvironmentConfigUpdate(config, "Adding command to environment "+config.Slug, "updated",
+				EnvironmentConfigUpdateInput{BootstrapCommands: commands})
 		},
 	)
 }
@@ -572,14 +599,8 @@ func (a *vaxisTUIApp) openRemoveEnvironmentConfigCommandDialog(config Environmen
 				description,
 				nil,
 				func(map[string]string) error {
-					updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{
-						BootstrapCommands: removeCommandsByIndex(config.BootstrapCommands, indices),
-					})
-					if err != nil {
-						return err
-					}
-					a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
-					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+					return a.startEnvironmentConfigUpdate(config, "Removing commands from environment "+config.Slug, "updated",
+						EnvironmentConfigUpdateInput{BootstrapCommands: removeCommandsByIndex(config.BootstrapCommands, indices)})
 				},
 			)
 			return nil
@@ -611,29 +632,18 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 			index := indices[0]
 			command := config.BootstrapCommands[index]
 
+			moveTitle := "Moving command in environment " + config.Slug
 			entries := []tuiMenuEntry{}
 			if index > 0 {
 				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
-					updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{
-						BootstrapCommands: moveCommand(config.BootstrapCommands, index, -1),
-					})
-					if err != nil {
-						return err
-					}
-					a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
-					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+					return a.startEnvironmentConfigUpdate(config, moveTitle, "updated",
+						EnvironmentConfigUpdateInput{BootstrapCommands: moveCommand(config.BootstrapCommands, index, -1)})
 				}})
 			}
 			if index < len(config.BootstrapCommands)-1 {
 				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
-					updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{
-						BootstrapCommands: moveCommand(config.BootstrapCommands, index, 1),
-					})
-					if err != nil {
-						return err
-					}
-					a.setStatus(slog.LevelInfo, "updated environment "+updated.Slug)
-					return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+					return a.startEnvironmentConfigUpdate(config, moveTitle, "updated",
+						EnvironmentConfigUpdateInput{BootstrapCommands: moveCommand(config.BootstrapCommands, index, 1)})
 				}})
 			}
 
@@ -655,12 +665,8 @@ func (a *vaxisTUIApp) openClearEnvironmentConfigCommandsDialog(config Environmen
 		[]string{"Remove all bootstrap commands from environment " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
-			updated, err := a.service.EnvironmentConfigUpdate(a.ctx, config.ID, EnvironmentConfigUpdateInput{ClearBootstrapCommands: true})
-			if err != nil {
-				return err
-			}
-			a.setStatus(slog.LevelInfo, "cleared environment "+updated.Slug)
-			return a.reopenEnvironmentConfigCommandMenu(updated.ID)
+			return a.startEnvironmentConfigUpdate(config, "Clearing commands in environment "+config.Slug, "cleared",
+				EnvironmentConfigUpdateInput{ClearBootstrapCommands: true})
 		},
 	)
 }
@@ -673,12 +679,17 @@ func (a *vaxisTUIApp) openDeleteEnvironmentConfigDialog(config EnvironmentConfig
 		[]string{"Delete reusable environment " + config.Slug + "."},
 		nil,
 		func(_ map[string]string) error {
-			deleted, err := a.service.EnvironmentConfigDelete(a.ctx, config.ID)
-			if err != nil {
-				return err
-			}
-			a.setStatus(slog.LevelInfo, "deleted environment "+deleted.Slug)
-			return a.reloadData(selectedKey)
+			return a.startMetadataOperation("Deleting environment "+config.Slug, "environments", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+				deleted, err := service.EnvironmentConfigDelete(ctx, config.ID)
+				if err != nil {
+					return tuiOperationResult{}, err
+				}
+				return tuiOperationResult{
+					Status:       "deleted environment " + deleted.Slug,
+					PreferredKey: selectedKey,
+					ReloadData:   true,
+				}, nil
+			})
 		},
 	)
 }

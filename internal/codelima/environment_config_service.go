@@ -17,30 +17,27 @@ func (s *Service) EnvironmentConfigCreate(ctx context.Context, input Environment
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
-	defer lockSet.release()
+	var config EnvironmentConfig
+	if err := s.withLocks(ctx, []lockKey{lockEnvironments}, nil, func() error {
+		if input.Slug == "" {
+			return invalidArgument("environment slug is required", nil)
+		}
 
-	if input.Slug == "" {
-		return EnvironmentConfig{}, invalidArgument("environment slug is required", nil)
-	}
+		if err := s.ensureUniqueEnvironmentConfigSlug(input.Slug, ""); err != nil {
+			return err
+		}
 
-	if err := s.ensureUniqueEnvironmentConfigSlug(input.Slug, ""); err != nil {
-		return EnvironmentConfig{}, err
-	}
+		now := s.now()
+		config = EnvironmentConfig{
+			ID:                newID(),
+			Slug:              input.Slug,
+			BootstrapCommands: append([]string(nil), input.BootstrapCommands...),
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
 
-	now := s.now()
-	config := EnvironmentConfig{
-		ID:                newID(),
-		Slug:              input.Slug,
-		BootstrapCommands: append([]string(nil), input.BootstrapCommands...),
-		CreatedAt:         now,
-		UpdatedAt:         now,
-	}
-
-	if err := s.store.SaveEnvironmentConfig(config); err != nil {
+		return s.store.SaveEnvironmentConfig(config)
+	}); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
@@ -68,25 +65,23 @@ func (s *Service) EnvironmentConfigUpdate(ctx context.Context, value string, inp
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
-	defer lockSet.release()
+	var config EnvironmentConfig
+	if err := s.withLocks(ctx, []lockKey{lockEnvironments}, nil, func() error {
+		var err error
+		config, err = s.store.EnvironmentConfigByIDOrSlug(value)
+		if err != nil {
+			return err
+		}
 
-	config, err := s.store.EnvironmentConfigByIDOrSlug(value)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
+		if input.ClearBootstrapCommands {
+			config.BootstrapCommands = []string{}
+		} else if input.BootstrapCommands != nil {
+			config.BootstrapCommands = append([]string(nil), input.BootstrapCommands...)
+		}
 
-	if input.ClearBootstrapCommands {
-		config.BootstrapCommands = []string{}
-	} else if input.BootstrapCommands != nil {
-		config.BootstrapCommands = append([]string(nil), input.BootstrapCommands...)
-	}
-
-	config.UpdatedAt = s.now()
-	if err := s.store.SaveEnvironmentConfig(config); err != nil {
+		config.UpdatedAt = s.now()
+		return s.store.SaveEnvironmentConfig(config)
+	}); err != nil {
 		return EnvironmentConfig{}, err
 	}
 
@@ -98,33 +93,31 @@ func (s *Service) EnvironmentConfigDelete(ctx context.Context, value string) (En
 		return EnvironmentConfig{}, err
 	}
 
-	lockSet, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockEnvironments, lockConfigurations)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
-	defer lockSet.release()
+	var config EnvironmentConfig
+	if err := s.withLocks(ctx, []lockKey{lockEnvironments, lockConfigurations}, nil, func() error {
+		var err error
+		config, err = s.store.EnvironmentConfigByIDOrSlug(value)
+		if err != nil {
+			return err
+		}
 
-	config, err := s.store.EnvironmentConfigByIDOrSlug(value)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
+		configurations, err := s.store.ListConfigurations(false)
+		if err != nil {
+			return err
+		}
 
-	configurations, err := s.store.ListConfigurations(false)
-	if err != nil {
-		return EnvironmentConfig{}, err
-	}
-
-	for _, configuration := range configurations {
-		for _, slug := range configuration.Environments {
-			if slug == config.Slug {
-				return EnvironmentConfig{}, preconditionFailed("environment is assigned to a configuration", map[string]any{"environment": config.Slug, "configuration_id": configuration.ID, "configuration_slug": configuration.Slug})
+		for _, configuration := range configurations {
+			for _, slug := range configuration.Environments {
+				if slug == config.Slug {
+					return preconditionFailed("environment is assigned to a configuration", map[string]any{"environment": config.Slug, "configuration_id": configuration.ID, "configuration_slug": configuration.Slug})
+				}
 			}
 		}
-	}
-	now := s.now()
-	config.DeletedAt = &now
-	config.UpdatedAt = now
-	if err := s.store.SaveEnvironmentConfig(config); err != nil {
+		now := s.now()
+		config.DeletedAt = &now
+		config.UpdatedAt = now
+		return s.store.SaveEnvironmentConfig(config)
+	}); err != nil {
 		return EnvironmentConfig{}, err
 	}
 

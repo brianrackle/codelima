@@ -65,5 +65,5 @@ Replace local query handling and synchronous PTY writes in one combined change.
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Related [use_ghostty_explicit_color_semantics_for_embedded_terminal_defaults_28.md](/Users/brianrackle/Projects/codelima/decisions/use_ghostty_explicit_color_semantics_for_embedded_terminal_defaults_28.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [use_ghostty_explicit_color_semantics_for_embedded_terminal_defaults_28.md](use_ghostty_explicit_color_semantics_for_embedded_terminal_defaults_28.md)

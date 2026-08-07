@@ -12,8 +12,10 @@ const (
 	defaultAgentValidationCommand        = "command -v sh >/dev/null 2>&1"
 	defaultNodeJSPrerequisitesCommand    = `apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`
 	defaultNPMUserPrefixCommand          = `guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`
-	defaultCodexValidationCommand        = `command -v codex >/dev/null 2>&1`
-	defaultClaudeCodeValidationCommand   = `command -v claude >/dev/null 2>&1`
+	defaultCodexValidationCommand        = `guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" codex --version >/dev/null`
+	defaultClaudeCodeValidationCommand   = `guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" claude --version >/dev/null`
+	legacyCodexLookupValidationCommand   = `command -v codex >/dev/null 2>&1`
+	legacyClaudeLookupValidationCommand  = `command -v claude >/dev/null 2>&1`
 	legacyCodexPrerequisitesCommand      = "apt-get update && apt-get install -y ca-certificates curl git"
 	legacyCodexStandaloneInstallCommand  = `curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALL_DIR=/usr/local/bin CODEX_NON_INTERACTIVE=1 sh`
 	legacyClaudeCodeNativeInstallCommand = "curl -fsSL https://claude.ai/install.sh | bash"
@@ -36,10 +38,9 @@ type Config struct {
 	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands" yaml:"runtime_commands"`
 	AgentProfilesDir    string                  `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
 	Daemon              struct {
-		Autostart                       bool   `json:"autostart" yaml:"autostart"`
-		Restore                         string `json:"restore" yaml:"restore"`
-		VirtioFSReclaim                 bool   `json:"virtiofs_reclaim" yaml:"virtiofs_reclaim"`
-		VirtioFSReclaimThresholdPercent int    `json:"virtiofs_reclaim_threshold_percent" yaml:"virtiofs_reclaim_threshold_percent"`
+		Autostart       bool   `json:"autostart" yaml:"autostart"`
+		Restore         string `json:"restore" yaml:"restore"`
+		VirtioFSReclaim bool   `json:"virtiofs_reclaim" yaml:"virtiofs_reclaim"`
 	} `json:"daemon" yaml:"daemon"`
 }
 
@@ -55,7 +56,6 @@ func DefaultConfig(home string) Config {
 	cfg.Daemon.Autostart = true
 	cfg.Daemon.Restore = "respawn"
 	cfg.Daemon.VirtioFSReclaim = true
-	cfg.Daemon.VirtioFSReclaimThresholdPercent = defaultVirtioFSPressureThresholdPercent
 
 	return cfg
 }
@@ -79,8 +79,12 @@ func LoadConfig(homeOverride string) (Config, error) {
 	cfg := DefaultConfig(home)
 	configPath := filepath.Join(home, "_config", "settings.yaml")
 	if exists(configPath) {
+		// Decoding tolerates keys this build does not know: settings written by
+		// a newer CodeLima and retired keys such as the removed
+		// virtiofs_reclaim_threshold_percent must not fail the load. The refresh
+		// writer round-trips the former and drops the latter.
 		if err := readYAMLFile(configPath, &cfg); err != nil {
-			return Config{}, metadataCorruption("failed to load config.yaml", err, map[string]any{"path": configPath})
+			return Config{}, metadataCorruption("failed to load settings.yaml", err, map[string]any{"path": configPath})
 		}
 		if slices.Equal(cfg.DefaultPorts, legacyGuessedDefaultPorts) {
 			cfg.DefaultPorts = []string{}
@@ -104,10 +108,9 @@ func (c Config) Summary() map[string]any {
 	return map[string]any{
 		"metadata_root": c.MetadataRoot,
 		"daemon": map[string]any{
-			"autostart":                          c.Daemon.Autostart,
-			"restore":                            c.Daemon.Restore,
-			"virtiofs_reclaim":                   c.Daemon.VirtioFSReclaim,
-			"virtiofs_reclaim_threshold_percent": c.Daemon.VirtioFSReclaimThresholdPercent,
+			"autostart":        c.Daemon.Autostart,
+			"restore":          c.Daemon.Restore,
+			"virtiofs_reclaim": c.Daemon.VirtioFSReclaim,
 		},
 	}
 }
@@ -157,9 +160,6 @@ func validateConfig(cfg Config) error {
 	if cfg.Daemon.Restore != "respawn" && cfg.Daemon.Restore != "forget" {
 		return invalidArgument("daemon.restore must be respawn or forget", map[string]any{"restore": cfg.Daemon.Restore})
 	}
-	if cfg.Daemon.VirtioFSReclaimThresholdPercent < 1 || cfg.Daemon.VirtioFSReclaimThresholdPercent > 95 {
-		return invalidArgument("daemon.virtiofs_reclaim_threshold_percent must be between 1 and 95", map[string]any{"threshold_percent": cfg.Daemon.VirtioFSReclaimThresholdPercent})
-	}
 
 	return nil
 }
@@ -169,17 +169,36 @@ func builtInProfiles() map[string]AgentProfile {
 		"codex-cli": {
 			Name:              "codex-cli",
 			InstallCommands:   []string{},
-			ValidationCommand: defaultAgentValidationCommand,
+			ValidationCommand: defaultCodexValidationCommand,
 			LaunchCommand:     "codex",
 			Environment:       map[string]string{},
 		},
 		"claude-code": {
 			Name:              "claude-code",
 			InstallCommands:   []string{},
-			ValidationCommand: defaultAgentValidationCommand,
+			ValidationCommand: defaultClaudeCodeValidationCommand,
 			LaunchCommand:     "claude",
 			Environment:       map[string]string{},
 		},
+	}
+}
+
+func legacyBuiltInProfiles() map[string][]AgentProfile {
+	return map[string][]AgentProfile{
+		"codex-cli": {{
+			Name:              "codex-cli",
+			InstallCommands:   []string{},
+			ValidationCommand: defaultAgentValidationCommand,
+			LaunchCommand:     "codex",
+			Environment:       map[string]string{},
+		}},
+		"claude-code": {{
+			Name:              "claude-code",
+			InstallCommands:   []string{},
+			ValidationCommand: defaultAgentValidationCommand,
+			LaunchCommand:     "claude",
+			Environment:       map[string]string{},
+		}},
 	}
 }
 
@@ -223,15 +242,76 @@ func defaultNPMInstallCommand(packageName, executable string) string {
 func legacyBuiltInEnvironmentConfigs() map[string][]builtInEnvironmentConfigSpec {
 	return map[string][]builtInEnvironmentConfigSpec{
 		"codex": {
-			{Slug: "codex", BootstrapCommands: []string{legacyCodexPrerequisitesCommand, legacyCodexStandaloneInstallCommand, defaultCodexValidationCommand}},
+			{Slug: "codex", BootstrapCommands: []string{defaultNodeJSPrerequisitesCommand, defaultNPMUserPrefixCommand, defaultNPMInstallCommand("@openai/codex", "codex"), legacyCodexLookupValidationCommand}},
+			{Slug: "codex", BootstrapCommands: []string{legacyCodexPrerequisitesCommand, legacyCodexStandaloneInstallCommand, legacyCodexLookupValidationCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexGlobalNPMInstallCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexAptNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
 		},
 		"claude-code": {
+			{Slug: "claude-code", BootstrapCommands: []string{defaultNodeJSPrerequisitesCommand, defaultNPMUserPrefixCommand, defaultNPMInstallCommand("@anthropic-ai/claude-code", "claude"), legacyClaudeLookupValidationCommand}},
 			{Slug: "claude-code", BootstrapCommands: []string{legacyClaudeCodeNativeInstallCommand}},
 		},
 	}
+}
+
+func migrateKnownBuiltInNodeBootstrap(node Node, bootstrap BootstrapState) (Node, BootstrapState, bool) {
+	commands, commandsChanged := migrateKnownBuiltInBootstrapCommands(bootstrap.BootstrapCommands)
+	bootstrap.BootstrapCommands = commands
+
+	validationChanged := false
+	if bootstrap.ValidationCommand == defaultAgentValidationCommand {
+		if profile, ok := builtInProfiles()[node.AgentProfileName]; ok {
+			bootstrap.ValidationCommand = profile.ValidationCommand
+			validationChanged = true
+		}
+	}
+
+	if !commandsChanged && !validationChanged {
+		return node, bootstrap, false
+	}
+	if commandsChanged {
+		bootstrap.Completed = false
+		bootstrap.CompletedAt = nil
+		node.BootstrapCompleted = false
+		node.BootstrapCompletedAt = nil
+	}
+	node.BootstrapCommands = bootstrap.CombinedCommands()
+	return node, bootstrap, true
+}
+
+func migrateKnownBuiltInBootstrapCommands(commands []string) ([]string, bool) {
+	updated := slices.Clone(commands)
+	changed := false
+	legacyConfigs := legacyBuiltInEnvironmentConfigs()
+	for _, current := range builtInEnvironmentConfigs() {
+		for _, legacy := range legacyConfigs[current.Slug] {
+			var replaced bool
+			updated, replaced = replaceBootstrapCommandSequence(updated, legacy.BootstrapCommands, current.BootstrapCommands)
+			if replaced {
+				changed = true
+				break
+			}
+		}
+	}
+	return updated, changed
+}
+
+func replaceBootstrapCommandSequence(commands, oldCommands, newCommands []string) ([]string, bool) {
+	if len(oldCommands) == 0 || len(oldCommands) > len(commands) {
+		return commands, false
+	}
+	for index := 0; index <= len(commands)-len(oldCommands); index++ {
+		if !bootstrapCommandsEqual(commands[index:index+len(oldCommands)], oldCommands) {
+			continue
+		}
+		updated := make([]string, 0, len(commands)-len(oldCommands)+len(newCommands))
+		updated = append(updated, commands[:index]...)
+		updated = append(updated, newCommands...)
+		updated = append(updated, commands[index+len(oldCommands):]...)
+		return updated, true
+	}
+	return commands, false
 }
 
 func bootstrapComment(state BootstrapState) string {

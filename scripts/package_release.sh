@@ -31,12 +31,6 @@ fi
 if [ -z "$RENDERER_BIN" ]; then
   RENDERER_BIN="$ROOT_DIR/bin/$PLATFORM_TAG/codelima-renderer-worker"
 fi
-COMPAT_BIN="$ROOT_DIR/bin/codelima"
-COMPAT_TARGET="$BUILD_BIN"
-if [ "$BUILD_BIN" = "$ROOT_DIR/bin/$PLATFORM_TAG/codelima" ]; then
-  COMPAT_TARGET="$PLATFORM_TAG/codelima"
-fi
-
 LIB_NAME="libghostty-vt.so"
 case "$GOOS" in
   darwin)
@@ -62,7 +56,6 @@ mkdir -p "$(dirname "$BUILD_BIN")" "$ROOT_DIR/bin" "$DIST_DIR"
 cd "$ROOT_DIR"
 "$GO_BIN" build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=$VERSION" -o "$BUILD_BIN" ./cmd/codelima
 "$GO_BIN" build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=$VERSION" -o "$RENDERER_BIN" ./cmd/codelima-renderer-worker
-ln -sfn "$COMPAT_TARGET" "$COMPAT_BIN"
 "$GO_BIN" run ./cmd/codelima-release archive \
   --version "$VERSION" \
   --goos "$GOOS" \

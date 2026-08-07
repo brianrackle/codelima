@@ -66,5 +66,5 @@ Drop `dlopen` and link directly against Ghostty's C API.
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Related [adopt_ghostty_0.md](/Users/brianrackle/Projects/codelima/decisions/adopt_ghostty_0.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [adopt_ghostty_0.md](adopt_ghostty_0.md)

@@ -64,7 +64,7 @@ Make `lima_commands` the authoritative Lima runtime surface at all scopes and us
 
 ## Links
 
-* Supersedes [ADR 19](/Users/brianrackle/personal/codelima/decisions/apply_vm_resources_via_limactl_create_flags_19.md)
-* Supersedes [ADR 20](/Users/brianrackle/personal/codelima/decisions/store_only_project_resource_overrides_20.md)
-* Refines [ADR 17](/Users/brianrackle/personal/codelima/decisions/project_scoped_lima_command_templates_17.md)
-* Refines [ADR 21](/Users/brianrackle/personal/codelima/decisions/configurable_workspace_seed_commands_21.md)
+* Supersedes [ADR 19](apply_vm_resources_via_limactl_create_flags_19.md)
+* Supersedes [ADR 20](store_only_project_resource_overrides_20.md)
+* Refines [ADR 17](project_scoped_lima_command_templates_17.md)
+* Refines [ADR 21](configurable_workspace_seed_commands_21.md)

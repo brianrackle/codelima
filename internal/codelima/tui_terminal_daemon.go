@@ -34,6 +34,10 @@ const daemonRPCTimeout = 2 * time.Second
 // behind this interval instead of every open tab owning a permanent ticker.
 const daemonTerminalSnapshotMinInterval = 50 * time.Millisecond
 
+// daemonTerminalResizeRetryInterval paces the resize reassert loop after a
+// failed attempt. A degraded daemon must not be retried once per redraw.
+const daemonTerminalResizeRetryInterval = 250 * time.Millisecond
+
 type daemonTUITerminal struct {
 	client              daemonRPCCaller
 	id                  string
@@ -47,6 +51,10 @@ type daemonTUITerminal struct {
 	pasting             bool
 	paste               strings.Builder
 	resizeMu            sync.Mutex
+	resizeOnce          sync.Once
+	resizeWake          chan struct{}
+	desiredCols         int
+	desiredRows         int
 	resizeCols          int
 	resizeRows          int
 	snapshot            daemon.Snapshot
@@ -82,19 +90,73 @@ func newDaemonTUITerminal(client daemonRPCCaller, id string, postEvent func(vaxi
 
 func (t *daemonTUITerminal) Start(*exec.Cmd) error { return nil }
 
+// Resize records the window's latest geometry. Draw calls it every frame, so it
+// must never touch the socket: the size is replaceable latest-value state, and
+// a background reassert loop drives it to the daemon and retries on failure.
 func (t *daemonTUITerminal) Resize(width, height int) {
 	if width <= 0 || height <= 0 || t.isClosed() {
 		return
 	}
 	t.resizeMu.Lock()
-	defer t.resizeMu.Unlock()
-	if width == t.resizeCols && height == t.resizeRows {
+	if width == t.desiredCols && height == t.desiredRows {
+		t.resizeMu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
-	defer cancel()
-	if err := t.client.Call(ctx, "terminal.resize", map[string]any{"terminal_id": t.id, "cols": width, "rows": height}, nil); err == nil {
-		t.resizeCols, t.resizeRows = width, height
+	t.desiredCols, t.desiredRows = width, height
+	t.resizeOnce.Do(func() {
+		t.resizeWake = make(chan struct{}, 1)
+		go t.reassertResize()
+	})
+	wake := t.resizeWake
+	t.resizeMu.Unlock()
+
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// reassertResize drives the daemon to the latest requested geometry. Only the
+// newest size matters, so a superseded one is simply dropped, and a failed
+// attempt retries on a bounded interval instead of once per redraw.
+func (t *daemonTUITerminal) reassertResize() {
+	for {
+		select {
+		case <-t.resizeWake:
+		case <-t.stop:
+			return
+		}
+
+		for {
+			t.resizeMu.Lock()
+			cols, rows := t.desiredCols, t.desiredRows
+			settled := cols == t.resizeCols && rows == t.resizeRows
+			t.resizeMu.Unlock()
+			if settled || t.isClosed() {
+				break
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
+			err := t.client.Call(ctx, "terminal.resize", map[string]any{"terminal_id": t.id, "cols": cols, "rows": rows}, nil)
+			cancel()
+			if err != nil {
+				select {
+				case <-t.stop:
+					return
+				case <-time.After(daemonTerminalResizeRetryInterval):
+				}
+				continue
+			}
+			t.resizeMu.Lock()
+			t.resizeCols, t.resizeRows = cols, rows
+			t.resizeMu.Unlock()
+		}
+
+		select {
+		case <-t.stop:
+			return
+		default:
+		}
 	}
 }
 
@@ -328,6 +390,10 @@ func (t *daemonTUITerminal) beginDetach() <-chan struct{} {
 	return t.inputDone
 }
 
+// Focus marks this terminal focused and tells the daemon off the event loop.
+// Focus transitions are driven from key, mouse, and tab handling, so the loop
+// must not wait on the RPC; the daemon-side call is idempotent per terminal, and
+// a failure rolls the local flag back when no newer transition superseded it.
 func (t *daemonTUITerminal) Focus() {
 	t.mu.Lock()
 	if t.closed || t.focused {
@@ -338,15 +404,18 @@ func (t *daemonTUITerminal) Focus() {
 	t.focusVersion++
 	focusVersion := t.focusVersion
 	t.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
-	defer cancel()
-	if err := t.client.Call(ctx, "terminal.focus", map[string]string{"terminal_id": t.id}, nil); err != nil {
-		t.mu.Lock()
-		if t.focused && t.focusVersion == focusVersion {
-			t.focused = false
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
+		defer cancel()
+		if err := t.client.Call(ctx, "terminal.focus", map[string]string{"terminal_id": t.id}, nil); err != nil {
+			t.mu.Lock()
+			if t.focused && t.focusVersion == focusVersion {
+				t.focused = false
+			}
+			t.mu.Unlock()
 		}
-		t.mu.Unlock()
-	}
+	}()
 }
 
 func (t *daemonTUITerminal) Blur() {

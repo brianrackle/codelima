@@ -555,6 +555,7 @@ func (a *vaxisTUIApp) drawHeaderLogo() {
 }
 
 func (a *vaxisTUIApp) draw() {
+	a.drawPasses++
 	if a.vx == nil {
 		return
 	}

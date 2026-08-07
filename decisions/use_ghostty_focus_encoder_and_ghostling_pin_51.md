@@ -67,7 +67,7 @@ Port Ghostling's Kitty graphics storage, PNG decode callback, placement iteratio
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/projects/codelima/ADR_TEMPLATE.md)
-* Related [rebase_ghostty_vt_packaging_to_upstream_api_25.md](/Users/brianrackle/projects/codelima/decisions/rebase_ghostty_vt_packaging_to_upstream_api_25.md)
-* Related [use_ghostty_key_encoder_for_embedded_terminal_input_24.md](/Users/brianrackle/projects/codelima/decisions/use_ghostty_key_encoder_for_embedded_terminal_input_24.md)
-* Related [use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md](/Users/brianrackle/projects/codelima/decisions/use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [rebase_ghostty_vt_packaging_to_upstream_api_25.md](rebase_ghostty_vt_packaging_to_upstream_api_25.md)
+* Related [use_ghostty_key_encoder_for_embedded_terminal_input_24.md](use_ghostty_key_encoder_for_embedded_terminal_input_24.md)
+* Related [use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md](use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md)

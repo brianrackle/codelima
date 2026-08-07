@@ -27,33 +27,30 @@ func (s *Service) ConfigurationCreate(ctx context.Context, input ConfigurationCr
 	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockEnvironments)
-	if err != nil {
-		return Configuration{}, err
-	}
-	defer locks.release()
-
-	if strings.TrimSpace(input.Slug) == "" {
-		return Configuration{}, invalidArgument("configuration slug is required", nil)
-	}
-	if err := s.ensureUniqueConfigurationSlug(input.Slug, ""); err != nil {
-		return Configuration{}, err
-	}
-	base, err := s.store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
-	if err != nil {
-		return Configuration{}, err
-	}
-	now := s.now()
-	configuration := cloneConfiguration(base)
-	configuration.ID = newID()
-	configuration.Slug = input.Slug
-	configuration.CreatedAt = now
-	configuration.UpdatedAt = now
-	configuration.DeletedAt = nil
-	if err := s.applyConfigurationInput(&configuration, input, true); err != nil {
-		return Configuration{}, err
-	}
-	if err := s.store.SaveConfiguration(configuration); err != nil {
+	var configuration Configuration
+	if err := s.withLocks(ctx, []lockKey{lockConfigurations, lockEnvironments}, nil, func() error {
+		if strings.TrimSpace(input.Slug) == "" {
+			return invalidArgument("configuration slug is required", nil)
+		}
+		if err := s.ensureUniqueConfigurationSlug(input.Slug, ""); err != nil {
+			return err
+		}
+		base, err := s.store.ConfigurationByIDOrSlug(DefaultConfigurationSlug)
+		if err != nil {
+			return err
+		}
+		now := s.now()
+		configuration = cloneConfiguration(base)
+		configuration.ID = newID()
+		configuration.Slug = input.Slug
+		configuration.CreatedAt = now
+		configuration.UpdatedAt = now
+		configuration.DeletedAt = nil
+		if err := s.applyConfigurationInput(&configuration, input, true); err != nil {
+			return err
+		}
+		return s.store.SaveConfiguration(configuration)
+	}); err != nil {
 		return Configuration{}, err
 	}
 	return configuration, nil
@@ -63,29 +60,27 @@ func (s *Service) ConfigurationClone(ctx context.Context, input ConfigurationClo
 	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations)
-	if err != nil {
-		return Configuration{}, err
-	}
-	defer locks.release()
-	if strings.TrimSpace(input.Slug) == "" {
-		return Configuration{}, invalidArgument("configuration clone requires --slug", nil)
-	}
-	if err := s.ensureUniqueConfigurationSlug(input.Slug, ""); err != nil {
-		return Configuration{}, err
-	}
-	source, err := s.store.ConfigurationByIDOrSlug(input.Source)
-	if err != nil {
-		return Configuration{}, err
-	}
-	now := s.now()
-	cloned := cloneConfiguration(source)
-	cloned.ID = newID()
-	cloned.Slug = input.Slug
-	cloned.CreatedAt = now
-	cloned.UpdatedAt = now
-	cloned.DeletedAt = nil
-	if err := s.store.SaveConfiguration(cloned); err != nil {
+	var cloned Configuration
+	if err := s.withLocks(ctx, []lockKey{lockConfigurations}, nil, func() error {
+		if strings.TrimSpace(input.Slug) == "" {
+			return invalidArgument("configuration clone requires --slug", nil)
+		}
+		if err := s.ensureUniqueConfigurationSlug(input.Slug, ""); err != nil {
+			return err
+		}
+		source, err := s.store.ConfigurationByIDOrSlug(input.Source)
+		if err != nil {
+			return err
+		}
+		now := s.now()
+		cloned = cloneConfiguration(source)
+		cloned.ID = newID()
+		cloned.Slug = input.Slug
+		cloned.CreatedAt = now
+		cloned.UpdatedAt = now
+		cloned.DeletedAt = nil
+		return s.store.SaveConfiguration(cloned)
+	}); err != nil {
 		return Configuration{}, err
 	}
 	return cloned, nil
@@ -109,29 +104,28 @@ func (s *Service) ConfigurationUpdate(ctx context.Context, value string, input C
 	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockEnvironments)
-	if err != nil {
-		return Configuration{}, err
-	}
-	defer locks.release()
-	configuration, err := s.store.ConfigurationByIDOrSlug(value)
-	if err != nil {
-		return Configuration{}, err
-	}
-	if input.Slug != "" && input.Slug != configuration.Slug {
-		if configuration.Slug == DefaultConfigurationSlug {
-			return Configuration{}, preconditionFailed("the default configuration (small) cannot be renamed", nil)
+	var configuration Configuration
+	if err := s.withLocks(ctx, []lockKey{lockConfigurations, lockEnvironments}, nil, func() error {
+		var err error
+		configuration, err = s.store.ConfigurationByIDOrSlug(value)
+		if err != nil {
+			return err
 		}
-		if err := s.ensureUniqueConfigurationSlug(input.Slug, configuration.ID); err != nil {
-			return Configuration{}, err
+		if input.Slug != "" && input.Slug != configuration.Slug {
+			if configuration.Slug == DefaultConfigurationSlug {
+				return preconditionFailed("the default configuration (small) cannot be renamed", nil)
+			}
+			if err := s.ensureUniqueConfigurationSlug(input.Slug, configuration.ID); err != nil {
+				return err
+			}
+			configuration.Slug = input.Slug
 		}
-		configuration.Slug = input.Slug
-	}
-	if err := s.applyConfigurationInput(&configuration, input, false); err != nil {
-		return Configuration{}, err
-	}
-	configuration.UpdatedAt = s.now()
-	if err := s.store.SaveConfiguration(configuration); err != nil {
+		if err := s.applyConfigurationInput(&configuration, input, false); err != nil {
+			return err
+		}
+		configuration.UpdatedAt = s.now()
+		return s.store.SaveConfiguration(configuration)
+	}); err != nil {
 		return Configuration{}, err
 	}
 	return configuration, nil
@@ -141,29 +135,28 @@ func (s *Service) ConfigurationDelete(ctx context.Context, value string) (Config
 	if err := s.ensureReadyForWrite(ctx); err != nil {
 		return Configuration{}, err
 	}
-	locks, err := acquireLocks(ctx, s.cfg.MetadataRoot, lockConfigurations, lockNodes)
-	if err != nil {
-		return Configuration{}, err
-	}
-	defer locks.release()
-	configuration, err := s.store.ConfigurationByIDOrSlug(value)
-	if err != nil {
-		return Configuration{}, err
-	}
-	if configuration.Slug == DefaultConfigurationSlug {
-		return Configuration{}, preconditionFailed("the default configuration (small) cannot be deleted", nil)
-	}
-	nodes, err := s.store.ConfigurationNodes(configuration.ID, false)
-	if err != nil {
-		return Configuration{}, err
-	}
-	if len(nodes) != 0 {
-		return Configuration{}, preconditionFailed("configuration is referenced by nodes", map[string]any{"configuration": configuration.Slug, "node_count": len(nodes)})
-	}
-	now := s.now()
-	configuration.DeletedAt = &now
-	configuration.UpdatedAt = now
-	if err := s.store.SaveConfiguration(configuration); err != nil {
+	var configuration Configuration
+	if err := s.withLocks(ctx, []lockKey{lockConfigurations, lockNodes}, nil, func() error {
+		var err error
+		configuration, err = s.store.ConfigurationByIDOrSlug(value)
+		if err != nil {
+			return err
+		}
+		if configuration.Slug == DefaultConfigurationSlug {
+			return preconditionFailed("the default configuration (small) cannot be deleted", nil)
+		}
+		nodes, err := s.store.ConfigurationNodes(configuration.ID, false)
+		if err != nil {
+			return err
+		}
+		if len(nodes) != 0 {
+			return preconditionFailed("configuration is referenced by nodes", map[string]any{"configuration": configuration.Slug, "node_count": len(nodes)})
+		}
+		now := s.now()
+		configuration.DeletedAt = &now
+		configuration.UpdatedAt = now
+		return s.store.SaveConfiguration(configuration)
+	}); err != nil {
 		return Configuration{}, err
 	}
 	return configuration, nil

@@ -64,5 +64,5 @@ Store the guest-side prepare command next to the existing `copy` template under 
 
 ## Links
 
-* Refines [ADR 18](/Users/brianrackle/personal/codelima/decisions/global_lima_command_defaults_with_project_overrides_18.md)
-* Refines [ADR 16](/Users/brianrackle/personal/codelima/decisions/support_per_node_workspace_modes_16.md)
+* Refines [ADR 18](global_lima_command_defaults_with_project_overrides_18.md)
+* Refines [ADR 16](support_per_node_workspace_modes_16.md)

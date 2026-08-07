@@ -68,4 +68,4 @@ Reads check a "seeded" marker and run the full seeding pass once when it is abse
 
 ## Links
 
-* Refines [ADR 37](/Users/brianrackle/projects/codelima/decisions/use_lima_as_runtime_status_source_for_read_surfaces_37.md) — reads still merge live runtime observations in memory; they stop persisting the merge.
+* Refines [ADR 37](use_lima_as_runtime_status_source_for_read_surfaces_37.md) — reads still merge live runtime observations in memory; they stop persisting the merge.

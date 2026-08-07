@@ -60,4 +60,4 @@ Write lifecycle-only node metadata to disk and keep runtime observation data in 
 
 ## Links
 
-* Refines [ADR 37](/Users/brianrackle/personal/codelima/decisions/use_lima_as_runtime_status_source_for_read_surfaces_37.md)
+* Refines [ADR 37](use_lima_as_runtime_status_source_for_read_surfaces_37.md)

@@ -64,5 +64,5 @@ Compare each Ghostty cell background to Ghostty's default background and leave t
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Follow-up [TODO.md](/Users/brianrackle/Projects/codelima/TODO.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Follow-up [TODO.md](../TODO.md)

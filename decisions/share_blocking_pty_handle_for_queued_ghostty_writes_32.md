@@ -64,5 +64,5 @@ Discard the queued writer and go back to direct `Write` calls from foreground te
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Refines [use_nonblocking_queued_pty_writes_for_embedded_ghostty_terminal_30.md](/Users/brianrackle/Projects/codelima/decisions/use_nonblocking_queued_pty_writes_for_embedded_ghostty_terminal_30.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Refines [use_nonblocking_queued_pty_writes_for_embedded_ghostty_terminal_30.md](use_nonblocking_queued_pty_writes_for_embedded_ghostty_terminal_30.md)

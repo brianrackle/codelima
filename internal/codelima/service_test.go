@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -27,11 +29,21 @@ type fakeSandbox struct {
 	cloneStatus  ObservationStatus
 	listCalls    int
 	listErr      error
-	createGate   *fakeSandboxGate
-	startGate    *fakeSandboxGate
-	stopGate     *fakeSandboxGate
-	deleteGate   *fakeSandboxGate
-	cloneGate    *fakeSandboxGate
+	// staleObservations stands in for a runtime whose List answers from a cache
+	// that has drifted. When it is set, List serves it and ListUncached still
+	// serves the real state, which is exactly the split Service relies on for
+	// decisions that gate a runtime mutation.
+	staleObservations map[string]RuntimeObservation
+	uncachedListCalls int
+	// startContexts records the state of the context each Start was handed, so
+	// tests can assert that a mutation which must survive caller cancellation
+	// was not handed the caller's context.
+	startContexts []fakeContextState
+	createGate    *fakeSandboxGate
+	startGate     *fakeSandboxGate
+	stopGate      *fakeSandboxGate
+	deleteGate    *fakeSandboxGate
+	cloneGate     *fakeSandboxGate
 }
 
 type fakeSandboxGate struct {
@@ -39,11 +51,27 @@ type fakeSandboxGate struct {
 	release chan struct{}
 }
 
+// fakeContextState captures what a sandbox call could observe about the context
+// it was handed: whether it was already dead, and whether it was bounded at all.
+type fakeContextState struct {
+	err     error
+	bounded bool
+}
+
+func fakeContextBounded(ctx context.Context) bool {
+	_, ok := ctx.Deadline()
+	return ok
+}
+
 type fakeShellCall struct {
 	instanceName string
 	command      []string
 	workdir      string
 	interactive  bool
+	// budget is the deadline the caller threaded through the context, or zero
+	// when it supplied none. It is how tests observe guest-command timeout
+	// classes without waiting one out.
+	budget time.Duration
 }
 
 type fakeCopyCall struct {
@@ -105,6 +133,25 @@ func (f *fakeSandbox) List(_ context.Context) ([]RuntimeObservation, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
+	source := f.observations
+	if f.staleObservations != nil {
+		source = f.staleObservations
+	}
+	observations := make([]RuntimeObservation, 0, len(source))
+	for _, observation := range source {
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
+func (f *fakeSandbox) ListUncached(_ context.Context) ([]RuntimeObservation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.listCalls++
+	f.uncachedListCalls++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	observations := make([]RuntimeObservation, 0, len(f.observations))
 	for _, observation := range f.observations {
 		observations = append(observations, observation)
@@ -124,11 +171,12 @@ func (f *fakeSandbox) Create(_ context.Context, node Node) error {
 	return nil
 }
 
-func (f *fakeSandbox) Start(_ context.Context, node Node) error {
+func (f *fakeSandbox) Start(ctx context.Context, node Node) error {
 	f.recordCall("start " + node.SandboxName)
 	f.startGate.block(node.SandboxName)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.startContexts = append(f.startContexts, fakeContextState{err: ctx.Err(), bounded: fakeContextBounded(ctx)})
 	observation := f.observations[node.SandboxName]
 	observation.Status = "running"
 	observation.Exists = true
@@ -216,14 +264,19 @@ func (f *fakeSandbox) CopyToGuest(_ context.Context, node Node, sourcePath, targ
 	return nil
 }
 
-func (f *fakeSandbox) Shell(_ context.Context, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
+func (f *fakeSandbox) Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
 	f.recordCall("shell " + node.SandboxName + " " + strings.Join(command, " "))
+	var budget time.Duration
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = time.Until(deadline)
+	}
 	f.mu.Lock()
 	f.shellCalls = append(f.shellCalls, fakeShellCall{
 		instanceName: node.SandboxName,
 		command:      append([]string(nil), command...),
 		workdir:      workdir,
 		interactive:  interactive,
+		budget:       budget,
 	})
 	failCommand := f.failCommand
 	f.mu.Unlock()
@@ -307,7 +360,8 @@ func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 		t.Fatalf("expected running status, got %q", node.Status)
 	}
 
-	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell "+node.SandboxName+" sh -lc cd "+quoted(workspace)+" && ./script/setup") {
+	// The workdir is shell-quoted, not Go-quoted: %q leaves $ and backticks live.
+	if !containsCall(service.sandbox.(*fakeSandbox).calls, "shell "+node.SandboxName+" sh -lc cd "+shellQuote(workspace)+" && ./script/setup") {
 		t.Fatalf("expected setup command delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
@@ -315,7 +369,7 @@ func TestNodeLifecycleCopyWorkspaceDelegatesToSandbox(t *testing.T) {
 		t.Fatalf("expected workspace copy delegation, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
-	if !containsSubstring(service.sandbox.(*fakeSandbox).calls, "command -v sh") {
+	if !containsSubstring(service.sandbox.(*fakeSandbox).calls, "codex --version") {
 		t.Fatalf("expected validation command to run, calls = %v", service.sandbox.(*fakeSandbox).calls)
 	}
 
@@ -437,6 +491,118 @@ func TestNodeStartClearsCreatedLifecycleStateFromPersistedNodeMetadata(t *testin
 	}
 	if strings.Contains(string(startedData), "lifecycle_state: created") {
 		t.Fatalf("expected started node metadata to drop lifecycle_state: created, got %s", string(startedData))
+	}
+}
+
+// TestNodeStartGivesBootstrapCommandsTheLongBudget pins the guest-command
+// timeout classes: bootstrap and agent-install commands run under the long
+// budget, and the quick probes around them keep the short one. The blanket
+// ten-minute cap this replaces killed slow installs mid-flight and recorded the
+// node Failed.
+func TestNodeStartGivesBootstrapCommandsTheLongBudget(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "budget-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	bootstrap.InstallCommands = []string{"install-the-agent"}
+	bootstrap.BootstrapCommands = nil
+	bootstrap.ValidationCommand = "probe-the-agent"
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode() error = %v", err)
+	}
+
+	if _, err := service.NodeStart(ctx, node.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	fake := service.sandbox.(*fakeSandbox)
+	fake.mu.Lock()
+	calls := append([]fakeShellCall(nil), fake.shellCalls...)
+	fake.mu.Unlock()
+
+	var install, probe *fakeShellCall
+	for index := range calls {
+		joined := strings.Join(calls[index].command, " ")
+		switch {
+		case strings.Contains(joined, "install-the-agent"):
+			install = &calls[index]
+		case strings.Contains(joined, "probe-the-agent"):
+			probe = &calls[index]
+		}
+	}
+	if install == nil || probe == nil {
+		t.Fatalf("expected both a bootstrap and a validation shell call, got %#v", calls)
+	}
+	// Bounded, and bounded by the long class rather than the short one.
+	if install.budget <= defaultGuestCommandTimeout || install.budget > bootstrapGuestCommandTimeout {
+		t.Fatalf("bootstrap command budget = %s, want (%s, %s]", install.budget, defaultGuestCommandTimeout, bootstrapGuestCommandTimeout)
+	}
+	// The validation probe stays on the runtime's own cap: no deadline is
+	// threaded, so the caller has not widened it.
+	if probe.budget != 0 {
+		t.Fatalf("validation probe budget = %s, want the runtime default", probe.budget)
+	}
+}
+
+// TestGuestCommandTimeoutDefersToCallerDeadline is the runtime half of the same
+// contract: LimaClient.Shell must not re-cap work the caller already bounded.
+func TestGuestCommandTimeoutDefersToCallerDeadline(t *testing.T) {
+	t.Parallel()
+
+	if got := guestCommandTimeout(context.Background()); got != defaultGuestCommandTimeout {
+		t.Fatalf("guestCommandTimeout(unbounded) = %s, want %s", got, defaultGuestCommandTimeout)
+	}
+	bounded, cancel := context.WithTimeout(context.Background(), bootstrapGuestCommandTimeout)
+	defer cancel()
+	if got := guestCommandTimeout(bounded); got != 0 {
+		t.Fatalf("guestCommandTimeout(bounded) = %s, want the caller's own deadline to stand", got)
+	}
+}
+
+// TestNodeStartIgnoresStaleRuntimeCacheWhenDecidingToBoot pins the boundary
+// ADR 126 draws: read surfaces may serve the observation cache, but the
+// decision to boot a VM may not. A cache entry that still says "running" for an
+// instance that is stopped makes NodeStart skip the boot and then run every
+// bootstrap command against a machine that is not there.
+func TestNodeStartIgnoresStaleRuntimeCacheWhenDecidingToBoot(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "stale-cache"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	fake := service.sandbox.(*fakeSandbox)
+	fake.mu.Lock()
+	// The runtime is genuinely stopped; only the cache claims otherwise.
+	fake.staleObservations = map[string]RuntimeObservation{
+		node.SandboxName: {Name: node.SandboxName, Exists: true, Status: ObservationRunning, Dir: "/fake/" + node.SandboxName},
+	}
+	fake.mu.Unlock()
+
+	if _, err := service.NodeStart(ctx, node.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	fake.mu.Lock()
+	calls := append([]string(nil), fake.calls...)
+	uncached := fake.uncachedListCalls
+	fake.mu.Unlock()
+	if !containsCall(calls, "start "+node.SandboxName) {
+		t.Fatalf("NodeStart() trusted a stale cache entry and never booted the VM: %v", calls)
+	}
+	if uncached == 0 {
+		t.Fatal("NodeStart() never asked the runtime for an uncached listing")
 	}
 }
 
@@ -1096,14 +1262,24 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 		`apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`,
 		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`,
 		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g @openai/codex && ln -sfn "$guest_home/.local/bin/codex" /usr/local/bin/codex`,
-		`command -v codex >/dev/null 2>&1`,
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" codex --version >/dev/null`,
 	)
 	assertEnvironmentConfigCommands(t, configs, "claude-code",
 		`apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`,
 		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`,
 		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g @anthropic-ai/claude-code && ln -sfn "$guest_home/.local/bin/claude" /usr/local/bin/claude`,
-		`command -v claude >/dev/null 2>&1`,
+		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" claude --version >/dev/null`,
 	)
+	for profileName, executable := range map[string]string{"codex-cli": "codex", "claude-code": "claude"} {
+		profile, err := service.store.LoadAgentProfile(profileName)
+		if err != nil {
+			t.Fatalf("LoadAgentProfile(%s) error = %v", profileName, err)
+		}
+		if !strings.Contains(profile.ValidationCommand, executable+" --version") ||
+			!strings.Contains(profile.ValidationCommand, `sudo -u "$guest_user"`) {
+			t.Fatalf("expected %s profile to validate as the Lima login user, got %q", profileName, profile.ValidationCommand)
+		}
+	}
 
 	config, err := service.EnvironmentConfigShow(context.Background(), "codex")
 	if err != nil {
@@ -1164,7 +1340,7 @@ func TestAgentEnvironmentBootstrapCannotCompleteWithoutExecutable(t *testing.T) 
 				t.Fatalf("NodeCreate() error = %v", err)
 			}
 
-			service.sandbox.(*fakeSandbox).failCommand = "command -v " + test.executable
+			service.sandbox.(*fakeSandbox).failCommand = test.executable + " --version"
 			if _, err := service.NodeStart(ctx, node.ID); err == nil {
 				t.Fatalf("NodeStart() succeeded without the selected %s executable", test.executable)
 			}
@@ -1228,6 +1404,167 @@ func TestUntouchedNativeAgentInstallersMigrateToUserOwnedNPM(t *testing.T) {
 		if !containsSubstring(config.BootstrapCommands, "npm install -g "+packageName) {
 			t.Fatalf("expected %s native installer to migrate to npm, got %q", slug, strings.Join(config.BootstrapCommands, "|"))
 		}
+	}
+}
+
+func TestUntouchedVersion5AgentDefinitionsMigrateToLoginUserValidation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true) error = %v", err)
+	}
+
+	for slug, specs := range legacyBuiltInEnvironmentConfigs() {
+		if _, err := service.EnvironmentConfigUpdate(ctx, slug, EnvironmentConfigUpdateInput{
+			BootstrapCommands: specs[0].BootstrapCommands,
+		}); err != nil {
+			t.Fatalf("EnvironmentConfigUpdate(%s) error = %v", slug, err)
+		}
+	}
+	for name, profiles := range legacyBuiltInProfiles() {
+		if err := writeYAMLFile(service.store.agentProfilePath(name), profiles[0]); err != nil {
+			t.Fatalf("write legacy profile %s: %v", name, err)
+		}
+	}
+	writeFile(t, service.store.seedVersionPath(), "5\n")
+
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true, migrate) error = %v", err)
+	}
+
+	for slug, executable := range map[string]string{"codex": "codex", "claude-code": "claude"} {
+		config, err := service.EnvironmentConfigShow(ctx, slug)
+		if err != nil {
+			t.Fatalf("EnvironmentConfigShow(%s) error = %v", slug, err)
+		}
+		if !containsSubstring(config.BootstrapCommands, executable+" --version") ||
+			containsSubstring(config.BootstrapCommands, "command -v "+executable) {
+			t.Fatalf("expected %s environment to validate executable as the login user, got %q", slug, strings.Join(config.BootstrapCommands, "|"))
+		}
+	}
+	for profileName, executable := range map[string]string{"codex-cli": "codex", "claude-code": "claude"} {
+		profile, err := service.store.LoadAgentProfile(profileName)
+		if err != nil {
+			t.Fatalf("LoadAgentProfile(%s) error = %v", profileName, err)
+		}
+		if !strings.Contains(profile.ValidationCommand, executable+" --version") {
+			t.Fatalf("expected %s profile migration, got %q", profileName, profile.ValidationCommand)
+		}
+	}
+}
+
+func TestCustomizedBuiltInAgentProfileIsNotMigrated(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true) error = %v", err)
+	}
+	custom := AgentProfile{
+		Name:              "codex-cli",
+		InstallCommands:   []string{},
+		ValidationCommand: "test -x /opt/custom/bin/codex",
+		LaunchCommand:     "/opt/custom/bin/codex",
+		Environment:       map[string]string{"CODEX_HOME": "/opt/custom/state"},
+	}
+	if err := writeYAMLFile(service.store.agentProfilePath(custom.Name), custom); err != nil {
+		t.Fatalf("write custom profile: %v", err)
+	}
+	writeFile(t, service.store.seedVersionPath(), "5\n")
+
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true, migrate) error = %v", err)
+	}
+	got, err := service.store.LoadAgentProfile(custom.Name)
+	if err != nil {
+		t.Fatalf("LoadAgentProfile(%s) error = %v", custom.Name, err)
+	}
+	if !reflect.DeepEqual(got, custom) {
+		t.Fatalf("custom profile was overwritten: got %#v, want %#v", got, custom)
+	}
+}
+
+func TestNodeStartRepairsCompletedLegacyBuiltInAgentBootstrap(t *testing.T) {
+	t.Parallel()
+
+	legacyConfigs := legacyBuiltInEnvironmentConfigs()
+	version5Commands := append([]string{}, legacyConfigs["codex"][0].BootstrapCommands...)
+	version5Commands = append(version5Commands, legacyConfigs["claude-code"][0].BootstrapCommands...)
+	tests := []struct {
+		name     string
+		commands []string
+	}{
+		{name: "version-5-npm", commands: version5Commands},
+		{name: "native-installers", commands: []string{
+			legacyCodexPrerequisitesCommand,
+			legacyCodexStandaloneInstallCommand,
+			legacyCodexLookupValidationCommand,
+			legacyClaudeCodeNativeInstallCommand,
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			service, workspace := newTestService(t)
+			writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+			node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "legacy-agent-node"})
+			if err != nil {
+				t.Fatalf("NodeCreate() error = %v", err)
+			}
+			bootstrap, err := service.store.LoadBootstrapState(node.ID)
+			if err != nil {
+				t.Fatalf("LoadBootstrapState() error = %v", err)
+			}
+			bootstrap.BootstrapCommands = test.commands
+			completedAt := time.Now().UTC()
+			bootstrap.Completed = true
+			bootstrap.CompletedAt = &completedAt
+			bootstrap.ValidationCommand = defaultAgentValidationCommand
+			node.BootstrapCommands = bootstrap.CombinedCommands()
+			node.BootstrapCompleted = true
+			node.BootstrapCompletedAt = &completedAt
+			if err := service.store.SaveNode(node, bootstrap); err != nil {
+				t.Fatalf("SaveNode(legacy bootstrap) error = %v", err)
+			}
+
+			fake := service.sandbox.(*fakeSandbox)
+			callStart := len(fake.calls)
+			started, err := service.NodeStart(ctx, node.ID)
+			if err != nil {
+				t.Fatalf("NodeStart() error = %v", err)
+			}
+			calls := append([]string(nil), fake.calls[callStart:]...)
+			for _, packageName := range []string{"@openai/codex", "@anthropic-ai/claude-code"} {
+				if !containsSubstring(calls, "npm install -g "+packageName) {
+					t.Fatalf("legacy bootstrap did not install %s as the login user, calls = %v", packageName, calls)
+				}
+			}
+			for _, executable := range []string{"codex", "claude"} {
+				if !containsSubstring(calls, executable+" --version") {
+					t.Fatalf("legacy bootstrap did not execute %s as validation, calls = %v", executable, calls)
+				}
+			}
+			if containsSubstring(calls, "command -v codex") || containsSubstring(calls, "command -v claude") ||
+				containsSubstring(calls, "chatgpt.com/codex/install.sh") || containsSubstring(calls, "claude.ai/install.sh") {
+				t.Fatalf("defective legacy commands were rerun, calls = %v", calls)
+			}
+			if !started.BootstrapCompleted {
+				t.Fatalf("repaired node bootstrap is incomplete: %#v", started)
+			}
+			repaired, err := service.store.LoadBootstrapState(node.ID)
+			if err != nil {
+				t.Fatalf("LoadBootstrapState(repaired) error = %v", err)
+			}
+			if !repaired.Completed || !containsSubstring(repaired.BootstrapCommands, "npm install -g @openai/codex") ||
+				!containsSubstring(repaired.BootstrapCommands, "npm install -g @anthropic-ai/claude-code") {
+				t.Fatalf("repaired bootstrap state = %#v", repaired)
+			}
+		})
 	}
 }
 
@@ -1690,10 +2027,6 @@ func assertEnvironmentConfigCommands(t *testing.T, configs []EnvironmentConfig, 
 	t.Fatalf("expected environment config %s to exist, got %#v", slug, configs)
 }
 
-func quoted(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
-}
-
 func countEnvironmentConfigSlug(configs []EnvironmentConfig, slug string) int {
 	count := 0
 	for _, config := range configs {
@@ -1913,6 +2246,73 @@ func TestReadSurfacesDoNotWrite(t *testing.T) {
 	after := snapshotHomeFiles(t, service.cfg.MetadataRoot)
 	if diff := diffFileSnapshots(before, after); diff != "" {
 		t.Fatalf("expected read surfaces to leave the metadata home untouched, but files changed:\n%s", diff)
+	}
+}
+
+// TestNodeCloneRestartsSourceAfterCallerCancellation pins the rule that a
+// mutation owed to the user must not inherit the caller's context. NodeClone
+// stops a running source VM and is obliged to put it back; hanging that restart
+// off ctx meant a Ctrl+C mid-clone cancelled the restart the moment it began
+// and left the user's VM stopped.
+func TestNodeCloneRestartsSourceAfterCallerCancellation(t *testing.T) {
+	t.Parallel()
+
+	service, workspace := newTestService(t)
+	source, err := service.NodeCreate(context.Background(), NodeCreateInput{Directory: workspace, Slug: "clone-src"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	if _, err := service.NodeStart(context.Background(), source.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	fake := service.sandbox.(*fakeSandbox)
+	cloneGate := newFakeSandboxGate()
+	fake.cloneGate = cloneGate
+	fake.mu.Lock()
+	fake.startContexts = nil
+	fake.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cloneDone := make(chan struct{})
+	go func() {
+		defer close(cloneDone)
+		// The clone itself is expected to fail once the caller goes away; the
+		// source VM's restart is what must still happen.
+		_, _ = service.NodeClone(ctx, NodeCloneInput{SourceNode: source.ID, NodeSlug: "clone-dst"})
+	}()
+
+	// The clone target's instance name is generated, so wait on the gate itself
+	// rather than a name the test can predict.
+	select {
+	case <-cloneGate.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the clone to start")
+	}
+	cancel()
+	close(cloneGate.release)
+	select {
+	case <-cloneDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("NodeClone() did not return after caller cancellation")
+	}
+
+	fake.mu.Lock()
+	starts := append([]fakeContextState(nil), fake.startContexts...)
+	calls := append([]string(nil), fake.calls...)
+	fake.mu.Unlock()
+	if !containsCall(calls, "start "+source.SandboxName) {
+		t.Fatalf("clone never restarted the source VM it stopped: %v", calls)
+	}
+	if len(starts) == 0 {
+		t.Fatal("no Start context was recorded")
+	}
+	restart := starts[len(starts)-1]
+	if restart.err != nil {
+		t.Fatalf("source restart ran on the cancelled caller context: %v", restart.err)
+	}
+	if !restart.bounded {
+		t.Fatal("source restart ran on an unbounded context; it must carry a VM-start budget")
 	}
 }
 
@@ -2257,5 +2657,400 @@ func TestNodeDeleteLeavesNodeListableWhenTeardownFails(t *testing.T) {
 	}
 	if _, live := findObservation(observations, instanceName); live {
 		t.Fatalf("expected the retry to tear down instance %q", instanceName)
+	}
+}
+
+// nodeStartGateSandbox blocks the runtime start of one named instance so tests
+// can inspect the whole system while a single node is mid-boot. Every other
+// call is delegated to the embedded fake, so its observations and call
+// bookkeeping stay authoritative.
+type nodeStartGateSandbox struct {
+	*fakeSandbox
+	instance string
+	entered  chan struct{}
+	release  chan struct{}
+}
+
+func (f *nodeStartGateSandbox) Start(ctx context.Context, node Node) error {
+	if node.SandboxName == f.instance {
+		select {
+		case f.entered <- struct{}{}:
+		default:
+		}
+		<-f.release
+	}
+	return f.fakeSandbox.Start(ctx, node)
+}
+
+// awaitLifecycleResult fails the test if a lifecycle call has not returned
+// within budget, which is what "blocked behind a booting node" looks like.
+func awaitLifecycleResult(t *testing.T, label string, results <-chan error, budget time.Duration) error {
+	t.Helper()
+
+	select {
+	case err := <-results:
+		return err
+	case <-time.After(budget):
+		t.Fatalf("%s did not complete within %s", label, budget)
+		return nil
+	}
+}
+
+func TestNodeStartHoldsNoLocksAcrossRuntimeWork(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	nodeA, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "node-a"})
+	if err != nil {
+		t.Fatalf("NodeCreate(node-a) error = %v", err)
+	}
+	nodeB, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "node-b"})
+	if err != nil {
+		t.Fatalf("NodeCreate(node-b) error = %v", err)
+	}
+
+	gate := &nodeStartGateSandbox{
+		fakeSandbox: service.sandbox.(*fakeSandbox),
+		instance:    nodeA.SandboxName,
+		entered:     make(chan struct{}, 1),
+		release:     make(chan struct{}),
+	}
+	service.sandbox = gate
+
+	startA := make(chan error, 1)
+	go func() {
+		_, startErr := service.NodeStart(ctx, nodeA.ID)
+		startA <- startErr
+	}()
+	select {
+	case <-gate.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("node A never reached the runtime start")
+	}
+
+	// The durable guard is in place while nothing holds a flock.
+	provisioning, err := service.store.NodeByID(nodeA.ID)
+	if err != nil {
+		t.Fatalf("NodeByID(node-a) error = %v", err)
+	}
+	if provisioning.Status != NodeStatusProvisioning {
+		t.Fatalf("expected node A to be persisted as provisioning while booting, got %q", provisioning.Status)
+	}
+
+	// (a) read paths do not block.
+	listResult := make(chan error, 1)
+	go func() {
+		_, listErr := service.NodeList(ctx, false)
+		listResult <- listErr
+	}()
+	if err := awaitLifecycleResult(t, "NodeList", listResult, 5*time.Second); err != nil {
+		t.Fatalf("NodeList() error = %v", err)
+	}
+
+	seedResult := make(chan error, 1)
+	go func() {
+		seedResult <- service.ensureReadyForWrite(ctx)
+	}()
+	if err := awaitLifecycleResult(t, "seedAndRepair", seedResult, 5*time.Second); err != nil {
+		t.Fatalf("ensureReadyForWrite() error = %v", err)
+	}
+
+	// No global lock domain is held across the VM boot.
+	lockCtx, cancelLocks := context.WithTimeout(ctx, 3*time.Second)
+	globalLocks, err := acquireLockSet(lockCtx, service.cfg.MetadataRoot, nil, []lockKey{lockNodes, lockConfigurations, lockEnvironments}, nil)
+	cancelLocks()
+	if err != nil {
+		t.Fatalf("a global lock domain was held across the VM boot: %v", err)
+	}
+	globalLocks.release()
+
+	// (c) a second operation on the same node fails fast with a typed error.
+	for _, second := range []struct {
+		label string
+		run   func() error
+	}{
+		{label: "NodeStart", run: func() error { _, err := service.NodeStart(ctx, nodeA.ID); return err }},
+		{label: "NodeStop", run: func() error { _, err := service.NodeStop(ctx, nodeA.ID); return err }},
+	} {
+		results := make(chan error, 1)
+		go func() { results <- second.run() }()
+		err := awaitLifecycleResult(t, "second "+second.label+" on the booting node", results, 5*time.Second)
+		var appErr *AppError
+		if !errors.As(err, &appErr) || appErr.Category != CategoryPreconditionFailed {
+			t.Fatalf("second %s on the booting node error = %#v, want PreconditionFailed", second.label, err)
+		}
+		if appErr.Fields["node_id"] != nodeA.ID {
+			t.Fatalf("second %s error fields = %#v", second.label, appErr.Fields)
+		}
+	}
+
+	// (b) an independent node runs its own lifecycle operation in parallel.
+	startB := make(chan error, 1)
+	go func() {
+		_, startErr := service.NodeStart(ctx, nodeB.ID)
+		startB <- startErr
+	}()
+	if err := awaitLifecycleResult(t, "NodeStart(node-b)", startB, 15*time.Second); err != nil {
+		t.Fatalf("NodeStart(node-b) error = %v", err)
+	}
+
+	close(gate.release)
+	if err := <-startA; err != nil {
+		t.Fatalf("NodeStart(node-a) error = %v", err)
+	}
+
+	persisted, err := service.store.NodeByID(nodeA.ID)
+	if err != nil {
+		t.Fatalf("NodeByID(node-a, after start) error = %v", err)
+	}
+	if nodeStatusInFlight(persisted.Status) {
+		t.Fatalf("expected node A to leave its in-flight status, got %q", persisted.Status)
+	}
+	shown, err := service.NodeShow(ctx, nodeA.ID)
+	if err != nil {
+		t.Fatalf("NodeShow(node-a) error = %v", err)
+	}
+	if shown.Status != NodeStatusRunning {
+		t.Fatalf("expected node A to finish running, got %q", shown.Status)
+	}
+}
+
+func TestSeedAndRepairSkipsLocksWhenTheHomeIsCurrent(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	if err := service.EnsureReady(ctx, true); err != nil {
+		t.Fatalf("EnsureReady(true) error = %v", err)
+	}
+
+	// Another process owns every domain lock for the rest of this test.
+	held, err := acquireLockSet(ctx, service.cfg.MetadataRoot, nil, []lockKey{lockEnvironments, lockConfigurations, lockNodes}, nil)
+	if err != nil {
+		t.Fatalf("acquireLockSet() error = %v", err)
+	}
+	defer held.release()
+
+	// The seed stamp is checked before any lock, so an already-seeded home is
+	// unaffected even by an already-cancelled context.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := service.seedAndRepair(cancelled, false); err != nil {
+		t.Fatalf("seedAndRepair on a current home took a lock: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- service.ensureReadyForWrite(ctx)
+	}()
+	if err := awaitLifecycleResult(t, "ensureReadyForWrite", done, 2*time.Second); err != nil {
+		t.Fatalf("ensureReadyForWrite() error = %v", err)
+	}
+
+	// A pass that actually has work to do does take the locks, and therefore
+	// does observe contention.
+	forcedCtx, cancelForced := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancelForced()
+	if err := service.seedAndRepair(forcedCtx, true); err == nil {
+		t.Fatal("expected a forced seed pass to wait on the held domain locks")
+	}
+}
+
+func TestStrandedInFlightNodeStatusIsRecoveredByTheNextOperation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "crashed-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	if _, err := service.NodeStart(ctx, node.ID); err != nil {
+		t.Fatalf("NodeStart() error = %v", err)
+	}
+
+	// Simulate a process killed mid-start: the durable in-flight status is left
+	// behind, but no live process holds the node's lifecycle token.
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	stranded, err := service.store.NodeByID(node.ID)
+	if err != nil {
+		t.Fatalf("NodeByID() error = %v", err)
+	}
+	stranded.Status = NodeStatusProvisioning
+	if err := service.store.SaveNode(stranded, bootstrap); err != nil {
+		t.Fatalf("SaveNode(stranded) error = %v", err)
+	}
+
+	claimed, err := nodeOperationClaimed(service.cfg.MetadataRoot, node.ID)
+	if err != nil {
+		t.Fatalf("nodeOperationClaimed() error = %v", err)
+	}
+	if claimed {
+		t.Fatal("expected the stranded node to have no live lifecycle claim")
+	}
+
+	report, err := service.Doctor(ctx, false)
+	if err != nil {
+		t.Fatalf("Doctor(false) error = %v", err)
+	}
+	if !containsSubstring(report.Warnings, "stuck in status") {
+		t.Fatalf("expected doctor to report the stranded node, warnings = %#v", report.Warnings)
+	}
+
+	started, err := service.NodeStart(ctx, node.ID)
+	if err != nil {
+		t.Fatalf("NodeStart(after crash) error = %v", err)
+	}
+	if started.Status != NodeStatusRunning {
+		t.Fatalf("expected the recovered node to start, got %q", started.Status)
+	}
+
+	events, err := service.store.NodeEvents(node.ID)
+	if err != nil {
+		t.Fatalf("NodeEvents() error = %v", err)
+	}
+	recovered := false
+	for _, event := range events {
+		if event.Type == "node.lifecycle.recovered" {
+			recovered = true
+			if event.Fields["previous_status"] != string(NodeStatusProvisioning) {
+				t.Fatalf("recovery event fields = %#v", event.Fields)
+			}
+		}
+	}
+	if !recovered {
+		t.Fatalf("expected a node.lifecycle.recovered event, got %#v", events)
+	}
+}
+
+func TestDoctorRepairRecoversStrandedNodeClaims(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	writeFile(t, filepath.Join(workspace, "README.md"), "hello\n")
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "crashed-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.Status = NodeStatusTerminating
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(stranded) error = %v", err)
+	}
+
+	report, err := service.Doctor(ctx, true)
+	if err != nil {
+		t.Fatalf("Doctor(true) error = %v", err)
+	}
+	repaired := false
+	for _, check := range report.Checks {
+		if check.Name == "node_claims" {
+			repaired = true
+			if !strings.Contains(check.Message, "recovered 1") {
+				t.Fatalf("node_claims check = %#v", check)
+			}
+		}
+	}
+	if !repaired {
+		t.Fatalf("expected doctor --repair to report a node_claims check, got %#v", report.Checks)
+	}
+
+	persisted, err := service.store.NodeByID(node.ID)
+	if err != nil {
+		t.Fatalf("NodeByID() error = %v", err)
+	}
+	if persisted.Status != NodeStatusFailed {
+		t.Fatalf("expected the stranded node to be repaired to failed, got %q", persisted.Status)
+	}
+}
+
+func TestDoctorRepairLeavesLiveLifecycleClaimsAlone(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "busy-node"})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.Status = NodeStatusProvisioning
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(provisioning) error = %v", err)
+	}
+
+	token, ok, err := tryAcquireNodeOperation(service.cfg.MetadataRoot, node.ID)
+	if err != nil || !ok {
+		t.Fatalf("tryAcquireNodeOperation() = %v, %v", ok, err)
+	}
+	defer token.release()
+
+	report, err := service.Doctor(ctx, true)
+	if err != nil {
+		t.Fatalf("Doctor(true) error = %v", err)
+	}
+	if containsSubstring(report.Warnings, "stuck in status") {
+		t.Fatalf("doctor reported a live operation as stranded: %#v", report.Warnings)
+	}
+
+	persisted, err := service.store.NodeByID(node.ID)
+	if err != nil {
+		t.Fatalf("NodeByID() error = %v", err)
+	}
+	if persisted.Status != NodeStatusProvisioning {
+		t.Fatalf("doctor --repair clobbered a live operation's status: %q", persisted.Status)
+	}
+}
+
+func TestRunGuestCommandQuotesWorkdirAgainstCommandSubstitution(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+	fake := service.sandbox.(*fakeSandbox)
+
+	base := t.TempDir()
+	marker := filepath.Join(base, "pwned")
+	workdir := filepath.Join(base, "node $(touch "+marker+") `touch "+marker+"` dir")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(hostile workdir) error = %v", err)
+	}
+
+	node := Node{ID: newID(), Slug: "hostile", SandboxName: "hostile-node", GuestWorkspacePath: workdir}
+	if err := service.runGuestCommand(context.Background(), node, "echo ok"); err != nil {
+		t.Fatalf("runGuestCommand() error = %v", err)
+	}
+	if len(fake.shellCalls) != 1 {
+		t.Fatalf("shell calls = %#v, want one", fake.shellCalls)
+	}
+	script := fake.shellCalls[0].command[2]
+	if want := "cd " + shellQuote(workdir) + " && echo ok"; script != want {
+		t.Fatalf("guest script = %q, want %q", script, want)
+	}
+
+	// The real proof: running the generated script must not evaluate the
+	// directory name. Go's %q would leave $(...) and backticks live.
+	output, err := exec.Command("sh", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated script %q failed: %v (%s)", script, err, output)
+	}
+	if exists(marker) {
+		t.Fatalf("workdir command substitution executed as part of the guest script: %q", script)
 	}
 }

@@ -184,17 +184,13 @@ func (c *Client) callConcurrent(ctx context.Context, method string, params any, 
 	c.writeFrames.Add(1)
 	c.writeBytes.Add(uint64(len(method) + len(raw)))
 
-	wait := c.timeout
-	if until, ok := ctx.Deadline(); ok {
-		if remaining := time.Until(until); remaining < wait {
-			wait = remaining
-		}
+	wait, bounded := c.callTimeout(ctx, method)
+	var expired <-chan time.Time
+	if bounded {
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		expired = timer.C
 	}
-	if wait <= 0 {
-		wait = time.Nanosecond
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
 	select {
 	case call := <-reply:
 		if call.err != nil {
@@ -212,13 +208,13 @@ func (c *Client) callConcurrent(ctx context.Context, method string, params any, 
 			outcome = DeliveryOutcomeUnknown
 		}
 		return &DeliveryError{Outcome: outcome, Err: ctx.Err()}
-	case <-timer.C:
+	case <-expired:
 		c.removePending(id)
 		outcome := DeliveryDisconnected
 		if mutatingMethod(method) {
 			outcome = DeliveryOutcomeUnknown
 		}
-		return &DeliveryError{Outcome: outcome, Err: fmt.Errorf("daemon request %s exceeded %s", method, c.timeout)}
+		return &DeliveryError{Outcome: outcome, Err: fmt.Errorf("daemon request %s exceeded %s", method, wait)}
 	}
 }
 
@@ -228,11 +224,11 @@ func (c *Client) callLocked(ctx context.Context, method string, params any, resu
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(c.timeout)
-	if value, ok := ctx.Deadline(); ok && value.Before(deadline) {
-		deadline = value
+	if wait, bounded := c.callTimeout(ctx, method); bounded {
+		_ = c.conn.SetDeadline(time.Now().Add(wait))
+	} else {
+		_ = c.conn.SetDeadline(time.Time{})
 	}
-	_ = c.conn.SetDeadline(deadline)
 	if err := c.encoder.Encode(daemon.Request{ID: id, Method: method, Params: raw}); err != nil {
 		c.recordClose("client", "ready", daemon.CloseWriteError, err)
 		_ = c.invalidateLocked()
@@ -263,6 +259,17 @@ func (c *Client) callLocked(ctx context.Context, method string, params any, resu
 		return fmt.Errorf("daemon response id %d does not match request %d", response.ID, id)
 	}
 	return daemon.DecodeResult(response, result)
+}
+
+// RestartRenderer asks the daemon to replace one terminal's renderer process.
+// It is the manual escape hatch from a renderer the automatic restart policy has
+// declared degraded: the shell, its PTY and the output journal survive, so the
+// replacement replays the journal and the session continues.
+//
+// It is a mutation, so an observe-only client must call input.takeover first.
+func (c *Client) RestartRenderer(ctx context.Context, terminalID string) error {
+	var result map[string]bool
+	return c.Call(ctx, "terminal.restart_renderer", map[string]string{"terminal_id": terminalID}, &result)
 }
 
 func (c *Client) Subscribe(ctx context.Context, topics []string) error {
@@ -581,13 +588,30 @@ func (e *DeliveryError) Unwrap() error {
 	return e.Err
 }
 
+// mutatingMethod reads the daemon's own method classification so the client's
+// delivery-outcome reporting can never drift from the server's ownership gate.
 func mutatingMethod(method string) bool {
-	switch method {
-	case "daemon.update", "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.resize", "terminal.focus", "terminal.scroll", "terminal.open", "terminal.close", "terminal.move", "input.takeover":
-		return true
-	default:
-		return false
+	return daemon.MutatingInputMethod(method)
+}
+
+// callTimeout applies the method's timeout class. Lifecycle methods (node
+// boot, node stop, live update) legitimately run for minutes, so the client's
+// short blanket timeout would abandon them mid-operation; they are bounded by
+// the caller's context and by connection loss instead.
+func (c *Client) callTimeout(ctx context.Context, method string) (time.Duration, bool) {
+	wait, bounded := c.timeout, true
+	if daemon.ClassifyMethod(method) == daemon.ClassLifecycle {
+		bounded = false
 	}
+	if until, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(until); !bounded || remaining < wait {
+			wait, bounded = remaining, true
+		}
+	}
+	if bounded && wait <= 0 {
+		wait = time.Nanosecond
+	}
+	return wait, bounded
 }
 
 func newClientInstanceID() string {

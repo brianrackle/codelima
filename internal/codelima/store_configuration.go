@@ -146,7 +146,7 @@ func (s *Store) SaveConfiguration(configuration Configuration) error {
 	if loaded, err := s.ConfigurationByID(configuration.ID); err == nil {
 		previous = &loaded
 	}
-	if err := writeYAMLFile(s.configurationPath(configuration.ID), configuration); err != nil {
+	if err := s.writeConfigurationMetadata(configuration); err != nil {
 		return err
 	}
 	if previous != nil && previous.Slug != configuration.Slug {
@@ -159,9 +159,40 @@ func (s *Store) SaveConfiguration(configuration Configuration) error {
 	return nil
 }
 
+// writeConfigurationMetadata writes configuration.yaml and drops the
+// parse-cache entry for it, for the same reason writeNodeMetadata does.
+func (s *Store) writeConfigurationMetadata(configuration Configuration) error {
+	path := s.configurationPath(configuration.ID)
+	err := writeYAMLFile(path, configuration)
+	s.configurationCache.forget(path)
+	return err
+}
+
+// ConfigurationByID reads one configuration record, serving it from the parse
+// cache while its file is unchanged. NodeList hydrates a configuration slug per
+// node on every call, so this is on the same >=1Hz path as the node records.
 func (s *Store) ConfigurationByID(id string) (Configuration, error) {
-	var configuration Configuration
 	path := s.configurationPath(id)
+	// Sample the file identity before reading, never after: see
+	// metadataCache.store.
+	info := statMetadataFile(path)
+	if configuration, ok := s.configurationCache.lookup(path, info); ok {
+		return cloneConfiguration(configuration), nil
+	}
+
+	configuration, err := s.readConfigurationRecord(path, id)
+	if err != nil {
+		s.configurationCache.forget(path)
+		return Configuration{}, err
+	}
+
+	s.configurationCache.store(path, info, configuration)
+	return cloneConfiguration(configuration), nil
+}
+
+func (s *Store) readConfigurationRecord(path, id string) (Configuration, error) {
+	var configuration Configuration
+	s.parsedRecords.Add(1)
 	if err := readYAMLFile(path, &configuration); err != nil {
 		if os.IsNotExist(err) {
 			return Configuration{}, notFound("configuration not found", map[string]any{"id": id})

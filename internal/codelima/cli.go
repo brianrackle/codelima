@@ -135,19 +135,6 @@ func isCommandGroup(value string) bool {
 	return value == "tui" || findCLIGroup(value) != nil
 }
 
-// Group entry points kept for tests that exercise one group directly.
-func dispatchDaemon(ctx context.Context, service *Service, args []string) (any, error) {
-	return dispatchGroup(ctx, service, findCLIGroup("daemon"), args)
-}
-
-func dispatchConfiguration(ctx context.Context, service *Service, args []string) (any, error) {
-	return dispatchGroup(ctx, service, findCLIGroup("configuration"), args)
-}
-
-func dispatchNode(ctx context.Context, service *Service, args []string) (any, error) {
-	return dispatchGroup(ctx, service, findCLIGroup("node"), args)
-}
-
 func tuiWorkspaceRootArgument(value string) (string, bool, error) {
 	candidate := expandHome(value)
 	info, err := os.Stat(candidate)

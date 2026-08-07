@@ -175,8 +175,12 @@ daemon:
   autostart: true
   restore: respawn
   virtiofs_reclaim: true
-  virtiofs_reclaim_threshold_percent: 20
 ```
+
+`virtiofs_reclaim` is an on/off switch only: while it is enabled the macOS
+VirtioFS workaround runs on a fixed 60-second cadence, so there is no threshold
+to configure. CodeLima owns the `daemon` key and round-trips the rest of the
+file, so operator-authored keys survive a settings refresh.
 
 The reusable default configuration retains its `image` field and seeds it as
 `template:ubuntu`. Runtime command defaults remain an internal compatibility

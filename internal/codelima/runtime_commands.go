@@ -1,6 +1,12 @@
 package codelima
 
-import "gopkg.in/yaml.v3"
+import (
+	"bytes"
+	"os"
+	"slices"
+
+	"gopkg.in/yaml.v3"
+)
 
 type runtimeCommandsExample struct {
 	RuntimeCommands RuntimeCommandTemplates `yaml:"runtime_commands"`
@@ -66,6 +72,27 @@ func (t RuntimeCommandTemplates) IsZero() bool {
 	return true
 }
 
+// effectiveRuntimeCommandTemplates is the single definition of runtime command
+// precedence — built-in defaults, then global settings, then node metadata.
+// resolveConfiguredRuntimeCommands renders these; runtimeCommandsAreBuiltIn
+// asks which definition won without rendering placeholders first.
+func effectiveRuntimeCommandTemplates(global, nodeCommands RuntimeCommandTemplates, kind runtimeCommandKind) []string {
+	templates := defaultRuntimeCommandTemplates().templates(kind)
+	templates = applyDefaultCommandList(global.templates(kind), templates)
+	return applyDefaultCommandList(nodeCommands.templates(kind), templates)
+}
+
+// runtimeCommandsAreBuiltIn reports whether a kind still resolves to the
+// command definitions CodeLima ships. Built-in commands execute as argv, which
+// is what keeps a host shell profile from prepending output to machine-parsed
+// limactl stdout; customized commands keep shell semantics because their
+// templates are written against a shell. The check compares against the
+// defaults rather than asking whether an override was supplied because the
+// loaded settings always carry the defaults merged in.
+func runtimeCommandsAreBuiltIn(global, nodeCommands RuntimeCommandTemplates, kind runtimeCommandKind) bool {
+	return slices.Equal(effectiveRuntimeCommandTemplates(global, nodeCommands, kind), defaultRuntimeCommandTemplates().templates(kind))
+}
+
 func (t RuntimeCommandTemplates) templates(kind runtimeCommandKind) []string {
 	for _, field := range t.orderedFields() {
 		if field.key == kind {
@@ -111,20 +138,64 @@ func loadRuntimeCommandsFile(path string) (RuntimeCommandTemplates, error) {
 	return commands, nil
 }
 
-func configYAMLBytes(cfg Config) ([]byte, error) {
-	settings := struct {
-		Daemon struct {
-			Autostart                       bool   `yaml:"autostart"`
-			Restore                         string `yaml:"restore"`
-			VirtioFSReclaim                 bool   `yaml:"virtiofs_reclaim"`
-			VirtioFSReclaimThresholdPercent int    `yaml:"virtiofs_reclaim_threshold_percent"`
-		} `yaml:"daemon"`
-	}{}
-	settings.Daemon.Autostart = cfg.Daemon.Autostart
-	settings.Daemon.Restore = cfg.Daemon.Restore
-	settings.Daemon.VirtioFSReclaim = cfg.Daemon.VirtioFSReclaim
-	settings.Daemon.VirtioFSReclaimThresholdPercent = cfg.Daemon.VirtioFSReclaimThresholdPercent
+// configYAMLBytes renders settings.yaml on top of whatever is already there.
+// The reader (LoadConfig) unmarshals the whole Config, so users legitimately
+// hand-edit keys the writer does not model; a writer that serialized only its
+// own struct silently wiped those keys every time a new daemon key shipped.
+// The document is therefore round-tripped as a yaml.Node — comments, key order,
+// and unknown/future keys survive — and only the `daemon` key is replaced.
+//
+// Inside `daemon` the writer is authoritative: the block is rewritten
+// wholesale, which is how a retired key is dropped. That is the migration path
+// for virtiofs_reclaim_threshold_percent, which no longer has any effect.
+func configYAMLBytes(cfg Config, existing []byte) ([]byte, error) {
+	daemonSettings := struct {
+		Autostart       bool   `yaml:"autostart"`
+		Restore         string `yaml:"restore"`
+		VirtioFSReclaim bool   `yaml:"virtiofs_reclaim"`
+	}{
+		Autostart:       cfg.Daemon.Autostart,
+		Restore:         cfg.Daemon.Restore,
+		VirtioFSReclaim: cfg.Daemon.VirtioFSReclaim,
+	}
+
+	daemonNode := &yaml.Node{}
+	if err := daemonNode.Encode(daemonSettings); err != nil {
+		return nil, err
+	}
+
+	settings := settingsMapping(existing)
+	setMappingValue(settings, "daemon", daemonNode)
 	return yamlBytes(settings)
+}
+
+// settingsMapping parses prior settings into the mapping the writer edits. A
+// missing, empty, or unparseable file yields a fresh mapping: an operator can
+// always recover hand-edited preferences from their editor, but a daemon that
+// refuses to write the keys it owns because the file is malformed would be
+// unusable.
+func settingsMapping(data []byte) *yaml.Node {
+	var document yaml.Node
+	if len(bytes.TrimSpace(data)) > 0 && yaml.Unmarshal(data, &document) == nil {
+		if len(document.Content) == 1 && document.Content[0].Kind == yaml.MappingNode {
+			return document.Content[0]
+		}
+	}
+	return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+}
+
+func setMappingValue(mapping *yaml.Node, key string, value *yaml.Node) {
+	for index := 0; index+1 < len(mapping.Content); index += 2 {
+		if mapping.Content[index].Value == key {
+			mapping.Content[index+1] = value
+			return
+		}
+	}
+	mapping.Content = append(
+		mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		value,
+	)
 }
 
 func nodeYAMLBytes(node Node, defaults RuntimeCommandTemplates) ([]byte, error) {
@@ -132,16 +203,24 @@ func nodeYAMLBytes(node Node, defaults RuntimeCommandTemplates) ([]byte, error) 
 	return yamlBytes(newNodeFileWire(node))
 }
 
+// configFileNeedsRefresh reports whether settings.yaml is missing a daemon key
+// this build owns, or still carries one it retired. Retired keys are listed so
+// the one-time rewrite that removes them is self-limiting: once the key is
+// gone the file stops being refreshed.
 func configFileNeedsRefresh(data []byte) bool {
 	var stored struct {
 		Daemon struct {
 			Autostart                       *bool  `yaml:"autostart"`
 			Restore                         string `yaml:"restore"`
 			VirtioFSReclaim                 *bool  `yaml:"virtiofs_reclaim"`
-			VirtioFSReclaimThresholdPercent int    `yaml:"virtiofs_reclaim_threshold_percent"`
+			VirtioFSReclaimThresholdPercent *int   `yaml:"virtiofs_reclaim_threshold_percent"`
 		} `yaml:"daemon"`
 	}
-	return yaml.Unmarshal(data, &stored) != nil || stored.Daemon.Autostart == nil || stored.Daemon.Restore == "" || stored.Daemon.VirtioFSReclaim == nil || stored.Daemon.VirtioFSReclaimThresholdPercent == 0
+	return yaml.Unmarshal(data, &stored) != nil ||
+		stored.Daemon.Autostart == nil ||
+		stored.Daemon.Restore == "" ||
+		stored.Daemon.VirtioFSReclaim == nil ||
+		stored.Daemon.VirtioFSReclaimThresholdPercent != nil
 }
 
 // nodeFileNeedsRefresh decides whether an on-disk node.yaml is stale by
@@ -185,7 +264,12 @@ func containsUnsupportedRuntimeCommandYAML(runtimeCommands map[string]any) bool 
 }
 
 func writeConfigFile(path string, cfg Config) error {
-	data, err := configYAMLBytes(cfg)
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return metadataCorruption("failed to read settings.yaml", err, map[string]any{"path": path})
+	}
+
+	data, err := configYAMLBytes(cfg, existing)
 	if err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
@@ -19,10 +20,15 @@ func newTUIRunner() TUIRunner {
 }
 
 type vaxisTUIApp struct {
-	ctx               context.Context
-	service           *Service
-	vx                *vaxis.Vaxis
-	postEvent         func(vaxis.Event)
+	ctx       context.Context
+	service   *Service
+	vx        *vaxis.Vaxis
+	postEvent func(vaxis.Event)
+	// postEventBlocking delivers one-shot completion events. vaxis PostEvent
+	// silently drops events once its queue is full — exactly when the loop is
+	// busy — and every dropped completion latches a state that never clears.
+	// nil falls back to postEvent (tests that never fill the queue).
+	postEventBlocking func(vaxis.Event)
 	treeWorkspaceRoot string
 	openLink          func(string) error
 	screenHyperlinkAt func(int, int) (string, bool)
@@ -42,14 +48,39 @@ type vaxisTUIApp struct {
 	daemonDisconnected bool
 	// overlay is the single active right-pane override (dialog, menu,
 	// selector, or messages view); nil means no overlay is showing.
-	overlay          tuiOverlay
-	messages         *tuiMessageLog
-	status           string
-	statusLevel      slog.Level
+	overlay     tuiOverlay
+	messages    *tuiMessageLog
+	status      string
+	statusLevel slog.Level
+	// refreshInFlight suppresses overlapping periodic reloads. refreshDeadline
+	// bounds it: a lost tuiRefreshCompleteEvent must not stop auto-refresh, so
+	// the next tick past the deadline starts a fresh load regardless.
 	refreshInFlight  bool
+	refreshDeadline  time.Time
 	clipboardPush    func(string) error
 	treeContentRect  tuiRect
 	terminalBodyRect tuiRect
+	// drawPasses counts full-screen rebuilds. It is owned by the event loop
+	// like every other field here; only the redraw-coalescing test reads it.
+	drawPasses int
+	// nodeUsage is the newest live usage sample seen per node id, from either
+	// source (the daemon's push or the copy embedded in a node.list reply). It
+	// is what lets the two races in applyNodeUsage be decided; it is pruned to
+	// the reloaded node set so nothing outlives the node it describes.
+	nodeUsage map[string]nodeUsageEvent
+}
+
+// postCompletion delivers a one-shot completion or handshake event. Unlike
+// ordinary redraw traffic these events carry a latch release, so they use the
+// blocking sink when the app has one.
+func (a *vaxisTUIApp) postCompletion(event vaxis.Event) {
+	if a.postEventBlocking != nil {
+		a.postEventBlocking(event)
+		return
+	}
+	if a.postEvent != nil {
+		a.postEvent(event)
+	}
 }
 
 // Typed views of the active overlay: nil when no overlay of that concrete
@@ -106,8 +137,36 @@ const (
 	terminalTabMoveNextFooterHint = "Opt-Shift-Right"
 	terminalTabMovePrevFooterHint = "Opt-Shift-Left"
 	terminalTabCloseFooterHint    = "Opt-w"
-	tuiAutoRefreshInterval        = time.Second
 )
+
+// tuiDaemonAutoRefreshInterval is the fallback poll under a daemon. The daemon
+// pushes node.status_changed the moment a lifecycle operation lands and the TUI
+// reloads from that push, so this ticker is only the safety net invariant I2
+// asks for — a dropped push must not leave the tree stale forever — and not how
+// node state normally arrives. Note that node.list is also the transport for
+// the daemon's live CPU/memory/disk telemetry, which nothing pushes; the tree's
+// usage lines therefore refresh on this interval.
+const tuiDaemonAutoRefreshInterval = 10 * time.Second
+
+// tuiLocalAutoRefreshInterval is the poll with no daemon to push. Nothing
+// observes node state in that mode, so the interval is the whole freshness
+// budget: three seconds still surfaces a node started from another terminal
+// promptly, at a third of the runtime listings the one-second poll cost.
+const tuiLocalAutoRefreshInterval = 3 * time.Second
+
+// tuiRefreshStallTimeout bounds how long one in-flight node reload suppresses
+// the next periodic one. It is the self-healing half of the refresh latch.
+const tuiRefreshStallTimeout = 10 * time.Second
+
+// tuiAutoRefreshInterval picks the fallback poll for this session: the daemon
+// has a push channel to lean on, a standalone TUI does not.
+func tuiAutoRefreshInterval(service *Service) time.Duration {
+	if service != nil && service.daemonClient != nil {
+		return tuiDaemonAutoRefreshInterval
+	}
+
+	return tuiLocalAutoRefreshInterval
+}
 
 func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoot string) error {
 	// TUI mode logs to a file sink (CODELIMA_HOME/_logs/codelima.log) instead of
@@ -131,6 +190,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	defer vx.Close()
 
 	sessions := newTUISessionStore(ctx, service, vx.PostEvent)
+	sessions.postEventBlocking = vx.PostEventBlocking
 	defer sessions.Close()
 
 	state, err := newTUIState(nodes, sessions)
@@ -143,6 +203,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		service:           service,
 		vx:                vx,
 		postEvent:         vx.PostEvent,
+		postEventBlocking: vx.PostEventBlocking,
 		treeWorkspaceRoot: workspaceRoot,
 		state:             state,
 		sessions:          sessions,
@@ -161,7 +222,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 
 	stopLogoAnimation := startTUILogoAnimation(ctx, vx.PostEvent)
 	defer stopLogoAnimation()
-	stopRefresh := startTUIAutoRefresh(ctx, vx.PostEvent, tuiAutoRefreshInterval)
+	stopRefresh := startTUIAutoRefresh(ctx, vx.PostEvent, tuiAutoRefreshInterval(service))
 	defer stopRefresh()
 
 	return app.serve(vx.Events())
@@ -182,21 +243,69 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.sessions.Close()
 
+	// carried holds the one event pulled off the queue while collapsing a
+	// redraw burst. A channel cannot be un-read, so the first non-redraw event
+	// the collapse encounters is parked here and handled on the next
+	// iteration — in its original order, before anything queued behind it.
+	var carried vaxis.Event
+	for {
+		event := carried
+		carried = nil
+		if event == nil {
+			select {
+			case <-a.ctx.Done():
+				return a.ctx.Err()
+			case queued, ok := <-events:
+				if !ok {
+					return nil
+				}
+				event = queued
+			}
+		}
+
+		// Terminal damage and daemon pushes arrive as redraw-only events at up
+		// to 20Hz; each one repaints the whole screen. Consecutive ones render
+		// identical frames, so drop the run and let this event's own draw stand
+		// for all of them. Only redraws are dropped: every other event mutates
+		// state, and the one-shot completion and handshake events release
+		// latches (invariant I2), so losing one is a hang rather than a frame.
+		if isTUIRedrawOnlyEvent(event) {
+			carried = collapseQueuedRedraws(events)
+		}
+
+		quit, err := a.handleEvent(event)
+		if err != nil {
+			return err
+		}
+		if quit {
+			return nil
+		}
+	}
+}
+
+// isTUIRedrawOnlyEvent reports whether an event's entire effect is "render the
+// current state". Such events are interchangeable, so a queued run of them can
+// be served by a single draw.
+func isTUIRedrawOnlyEvent(event vaxis.Event) bool {
+	_, ok := event.(vaxis.Redraw)
+	return ok
+}
+
+// collapseQueuedRedraws discards the redraw-only events already queued, without
+// blocking. It stops at the first event of any other kind and returns it for
+// the caller to handle next; nil means the queue held nothing else.
+func collapseQueuedRedraws(events chan vaxis.Event) vaxis.Event {
 	for {
 		select {
-		case <-a.ctx.Done():
-			return a.ctx.Err()
-		case event, ok := <-events:
+		case queued, ok := <-events:
 			if !ok {
 				return nil
 			}
-			quit, err := a.handleEvent(event)
-			if err != nil {
-				return err
+			if !isTUIRedrawOnlyEvent(queued) {
+				return queued
 			}
-			if quit {
-				return nil
-			}
+		default:
+			return nil
 		}
 	}
 }
@@ -230,7 +339,22 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.sessions.markDaemonTerminalDirty(event.TerminalID, a.state.activeSessionKey())
 		return false, nil
 	case tuiRefreshTickEvent:
-		a.startDataRefresh()
+		a.reapCompletedOperations()
+		a.startDataRefresh("")
+		return false, nil
+	case tuiNodesChangedEvent:
+		// The daemon pushed a node lifecycle change. Reload now instead of
+		// waiting out the fallback ticker; the load runs off the loop and the
+		// draw happens when tuiRefreshCompleteEvent lands. This does the tick's
+		// work, not a subset of it: the dropped-completion sweep now runs at
+		// push latency instead of at the slowed tick.
+		a.reapCompletedOperations()
+		a.startDataRefresh("")
+		return false, nil
+	case tuiNodeUsageEvent:
+		if a.applyNodeUsage(event.Usage) {
+			a.requestRedraw()
+		}
 		return false, nil
 	case tuiRefreshCompleteEvent:
 		a.finishDataRefresh(event)
@@ -254,6 +378,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiTerminalClosedEvent:
 		a.handleTerminalClosed(event)
+		a.draw()
+		return false, nil
+	case tuiDaemonTerminalOpenedEvent:
+		a.handleDaemonTerminalOpened(event)
+		a.draw()
+		return false, nil
+	case tuiDaemonInputReclaimedEvent:
+		a.finishDaemonInputTakeover(event)
 		a.draw()
 		return false, nil
 	case tuiDaemonDisconnectedEvent:
@@ -296,13 +428,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		// A newer TUI can revoke this request connection while both windows stay
 		// open. Window focus is an explicit user handoff, so reclaim ownership
 		// before the next key or mouse event can mutate a terminal.
-		if !a.daemonDisconnected && a.service != nil && a.service.daemonClient != nil {
-			if err := takeTUIDaemonInput(a.ctx, a.service.daemonClient); err != nil {
-				a.service.log().Error("reclaim terminal input ownership failed", "error", err.Error())
-				a.daemonDisconnected = true
-				a.setStatus(slog.LevelError, "daemon connection lost; reconnecting")
-			}
-		}
+		a.startDaemonInputTakeover()
 		a.draw()
 		return false, nil
 	}
@@ -407,18 +533,77 @@ func (a *vaxisTUIApp) openHyperlink(target string) error {
 	return openHyperlink(target)
 }
 
-func (a *vaxisTUIApp) reloadData(preferredKey string) error {
-	nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
-	if err != nil {
-		return err
+// applyNodeUsage merges one pushed usage sample into this window's records.
+// A 1Hz push races the node.list reload that carries the same numbers, so the
+// rules are:
+//
+//   - A sample for a node this window does not hold is dropped. The reload owns
+//     membership, so a push can never resurrect a node a reload removed, nor
+//     add one from outside this window's directory scope.
+//   - The newest sample per node wins. Both timestamps are minted by the
+//     daemon's forwarder at sample time, so they are directly comparable: a
+//     push older than what the last reload carried is ignored here, and a
+//     reload carrying older numbers than the last push is corrected in
+//     reconcileNodeUsage.
+//
+// It reports whether anything changed, so a dropped sample costs no repaint.
+func (a *vaxisTUIApp) applyNodeUsage(usage nodeUsageEvent) bool {
+	if a.state == nil || strings.TrimSpace(usage.NodeID) == "" {
+		return false
 	}
-	return a.applyReloadedNodes(nodes, preferredKey)
+	if known, ok := a.nodeUsage[usage.NodeID]; ok && usage.SampledAt.Before(known.SampledAt) {
+		return false
+	}
+	if !a.state.applyNodeUsage(usage) {
+		return false
+	}
+	if a.nodeUsage == nil {
+		a.nodeUsage = map[string]nodeUsageEvent{}
+	}
+	a.nodeUsage[usage.NodeID] = usage
+	return true
+}
+
+// reconcileNodeUsage settles pushed usage against a freshly loaded node list.
+// The list embeds the daemon's usage as of the moment it was served, which can
+// be older than the last push this window applied; where it is, the push is
+// written back over it so a reload never regresses the display. Samples for
+// nodes the reload did not return are dropped with them.
+func (a *vaxisTUIApp) reconcileNodeUsage() {
+	if a.state == nil {
+		return
+	}
+
+	kept := make(map[string]nodeUsageEvent, len(a.state.nodes))
+	for _, node := range a.state.nodes {
+		listed := nodeUsageFromNode(node)
+		if pushed, ok := a.nodeUsage[node.ID]; ok && listed.SampledAt.Before(pushed.SampledAt) {
+			a.state.applyNodeUsage(pushed)
+			kept[node.ID] = pushed
+			continue
+		}
+		kept[node.ID] = listed
+	}
+	a.nodeUsage = kept
+}
+
+// requestRedraw asks for a repaint through the event queue rather than drawing
+// inline, so a burst of per-node samples collapses into one frame in serve. The
+// state is already applied when this is called: a dropped redraw costs a frame,
+// never a value. Without a queue (synchronous tests) it draws directly.
+func (a *vaxisTUIApp) requestRedraw() {
+	if a.postEvent != nil {
+		a.postEvent(vaxis.Redraw{})
+		return
+	}
+	a.draw()
 }
 
 func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) error {
 	if err := a.state.replaceNodes(nodes, preferredKey); err != nil {
 		return err
 	}
+	a.reconcileNodeUsage()
 	a.sessions.PruneStaleSessions(a.targetKeyStillExists)
 	if err := a.ensureSelectedNodeTerminal(); err != nil {
 		return err
@@ -465,21 +650,26 @@ func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 	}
 }
 
-func (a *vaxisTUIApp) startDataRefresh() {
-	if a.refreshInFlight {
+// startDataRefresh loads the node list off the event loop: it is a daemon RPC
+// under a daemon and a store read otherwise, and neither may run on the loop.
+// preferredKey is the selection to restore once the load lands; a request that
+// carries one always starts, because the periodic tick cannot reproduce it.
+func (a *vaxisTUIApp) startDataRefresh(preferredKey string) {
+	if preferredKey == "" && a.refreshInFlight && time.Now().Before(a.refreshDeadline) {
 		return
 	}
 
 	a.refreshInFlight = true
+	a.refreshDeadline = time.Now().Add(tuiRefreshStallTimeout)
 	if a.postEvent == nil {
 		nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
-		a.finishDataRefresh(tuiRefreshCompleteEvent{Nodes: nodes, Err: err})
+		a.finishDataRefresh(tuiRefreshCompleteEvent{Nodes: nodes, PreferredKey: preferredKey, Err: err})
 		return
 	}
 
 	go func() {
 		nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
-		a.postEvent(tuiRefreshCompleteEvent{Nodes: nodes, Err: err})
+		a.postCompletion(tuiRefreshCompleteEvent{Nodes: nodes, PreferredKey: preferredKey, Err: err})
 	}()
 }
 
@@ -499,10 +689,54 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		}
 		return
 	}
-	if err := a.applyReloadedNodes(event.Nodes, ""); err != nil && a.status == "" {
+	if err := a.applyReloadedNodes(event.Nodes, event.PreferredKey); err != nil && a.status == "" {
 		a.service.log().Warn("tui node reload failed", "error", err.Error())
 		a.setStatus(slog.LevelError, err.Error())
 	}
+}
+
+// startDaemonInputTakeover reclaims terminal input ownership for this window.
+// The RPC runs off the event loop; its outcome returns as
+// tuiDaemonInputReclaimedEvent. A window that already knows the daemon is gone
+// must not probe the dead connection and replace the actionable reopen
+// guidance with broken-pipe noise.
+func (a *vaxisTUIApp) startDaemonInputTakeover() {
+	if a.daemonDisconnected || a.service == nil || a.service.daemonClient == nil {
+		return
+	}
+
+	client := a.service.daemonClient
+	if a.postEvent == nil {
+		a.finishDaemonInputTakeover(tuiDaemonInputReclaimedEvent{Err: takeTUIDaemonInput(a.ctx, client)})
+		return
+	}
+	go func() {
+		a.postCompletion(tuiDaemonInputReclaimedEvent{Err: takeTUIDaemonInput(a.ctx, client)})
+	}()
+}
+
+func (a *vaxisTUIApp) finishDaemonInputTakeover(event tuiDaemonInputReclaimedEvent) {
+	if event.Err == nil || a.daemonDisconnected {
+		return
+	}
+	a.service.log().Error("reclaim terminal input ownership failed", "error", event.Err.Error())
+	a.daemonDisconnected = true
+	a.setStatus(slog.LevelError, "daemon connection lost; reconnecting")
+}
+
+// handleDaemonTerminalOpened installs a daemon terminal.open reply. The RPC ran
+// off the event loop; the session map, the tab list, and the active-tab record
+// are all owned by the loop, so they are updated here.
+func (a *vaxisTUIApp) handleDaemonTerminalOpened(event tuiDaemonTerminalOpenedEvent) {
+	sessionKey, err := a.sessions.applyOpenedDaemonTab(event)
+	if err != nil {
+		a.setStatus(slog.LevelError, fmt.Sprintf("start shell for %s: %s", event.Label, err))
+		return
+	}
+	if a.state != nil {
+		a.state.setActiveTab(event.TargetKey, sessionKey)
+	}
+	a.syncSessionFocus()
 }
 
 func startTUIAutoRefresh(ctx context.Context, postEvent func(vaxis.Event), interval time.Duration) func() {

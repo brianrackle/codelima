@@ -18,6 +18,7 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 	"github.com/containerd/console"
 
+	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
@@ -344,6 +345,8 @@ func (f *fakeTUISessionManager) TargetSessionKeys(targetKey string) []string {
 	return append([]string(nil), f.openTabs[targetKey]...)
 }
 
+func (f *fakeTUISessionManager) PendingTabOpen(string) bool { return false }
+
 func (f *fakeTUISessionManager) MoveTab(targetKey, sessionKey string, direction int) error {
 	keys := f.openTabs[targetKey]
 	for index, key := range keys {
@@ -381,6 +384,10 @@ func (f *sharedFakeTUISessionManager) HasSession(sessionKey string) bool {
 
 func (f *sharedFakeTUISessionManager) TargetSessionKeys(targetKey string) []string {
 	return f.store.TargetSessionKeys(targetKey)
+}
+
+func (f *sharedFakeTUISessionManager) PendingTabOpen(targetKey string) bool {
+	return f.store.PendingTabOpen(targetKey)
 }
 
 func (f *sharedFakeTUISessionManager) MoveTab(targetKey, sessionKey string, direction int) error {
@@ -1991,11 +1998,21 @@ func TestVaxisTUITerminalPreservesInitialOutputWhenStartedAtPaneSize(t *testing.
 	}
 }
 
-func TestTUIAutoRefreshSamplesNodeCPUOncePerSecond(t *testing.T) {
+// The auto-refresh tick is the fallback, not the mechanism: under a daemon the
+// node list arrives from the pushed node.status_changed event, so the ticker
+// only has to catch a dropped push (invariant I2). Without a daemon nothing
+// pushes, so the tick is the whole freshness budget and stays short. This also
+// pins the cadence of the daemon-side CPU/memory/disk telemetry the node.list
+// reply carries: nothing pushes those, so they refresh on the daemon interval.
+func TestTUIAutoRefreshIntervalsPreferPushOverPolling(t *testing.T) {
 	t.Parallel()
 
-	if tuiAutoRefreshInterval != time.Second {
-		t.Fatalf("tuiAutoRefreshInterval = %s, want 1s", tuiAutoRefreshInterval)
+	daemonService := &Service{daemonClient: &daemonclient.Client{}}
+	if got := tuiAutoRefreshInterval(daemonService); got != 10*time.Second {
+		t.Fatalf("tuiAutoRefreshInterval(daemon) = %s, want 10s", got)
+	}
+	if got := tuiAutoRefreshInterval(&Service{}); got != 3*time.Second {
+		t.Fatalf("tuiAutoRefreshInterval(no daemon) = %s, want 3s", got)
 	}
 }
 

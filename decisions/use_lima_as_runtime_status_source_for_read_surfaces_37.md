@@ -60,4 +60,4 @@ Fetch the Lima observation set once for a collection read, then map observations
 
 ## Links
 
-* Refines [ADR 5](/Users/brianrackle/personal/codelima/decisions/defer_project_snapshots_and_runtime_validation_5.md)
+* Refines [ADR 5](defer_project_snapshots_and_runtime_validation_5.md)

@@ -71,6 +71,38 @@ func TestDefaultRuntimeCommandsUseLima(t *testing.T) {
 	}
 }
 
+func TestRuntimeCommandsAreBuiltInTracksOverrides(t *testing.T) {
+	t.Parallel()
+	// The loaded settings always carry the defaults merged in, so an untouched
+	// home must still read as built-in.
+	loaded := RuntimeCommandTemplates{}.ApplyDefaults(defaultRuntimeCommandTemplates())
+	for _, kind := range []runtimeCommandKind{runtimeCommandVersion, runtimeCommandList, runtimeCommandStart, runtimeCommandShellExec} {
+		if !runtimeCommandsAreBuiltIn(loaded, RuntimeCommandTemplates{}, kind) {
+			t.Fatalf("%s must resolve to the built-in definition", kind)
+		}
+	}
+
+	global := loaded
+	global.List = []string{"{{binary}} list --json | tee /tmp/list.json"}
+	if runtimeCommandsAreBuiltIn(global, RuntimeCommandTemplates{}, runtimeCommandList) {
+		t.Fatal("settings override must not read as built-in")
+	}
+	if !runtimeCommandsAreBuiltIn(global, RuntimeCommandTemplates{}, runtimeCommandStart) {
+		t.Fatal("an unrelated override must not change other kinds")
+	}
+
+	node := RuntimeCommandTemplates{Start: []string{"{{binary}} start --custom {{sandbox_name}}"}}
+	if runtimeCommandsAreBuiltIn(loaded, node, runtimeCommandStart) {
+		t.Fatal("node override must not read as built-in")
+	}
+	if got := effectiveRuntimeCommandTemplates(global, node, runtimeCommandStart); strings.Join(got, "|") != node.Start[0] {
+		t.Fatalf("node metadata must win the precedence chain, got %q", got)
+	}
+	if got := effectiveRuntimeCommandTemplates(global, node, runtimeCommandList); strings.Join(got, "|") != global.List[0] {
+		t.Fatalf("settings must win over the built-in defaults, got %q", got)
+	}
+}
+
 func TestDefaultRuntimeStartCanEnableNestedVirtualization(t *testing.T) {
 	t.Parallel()
 	commands, err := resolveConfiguredRuntimeCommands("limactl", defaultRuntimeCommandTemplates(), RuntimeCommandTemplates{}, runtimeCommandStart, map[string]string{

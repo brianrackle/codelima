@@ -27,6 +27,11 @@ const (
 	requiredLimaVersion = "2.1.0"
 	limaCommandTimeout  = 15 * time.Minute
 	limaOutputLimit     = 16 << 20
+	// defaultGuestCommandTimeout bounds one non-interactive guest command when
+	// the caller supplied no deadline of its own. It exists so a wedged guest
+	// command cannot hang a caller forever, not as a statement about how long
+	// guest work may legitimately take — see guestCommandTimeout.
+	defaultGuestCommandTimeout = 10 * time.Minute
 )
 
 // LimaClient adapts the Lima 2.x CLI to CodeLima's runtime contract. Lima's
@@ -42,6 +47,10 @@ type LimaClient struct {
 	GOARCH          string
 	LimaHome        string
 	UnixSocketProbe func(string) error
+	// ReconcileInterval overrides limaObserverReconcileInterval for the
+	// observation cache's periodic full list. Tests set it; production leaves it
+	// zero.
+	ReconcileInterval time.Duration
 
 	nestedVirtualizationProbe func() bool
 
@@ -97,7 +106,7 @@ func (c *LimaClient) supportsNestedVirtualization() bool {
 }
 
 func (c *LimaClient) Version(ctx context.Context) (string, error) {
-	commands, err := c.ResolveCommands(Node{}, runtimeCommandVersion, nil)
+	commands, err := c.resolveRuntimeCommands(Node{}, runtimeCommandVersion, nil)
 	if err != nil {
 		return "", err
 	}
@@ -151,14 +160,111 @@ func validateLimaVersion(version string) error {
 		values[index] = value
 	}
 	minimum := [3]int{2, 1, 0}
-	if values[0] != minimum[0] || values[1] < minimum[1] || values[1] == minimum[1] && values[2] < minimum[2] {
-		return dependencyUnavailable("unsupported Lima version", nil, map[string]any{"found": version, "required": requiredLimaVersion, "supported_major": 2})
+	// The floor is a floor, not an equality: CodeLima depends on the Lima 2.x
+	// CLI surface (`limactl list --json`, `watch --json`, `clone`), and a future
+	// major keeps that surface until it does not. Rejecting Lima 3.x outright
+	// broke every user who upgraded Lima before CodeLima shipped a release that
+	// merely bumped a constant; a genuine incompatibility surfaces as a command
+	// failure with the actual limactl diagnostic instead.
+	if values[0] < minimum[0] {
+		return dependencyUnavailable("unsupported Lima version", nil, map[string]any{"found": version, "required": requiredLimaVersion, "minimum_major": minimum[0]})
+	}
+	if values[0] == minimum[0] && (values[1] < minimum[1] || values[1] == minimum[1] && values[2] < minimum[2]) {
+		return dependencyUnavailable("unsupported Lima version", nil, map[string]any{"found": version, "required": requiredLimaVersion, "minimum_major": minimum[0]})
 	}
 	return nil
 }
 
 func (c *LimaClient) ResolveCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]string, error) {
 	return resolveConfiguredRuntimeCommands(c.binary(), c.RuntimeCommands, node.RuntimeCommands, kind, values)
+}
+
+// resolvedRuntimeCommand is a resolved runtime command together with the
+// transport it must use. A command that still matches the definition CodeLima
+// ships carries an argv and executes without a shell, so no host shell profile
+// can prepend output to machine-parsed stdout — `limactl list --json` is the
+// load-bearing case — or otherwise reinterpret the command. A command a user
+// customized keeps the `sh -lc` transport its template is written against.
+type resolvedRuntimeCommand struct {
+	text string
+	argv []string
+}
+
+func (r resolvedRuntimeCommand) command(ctx context.Context) *exec.Cmd {
+	if len(r.argv) != 0 {
+		return exec.CommandContext(ctx, r.argv[0], r.argv[1:]...)
+	}
+	return exec.CommandContext(ctx, "sh", "-lc", r.text)
+}
+
+func (c *LimaClient) resolveRuntimeCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]resolvedRuntimeCommand, error) {
+	resolved, err := c.ResolveCommands(node, kind, values)
+	if err != nil {
+		return nil, err
+	}
+	builtIn := runtimeCommandsAreBuiltIn(c.RuntimeCommands, node.RuntimeCommands, kind)
+	commands := make([]resolvedRuntimeCommand, 0, len(resolved))
+	for _, text := range resolved {
+		command := resolvedRuntimeCommand{text: text}
+		if builtIn {
+			if argv, ok := argvFromQuotedCommand(text); ok {
+				command.argv = argv
+			}
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
+
+// shellInterpretedCharacters are the characters a shell would act on rather
+// than pass through as literal argument text.
+const shellInterpretedCharacters = "$`\\|&;<>()!*?[]{}~#\n\r"
+
+// argvFromQuotedCommand converts a resolved command into argv when the command
+// is provably a plain word list: literal characters, single-quoted segments,
+// and double-quoted segments carrying no expansion. This is the exact inverse
+// of shellQuote/shellArgsFragment, which is how every built-in template renders
+// its values. Anything a shell would interpret returns false so the caller
+// keeps the shell transport instead of silently changing what runs.
+func argvFromQuotedCommand(command string) ([]string, bool) {
+	argv := make([]string, 0, 8)
+	word := strings.Builder{}
+	started := false
+	for index := 0; index < len(command); index++ {
+		switch character := command[index]; character {
+		case ' ', '\t':
+			if started {
+				argv = append(argv, word.String())
+				word.Reset()
+				started = false
+			}
+		case '\'', '"':
+			end := strings.IndexByte(command[index+1:], character)
+			if end < 0 {
+				return nil, false
+			}
+			segment := command[index+1 : index+1+end]
+			if character == '"' && strings.ContainsAny(segment, "$`\\") {
+				return nil, false
+			}
+			word.WriteString(segment)
+			index += end + 1
+			started = true
+		default:
+			if strings.IndexByte(shellInterpretedCharacters, character) >= 0 {
+				return nil, false
+			}
+			word.WriteByte(character)
+			started = true
+		}
+	}
+	if started {
+		argv = append(argv, word.String())
+	}
+	if len(argv) == 0 || argv[0] == "" {
+		return nil, false
+	}
+	return argv, true
 }
 
 func (c *LimaClient) List(ctx context.Context) ([]RuntimeObservation, error) {
@@ -170,8 +276,16 @@ func (c *LimaClient) List(ctx context.Context) ([]RuntimeObservation, error) {
 	return c.listDirect(ctx)
 }
 
+// ListUncached answers from `limactl list` without consulting the observation
+// cache. It is the uncachedSandboxLister half of the runtime contract: callers
+// about to start or stop a VM must not decide from a cache that a watch stream
+// and a one-minute reconciliation are both allowed to leave stale.
+func (c *LimaClient) ListUncached(ctx context.Context) ([]RuntimeObservation, error) {
+	return c.listDirect(ctx)
+}
+
 func (c *LimaClient) listDirect(ctx context.Context) ([]RuntimeObservation, error) {
-	commands, err := c.ResolveCommands(Node{}, runtimeCommandList, nil)
+	commands, err := c.resolveRuntimeCommands(Node{}, runtimeCommandList, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -199,13 +313,32 @@ type limaListRecord struct {
 	VMType        string `json:"vmType"`
 }
 
+// parseLimaList converts `limactl list --json` output into observations,
+// skipping records it cannot make sense of instead of failing the whole list.
+//
+// The list is the single input to NodeList, the forwarder's reconcile loop and
+// every preflight check, so one unparseable record used to take all of them
+// down together: a Lima release that adds a status string CodeLima has not seen
+// froze the route table and made the tool report zero nodes (plans §6c). A
+// skipped record only hides that one instance, and the skip is logged with the
+// offending value so it is diagnosable.
+//
+// The loud failure is kept for the case it was meant for: input that yielded no
+// usable record at all — a wholly garbled stream, most often a login shell's
+// profile output arriving where JSON was expected — still returns corruption.
+// Genuinely empty output (no instances, or a bare `[]`) parses to an empty list
+// because nothing was skipped.
 func parseLimaList(data []byte) ([]RuntimeObservation, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 {
 		return []RuntimeObservation{}, nil
 	}
+	logger := packageLog()
+	skipped := 0
 	records := []limaListRecord{}
 	if trimmed[0] == '[' {
+		// A JSON array is one document: a decode failure says nothing about
+		// individual records, so there is no per-record recovery to attempt.
 		if err := json.Unmarshal(trimmed, &records); err != nil {
 			return nil, metadataCorruption("failed to parse limactl list output", err, nil)
 		}
@@ -219,7 +352,10 @@ func parseLimaList(data []byte) ([]RuntimeObservation, error) {
 			}
 			var record limaListRecord
 			if err := json.Unmarshal(line, &record); err != nil {
-				return nil, metadataCorruption("failed to parse limactl list output", err, map[string]any{"line": boundedText(line, 512)})
+				skipped++
+				logger.Warn("skipping unparseable limactl list record",
+					"error", err, "line", boundedText(line, 512))
+				continue
 			}
 			records = append(records, record)
 		}
@@ -232,16 +368,29 @@ func parseLimaList(data []byte) ([]RuntimeObservation, error) {
 	for _, record := range records {
 		name := strings.TrimSpace(record.Name)
 		if name == "" {
-			return nil, metadataCorruption("limactl list record is missing an instance name", nil, nil)
+			skipped++
+			logger.Warn("skipping limactl list record without an instance name", "status", record.Status, "dir", record.Dir)
+			continue
 		}
+		// normalizeLimaStatus stays strict: an unrecognized status must never be
+		// coerced into a state CodeLima acts on. Dropping the record is the
+		// tolerant half.
 		status, err := normalizeLimaStatus(record.Status)
 		if err != nil {
-			return nil, metadataCorruption("limactl list record has an invalid status", err, map[string]any{"sandbox_name": name, "status": record.Status})
+			skipped++
+			logger.Warn("skipping limactl list record with an unsupported status",
+				"sandbox_name", name, "status", record.Status, "error", err)
+			continue
 		}
 		observations = append(observations, RuntimeObservation{
 			Name: name, Exists: true, Status: status, Dir: record.Dir, Hostname: record.Hostname,
 			SSHAddress: record.SSHAddress, SSHPort: record.SSHLocalPort, SSHConfigFile: record.SSHConfigFile,
 			LimaHome: record.LimaHome, LimaVersion: record.LimaVersion, VMType: record.VMType,
+		})
+	}
+	if len(observations) == 0 && skipped > 0 {
+		return nil, metadataCorruption("limactl list output contained no usable records", nil, map[string]any{
+			"skipped_records": skipped, "output": boundedText(trimmed, 512),
 		})
 	}
 	return observations, nil
@@ -294,7 +443,7 @@ func (c *LimaClient) Create(ctx context.Context, node Node) error {
 	if _, err := c.runDirect(ctx, 2*time.Minute, "validate Lima template", nil, c.binary(), "validate", templatePath); err != nil {
 		return err
 	}
-	commands, err := c.ResolveCommands(node, runtimeCommandCreate, map[string]string{
+	commands, err := c.resolveRuntimeCommands(node, runtimeCommandCreate, map[string]string{
 		"sandbox_name":  shellQuote(node.SandboxName),
 		"template_path": shellQuote(templatePath),
 	})
@@ -522,7 +671,7 @@ func (c *LimaClient) Start(ctx context.Context, node Node) error {
 	if c.supportsNestedVirtualization() {
 		nestedVirtualizationFlag = " --nested-virt"
 	}
-	commands, err := c.ResolveCommands(node, runtimeCommandStart, map[string]string{
+	commands, err := c.resolveRuntimeCommands(node, runtimeCommandStart, map[string]string{
 		"sandbox_name":               shellQuote(node.SandboxName),
 		"nested_virtualization_flag": nestedVirtualizationFlag,
 	})
@@ -536,7 +685,7 @@ func (c *LimaClient) Start(ctx context.Context, node Node) error {
 }
 
 func (c *LimaClient) Stop(ctx context.Context, node Node) error {
-	commands, err := c.ResolveCommands(node, runtimeCommandStop, map[string]string{"sandbox_name": shellQuote(node.SandboxName)})
+	commands, err := c.resolveRuntimeCommands(node, runtimeCommandStop, map[string]string{"sandbox_name": shellQuote(node.SandboxName)})
 	if err != nil {
 		return err
 	}
@@ -564,7 +713,7 @@ func (c *LimaClient) Delete(ctx context.Context, node Node) error {
 			return err
 		}
 	}
-	commands, err := c.ResolveCommands(node, runtimeCommandDelete, map[string]string{"sandbox_name": shellQuote(node.SandboxName)})
+	commands, err := c.resolveRuntimeCommands(node, runtimeCommandDelete, map[string]string{"sandbox_name": shellQuote(node.SandboxName)})
 	if err != nil {
 		return err
 	}
@@ -595,7 +744,7 @@ func (c *LimaClient) Clone(ctx context.Context, sourceNode, targetNode Node) err
 	if _, exists := findObservation(observations, targetNode.SandboxName); exists {
 		return preconditionFailed("target Lima instance name already exists", map[string]any{"sandbox_name": targetNode.SandboxName})
 	}
-	commands, err := c.ResolveCommands(targetNode, runtimeCommandClone, map[string]string{
+	commands, err := c.resolveRuntimeCommands(targetNode, runtimeCommandClone, map[string]string{
 		"source_sandbox": shellQuote(sourceNode.SandboxName),
 		"sandbox_name":   shellQuote(targetNode.SandboxName),
 	})
@@ -618,7 +767,7 @@ func (c *LimaClient) CopyToGuest(ctx context.Context, node Node, sourcePath, tar
 	if recursive {
 		recursiveFlag = " -r"
 	}
-	commands, err := c.ResolveCommands(node, runtimeCommandCopy, map[string]string{
+	commands, err := c.resolveRuntimeCommands(node, runtimeCommandCopy, map[string]string{
 		"sandbox_name":   shellQuote(node.SandboxName),
 		"source_path":    shellQuote(sourcePath),
 		"target_path":    shellQuote(targetPath),
@@ -656,19 +805,19 @@ func (c *LimaClient) Shell(ctx context.Context, node Node, command []string, wor
 	if interactive {
 		kind = runtimeCommandShellLogin
 	}
-	commands, err := c.ResolveCommands(node, kind, values)
+	commands, err := c.resolveRuntimeCommands(node, kind, values)
 	if err != nil {
 		return err
 	}
-	for index, commandString := range commands {
+	for index, command := range commands {
 		lastInteractive := interactive && index == len(commands)-1
 		if lastInteractive {
-			if err := runInteractiveCommand(ctx, commandString, streams); err != nil {
+			if err := runInteractiveCommand(ctx, command, streams); err != nil {
 				return mapLimaCommandError("open Lima shell", err, nil, map[string]any{"sandbox_name": node.SandboxName})
 			}
 			continue
 		}
-		_, stderr, runErr := runShellCommand(ctx, 10*time.Minute, commandString, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
+		_, stderr, runErr := runRuntimeCommand(ctx, guestCommandTimeout(ctx), command, multiWriter(streams.Stdout, c.Stdout), multiWriter(streams.Stderr, c.Stderr))
 		if runErr != nil {
 			return mapLimaCommandError("run command in Lima instance", runErr, stderr, map[string]any{"sandbox_name": node.SandboxName, "command_index": index})
 		}
@@ -700,10 +849,10 @@ func (c *LimaClient) removeCachedObservation(name string) {
 	}
 }
 
-func (c *LimaClient) runCommands(ctx context.Context, timeout time.Duration, action string, commands []string, fields map[string]any) ([]byte, error) {
+func (c *LimaClient) runCommands(ctx context.Context, timeout time.Duration, action string, commands []resolvedRuntimeCommand, fields map[string]any) ([]byte, error) {
 	var combined bytes.Buffer
 	for index, command := range commands {
-		stdout, stderr, err := runShellCommand(ctx, timeout, command, nil, c.Stderr)
+		stdout, stderr, err := runRuntimeCommand(ctx, timeout, command, nil, c.Stderr)
 		if err != nil {
 			commandFields := cloneAnyMap(fields)
 			commandFields["command_index"] = index
@@ -721,28 +870,17 @@ func (c *LimaClient) runCommands(ctx context.Context, timeout time.Duration, act
 }
 
 func (c *LimaClient) runDirect(ctx context.Context, timeout time.Duration, action string, fields map[string]any, name string, args ...string) ([]byte, error) {
-	runCtx, cancel := commandContext(ctx, timeout)
-	defer cancel()
-	command := exec.CommandContext(runCtx, name, args...)
-	configureCommandCancellation(command)
-	var stdout, stderr limitedBuffer
-	stdout.limit, stderr.limit = limaOutputLimit, 64*1024
-	command.Stdout = &stdout
-	command.Stderr = multiWriter(&stderr, c.Stderr)
-	err := command.Run()
-	if runCtx.Err() != nil {
-		return stdout.Bytes(), runCtx.Err()
-	}
+	stdout, stderr, err := runRuntimeCommand(ctx, timeout, resolvedRuntimeCommand{argv: append([]string{name}, args...)}, nil, c.Stderr)
 	if err != nil {
-		return stdout.Bytes(), mapLimaCommandError(action, err, stderr.Bytes(), fields)
+		return stdout, mapLimaCommandError(action, err, stderr, fields)
 	}
-	return stdout.Bytes(), nil
+	return stdout, nil
 }
 
-func runShellCommand(ctx context.Context, timeout time.Duration, commandString string, stdoutWriter, stderrWriter io.Writer) ([]byte, []byte, error) {
+func runRuntimeCommand(ctx context.Context, timeout time.Duration, resolved resolvedRuntimeCommand, stdoutWriter, stderrWriter io.Writer) ([]byte, []byte, error) {
 	runCtx, cancel := commandContext(ctx, timeout)
 	defer cancel()
-	command := exec.CommandContext(runCtx, "sh", "-lc", commandString)
+	command := resolved.command(runCtx)
 	configureCommandCancellation(command)
 	var stdout, stderr limitedBuffer
 	stdout.limit, stderr.limit = limaOutputLimit, 64*1024
@@ -755,8 +893,8 @@ func runShellCommand(ctx context.Context, timeout time.Duration, commandString s
 	return stdout.Bytes(), stderr.Bytes(), err
 }
 
-func runInteractiveCommand(ctx context.Context, commandString string, streams ShellStreams) error {
-	command := exec.CommandContext(ctx, "sh", "-lc", commandString)
+func runInteractiveCommand(ctx context.Context, resolved resolvedRuntimeCommand, streams ShellStreams) error {
+	command := resolved.command(ctx)
 	// The terminal wrapper is the PTY session leader. Keep the interactive
 	// transport in that foreground process group so limactl/ssh can switch the
 	// controlling terminal to raw mode and deliver input to the guest. Moving
@@ -768,6 +906,26 @@ func runInteractiveCommand(ctx context.Context, commandString string, streams Sh
 		return ctx.Err()
 	}
 	return err
+}
+
+// guestCommandTimeout picks the budget for one non-interactive guest command.
+//
+// A blanket cap here was wrong in both directions. Guest commands are not one
+// class of work: an agent-install bootstrap is an `apt-get install` plus an
+// `npm install -g` on a cold VM and legitimately runs far past ten minutes,
+// while a probe that has not answered in ten minutes is simply stuck. Killing
+// the former marked healthy nodes Failed halfway through provisioning them.
+//
+// The budget therefore belongs to the caller that knows which class it is
+// running: a caller that already bounded the work owns the deadline and gets it
+// verbatim (see bootstrapGuestCommandTimeout and
+// guestFilesystemCacheReclaimTimeout), and only a caller that supplied no bound
+// at all falls back to the historical cap.
+func guestCommandTimeout(ctx context.Context) time.Duration {
+	if _, ok := ctx.Deadline(); ok {
+		return 0
+	}
+	return defaultGuestCommandTimeout
 }
 
 func commandContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
@@ -974,26 +1132,32 @@ func ownedByCurrentUser(info os.FileInfo) bool {
 // The observer implementation lives in lima_observer.go. Keeping the cache
 // behind this small type lets command-only clients avoid a background process.
 type limaObservationService struct {
-	mu           sync.RWMutex
-	started      bool
-	observations map[string]RuntimeObservation
-	lastEvent    time.Time
-	lastList     time.Time
-	restarts     int
-	lastError    string
-	connected    bool
-	cancel       context.CancelFunc
-	done         chan struct{}
+	mu                sync.RWMutex
+	started           bool
+	observations      map[string]RuntimeObservation
+	lastEvent         time.Time
+	lastList          time.Time
+	restarts          int
+	reconcileFailures int
+	lastError         string
+	connected         bool
+	cancel            context.CancelFunc
+	done              chan struct{}
 }
 
 func newLimaObservationService() *limaObservationService {
 	return &limaObservationService{observations: map[string]RuntimeObservation{}}
 }
 
+// cached reports the cache and whether it may be believed. Being started is not
+// enough: until one full `limactl list` has succeeded the cache holds at best
+// entries synthesized from watch events, and an empty map is not the same claim
+// as "no instances exist". lastList is stamped only by replace, so it is
+// exactly the "a full list has landed" bit.
 func (o *limaObservationService) cached() ([]RuntimeObservation, bool) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if !o.started {
+	if !o.started || o.lastList.IsZero() {
 		return nil, false
 	}
 	return observationMapValues(o.observations), true

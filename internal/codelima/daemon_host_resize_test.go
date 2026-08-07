@@ -3,9 +3,11 @@ package codelima
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
 
@@ -13,12 +15,21 @@ import (
 )
 
 type recordingDaemonCaller struct {
+	mu      sync.Mutex
 	methods []string
 }
 
 func (c *recordingDaemonCaller) Call(_ context.Context, method string, _ any, _ any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.methods = append(c.methods, method)
 	return nil
+}
+
+func (c *recordingDaemonCaller) recorded() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.methods)
 }
 
 type resizeCountingDaemonTerminal struct {
@@ -42,15 +53,7 @@ func (*resizeCountingDaemonTerminal) Scroll(int)       {}
 func (*resizeCountingDaemonTerminal) SendInput([]byte) {}
 
 func TestDaemonHostResizeSkipsUnchangedGeometry(t *testing.T) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmp := filepath.Join(cwd, "..", "..", "tmp", "daemon-resize-"+newID()[:8])
-	if err := os.MkdirAll(tmp, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
+	tmp := newDaemonTestRoot(t, "daemon-resize-")
 
 	term := &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()}
 	state := daemon.TerminalState{TerminalID: "term-1", Cols: 80, Rows: 24}
@@ -119,19 +122,26 @@ func TestDaemonHostSnapshotReadsPublishedCacheWithoutCallingTerminal(t *testing.
 	}
 }
 
+// Resize is called from Draw, so it only records the latest geometry; the
+// background reassert loop is what reaches the daemon. Repeats of a geometry the
+// daemon already has stay off the wire.
 func TestDaemonTUITerminalResizeSendsOnlyGeometryChanges(t *testing.T) {
 	caller := &recordingDaemonCaller{}
 	term := &daemonTUITerminal{client: caller, id: "term-1", stop: make(chan struct{})}
+	t.Cleanup(term.Detach)
 
 	term.Resize(80, 24)
+	waitForCondition(t, time.Second, func() bool { return len(caller.recorded()) == 1 }, "first resize reassert")
 	term.Resize(80, 24)
 	term.Resize(100, 30)
+	waitForCondition(t, time.Second, func() bool { return len(caller.recorded()) == 2 }, "second resize reassert")
 	term.Resize(100, 30)
 
-	if got := len(caller.methods); got != 2 {
-		t.Fatalf("resize RPC calls = %d, want 2 for two distinct geometries", got)
+	methods := caller.recorded()
+	if len(methods) != 2 {
+		t.Fatalf("resize RPC calls = %d, want 2 for two distinct geometries", len(methods))
 	}
-	for _, method := range caller.methods {
+	for _, method := range methods {
 		if method != "terminal.resize" {
 			t.Fatalf("resize RPC method = %q", method)
 		}
@@ -148,10 +158,12 @@ func TestDaemonTUITerminalFocusSendsOnlyFocusTransitions(t *testing.T) {
 	term.Blur()
 	term.Focus()
 
-	if got := len(caller.methods); got != 2 {
-		t.Fatalf("focus RPC calls = %d, want 2 for two transitions into focus", got)
+	waitForCondition(t, time.Second, func() bool { return len(caller.recorded()) == 2 }, "focus transitions to reach the daemon")
+	methods := caller.recorded()
+	if len(methods) != 2 {
+		t.Fatalf("focus RPC calls = %d, want 2 for two transitions into focus", len(methods))
 	}
-	for _, method := range caller.methods {
+	for _, method := range methods {
 		if method != "terminal.focus" {
 			t.Fatalf("focus RPC method = %q", method)
 		}

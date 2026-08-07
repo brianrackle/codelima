@@ -154,7 +154,7 @@ func runDaemonConnectionSupervisor(ctx context.Context, options daemonConnection
 			if options.OnEvent != nil {
 				options.OnEvent(event)
 			}
-			if event.Event == "daemon.shutdown" || event.Event == "daemon.update_committed" {
+			if event.Event == daemon.EventDaemonShutdown || event.Event == daemon.EventDaemonUpdateCommitted {
 				err = fmt.Errorf("%s requested reconnect", event.Event)
 				break
 			}

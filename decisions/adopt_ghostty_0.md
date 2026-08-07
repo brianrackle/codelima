@@ -65,4 +65,4 @@ Move away from Vaxis entirely and rebuild the full interface on another stack.
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)

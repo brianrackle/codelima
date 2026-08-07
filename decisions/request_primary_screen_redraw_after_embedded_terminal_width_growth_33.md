@@ -60,6 +60,6 @@ After resizing the PTY, send `Ctrl-L` when the terminal is on the primary screen
 
 ## Links
 
-* Pattern [PATTERNS.MD](/Users/brianrackle/Projects/codelima/PATTERNS.MD)
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
+* Pattern [PATTERNS.MD](../PATTERNS.MD)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
 * Superseded by [Redraw widened primary screens with a signal, not input](redraw_widened_primary_screens_with_a_signal_not_input_95.md).

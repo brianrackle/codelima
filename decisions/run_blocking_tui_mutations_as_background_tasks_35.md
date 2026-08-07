@@ -65,4 +65,4 @@ Start every requested mutation immediately and let metadata locks or Lima failur
 
 ## Links
 
-* Refines [render_transient_tui_views_in_the_right_pane_34.md](/Users/brianrackle/Projects/codelima/decisions/render_transient_tui_views_in_the_right_pane_34.md)
+* Refines [render_transient_tui_views_in_the_right_pane_34.md](render_transient_tui_views_in_the_right_pane_34.md)

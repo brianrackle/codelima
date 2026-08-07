@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"git.sr.ht/~rockorager/vaxis"
+
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 // This file holds the runtime-actor orchestration for the Ghostty embedded
@@ -155,24 +157,13 @@ type ReadResult struct {
 	Err        error
 }
 
-// SnapshotCell is one UI-agnostic cell of a TerminalSnapshot.
-type SnapshotCell struct {
-	Grapheme      string
-	Width         int
-	FG            uint32
-	BG            uint32
-	FGDefault     bool
-	BGDefault     bool
-	Bold          bool
-	Faint         bool
-	Italic        bool
-	Underline     bool
-	Strikethrough bool
-	Inverse       bool
-	Invisible     bool
-	Blink         bool
-	Hyperlink     string
-}
+// SnapshotCell is one UI-agnostic cell of a TerminalSnapshot. It is an alias,
+// not a copy: this exact struct is what the renderer worker protocol puts on
+// the wire and what the daemon RPC protocol serves to clients, and a second
+// declaration with its own JSON tags is how a producer and a consumer of the
+// same bytes drift apart. The daemon package owns the protocol, so it owns the
+// definition; see daemon.SnapshotCell for the compact wire encoding.
+type SnapshotCell = daemon.SnapshotCell
 
 // TerminalSnapshot is a consistent, TUI-free view of the emulator grid: it is
 // assembled entirely under t.mu, so a snapshot taken while output streams is

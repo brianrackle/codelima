@@ -29,6 +29,10 @@ const (
 type tuiSessionManager interface {
 	HasSession(sessionKey string) bool
 	TargetSessionKeys(targetKey string) []string
+	// PendingTabOpen reports whether a tab was requested for the target but has
+	// not landed yet. Daemon-backed opens complete off the event loop, so the
+	// implicit per-selection open must not re-request one every refresh tick.
+	PendingTabOpen(targetKey string) bool
 	MoveTab(targetKey, sessionKey string, direction int) error
 	OpenNodeTab(node Node) (string, error)
 	OpenNodeHostTab(node Node) (string, error)
@@ -60,6 +64,10 @@ func (tuiNoopSessionManager) HasSession(string) bool {
 
 func (tuiNoopSessionManager) TargetSessionKeys(string) []string {
 	return nil
+}
+
+func (tuiNoopSessionManager) PendingTabOpen(string) bool {
+	return false
 }
 
 func (tuiNoopSessionManager) MoveTab(string, string, int) error {
@@ -254,7 +262,12 @@ func (s *tuiState) focusTerminalEntry(entry tuiTreeEntry) error {
 	if err != nil {
 		return err
 	}
-	if sessionKey == "" || !s.sessions.HasSession(sessionKey) {
+	// A daemon-backed open completes off the event loop, so a tab requested just
+	// now may not exist yet. That is a retry, not a failure.
+	if sessionKey == "" {
+		return errors.New("terminal tab is still opening; try again")
+	}
+	if !s.sessions.HasSession(sessionKey) {
 		return errors.New("no terminal session is active")
 	}
 
@@ -274,6 +287,9 @@ func (s *tuiState) ensureTargetTab(entry tuiTreeEntry) (string, error) {
 		s.setActiveTab(targetKey, sessionKey)
 		return sessionKey, nil
 	}
+	if s.sessions.PendingTabOpen(targetKey) {
+		return "", nil
+	}
 	return s.openTerminalTabEntry(entry)
 }
 
@@ -285,7 +301,7 @@ func (s *tuiState) ensureSelectedTerminalTab() error {
 	if !entry.valid() {
 		return nil
 	}
-	if s.targetActiveSessionKey(entry.key()) != "" {
+	if s.targetActiveSessionKey(entry.key()) != "" || s.sessions.PendingTabOpen(entry.key()) {
 		return nil
 	}
 	if !nodeIsRunning(entry.node) {
@@ -323,7 +339,12 @@ func (s *tuiState) openHostTerminalTabEntry(entry tuiTreeEntry) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("start host shell for %s: %w", entry.node.Slug, err)
 	}
-	if sessionKey == "" || !s.sessions.HasSession(sessionKey) {
+	// A daemon-backed open is queued rather than completed here; the tab becomes
+	// active when its reply lands on the event loop.
+	if sessionKey == "" {
+		return "", nil
+	}
+	if !s.sessions.HasSession(sessionKey) {
 		return "", errors.New("no host terminal session is active")
 	}
 	s.setActiveTab(entry.key(), sessionKey)
@@ -505,6 +526,43 @@ func (s *tuiState) replaceNodes(nodes []Node, preferredKey string) error {
 	}
 
 	return selectIndex(s.selection)
+}
+
+// applyNodeUsage writes a live usage sample into the record for usage.NodeID
+// and into the two views derived from it, leaving selection and scroll alone —
+// a once-per-second sample must never move the cursor. It reports whether the
+// node was found: a sample for a node this window does not hold is dropped,
+// never used to create an entry.
+//
+// The observation is replaced rather than mutated through its pointer: the
+// records handed to the tree, the info pane, and the session store are copies
+// that share it, and a usage sample must not reach through them.
+func (s *tuiState) applyNodeUsage(usage nodeUsageEvent) bool {
+	index := -1
+	for candidate := range s.nodes {
+		if s.nodes[candidate].ID == usage.NodeID {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		return false
+	}
+
+	observation := RuntimeObservation{Name: s.nodes[index].SandboxName}
+	if current := s.nodes[index].LastRuntimeObservation; current != nil {
+		observation = *current
+	}
+	applyNodeUsageSample(usage, &observation)
+	s.nodes[index].LastRuntimeObservation = &observation
+
+	s.nodesByID[usage.NodeID] = s.nodes[index]
+	for entry := range s.entries {
+		if s.entries[entry].node.ID == usage.NodeID {
+			s.entries[entry].node = s.nodes[index]
+		}
+	}
+	return true
 }
 
 func (s *tuiState) activeTerminalTargetKey() string {

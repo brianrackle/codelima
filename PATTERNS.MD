@@ -4,7 +4,7 @@
 
 `CODELIMA_HOME` is authoritative for configurations, environments, nodes, daemon state, indexes, and locks. Durable writes use temp-file-plus-rename semantics. `_config/schema.version` is checked before metadata is interpreted; schema v4 rejects schema-v2, schema-v3, and legacy Lima homes instead of attempting an in-place migration.
 
-Read paths create only the directory skeleton required to inspect a recognized home. Seed and repair work runs under the relevant flock set from mutating readiness, `doctor --repair`, or TUI startup. Runtime-backed node lists fetch sandbox observations once, index by sandbox name, and merge transient status in memory.
+Read paths create only the directory skeleton required to inspect a recognized home. Seed and repair work is triggered by mutating readiness, `doctor --repair`, or TUI startup, and checks its version stamp before taking any lock, so an already-seeded home never queues behind another operation; only a pass that has work takes the relevant flock set, re-checks the stamp under it, and locks each node whose file it may rewrite. Runtime-backed node lists fetch sandbox observations once, index by sandbox name, and merge transient status in memory.
 
 ## Reusable configuration, frozen node
 
@@ -18,11 +18,14 @@ Built-in coding-agent environments share a user-owned npm installation pattern:
 install their system Node.js prerequisite at the root bootstrap boundary,
 resolve Lima's login user from `SUDO_USER`, configure that user's npm prefix
 under `~/.local`, run npm after dropping privileges, and publish a stable
-`/usr/local/bin` link. Validate the public command before bootstrap completes.
-Keep each environment independently installable. Seed revision 5 migrates only
-environment records that exactly match a known prior built-in; customized and
-deleted records remain authoritative, and already-created nodes keep their
-frozen bootstrap snapshots.
+`/usr/local/bin` link. Validate by executing the public command's `--version`
+operation as the login user before bootstrap completes; a root-side lookup can
+accept a target beneath an inaccessible `/root`. Keep each environment
+independently installable. Seed revision 6 migrates only environment and agent
+profile records that exactly match a known prior built-in; customized and
+deleted records remain authoritative. Already-created nodes keep frozen custom
+bootstrap snapshots, while `NodeStart` replaces and reruns only exact known
+defective built-in command sequences (ADR 118).
 
 Built-in sizes are persisted configurations, not synthetic UI rows. Seed them through the store so CLI and TUI consumers agree, order them by size instead of alphabetically, and treat any existing record—including a soft-deleted tombstone—as user-owned. A seed-revision bump may add a genuinely missing size to an older home, but repair must never overwrite a customized configuration or resurrect a deleted optional size. If a formerly optional record becomes a required protected default, restore its tombstone in place so custom values and identity survive. Retire the former `default` configuration with a tombstone rather than removing its record: it disappears from live lists while existing nodes can still hydrate their historical configuration ID and slug.
 
@@ -86,14 +89,33 @@ when regular files work.
 
 ## Dynamic node-hostname forwarding
 
-The daemon owns HTTP/WebSocket forwarding for discovered guest listeners. The earliest active route on a port claims both `localhost:{guest-port}` and `127.0.0.1:{guest-port}` until that guest listener disappears; the next active claimant takes over during the one-second reconciliation loop. Bind each logical host port on both `127.0.0.1` and `::1`, serve both sockets from the same route registry, and roll back the other socket when either address family has a real bind conflict so hostname resolution cannot select a different owner. An unavailable IPv6 stack may fall back to IPv4; never replace explicit loopback binds with a wildcard listener. Treat only the exact IPv4 loopback address as a generic Host alias, preserve the original request `Host` upstream, and keep the claim ephemeral rather than persisting it.
+The daemon owns HTTP/WebSocket forwarding for discovered guest listeners. The earliest active route on a port claims both `localhost:{guest-port}` and `127.0.0.1:{guest-port}` until that guest listener disappears; the next active claimant takes over during the one-second reconciliation loop. Product callback ports may define a narrower intent rule when their generic host is fixed: Codex login port 1455 follows the newest discovered listener and falls back to the next-newest route when it disappears, while ordinary ports retain earliest-claim stability. Bind each logical host port on both `127.0.0.1` and `::1`, serve both sockets from the same route registry, and roll back the other socket when either address family has a real bind conflict so hostname resolution cannot select a different owner. An unavailable IPv6 stack may fall back to IPv4; never replace explicit loopback binds with a wildcard listener. Treat `localhost` and any loopback literal — including `::1` and every `127.0.0.0/8` address — as a generic Host alias, since the forwarder binds both families and a client may name either; preserve the original request `Host` upstream, and keep the claim ephemeral rather than persisting it. The claim is nonetheless sticky across a blink: a lapsed route keeps its original discovery time and a route rediscovered within a short window has that time restored, so earliest-claimant ordering returns the generic host to its previous owner instead of stranding it with whichever node happened to be present during the gap.
 
 Host routing at `{node-slug}.localhost:{guest-port}` always chooses the named node, so several nodes can use the same guest port regardless of the generic claimant. Traffic travels over one persistent Go SSH client per running Lima node. Take the generated `ssh.config` path from Lima's machine-readable instance observation, but resolve its containment trust root from CodeLima's configured `LIMA_HOME`; `limactl list --json` does not own or need to repeat that process configuration. Parse the localhost endpoint and identity only from that Lima-owned config, validate its ownership, permissions, and containment under the resolved home, and do not modify global SSH configuration. Discovery accepts IPv4 and IPv6 guest-loopback listeners, so each new tunnel connection tries `127.0.0.1` and then `::1`; keep accepted discovery addresses and dial targets aligned. Host bind conflicts remain observable and are retried every reconciliation.
 
-Reuse that same one-second SSH observation for per-node guest telemetry instead
-of starting another runtime process or multiplying samples by TUI client count.
-Read the aggregate Linux `/proc/stat` CPU counters with listener discovery,
-exclude `guest` fields already represented in `user`/`nice`, and calculate busy
+Forwarding state degrades before it disappears. A peer is healthy while its
+listener scan succeeds, becomes suspect on the first failure or missed
+keepalives, and lapses only after repeated failures span a grace window: lapsed
+routes and their host listeners stay bound and answer a retryable 502, because a
+closed listener is a connection refusal that clients cache. Remove routes only
+on a confirmed stop or delete — absence from a successful node list, or a
+not-running observation that persisted through its own grace window while the
+guest also stopped answering. A guest that still answers its scan outranks a
+stale or watch-synthesized cache entry indefinitely; a failed node list is not
+evidence that any node stopped, so retain every peer and route, keep working the
+known nodes, and report the condition in the daemon snapshot. Detect a
+dead-but-not-closed peer with SSH keepalives and close it after a few misses so
+blocked work fails at once and the next pass reconnects and re-points existing
+routes; bound every proxied dial for the same reason. Reconcile nodes
+concurrently under a small cap with per-node backoff that also rate-limits its
+warnings, so one unreachable node cannot freeze the others.
+
+Reuse that same one-second SSH peer for per-node guest telemetry instead of
+starting another runtime process or multiplying samples by TUI client count.
+Sample telemetry in its own guest command, separate from listener discovery, so
+a slow or failing probe can never affect routes. Read the aggregate Linux
+`/proc/stat` CPU counters, exclude `guest` fields already represented in
+`user`/`nice`, and calculate busy
 percentage only from two valid consecutive samples. Normalize aggregate CPU to
 `0..100%`, clear it on resets, peer loss, or stopped nodes, and attach the
 sample only to transient runtime observations returned by the daemon. Collect
@@ -222,9 +244,11 @@ response order and one blocked query cannot hold terminal input or ping behind
 a client mutex. Never replay a submitted mutation after reconnect. Report
 not-sent and outcome-unknown delivery separately.
 
-Input takeover is part of the ordered mutation lane. A following input frame
-must not race ahead of the takeover merely because the takeover itself does not
-touch a terminal.
+Input takeover is applied synchronously on the connection reader, before any
+later frame is dispatched to a lane. A following input frame must not race ahead
+of the takeover merely because the takeover itself does not touch a terminal.
+Input itself is ordered per terminal lane, so a takeover cannot be ordered by
+sharing one of those lanes; only the reader sees every frame in wire order.
 
 Every daemon client connection owns a bounded outbound mailbox and one writer
 pump. Broadcast is nonblocking enqueue only; queue overflow or a write deadline

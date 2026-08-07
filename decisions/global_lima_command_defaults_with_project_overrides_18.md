@@ -65,4 +65,4 @@ Persist the application-wide defaults in `CODELIMA_HOME/_config/config.yaml`, th
 
 ## Links
 
-* Refines [ADR 17](/Users/brianrackle/personal/codelima/decisions/project_scoped_lima_command_templates_17.md)
+* Refines [ADR 17](project_scoped_lima_command_templates_17.md)

@@ -66,5 +66,5 @@ Drop `dlopen` and link directly against Ghostty's C API.
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Related [use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md](/Users/brianrackle/Projects/codelima/decisions/use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md](use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md)

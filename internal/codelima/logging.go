@@ -15,6 +15,11 @@ import (
 // library (ADR 59).
 const tuiLogMaxBytes int64 = 5 * 1024 * 1024
 
+// daemonLogMaxBytes is the same cap for the daemon's structured sink. It is a
+// separate constant because the daemon's log has a different lifetime — a
+// daemon runs for days, a TUI for a session — not because the number differs.
+const daemonLogMaxBytes int64 = tuiLogMaxBytes
+
 // parseLogLevel maps a --log-level value to an slog.Level, defaulting to info
 // for empty or unrecognized input so a typo never silences logging entirely.
 func parseLogLevel(value string) slog.Level {
@@ -155,6 +160,29 @@ func (w *rotatingLogWriter) Close() error {
 func newTUIFileLogger(home string, level slog.Level) (*slog.Logger, func() error, error) {
 	path := filepath.Join(home, "_logs", "codelima.log")
 	writer, err := newRotatingLogWriter(path, tuiLogMaxBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	logger := slog.New(slog.NewTextHandler(writer, &slog.HandlerOptions{Level: level}))
+	return logger, writer.Close, nil
+}
+
+// newDaemonFileLogger builds the daemon-mode structured sink: an append-only,
+// size-rotated file at path. It returns the logger and a closer the daemon must
+// invoke on shutdown.
+//
+// This deliberately rotates only the structured sink and not the daemon's raw
+// stdout/stderr, which point at the same file. `codelima daemon start` opens
+// daemon.log and hands the descriptor to the daemon as fd 1 and 2; the renderer
+// worker inherits it as its stderr (renderer_supervisor.go) and the Go runtime
+// crash handler holds a dup of it (renderer_worker_server.go). Rotation is
+// rename-then-reopen, and an inherited descriptor cannot follow a rename — so
+// the raw stream keeps its append-only semantics for subprocess diagnostics and
+// crash tracebacks, which are low volume, while the daemon's own records (the
+// volume that actually grew the file without bound) move onto the rotating
+// writer.
+func newDaemonFileLogger(path string, level slog.Level) (*slog.Logger, func() error, error) {
+	writer, err := newRotatingLogWriter(path, daemonLogMaxBytes)
 	if err != nil {
 		return nil, nil, err
 	}

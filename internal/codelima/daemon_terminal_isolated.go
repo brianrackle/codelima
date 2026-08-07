@@ -26,6 +26,32 @@ const rendererResponseDedupeLimit = 4096
 type isolatedTerminalCache struct {
 	state   rendererPublishedState
 	partial bool
+	// epoch names this published screen. Read variants memoized against it stay
+	// valid until the renderer publishes a new one; re-stamping staleness onto
+	// the same screen keeps the epoch, because the content did not change.
+	epoch uint64
+}
+
+// isolatedReadVariant selects one of the on-demand read renderings.
+type isolatedReadVariant struct {
+	source ReadSource
+	format ReadFormat
+}
+
+// isolatedReadVariants memoizes read variants the renderer computes on demand.
+// Only the plain visible text rides along with every published screen; the ANSI
+// viewport render and both scrollback renders each walk the whole grid or the
+// retained scrollback, so they are fetched the first time a terminal.read wants
+// one and reused for the rest of that screen's epoch.
+type isolatedReadVariants struct {
+	mu     sync.Mutex
+	epoch  uint64
+	values map[isolatedReadVariant]ReadResultDTO
+	// last retains the newest successful rendering of each variant regardless of
+	// epoch. A renderer that is restarting or degraded cannot answer, and
+	// serving its last text preserves the behaviour of the era when every
+	// variant was pushed with the snapshot: stale, but present.
+	last map[isolatedReadVariant]ReadResultDTO
 }
 
 type rendererResponseKey struct {
@@ -66,9 +92,14 @@ type isolatedDaemonTerminal struct {
 	journal    *rendererJournal
 	renderer   *rendererSupervisor
 	cache      atomic.Pointer[isolatedTerminalCache]
-	responseMu sync.Mutex
-	responses  map[rendererResponseKey]struct{}
-	order      []rendererResponseKey
+	cacheEpoch atomic.Uint64
+	variants   isolatedReadVariants
+	// readFetches counts on-demand variant round-trips to the renderer. It is
+	// test observability for the "nothing is rendered until a read asks" rule.
+	readFetches atomic.Uint64
+	responseMu  sync.Mutex
+	responses   map[rendererResponseKey]struct{}
+	order       []rendererResponseKey
 }
 
 func newIsolatedDaemonTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
@@ -346,25 +377,95 @@ func (t *isolatedDaemonTerminal) CapturesMouse() bool {
 }
 
 func (t *isolatedDaemonTerminal) ReadVisible(format ReadFormat) ReadResult {
-	cache := t.cache.Load()
-	if cache == nil {
-		return ReadResult{Err: errSnapshotFailed}
-	}
-	if format == ReadANSI {
-		return cache.state.VisibleANSI.readResult()
-	}
-	return cache.state.VisibleText.readResult()
+	return t.readVariant(ReadVisible, format)
 }
 
 func (t *isolatedDaemonTerminal) ReadRecent(format ReadFormat) ReadResult {
+	return t.readVariant(ReadRecent, format)
+}
+
+// readVariant answers one read variant. The plain visible text arrives with
+// every published screen; everything else is rendered by the renderer the first
+// time it is asked for and memoized for the rest of that screen's epoch, so a
+// terminal nobody reads never pays for a scrollback walk.
+func (t *isolatedDaemonTerminal) readVariant(source ReadSource, format ReadFormat) ReadResult {
 	cache := t.cache.Load()
 	if cache == nil {
 		return ReadResult{Err: errSnapshotFailed}
 	}
-	if format == ReadANSI {
-		return cache.state.RecentANSI.readResult()
+	if source == ReadVisible && format == ReadText {
+		return cache.state.VisibleText.readResult()
 	}
-	return cache.state.RecentText.readResult()
+	key := isolatedReadVariant{source: source, format: format}
+	if value, ok := t.memoizedReadVariant(cache.epoch, key); ok {
+		return value.readResult()
+	}
+
+	t.mu.Lock()
+	renderer := t.renderer
+	t.mu.Unlock()
+	if renderer == nil {
+		return t.lastReadVariant(key)
+	}
+	t.readFetches.Add(1)
+	value, err := renderer.Read(source, format)
+	if err != nil {
+		return t.lastReadVariant(key)
+	}
+	t.storeReadVariant(cache.epoch, key, value)
+	return value.readResult()
+}
+
+func (t *isolatedDaemonTerminal) memoizedReadVariant(epoch uint64, key isolatedReadVariant) (ReadResultDTO, bool) {
+	t.variants.mu.Lock()
+	defer t.variants.mu.Unlock()
+	if t.variants.epoch != epoch {
+		return ReadResultDTO{}, false
+	}
+	value, ok := t.variants.values[key]
+	return value, ok
+}
+
+func (t *isolatedDaemonTerminal) storeReadVariant(epoch uint64, key isolatedReadVariant, value ReadResultDTO) {
+	t.variants.mu.Lock()
+	defer t.variants.mu.Unlock()
+	if epoch < t.variants.epoch {
+		// A newer screen was published while this render was in flight; the
+		// value is still worth retaining as the newest known text, but it must
+		// not reopen the memo for an epoch that has already been superseded.
+		t.rememberReadVariantLocked(key, value)
+		return
+	}
+	if t.variants.epoch != epoch {
+		t.variants.epoch = epoch
+		t.variants.values = nil
+	}
+	if t.variants.values == nil {
+		t.variants.values = map[isolatedReadVariant]ReadResultDTO{}
+	}
+	t.variants.values[key] = value
+	t.rememberReadVariantLocked(key, value)
+}
+
+func (t *isolatedDaemonTerminal) rememberReadVariantLocked(key isolatedReadVariant, value ReadResultDTO) {
+	if t.variants.last == nil {
+		t.variants.last = map[isolatedReadVariant]ReadResultDTO{}
+	}
+	t.variants.last[key] = value
+}
+
+// lastReadVariant serves the newest text this variant ever produced. When there
+// is none, it returns an empty result rather than an error: an empty variant is
+// the daemon's existing signal to fall back to the visible screen, and a
+// renderer that is briefly unavailable should not turn terminal.read into a
+// failure.
+func (t *isolatedDaemonTerminal) lastReadVariant(key isolatedReadVariant) ReadResult {
+	t.variants.mu.Lock()
+	defer t.variants.mu.Unlock()
+	if value, ok := t.variants.last[key]; ok {
+		return value.readResult()
+	}
+	return ReadResult{}
 }
 
 func (t *isolatedDaemonTerminal) Snapshot() SnapshotResult {
@@ -499,7 +600,7 @@ func (t *isolatedDaemonTerminal) installRendererSnapshot(
 	}
 	_ = generation
 	state.Snapshot = cloneTerminalSnapshot(state.Snapshot)
-	t.cache.Store(&isolatedTerminalCache{state: state, partial: partial})
+	t.cache.Store(&isolatedTerminalCache{state: state, partial: partial, epoch: t.cacheEpoch.Add(1)})
 	if t.postEvent != nil {
 		t.postEvent(vaxis.Redraw{})
 	}
@@ -688,7 +789,7 @@ func (t *isolatedDaemonTerminal) RollbackHandoff() error {
 	t.renderer = renderer
 	cols, rows := t.cols, t.rows
 	t.mu.Unlock()
-	ctx, cancel := contextWithRendererTimeout(t.options.CommandTimeout)
+	ctx, cancel := rendererStartContext(t.options.CommandTimeout, t.journal)
 	defer cancel()
 	if err := renderer.Start(ctx, cols, rows); err != nil {
 		return err
@@ -697,13 +798,40 @@ func (t *isolatedDaemonTerminal) RollbackHandoff() error {
 	return nil
 }
 
-func contextWithRendererTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
-	if timeout <= 0 {
-		timeout = defaultRendererCommandTimeout
+// rendererStartContext bounds a renderer startup with the same journal-scaled
+// budget the supervisor uses for its own restarts. A renderer has to replay the
+// retained journal before it can answer init, so a fixed timeout turns a large
+// journal into a guaranteed adoption or rollback failure.
+func rendererStartContext(timeout time.Duration, journal *rendererJournal) (context.Context, context.CancelFunc) {
+	journalBytes := 0
+	if journal != nil {
+		journalBytes = journal.Stats().Bytes
 	}
-	return context.WithTimeout(context.Background(), timeout)
+	return context.WithTimeout(context.Background(), rendererInitDeadline(timeout, journalBytes))
 }
 
+// adoptIsolatedDaemonTerminal rebuilds a terminal in the replacement daemon
+// from what a live update hands over.
+//
+// A renderer worker never survives a live update, so this path cannot inherit
+// one that predates the running binary and needs no separate version check
+// beyond the handshake every spawn already performs. The evidence, all in this
+// file plus the handoff protocol:
+//
+//   - BeginHandoff closes the outgoing daemon's supervisor (renderer.Close())
+//     before the PTY descriptor is transferred, which kills that worker process.
+//   - handoffTerminalState carries a PTY, a child PID, geometry and the journal
+//     replay bytes -- no renderer process, no control socket, no descriptor that
+//     could reach one. daemon.HandoffRuntime, the serialized form, has the same
+//     fields and no more.
+//   - This function always constructs a fresh supervisor (newRenderer) and
+//     starts it, and startRendererLink resolves the worker beside
+//     os.Executable() -- which in the importing process is the NEW binary.
+//
+// So the only skew that can reach a renderer is an out-of-date worker file on
+// disk beside the new binary, which is exactly what the init-reply version
+// handshake rejects, and the journal replay assembled below is already the safe
+// restart path a rejected worker falls back to.
 func adoptIsolatedDaemonTerminal(
 	targetKey string,
 	postEvent func(vaxis.Event),
@@ -730,7 +858,7 @@ func adoptIsolatedDaemonTerminal(
 	terminal.ptyWriter = newGhosttyPTYWriter(ptyFile, waitGhosttyPTYWritable, terminal.postPTYError)
 	terminal.readPumpDone = make(chan struct{})
 	terminal.renderer = terminal.newRenderer()
-	ctx, cancel := contextWithRendererTimeout(terminal.options.CommandTimeout)
+	ctx, cancel := rendererStartContext(terminal.options.CommandTimeout, terminal.journal)
 	defer cancel()
 	if err := terminal.renderer.Start(ctx, cols, rows); err != nil {
 		terminal.renderer.Close()
@@ -742,6 +870,26 @@ func adoptIsolatedDaemonTerminal(
 
 func (t *isolatedDaemonTerminal) ActivateAfterHandoff() {
 	go t.readPump()
+}
+
+// RestartRenderer replaces this terminal's renderer process immediately. The
+// supervisor's own restart budget and degraded cooldown are deliberately
+// bypassed: this is the operator escape hatch for a renderer that the automatic
+// policy has already given up on, and it is the only way back from a permanent
+// degraded state without closing the tab.
+//
+// The PTY, the child process and the output journal are untouched, so the
+// replacement replays the retained journal and the shell never notices.
+func (t *isolatedDaemonTerminal) RestartRenderer() error {
+	t.mu.Lock()
+	renderer := t.renderer
+	closed := t.closed
+	t.mu.Unlock()
+	if closed || renderer == nil {
+		return errTerminalClosed
+	}
+	renderer.Restart()
+	return nil
 }
 
 func (t *isolatedDaemonTerminal) RendererStatus() rendererSupervisorStatus {

@@ -62,4 +62,4 @@ Rename or recreate existing Lima instances and metadata.
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/projects/codelima/ADR_TEMPLATE.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)

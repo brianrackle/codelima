@@ -11,8 +11,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"git.sr.ht/~rockorager/vaxis"
+
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 type tuiLinkRegion struct {
@@ -28,6 +31,11 @@ type tuiOperationState struct {
 	EntryKeys     []string
 	ResourceKeys  []string
 	Lines         []string
+	// completion is written once by the background goroutine before it posts
+	// tuiOperationCompleteEvent. It makes "finished" re-derivable on the event
+	// loop so a dropped completion event cannot latch the operation — and its
+	// resource keys — as in progress forever (invariant I2).
+	completion atomic.Pointer[tuiOperationCompleteEvent]
 }
 
 type tuiOperationResult struct {
@@ -36,6 +44,10 @@ type tuiOperationResult struct {
 	CloseNodeID      string
 	ReloadData       bool
 	ShowTerminalPane bool
+	// Apply runs on the TUI event loop once the rest of the result has been
+	// applied. Dialog flows use it for the follow-up overlay they used to open
+	// inline, keeping the service call itself off the loop.
+	Apply func(*vaxisTUIApp) error
 }
 
 type tuiOperationRequest struct {
@@ -59,9 +71,86 @@ type tuiOperationCompleteEvent struct {
 
 type tuiRefreshTickEvent struct{}
 
+// tuiNodesChangedEvent asks the event loop to reload the node list because the
+// daemon reported a lifecycle change. It carries no payload: the loop owns the
+// reload, and the reload itself (startDataRefresh) runs off the loop. It is
+// posted debounced, so a burst of pushes costs one reload.
+type tuiNodesChangedEvent struct{}
+
+// tuiNodeUsageEvent carries one node's live usage sample to the event loop,
+// which owns the node records. Usage is a per-node value, not a list change:
+// it is applied in place at push latency and never triggers a node.list
+// reload, so the 1Hz sampler stays 1Hz-fresh while list reloads stay on
+// push-on-change plus their slow safety net.
+type tuiNodeUsageEvent struct {
+	Usage nodeUsageEvent
+}
+
+// decodeDaemonNodeUsage decodes a node.usage_changed payload and rejects the
+// samples that name no node. The decode itself goes through the one seam every
+// event consumer uses (daemon.DecodeEventData); only the "which node is this
+// about" precondition is local, because a sample with no node has nowhere to be
+// applied.
+func decodeDaemonNodeUsage(data any) (nodeUsageEvent, bool) {
+	usage, ok := daemon.DecodeEventData[nodeUsageEvent](data)
+	if !ok || strings.TrimSpace(usage.NodeID) == "" {
+		return nodeUsageEvent{}, false
+	}
+	return usage, true
+}
+
+// applyNodeUsageSample writes a usage sample over a node's runtime observation.
+// The whole sample is written, including its absences: the daemon publishes
+// every reading it has each time, so a cleared reading must clear the display
+// rather than leave the previous number standing.
+func applyNodeUsageSample(u nodeUsageEvent, observation *RuntimeObservation) {
+	if observation == nil {
+		return
+	}
+	observation.CPUUsagePercent = u.CPUUsagePercent
+	observation.MemoryUsedBytes = u.MemoryUsedBytes
+	observation.MemoryTotalBytes = u.MemoryTotalBytes
+	observation.DiskUsedBytes = u.DiskUsedBytes
+	observation.DiskTotalBytes = u.DiskTotalBytes
+	if u.SampledAt.IsZero() {
+		observation.CPUUsageSampledAt = nil
+		observation.ResourceUsageSampledAt = nil
+		return
+	}
+	sampledAt := u.SampledAt
+	observation.CPUUsageSampledAt = &sampledAt
+	observation.ResourceUsageSampledAt = &sampledAt
+}
+
+// nodeUsageFromNode reads back the usage a node.list reply carried, in the same
+// shape a push delivers it, so the two can be compared and merged.
+func nodeUsageFromNode(node Node) nodeUsageEvent {
+	usage := nodeUsageEvent{NodeID: node.ID}
+	observation := node.LastRuntimeObservation
+	if observation == nil {
+		return usage
+	}
+	usage.CPUUsagePercent = observation.CPUUsagePercent
+	usage.MemoryUsedBytes = observation.MemoryUsedBytes
+	usage.MemoryTotalBytes = observation.MemoryTotalBytes
+	usage.DiskUsedBytes = observation.DiskUsedBytes
+	usage.DiskTotalBytes = observation.DiskTotalBytes
+	switch {
+	case observation.ResourceUsageSampledAt != nil:
+		usage.SampledAt = *observation.ResourceUsageSampledAt
+	case observation.CPUUsageSampledAt != nil:
+		usage.SampledAt = *observation.CPUUsageSampledAt
+	}
+	return usage
+}
+
 type tuiRefreshCompleteEvent struct {
 	Nodes []Node
-	Err   error
+	// PreferredKey is the tree selection to restore once the reload lands. It
+	// is empty for the periodic tick and set for reloads requested by a
+	// finished background operation.
+	PreferredKey string
+	Err          error
 }
 
 type tuiClipboardEvent struct {

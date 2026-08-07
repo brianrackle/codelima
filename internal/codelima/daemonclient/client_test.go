@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -294,4 +295,80 @@ func TestConcurrentPingIsNotSerializedBehindBlockedRequest(t *testing.T) {
 	}
 	_ = client.Close()
 	<-serverDone
+}
+
+func TestLifecycleCallOutlivesTheShortClientTimeout(t *testing.T) {
+	t.Parallel()
+
+	home := testutil.TempDir(t, "dc-lifecycle-")
+	paths := daemon.HomePaths(home)
+	if err := os.MkdirAll(paths.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", paths.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		decoder, encoder := json.NewDecoder(conn), json.NewEncoder(conn)
+		var request daemon.Request
+		if decoder.Decode(&request) != nil {
+			return
+		}
+		hello, _ := json.Marshal(daemon.HelloResult{
+			Version: "1.2.3", Protocol: daemon.ProtocolVersion, ClientID: "lifecycle",
+		})
+		if encoder.Encode(daemon.Response{ID: request.ID, Result: hello}) != nil {
+			return
+		}
+		var writes sync.Mutex
+		for {
+			if decoder.Decode(&request) != nil {
+				return
+			}
+			// Node lifecycle legitimately takes far longer than the client's
+			// blanket request timeout.
+			go func(pending daemon.Request) {
+				time.Sleep(300 * time.Millisecond)
+				result, _ := json.Marshal(map[string]bool{"ok": true})
+				writes.Lock()
+				defer writes.Unlock()
+				_ = encoder.Encode(daemon.Response{ID: pending.ID, Result: result})
+			}(request)
+		}
+	}()
+
+	client, err := Dial(context.Background(), Options{
+		Home: filepath.Clean(home), Version: "1.2.3", Timeout: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+
+	var result map[string]bool
+	if err := client.Call(context.Background(), "node.start", map[string]string{"node": "demo"}, &result); err != nil {
+		t.Fatalf("node.start was abandoned by the short client timeout: %v", err)
+	}
+	if !result["ok"] {
+		t.Fatalf("node.start result = %#v", result)
+	}
+	if err := client.Call(context.Background(), "terminal.list", nil, &result); err == nil {
+		t.Fatal("a fast-class call ignored the short client timeout")
+	}
+
+	// An explicit caller deadline still bounds a lifecycle call.
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	if err := client.Call(ctx, "node.stop", map[string]string{"node": "demo"}, &result); err == nil {
+		t.Fatal("lifecycle call ignored the caller's deadline")
+	}
 }

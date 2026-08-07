@@ -66,5 +66,5 @@ Set the single PTY fd nonblocking and handle readiness for both read and write o
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Related [use_ghostty_terminal_callbacks_for_embedded_terminal_queries_29.md](/Users/brianrackle/Projects/codelima/decisions/use_ghostty_terminal_callbacks_for_embedded_terminal_queries_29.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [use_ghostty_terminal_callbacks_for_embedded_terminal_queries_29.md](use_ghostty_terminal_callbacks_for_embedded_terminal_queries_29.md)

@@ -129,7 +129,12 @@ work whether the client resolves them to `127.0.0.1` or `::1`.
 
 Two nodes can serve the same guest port at the same time. Their node-qualified
 hostnames keep the traffic separate, while the first active node on a port also
-claims the short `localhost` form.
+claims the short `localhost` form. Codex's browser-login callback is the narrow
+exception: when a new listener appears on its default port 1455, generic
+`localhost:1455` follows that newest listener so `codex login` in a second node
+receives its own browser callback. If browser callbacks are unavailable in the
+host environment, use `codex login --device-auth` where account and workspace
+policy permit it.
 
 ### Sessions survive the interface
 
@@ -208,6 +213,8 @@ Node.js 22, configures npm's global prefix as `~/.local` for Lima's
 unprivileged login user, and installs `@openai/codex` plus
 `@anthropic-ai/claude-code` without root-owned npm state. Stable links under
 `/usr/local/bin` keep `codex` and `claude` available in ordinary guest shells.
+Bootstrap completes only after that login user successfully executes each
+agent's `--version` command.
 
 After upgrading an existing CodeLima installation, run:
 
@@ -217,11 +224,12 @@ codelima environment show codex
 codelima environment show claude-code
 ```
 
-Seed revision 5 replaces untouched older built-in installer definitions.
-Customized or deleted environments remain user-controlled. Node bootstrap is
-frozen at creation, so a node that already captured and failed the old Claude
-installer must be deleted and recreated after the repair; retrying that same
-node intentionally keeps its historical command list.
+Seed revision 6 replaces untouched older built-in installer and validator
+definitions. Customized or deleted environments and customized agent profiles
+remain user-controlled. Node bootstrap remains frozen at creation except for
+exact known defective built-in command sequences: the next `node start`
+replaces those sequences, records `node.bootstrap.migrated`, and reruns the
+user-owned installation without requiring node recreation.
 
 ## Guide
 

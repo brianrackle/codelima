@@ -64,6 +64,6 @@ Consult `lima.List`, `lima.Delete` any matched live instance, then remove the di
 
 ## Links
 
-* Refines [ADR 37](/Users/brianrackle/projects/codelima/decisions/use_lima_as_runtime_status_source_for_read_surfaces_37.md) — cleanup joins the read surfaces in consulting live runtime observations, and extends that from status reads to teardown ordering.
-* Builds on [ADR 57](/Users/brianrackle/projects/codelima/decisions/read_surfaces_do_not_write_metadata_57.md) — reuses the read/write readiness split that item 0.3 introduced.
+* Refines [ADR 37](use_lima_as_runtime_status_source_for_read_surfaces_37.md) — cleanup joins the read surfaces in consulting live runtime observations, and extends that from status reads to teardown ordering.
+* Builds on [ADR 57](read_surfaces_do_not_write_metadata_57.md) — reuses the read/write readiness split that item 0.3 introduced.
 * Implements work item 0.4 of [plans/IMPROVEMENT_PLAN.md](../plans/IMPROVEMENT_PLAN.md)

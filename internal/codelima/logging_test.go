@@ -135,6 +135,62 @@ func TestNewTUIFileLoggerWritesUnderLogsDir(t *testing.T) {
 	}
 }
 
+// TestNewDaemonFileLoggerRotatesInPlace covers the daemon half of ADR 59's
+// rotation policy. The daemon runs for days on a file nothing else truncates,
+// so its structured sink has to rotate the same way the TUI's does.
+func TestNewDaemonFileLoggerRotatesInPlace(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "_daemon", "daemon.log")
+	logger, closeLog, err := newDaemonFileLogger(path, slog.LevelDebug)
+	if err != nil {
+		t.Fatalf("newDaemonFileLogger() error = %v", err)
+	}
+	defer func() { _ = closeLog() }()
+
+	logger.Info("daemon log line", "source", "test")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", path, err)
+	}
+	if !strings.Contains(string(data), "daemon log line") {
+		t.Fatalf("daemon log missing record: %q", string(data))
+	}
+	if daemonLogMaxBytes <= 0 {
+		t.Fatalf("daemonLogMaxBytes = %d, want a positive rotation cap", daemonLogMaxBytes)
+	}
+}
+
+// TestEnableDaemonFileLoggingRedirectsServiceAndStoreSinks pins the wiring:
+// runDaemon's structured records and the Store warnings that ride the same
+// logger both land in the rotating daemon.log rather than the inherited
+// descriptor.
+func TestEnableDaemonFileLoggingRedirectsServiceAndStoreSinks(t *testing.T) {
+	t.Parallel()
+
+	service, _ := newTestService(t)
+	closeLog, err := enableDaemonFileLogging(service)
+	if err != nil {
+		t.Fatalf("enableDaemonFileLogging() error = %v", err)
+	}
+	service.log().Error("daemon seam record")
+	service.store.log().Warn("store seam record")
+	if err := closeLog(); err != nil {
+		t.Fatalf("close daemon log error = %v", err)
+	}
+
+	path := filepath.Join(service.cfg.MetadataRoot, "_daemon", "daemon.log")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected %s to exist: %v", path, err)
+	}
+	for _, want := range []string{"daemon seam record", "store seam record"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("daemon log missing %q: %q", want, string(data))
+		}
+	}
+}
+
 func TestEnableFileLoggingContainsSuccessfulLimaDiagnostics(t *testing.T) {
 	// Not parallel: enableFileLogging swaps the process-global package logger.
 	original := packageLog()

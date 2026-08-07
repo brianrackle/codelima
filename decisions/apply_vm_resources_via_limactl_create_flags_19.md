@@ -63,5 +63,5 @@ Persist requested resources as structured metadata, then expand them into `{{cre
 
 ## Links
 
-* Refines [ADR 17](/Users/brianrackle/personal/codelima/decisions/project_scoped_lima_command_templates_17.md)
-* Refines [ADR 18](/Users/brianrackle/personal/codelima/decisions/global_lima_command_defaults_with_project_overrides_18.md)
+* Refines [ADR 17](project_scoped_lima_command_templates_17.md)
+* Refines [ADR 18](global_lima_command_defaults_with_project_overrides_18.md)

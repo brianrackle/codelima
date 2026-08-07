@@ -53,7 +53,9 @@ Problem:
   sleep/wake and live-update focus behavior still require the interactive Flow
   7 run.
 - ADR 93 restores the pre-Microsandbox foreground-process-group invariant for interactive Lima shells. A real Linux/aarch64 Lima guest and controlling PTY verified Left, `Ctrl+a`, `Ctrl+e`, multiline bracketed paste, and guest `Ctrl+c`; `TestRunInteractiveCommandKeepsPTYInForeground` covers the underlying PTY ownership regression automatically. The same checks inside the complete native macOS Ghostty TUI flow remain part of this item.
-- ADR 94 redirects successful Lima-command diagnostics to the rotating TUI log, and ADR 95 replaces width-growth `Ctrl-L` injection with a supplemental process-group `SIGWINCH`. A focused Linux PTY run with a fake Lima boundary reproduced the exact unhealthy-instance warning, confirmed it appeared only as `source=limactl` in `_logs/codelima.log`, toggled Option+Backtick repeatedly without `^L`, and preserved earlier output across split/full-width changes. This development host now exposes `limactl` and `/dev/kvm`, but the Flow 4 `qa-large` QEMU guest cannot allocate its required 5120 MiB, so the full lifecycle flow still cannot substitute for the remaining native-host run.
+- ADR 118 repairs exact known built-in Codex and Claude bootstrap snapshots and validates both CLIs as the Lima login user. Automated lifecycle coverage verifies the repair and ownership boundary, and a disposable Linux login user successfully installed the current real npm packages and ran both version commands from its `~/.local` prefix. The complete Flow 4 VM pass still needs a native Lima-capable host: this development session itself runs inside a two-vCPU Lima guest, where a 5 GiB inner guest cannot boot reliably under nested KVM and software emulation does not advance beyond UEFI.
+- ADR 119 gives Codex's port-1455 browser callback newest-listener routing while preserving first-claimant routing for ordinary shared ports. Automated HTTP forwarding coverage proves transfer to a second VM and fallback when that listener disappears. The matching two-VM Flow 6 pass still needs a native Lima-capable host to complete a real `codex login` browser callback through the daemon.
+- ADR 94 redirects successful Lima-command diagnostics to the rotating TUI log, and ADR 95 replaces width-growth `Ctrl-L` injection with a supplemental process-group `SIGWINCH`. A focused Linux PTY run with a fake Lima boundary reproduced the exact unhealthy-instance warning, confirmed it appeared only as `source=limactl` in `_logs/codelima.log`, toggled Option+Backtick repeatedly without `^L`, and preserved earlier output across split/full-width changes. This development session exposes `limactl` and `/dev/kvm`, but it runs inside a two-vCPU, 3.8 GiB Lima guest: temporary swap allowed the Flow 4 VM allocation, while nested-KVM multi-vCPU boot stalled and software emulation did not leave UEFI. The full lifecycle flow still requires a native-host run.
 - The `diagnose-codelima-terminal-freezes` skill and its deterministic
   fake-daemon regression cover read-only status/list/snapshot collection,
   renderer-process discovery, one failed actor probe, local evidence handling,
@@ -64,6 +66,8 @@ Problem:
 Suggested solution:
 
 - Run the QA.md "TUI" flow on macOS in Ghostty, specifically the startup default tab and `Option+t`/`Option+Shift+t`/`Option+Left`/`Option+Right`/`Option+Shift+Left`/`Option+Shift+Right`/`Option+w` movement and adjacent-close steps, with and without `macos-option-as-alt`. In the Create Node form, confirm the muted slug default is the slug-safe current-directory leaf, both slug and directory defaults disappear on the first typed character, and submitting untouched defaults creates the expected node.
+- Run Flow 4 on a native Lima-capable host and confirm a completed legacy built-in snapshot is repaired on its next start, both npm package trees and executables belong to the Lima login user, and `codex --version` plus `claude --version` succeed through that user's `HOME` and `PATH`.
+- Run Flow 6 with callback listeners on port 1455 in two VMs, confirm generic `localhost:1455` moves to the newest listener while node-qualified routes remain stable, then complete a real Codex browser login in the second VM.
 - Launch the same path-scoped TUI from a second real terminal, repeatedly switch host focus in both directions, and verify each newly focused TUI can immediately open or control a guest/host tab without either window showing the ownership-revoked message. Also launch two TUIs at disjoint directory roots, open two tabs in each, wait through refresh, quit and reopen both, and verify all four tabs survive. Paste the multiline QA sample and confirm it appears promptly without executing, type the ordinary-input sample quickly and confirm it keeps pace without reordering, then leave the final owner idle for at least 35 seconds and verify its next terminal action also succeeds.
 - Open guest/host/guest tabs with wrapped output, verify all idle CodeLima
   processes settle instead of pinning cores, live-update while one TUI remains
@@ -790,8 +794,8 @@ Suggested solution:
 - Record VZ/QEMU process CPU after a five-minute idle window, interactive input
   cadence, sleep/wake or reboot recovery, mounted/copy semantics, clone source
   restoration, and observation/SSH reconnection.
-- On macOS, run the VirtioFS pressure flow at the QA threshold and production
-  threshold while recording host descriptor counts.
+- On macOS, run the VirtioFS reclaim flow across at least two 60-second
+  intervals, confirming the cadence holds with the host otherwise idle.
 - On macOS, confirm `doctor` capability reporting, generated
   `nestedVirtualization` YAML, and `/dev/kvm` inside both a new node and a node
   created before ADR 101. Include an unsupported-host run that creates and

@@ -65,4 +65,4 @@ Forward mouse to the guest when the embedded terminal reports mouse capture, kee
 
 ## Links
 
-* Refines [use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md](/Users/brianrackle/Projects/codelima/decisions/use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md)
+* Refines [use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md](use_ghostty_mouse_encoder_for_embedded_terminal_input_26.md)

@@ -8,12 +8,25 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
 	limaWatchInitialBackoff = 250 * time.Millisecond
 	limaWatchMaximumBackoff = 30 * time.Second
+	// limaObserverReconcileInterval bounds how far the observation cache may
+	// drift from limactl's own view while the watch is healthy.
+	//
+	// `limactl watch` reports running/exiting transitions and nothing else: an
+	// instance created, deleted or repaired outside CodeLima never appears, and
+	// an entry synthesized from an event carries no SSH config path, no dir and
+	// no VM type. The daemon holds one watch open for days at a time, so without
+	// a full list on a timer the cache diverges without bound — and every read
+	// surface (NodeList, the TUI, the forwarder's reconcile loop) reads through
+	// it. One minute is short enough that drift is never user-visible for long
+	// and long enough that the list costs nothing measurable.
+	limaObserverReconcileInterval = time.Minute
 )
 
 type LimaObservationRuntime interface {
@@ -44,6 +57,12 @@ func (c *LimaClient) StartObservation(parent context.Context) error {
 		return nil
 	}
 
+	// A failed initial list deliberately does not populate the cache, and
+	// replace is the only thing that stamps lastList — which is what cached()
+	// tests for authority. Starting the watch with an empty, unstamped cache
+	// therefore leaves reads falling through to a direct list rather than
+	// serving "no instances exist" as if it were an answer: an authoritative
+	// empty cache yanks every forwarding route in one tick (plans §6d).
 	observations, listErr := c.listDirect(parent)
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
@@ -65,11 +84,63 @@ func (c *LimaClient) StartObservation(parent context.Context) error {
 		c.observer.lastError = ""
 	}
 	c.observer.mu.Unlock()
+	// Both loops are owned by this observation: they are cancelled by
+	// StopObservation's cancel and done is not closed until both have returned,
+	// so a stopped observation never leaves a goroutine listing behind it.
 	go func() {
 		defer close(done)
-		c.watchLoop(ctx)
+		var loops sync.WaitGroup
+		loops.Add(2)
+		go func() {
+			defer loops.Done()
+			c.watchLoop(ctx)
+		}()
+		go func() {
+			defer loops.Done()
+			c.reconcileLoop(ctx)
+		}()
+		loops.Wait()
 	}()
 	return nil
+}
+
+// reconcileLoop replaces the cache from a full `limactl list` on a timer for as
+// long as the observation runs. It is the only thing that repairs drift while
+// the watch is healthy, because a healthy watch never ends and the post-restart
+// list in watchLoop only runs after the watch has failed.
+//
+// A failed reconciliation records the error and preserves the previous cache:
+// the last known-good view of the world is strictly better than an empty one,
+// and cached() keeps reporting authority from the earlier successful list.
+func (c *LimaClient) reconcileLoop(ctx context.Context) {
+	interval := c.ReconcileInterval
+	if interval <= 0 {
+		interval = limaObserverReconcileInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		observations, err := c.listDirect(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			c.observer.mu.Lock()
+			c.observer.lastError = err.Error()
+			c.observer.reconcileFailures++
+			c.observer.mu.Unlock()
+			continue
+		}
+		c.observer.replace(observations)
+		c.observer.mu.Lock()
+		c.observer.lastError = ""
+		c.observer.mu.Unlock()
+	}
 }
 
 func (c *LimaClient) StopObservation() error {
@@ -218,8 +289,14 @@ func (c *LimaClient) ObservationSnapshot() map[string]any {
 	if !c.observer.lastEvent.IsZero() {
 		result["last_event_at"] = c.observer.lastEvent
 	}
+	// Authority, not liveness: a started observation whose every list has failed
+	// serves nothing, and operators need to see that rather than infer it.
+	result["authoritative"] = c.observer.started && !c.observer.lastList.IsZero()
 	if !c.observer.lastList.IsZero() {
 		result["last_reconciliation_at"] = c.observer.lastList
+	}
+	if c.observer.reconcileFailures > 0 {
+		result["reconciliation_failures"] = c.observer.reconcileFailures
 	}
 	if c.observer.lastError != "" {
 		result["last_error"] = c.observer.lastError

@@ -59,4 +59,4 @@ Move selection to the project entry so the existing project terminal path is reu
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/projects/codelima/ADR_TEMPLATE.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)

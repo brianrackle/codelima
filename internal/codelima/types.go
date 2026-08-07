@@ -581,6 +581,9 @@ func commandSliceWithLegacy(primary, environmentCommands, setupCommands []string
 	}
 }
 
+// cloneStringMap copies a string map, returning an empty map rather than nil
+// for an absent source so callers can always write into the result. It is not
+// maps.Clone for exactly that reason: maps.Clone(nil) is nil.
 func cloneStringMap(source map[string]string) map[string]string {
 	if len(source) == 0 {
 		return map[string]string{}

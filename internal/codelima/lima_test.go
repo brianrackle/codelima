@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +27,7 @@ func TestRunInteractiveCommandPTYHelper(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	err := runInteractiveCommand(ctx, `IFS= read -r value && printf 'received:%s\n' "$value"`, ShellStreams{
+	err := runInteractiveCommand(ctx, resolvedRuntimeCommand{text: `IFS= read -r value && printf 'received:%s\n' "$value"`}, ShellStreams{
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
@@ -135,7 +138,7 @@ func TestParseLimaVersionAndSupportedRange(t *testing.T) {
 		}
 	}
 
-	for _, unsupported := range []string{"", "limactl dev", "2.0.9", "3.0.0"} {
+	for _, unsupported := range []string{"", "limactl dev", "2.0.9", "1.9.9"} {
 		version, err := parseLimaVersion(unsupported)
 		if err == nil {
 			err = validateLimaVersion(version)
@@ -149,6 +152,21 @@ func TestParseLimaVersionAndSupportedRange(t *testing.T) {
 	}
 	if err := validateLimaVersion("2.9.4"); err != nil {
 		t.Fatalf("validateLimaVersion(2.9.4) error = %v", err)
+	}
+	// The required version is a floor, not an exact major: a Lima major bump
+	// must not lock every upgraded user out of the tool.
+	for _, supported := range []string{"3.0.0", "10.4.2"} {
+		if err := validateLimaVersion(supported); err != nil {
+			t.Fatalf("validateLimaVersion(%s) error = %v", supported, err)
+		}
+	}
+	err := validateLimaVersion("1.9.9")
+	if err == nil {
+		t.Fatal("validateLimaVersion(1.9.9) unexpectedly succeeded")
+	}
+	var appErr *AppError
+	if !errors.As(err, &appErr) || appErr.Fields["minimum_major"] != 2 {
+		t.Fatalf("validateLimaVersion(1.9.9) fields = %#v", err)
 	}
 }
 
@@ -214,6 +232,9 @@ func TestParseLimaListJSONLines(t *testing.T) {
 		t.Fatalf("parseLimaList() SSH metadata = %#v", got[0])
 	}
 
+	// Input whose every record is unusable still fails loudly: that is the
+	// wholly-garbled stream (profile noise on stdout, a truncated pipe), not a
+	// Lima release CodeLima has not caught up with.
 	for _, malformed := range []string{
 		`{"status":"Running"}`,
 		`{"name":"bad","status":"Unexpected"}`,
@@ -223,6 +244,98 @@ func TestParseLimaListJSONLines(t *testing.T) {
 			t.Fatalf("parseLimaList(%q) unexpectedly succeeded", malformed)
 		}
 	}
+}
+
+// TestParseLimaListSkipsUnusableRecords is the tolerance half of the parser
+// contract: one record CodeLima cannot interpret must cost exactly that
+// instance, never the whole list. The list feeds NodeList, the forwarder's
+// reconcile loop and every preflight check, so failing it whole is how a single
+// unknown status string used to freeze routing (plans §6c).
+func TestParseLimaListSkipsUnusableRecords(t *testing.T) {
+	// Not parallel: the skip warnings go through the process-wide package sink.
+	original := packageLog()
+	var logs bytes.Buffer
+	setPackageLogger(newTextLogger(&logs, slog.LevelDebug))
+	t.Cleanup(func() { setPackageLogger(original) })
+
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name: "unknown status",
+			input: strings.Join([]string{
+				`{"name":"alpha","status":"Running"}`,
+				`{"name":"beta","status":"Hibernating"}`,
+			}, "\n"),
+			want: "unsupported status",
+		},
+		{
+			name: "missing instance name",
+			input: strings.Join([]string{
+				`{"name":"alpha","status":"Running"}`,
+				`{"status":"Stopped","dir":"/safe/.lima/ghost"}`,
+			}, "\n"),
+			want: "without an instance name",
+		},
+		{
+			name: "malformed json line",
+			input: strings.Join([]string{
+				`{"name":"alpha","status":"Running"}`,
+				`this is not json`,
+			}, "\n"),
+			want: "unparseable limactl list record",
+		},
+		{
+			name:  "unknown status inside a json array",
+			input: `[{"name":"alpha","status":"Running"},{"name":"beta","status":"Hibernating"}]`,
+			want:  "unsupported status",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs.Reset()
+			got, err := parseLimaList([]byte(test.input))
+			if err != nil {
+				t.Fatalf("parseLimaList() error = %v", err)
+			}
+			if len(got) != 1 || got[0].Name != "alpha" || got[0].Status != ObservationRunning {
+				t.Fatalf("parseLimaList() = %#v, want only the usable record", got)
+			}
+			if !strings.Contains(logs.String(), test.want) {
+				t.Fatalf("skip warning missing %q, got %q", test.want, logs.String())
+			}
+		})
+	}
+
+	// A bare empty list is not garbled input: nothing was skipped, so it parses
+	// to an empty result rather than tripping the zero-record guard.
+	for _, empty := range []string{`[]`, "", "   \n"} {
+		got, err := parseLimaList([]byte(empty))
+		if err != nil || len(got) != 0 {
+			t.Fatalf("parseLimaList(%q) = %#v, %v", empty, got, err)
+		}
+	}
+
+	// Every record unusable => corruption, and the error names the count so the
+	// condition is diagnosable from a log line alone.
+	err := parseLimaListExpectError(t, strings.Join([]string{
+		`{"name":"alpha","status":"Hibernating"}`,
+		`{"status":"Running"}`,
+	}, "\n"))
+	var appErr *AppError
+	if !errors.As(err, &appErr) || appErr.Fields["skipped_records"] != 2 {
+		t.Fatalf("zero-record guard error = %#v", err)
+	}
+}
+
+func parseLimaListExpectError(t *testing.T, input string) error {
+	t.Helper()
+	observations, err := parseLimaList([]byte(input))
+	if err == nil {
+		t.Fatalf("parseLimaList(%q) = %#v, want an error", input, observations)
+	}
+	return err
 }
 
 func TestRenderLimaTemplateAppliesRuntimeInvariants(t *testing.T) {
@@ -357,15 +470,12 @@ func TestForwardingSSHConfigUsesConfiguredLimaHome(t *testing.T) {
 	configPath, identity, _ := writeTestLimaSSHConfig(t, home, "demo")
 	client := NewLimaClient(t.TempDir())
 	client.LimaHome = home
-	client.observer.mu.Lock()
-	client.observer.started = true
-	client.observer.observations["demo"] = RuntimeObservation{
+	seedLimaObservationCache(t, client, RuntimeObservation{
 		Name:          "demo",
 		Exists:        true,
 		Status:        ObservationRunning,
 		SSHConfigFile: configPath,
-	}
-	client.observer.mu.Unlock()
+	})
 
 	got, err := client.ForwardingSSHConfig(context.Background(), "demo")
 	if err != nil {
@@ -374,6 +484,18 @@ func TestForwardingSSHConfigUsesConfiguredLimaHome(t *testing.T) {
 	if got.User != "lima" || got.Host != "127.0.0.1" || got.Port != 60022 || got.IdentityFile != identity {
 		t.Fatalf("ForwardingSSHConfig() = %#v", got)
 	}
+}
+
+// seedLimaObservationCache puts the observation cache in the state a successful
+// startup list leaves behind: started, filled, and authoritative. Setting
+// `started` alone is deliberately not enough any more — cached() also requires
+// that a full list has landed, which is what replace stamps (ADR 126).
+func seedLimaObservationCache(t *testing.T, client *LimaClient, observations ...RuntimeObservation) {
+	t.Helper()
+	client.observer.replace(observations)
+	client.observer.mu.Lock()
+	client.observer.started = true
+	client.observer.mu.Unlock()
 }
 
 func writeTestLimaSSHConfig(t *testing.T, home, instance string) (string, string, string) {
@@ -413,6 +535,267 @@ func TestLimaCommandErrorMapping(t *testing.T) {
 			t.Fatalf("mapLimaCommandError(%q) = %#v", test.stderr, err)
 		}
 	}
+}
+
+// hostShellProfileNoise stands in for the `/etc/profile` or `~/.profile` line
+// that writes to stdout on every login shell. It must not be parseable as a
+// limactl list record, otherwise the transport tests below prove nothing.
+const hostShellProfileNoise = "profile: welcome back"
+
+func TestBuiltInRuntimeCommandsBypassTheHostLoginShell(t *testing.T) {
+	home := testutil.TempDir(t, "lima-")
+	binary := writeFakeLimactl(t, home)
+	if err := os.WriteFile(binary+".state", []byte("demo Running\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shellLog := installNoisyHostShell(t, home)
+
+	if _, err := parseLimaList([]byte(hostShellProfileNoise + "\n")); err == nil {
+		t.Fatal("profile output must be unparseable for this test to mean anything")
+	}
+
+	client := NewLimaClient(home)
+	client.Binary = binary
+	ctx := context.Background()
+
+	observations, err := client.listDirect(ctx)
+	if err != nil {
+		t.Fatalf("listDirect() error = %v", err)
+	}
+	if len(observations) != 1 || observations[0].Name != "demo" || observations[0].Status != ObservationRunning {
+		t.Fatalf("listDirect() = %#v", observations)
+	}
+	if version, err := client.Version(ctx); err != nil || version != requiredLimaVersion {
+		t.Fatalf("Version() = %q, %v", version, err)
+	}
+	if data, err := os.ReadFile(shellLog); err == nil {
+		t.Fatalf("built-in runtime commands still ran through a host shell:\n%s", data)
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+}
+
+func TestCustomizedRuntimeCommandsKeepTheShellTransport(t *testing.T) {
+	home := testutil.TempDir(t, "lima-")
+	binary := writeFakeLimactl(t, home)
+	if err := os.WriteFile(binary+".state", []byte("demo Running\nnested Stopped\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	shellLog := installNoisyHostShell(t, home)
+
+	client := NewLimaClient(home)
+	client.Binary = binary
+	client.nestedVirtualizationProbe = func() bool { return false }
+	// A settings.yaml override that only a shell can run: the chained second
+	// command and the redirection have no argv equivalent.
+	client.RuntimeCommands.Stop = []string{"{{binary}} stop -y {{sandbox_name}} && {{binary}} list --json > /dev/null"}
+	ctx := context.Background()
+
+	if err := client.Stop(ctx, Node{ID: "node-id", SandboxName: "demo"}); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	shellText := readTestFile(t, shellLog)
+	if !strings.Contains(shellText, "-lc") {
+		t.Fatalf("customized stop lost the login-shell transport:\n%s", shellText)
+	}
+	if !strings.Contains(shellText, "stop -y 'demo' && ") || !strings.Contains(shellText, "> /dev/null") {
+		t.Fatalf("customized stop did not reach the shell intact:\n%s", shellText)
+	}
+
+	// A node-scoped override wins over the built-in definition the same way.
+	node := Node{ID: "nested-id", SandboxName: "nested", RuntimeCommands: RuntimeCommandTemplates{
+		Start: []string{"{{binary}} start -y {{sandbox_name}}{{nested_virtualization_flag}} && {{binary}} list --json > /dev/null"},
+	}}
+	if err := client.Start(ctx, node); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if shellText = readTestFile(t, shellLog); !strings.Contains(shellText, "start -y 'nested' && ") {
+		t.Fatalf("node-scoped start override did not reach the shell:\n%s", shellText)
+	}
+
+	limactlLog := readTestFile(t, binary+".log")
+	for _, want := range []string{"stop -y demo", "start -y nested"} {
+		if !strings.Contains(limactlLog, want) {
+			t.Fatalf("fake limactl log lacks %q:\n%s", want, limactlLog)
+		}
+	}
+	if strings.Contains(limactlLog, "--nested-virt") {
+		t.Fatalf("unsupported host enabled nested virtualization:\n%s", limactlLog)
+	}
+}
+
+func TestBuiltInRuntimeCommandsResolveToArgv(t *testing.T) {
+	t.Parallel()
+	client := NewLimaClient(t.TempDir())
+	client.Binary = "limactl"
+	node := Node{ID: "node-id", SandboxName: "demo"}
+	for _, test := range []struct {
+		name   string
+		kind   runtimeCommandKind
+		node   Node
+		values map[string]string
+		want   []string
+	}{
+		{name: "version", kind: runtimeCommandVersion, want: []string{"limactl", "--version"}},
+		{name: "list", kind: runtimeCommandList, want: []string{"limactl", "list", "--json"}},
+		{
+			name: "create", kind: runtimeCommandCreate, node: node,
+			values: map[string]string{"sandbox_name": shellQuote("demo"), "template_path": shellQuote("/tmp/a b/instance.lima.yaml")},
+			want:   []string{"limactl", "create", "-y", "--name", "demo", "/tmp/a b/instance.lima.yaml"},
+		},
+		{
+			name: "start", kind: runtimeCommandStart, node: node,
+			values: map[string]string{"sandbox_name": shellQuote("demo"), "nested_virtualization_flag": " --nested-virt"},
+			want:   []string{"limactl", "start", "-y", "demo", "--nested-virt"},
+		},
+		{
+			name: "stop", kind: runtimeCommandStop, node: node,
+			values: map[string]string{"sandbox_name": shellQuote("demo")},
+			want:   []string{"limactl", "stop", "-y", "demo"},
+		},
+		{
+			name: "delete", kind: runtimeCommandDelete, node: node,
+			values: map[string]string{"sandbox_name": shellQuote("demo")},
+			want:   []string{"limactl", "delete", "-f", "demo"},
+		},
+		{
+			name: "clone", kind: runtimeCommandClone, node: node,
+			values: map[string]string{"source_sandbox": shellQuote("demo"), "sandbox_name": shellQuote("clone")},
+			want:   []string{"limactl", "clone", "-y", "demo", "clone"},
+		},
+		{
+			name: "copy", kind: runtimeCommandCopy, node: node,
+			values: map[string]string{
+				"sandbox_name": shellQuote("demo"), "source_path": shellQuote("/host/dir"),
+				"copy_target": shellQuote("demo:/workspace"), "recursive_flag": " -r",
+			},
+			want: []string{"limactl", "copy", "-r", "/host/dir", "demo:/workspace"},
+		},
+		{
+			name: "shell_exec", kind: runtimeCommandShellExec, node: node,
+			values: map[string]string{
+				"sandbox_name": shellQuote("demo"), "workdir_flag": " --workdir " + shellQuote("/work space"),
+				"command_args": " -- " + shellArgsFragment([]string{"sudo", "-H", "--", "sh", "-lc", "printf 'hi'"}),
+			},
+			want: []string{"limactl", "shell", "--workdir", "/work space", "demo", "--", "sudo", "-H", "--", "sh", "-lc", "printf 'hi'"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			commands, err := client.resolveRuntimeCommands(test.node, test.kind, test.values)
+			if err != nil {
+				t.Fatalf("resolveRuntimeCommands() error = %v", err)
+			}
+			if len(commands) != 1 {
+				t.Fatalf("resolveRuntimeCommands() = %#v", commands)
+			}
+			if !slices.Equal(commands[0].argv, test.want) {
+				t.Fatalf("argv = %#v, want %#v (text %q)", commands[0].argv, test.want, commands[0].text)
+			}
+		})
+	}
+}
+
+func TestCustomizedRuntimeCommandsResolveWithoutArgv(t *testing.T) {
+	t.Parallel()
+	client := NewLimaClient(t.TempDir())
+	client.Binary = "limactl"
+	client.RuntimeCommands.Stop = []string{"{{binary}} stop --custom {{sandbox_name}}"}
+	values := map[string]string{"sandbox_name": shellQuote("demo")}
+
+	commands, err := client.resolveRuntimeCommands(Node{}, runtimeCommandStop, values)
+	if err != nil {
+		t.Fatalf("resolveRuntimeCommands() error = %v", err)
+	}
+	if len(commands) != 1 || commands[0].argv != nil {
+		t.Fatalf("settings override must keep the shell transport: %#v", commands)
+	}
+	if commands[0].text != "'limactl' stop --custom 'demo'" {
+		t.Fatalf("settings override text = %q", commands[0].text)
+	}
+
+	node := Node{RuntimeCommands: RuntimeCommandTemplates{Delete: []string{"{{binary}} delete --custom {{sandbox_name}}"}}}
+	commands, err = client.resolveRuntimeCommands(node, runtimeCommandDelete, values)
+	if err != nil {
+		t.Fatalf("resolveRuntimeCommands() error = %v", err)
+	}
+	if len(commands) != 1 || commands[0].argv != nil {
+		t.Fatalf("node override must keep the shell transport: %#v", commands)
+	}
+	// Kinds the node did not override still resolve to the built-in argv.
+	commands, err = client.resolveRuntimeCommands(node, runtimeCommandList, nil)
+	if err != nil {
+		t.Fatalf("resolveRuntimeCommands() error = %v", err)
+	}
+	if len(commands) != 1 || !slices.Equal(commands[0].argv, []string{"limactl", "list", "--json"}) {
+		t.Fatalf("unrelated kind lost its built-in argv: %#v", commands)
+	}
+}
+
+func TestArgvFromQuotedCommandAcceptsOnlyPlainWordLists(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		command string
+		want    []string
+	}{
+		{command: "limactl list --json", want: []string{"limactl", "list", "--json"}},
+		{command: "  'lima ctl'   start -y 'my node'  ", want: []string{"lima ctl", "start", "-y", "my node"}},
+		{command: shellQuote("it's") + " " + shellQuote(""), want: []string{"it's", ""}},
+		{command: `'limactl' shell 'demo' -- 'sh' '-lc' 'echo $HOME > /tmp/x'`, want: []string{"limactl", "shell", "demo", "--", "sh", "-lc", "echo $HOME > /tmp/x"}},
+	} {
+		argv, ok := argvFromQuotedCommand(test.command)
+		if !ok || !slices.Equal(argv, test.want) {
+			t.Fatalf("argvFromQuotedCommand(%q) = %#v, %v; want %#v", test.command, argv, ok, test.want)
+		}
+	}
+
+	for _, command := range []string{
+		"",
+		"   ",
+		"limactl list --json | cat",
+		"limactl list --json > out",
+		"limactl stop demo && limactl delete demo",
+		"limactl start $NAME",
+		"limactl start `id -un`",
+		"limactl start ~/demo",
+		"limactl copy dir/* demo:/workspace",
+		`limactl start "$(id -un)"`,
+		"limactl start 'demo",
+		`limactl start "demo`,
+		"limactl start demo; rm -rf /",
+	} {
+		if argv, ok := argvFromQuotedCommand(command); ok {
+			t.Fatalf("argvFromQuotedCommand(%q) = %#v, want a shell fallback", command, argv)
+		}
+	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// installNoisyHostShell puts a `sh` on PATH that writes to stdout before
+// running the real shell, standing in for a host profile that greets every
+// login shell. It returns the path its invocation log will occupy; the file
+// only exists once something actually spawned a shell.
+func installNoisyHostShell(t *testing.T, directory string) string {
+	t.Helper()
+	shellDir := filepath.Join(directory, "host-shell")
+	if err := os.MkdirAll(shellDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(shellDir, "sh.log")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\nprintf '%s\\n'\nexec /bin/sh \"$@\"\n", shellQuote(log), hostShellProfileNoise)
+	if err := os.WriteFile(filepath.Join(shellDir, "sh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shellDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return log
 }
 
 func TestWriteRenderedLimaTemplateIsPrivate(t *testing.T) {
@@ -703,6 +1086,123 @@ func TestLimaObservationCacheUsesWatchEvents(t *testing.T) {
 	}
 }
 
+// TestLimaObservationCacheIsNotAuthoritativeAfterFailedInitialList pins the
+// difference between "the cache says there are no instances" and "the cache has
+// never been filled". A started-but-unfilled cache that answered reads served an
+// authoritative empty list, which is what yanked every forwarding route in a
+// single tick after a transient limactl failure at daemon startup.
+func TestLimaObservationCacheIsNotAuthoritativeAfterFailedInitialList(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	binary := writeFakeLimactl(t, home)
+	if err := os.WriteFile(binary+".state", []byte("demo Stopped\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binary+".list-fails", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := NewLimaClient(home)
+	client.Binary = binary
+	client.RuntimeCommands = defaultRuntimeCommandTemplates()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := client.StartObservation(ctx); err != nil {
+		t.Fatalf("StartObservation() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.StopObservation() })
+
+	if observations, ok := client.observer.cached(); ok {
+		t.Fatalf("cached() = %#v, true after a failed initial list", observations)
+	}
+	if snapshot := client.ObservationSnapshot(); snapshot["authoritative"] != false {
+		t.Fatalf("ObservationSnapshot() = %#v, want authoritative=false", snapshot)
+	}
+	// The failing initial list runs on the observer goroutine after
+	// StartObservation returns, so the recorded error is awaited rather than
+	// asserted immediately; authoritative=false above needs no wait because it
+	// is the initial state.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if snapshot := client.ObservationSnapshot(); snapshot["last_error"] != nil {
+			break
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("ObservationSnapshot() = %#v, want the list failure recorded", client.ObservationSnapshot())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Reads fall through to a direct list, so they surface the real failure
+	// instead of an empty answer that reads as "nothing exists".
+	if _, err := client.List(context.Background()); err == nil {
+		t.Fatal("List() unexpectedly succeeded while limactl list was failing")
+	}
+
+	// Once a list lands the cache becomes authoritative on its own, without an
+	// observation restart.
+	if err := os.Remove(binary + ".list-fails"); err != nil {
+		t.Fatal(err)
+	}
+	waitForLimaObservation(t, client, func(observations []RuntimeObservation) bool {
+		_, ok := findObservation(observations, "demo")
+		return ok
+	}, "the cache to become authoritative after a successful reconciliation")
+}
+
+// TestLimaObservationReconciliationRepairsDriftedCache exercises the drift the
+// watch stream structurally cannot report: an instance that appears while the
+// watch is healthy is never the subject of a running/exiting event, so only a
+// periodic full list can ever surface it.
+func TestLimaObservationReconciliationRepairsDriftedCache(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	binary := writeFakeLimactl(t, home)
+	if err := os.WriteFile(binary+".state", []byte("demo Stopped\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := NewLimaClient(home)
+	client.Binary = binary
+	client.RuntimeCommands = defaultRuntimeCommandTemplates()
+	client.ReconcileInterval = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := client.StartObservation(ctx); err != nil {
+		t.Fatalf("StartObservation() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.StopObservation() })
+
+	if err := os.WriteFile(binary+".state", []byte("demo Stopped\nlate Running\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForLimaObservation(t, client, func(observations []RuntimeObservation) bool {
+		observation, ok := findObservation(observations, "late")
+		return ok && observation.Status == ObservationRunning
+	}, "the reconciliation ticker to surface an instance the watch never mentioned")
+
+	// The reconciled entry carries the full record, not the running/exiting bit
+	// a watch-synthesized entry would have — that missing SSH config path is
+	// what denied a plainly running node any forwarding route.
+	observations, err := client.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, _ := findObservation(observations, "late")
+	if observation.SSHConfigFile == "" {
+		t.Fatalf("reconciled observation = %#v, want the full list record", observation)
+	}
+}
+
+func waitForLimaObservation(t *testing.T, client *LimaClient, match func([]RuntimeObservation) bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if observations, err := client.List(context.Background()); err == nil && match(observations) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
+}
+
 func TestNativeLimaTemplateValidation(t *testing.T) {
 	if os.Getenv("CODELIMA_NATIVE_LIMA") != "1" {
 		t.Skip("set CODELIMA_NATIVE_LIMA=1 through make test-lima-native")
@@ -759,6 +1259,10 @@ case "$cmd" in
     test -f "$1"
     ;;
   list)
+    if [ -f "$0.list-fails" ]; then
+      printf 'fake limactl: list refused\n' >&2
+      exit 3
+    fi
     if [ -f "$state" ]; then
       while read -r name status; do
         [ -n "$name" ] || continue

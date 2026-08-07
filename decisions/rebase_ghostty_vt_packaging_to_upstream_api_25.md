@@ -69,6 +69,6 @@ Drop `dlopen` and link directly against Ghostty's exported C API.
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Related [adopt_ghostty_0.md](/Users/brianrackle/Projects/codelima/decisions/adopt_ghostty_0.md)
-* Related [use_ghostty_key_encoder_for_embedded_terminal_input_24.md](/Users/brianrackle/Projects/codelima/decisions/use_ghostty_key_encoder_for_embedded_terminal_input_24.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [adopt_ghostty_0.md](adopt_ghostty_0.md)
+* Related [use_ghostty_key_encoder_for_embedded_terminal_input_24.md](use_ghostty_key_encoder_for_embedded_terminal_input_24.md)

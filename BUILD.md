@@ -95,11 +95,15 @@ The built-in `codex` and `claude-code` environments share one Node.js 22
 prerequisite and user-owned npm-prefix pattern. Noninteractive Lima commands
 still cross the single root boundary in `LimaClient.Shell`; the agent installers
 then resolve `SUDO_USER`, run npm as that login user, and expose only stable
-links in `/usr/local/bin`. Keep the two npm package commands independently
-usable because either environment may be selected without the other. A new
-installer definition requires a seed-revision bump plus exact legacy specs so
-untouched environment records upgrade while customized and deleted records do
-not. Existing node bootstrap snapshots remain frozen.
+links in `/usr/local/bin`. Installation and profile validation must execute each
+agent's `--version` command as that same login user; root-side path lookup is
+not sufficient. Keep the two npm package commands independently usable because
+either environment may be selected without the other. A new installer or
+validator definition requires a seed-revision bump plus exact legacy specs so
+untouched environment records and profiles upgrade while customized and deleted
+records do not. Node bootstrap snapshots remain frozen except that `NodeStart`
+may replace exact known defective former built-in command sequences and rerun
+the repaired snapshot (ADR 118).
 
 macOS release qualification must exercise nested virtualization on an Apple
 silicon host where Virtualization.framework reports it supported and an
@@ -116,7 +120,8 @@ while its ownership and containment trust root comes from CodeLima's resolved
 `LIMA_HOME`; do not require a `LimaHome` field in `limactl list --json`. The
 daemon also owns one `limactl watch --json` observation process. Release
 qualification must verify generic `localhost` and `127.0.0.1` claimant
-selection, one-second bind retry and claimant transfer, and
+selection, one-second bind retry and claimant transfer, the port-1455 Codex
+login exception that transfers generic routing to the newest listener, and
 `{node}.localhost` HTTP and Upgrade traffic on both native platforms, including
 two nodes sharing one guest port and a guest-loopback-only service.
 

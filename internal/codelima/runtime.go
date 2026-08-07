@@ -35,6 +35,15 @@ type SandboxClient interface {
 	Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error
 }
 
+// uncachedSandboxLister is the optional half of SandboxClient implemented by
+// runtimes whose List may answer from a cache. Service uses it for the
+// decisions that gate a runtime mutation, where a stale answer is not a stale
+// display but a wrong action. It is optional rather than part of SandboxClient
+// because a runtime with no cache has nothing to implement.
+type uncachedSandboxLister interface {
+	ListUncached(ctx context.Context) ([]RuntimeObservation, error)
+}
+
 // runtimeMutationError marks a failed runtime call that may have created its
 // target. Service rollback may delete only errors carrying this marker; plain
 // precondition/dependency failures must never tear down a pre-existing instance.
@@ -82,12 +91,10 @@ func resolveConfiguredRuntimeCommands(binary string, global RuntimeCommandTempla
 	if values == nil {
 		values = map[string]string{}
 	}
-	values = cloneMap(values)
+	values = cloneStringMap(values)
 	values["binary"] = shellQuote(binary)
 
-	templates := defaultRuntimeCommandTemplates().templates(kind)
-	templates = applyDefaultCommandList(global.templates(kind), templates)
-	templates = applyDefaultCommandList(nodeCommands.templates(kind), templates)
+	templates := effectiveRuntimeCommandTemplates(global, nodeCommands, kind)
 
 	resolved := make([]string, 0, len(templates))
 	for _, template := range templates {

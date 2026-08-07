@@ -56,61 +56,91 @@ type ghosttyAPILoadState struct {
 
 var ghosttyAPI ghosttyAPILoadState
 
-type ghosttyStderrState struct {
-	once sync.Once
-	mu   sync.Mutex
-	file *os.File // write end of the capture pipe, dup2'd over fd 2 around bridge calls
-	err  error
+// ghosttyStderrCapture owns the process-wide fd 2 redirect that keeps
+// libghostty's parser warnings out of the TUI chrome (work item 0.5, ADR 59).
+// A background reader drains the capture pipe and forwards each non-empty
+// record to the package logger at debug level, tagged source=libghostty, so the
+// warnings stay inspectable in _logs/codelima.log while staying invisible on
+// screen.
+//
+// The redirect is installed once per process and torn down once, rather than
+// around every bridge call. The former per-call form took a process-global
+// mutex plus four dup/dup2 syscalls on the hot path, which serialized every
+// terminal's emulation, reads and input in the in-process TUI backend even
+// though the terminals share no other state. Installation is reference-counted
+// by live libghostty terminals: the redirect exists exactly while something in
+// this process can emit libghostty diagnostics, and fd 2 is handed back
+// afterwards so a CLI error printed after the TUI exits is still visible.
+type ghosttyStderrCapture struct {
+	mu      sync.Mutex
+	refs    int
+	active  bool
+	writer  *os.File // write end of the capture pipe; fd 2 is a dup of it
+	savedFD int      // the caller's original fd 2, restored at refs == 0
 }
 
-var ghosttyStderr ghosttyStderrState
+var ghosttyStderr ghosttyStderrCapture
 
-// withGhosttyStderrSuppressed redirects process stderr to an internal pipe for
-// the duration of fn so libghostty's parser warnings never spill into the TUI
-// chrome. A background reader drains the pipe and forwards each non-empty line to
-// the package logger at debug level, tagged source=libghostty, so the warnings
-// stay inspectable in _logs/codelima.log while staying invisible on screen
-// (work item 0.5, ADR 59). This replaces the former /dev/null sink, which threw
-// the warnings away entirely.
-//
-// CAVEAT: the dup2 over fd 2 is process-global and not concurrency-safe. The
-// mutex serializes every bridge call, so two terminals initializing at once can
-// no longer interleave the redirect (which also closes that prior data race).
-// The pipe and its reader goroutine are created once via sync.Once and live for
-// the life of the process; the reader must keep draining or a full pipe buffer
-// would block libghostty's writes to fd 2 and hang the bridge call.
-func withGhosttyStderrSuppressed[T any](fn func() T) T {
+// acquireGhosttyStderrCapture installs the redirect for the first live
+// libghostty user in this process. Callers must pair it with exactly one
+// releaseGhosttyStderrCapture.
+func acquireGhosttyStderrCapture() {
 	ghosttyStderr.mu.Lock()
 	defer ghosttyStderr.mu.Unlock()
-
-	ghosttyStderr.once.Do(func() {
-		reader, writer, err := os.Pipe()
-		if err != nil {
-			ghosttyStderr.err = err
-			return
-		}
-		ghosttyStderr.file = writer
-		go drainGhosttyStderr(reader)
-	})
-	if ghosttyStderr.err != nil || ghosttyStderr.file == nil {
-		return fn()
+	ghosttyStderr.refs++
+	if ghosttyStderr.refs > 1 || ghosttyStderr.active {
+		return
 	}
-
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return
+	}
 	stderrFD := int(os.Stderr.Fd())
 	savedFD, err := unix.Dup(stderrFD)
 	if err != nil {
-		return fn()
+		_ = reader.Close()
+		_ = writer.Close()
+		return
 	}
-	if err := unix.Dup2(int(ghosttyStderr.file.Fd()), stderrFD); err != nil {
+	if err := unix.Dup2(int(writer.Fd()), stderrFD); err != nil {
 		_ = unix.Close(savedFD)
-		return fn()
+		_ = reader.Close()
+		_ = writer.Close()
+		return
 	}
-	defer func() {
-		_ = unix.Dup2(savedFD, stderrFD)
-		_ = unix.Close(savedFD)
-	}()
+	ghosttyStderr.writer = writer
+	ghosttyStderr.savedFD = savedFD
+	ghosttyStderr.active = true
+	// The reader must keep draining: a full pipe buffer would block
+	// libghostty's writes to fd 2 and wedge the bridge call that produced them.
+	go drainGhosttyStderr(reader)
+}
 
-	return fn()
+// releaseGhosttyStderrCapture restores the caller's fd 2 once the last
+// libghostty terminal in this process is gone.
+func releaseGhosttyStderrCapture() {
+	ghosttyStderr.mu.Lock()
+	defer ghosttyStderr.mu.Unlock()
+	if ghosttyStderr.refs > 0 {
+		ghosttyStderr.refs--
+	}
+	if ghosttyStderr.refs > 0 || !ghosttyStderr.active {
+		return
+	}
+	_ = unix.Dup2(ghosttyStderr.savedFD, int(os.Stderr.Fd()))
+	_ = unix.Close(ghosttyStderr.savedFD)
+	// Closing the last write end lets the drain goroutine observe EOF and exit.
+	_ = ghosttyStderr.writer.Close()
+	ghosttyStderr.savedFD = 0
+	ghosttyStderr.writer = nil
+	ghosttyStderr.active = false
+}
+
+// ghosttyStderrCaptureActive reports whether this process currently owns fd 2.
+func ghosttyStderrCaptureActive() bool {
+	ghosttyStderr.mu.Lock()
+	defer ghosttyStderr.mu.Unlock()
+	return ghosttyStderr.active
 }
 
 // drainGhosttyStderr continuously consumes captured libghostty stderr. It must
@@ -138,10 +168,12 @@ func newGhosttyTUITerminal(targetKey string, postEvent func(vaxis.Event)) (tuiTe
 		return nil, err
 	}
 
-	term := withGhosttyStderrSuppressed(func() C.GhosttyBridgeTerminal {
-		return C.ghostty_bridge_terminal_new(80, 24)
-	})
+	// Own fd 2 for as long as this terminal can emit libghostty diagnostics.
+	// teardown returns it when the emulator handle is freed.
+	acquireGhosttyStderrCapture()
+	term := C.ghostty_bridge_terminal_new(80, 24)
 	if term == nil {
+		releaseGhosttyStderrCapture()
 		return nil, fmt.Errorf("create ghostty terminal: %s", C.GoString(C.ghostty_bridge_last_error()))
 	}
 
@@ -712,7 +744,14 @@ func (e *ghosttyKeyEncoder) Encode(
 		C.size_t(len(buffer)),
 		&outLen,
 	)
-	if result == C.GHOSTTY_OUT_OF_MEMORY {
+	// ghostty/vt/key/encoder.h: "@return GHOSTTY_SUCCESS on success,
+	// GHOSTTY_OUT_OF_SPACE if buffer too small ... out_len will contain the
+	// required buffer size." This retry checked OUT_OF_MEMORY, which the encoder
+	// never returns for a short buffer, so the regrow was dead code and any key
+	// whose encoding exceeded 64 bytes was silently dropped instead of being
+	// re-encoded. The focus and mouse encoders next to it already check
+	// OUT_OF_SPACE.
+	if result == C.GHOSTTY_OUT_OF_SPACE {
 		buffer = make([]byte, int(outLen))
 		var bufferPtr *C.char
 		if len(buffer) > 0 {
@@ -1466,18 +1505,15 @@ func (t *ghosttyTUITerminal) ingestPTYEvent(data []byte, eventID uint64) {
 
 	t.responseEventID = eventID
 	t.responseOrdinal = 0
-	withGhosttyStderrSuppressed(func() struct{} {
-		if os.Getenv("CODELIMA_TEST_GHOSTTY_HANG_OPERATION") == "output" {
-			C.codelima_test_ghostty_hang_forever()
-		}
-		C.ghostty_bridge_terminal_write(
-			t.term,
-			(*C.uint8_t)(unsafe.Pointer(&data[0])),
-			C.size_t(len(data)),
-		)
-		t.drainResponsesLockedRaw()
-		return struct{}{}
-	})
+	if os.Getenv("CODELIMA_TEST_GHOSTTY_HANG_OPERATION") == "output" {
+		C.codelima_test_ghostty_hang_forever()
+	}
+	C.ghostty_bridge_terminal_write(
+		t.term,
+		(*C.uint8_t)(unsafe.Pointer(&data[0])),
+		C.size_t(len(data)),
+	)
+	t.drainResponsesLockedRaw()
 	// Advance the output generation so cmdSnapshot/cmdRead consumers can detect
 	// new child output and discard stale pulls (ADR 63).
 	t.generation++
@@ -1511,9 +1547,7 @@ func (t *ghosttyTUITerminal) readPendingResponses() string {
 		return ""
 	}
 
-	return withGhosttyStderrSuppressed(func() string {
-		return t.readPendingResponsesLockedRaw()
-	})
+	return t.readPendingResponsesLockedRaw()
 }
 
 func (t *ghosttyTUITerminal) readPendingResponsesLockedRaw() string {
@@ -1544,16 +1578,14 @@ func (t *ghosttyTUITerminal) serveRead(source ReadSource, format ReadFormat) Rea
 	if t.closed || t.term == nil {
 		return ReadResult{Err: errTerminalClosed}
 	}
-	return withGhosttyStderrSuppressed(func() ReadResult {
-		var text string
-		switch source {
-		case ReadRecent:
-			text = t.recentTextLockedRaw(format)
-		default:
-			text = t.visibleTextLockedRaw(format)
-		}
-		return ReadResult{Text: text, Generation: t.generation}
-	})
+	var text string
+	switch source {
+	case ReadRecent:
+		text = t.recentTextLockedRaw(format)
+	default:
+		text = t.visibleTextLockedRaw(format)
+	}
+	return ReadResult{Text: text, Generation: t.generation}
 }
 
 // serveSnapshot answers a cmdSnapshot query: the whole cell grid + cursor +
@@ -1566,9 +1598,7 @@ func (t *ghosttyTUITerminal) serveSnapshot() SnapshotResult {
 	if t.closed || t.term == nil {
 		return SnapshotResult{Err: errTerminalClosed}
 	}
-	return withGhosttyStderrSuppressed(func() SnapshotResult {
-		return t.snapshotLockedRaw()
-	})
+	return t.snapshotLockedRaw()
 }
 
 func (t *ghosttyTUITerminal) snapshotLockedRaw() SnapshotResult {
@@ -1923,10 +1953,7 @@ func (t *ghosttyTUITerminal) handleMouseLocked(event vaxis.Mouse) {
 		}
 	}
 
-	hasMouseTracking := withGhosttyStderrSuppressed(func() bool {
-		return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
-	})
-	if !hasMouseTracking {
+	if !bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term)) {
 		return
 	}
 
@@ -1967,14 +1994,10 @@ func (t *ghosttyTUITerminal) handleWheelLocked(button vaxis.MouseButton) bool {
 	if t.term == nil {
 		return false
 	}
-	if withGhosttyStderrSuppressed(func() bool {
-		return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
-	}) {
+	if bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term)) {
 		return false
 	}
-	if withGhosttyStderrSuppressed(func() bool {
-		return bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term))
-	}) {
+	if bool(C.ghostty_bridge_terminal_is_alternate_screen(t.term)) {
 		if t.getModeLocked(ghosttyModeAltScroll, false) {
 			switch button {
 			case vaxis.MouseWheelUp:
@@ -2048,48 +2071,43 @@ func (t *ghosttyTUITerminal) Draw(win vaxis.Window) {
 	if width <= 0 || height <= 0 {
 		return
 	}
-	if !withGhosttyStderrSuppressed(func() bool {
-		t.resizeLocked(width, height)
+	t.resizeLocked(width, height)
 
-		C.ghostty_bridge_render_state_update(t.term)
+	C.ghostty_bridge_render_state_update(t.term)
 
-		viewport := make([]C.GhosttyResolvedCell, width*height)
-		if len(viewport) > 0 {
-			count := int(C.ghostty_bridge_render_state_get_viewport(
-				t.term,
-				(*C.GhosttyResolvedCell)(unsafe.Pointer(&viewport[0])),
-				C.size_t(len(viewport)),
-			))
-			if count < 0 {
-				return false
-			}
+	viewport := make([]C.GhosttyResolvedCell, width*height)
+	if len(viewport) > 0 {
+		count := int(C.ghostty_bridge_render_state_get_viewport(
+			t.term,
+			(*C.GhosttyResolvedCell)(unsafe.Pointer(&viewport[0])),
+			C.size_t(len(viewport)),
+		))
+		if count < 0 {
+			return
 		}
-
-		lineTexts := make([]string, 0, height)
-		for visibleRow := 0; visibleRow < height; visibleRow++ {
-			offset := visibleRow * width
-			if offset+width > len(viewport) {
-				break
-			}
-			lineTexts = append(lineTexts, t.drawCellsLocked(win, visibleRow, viewport[offset:offset+width]))
-		}
-
-		t.snapshot = strings.Join(lineTexts, "\n")
-
-		if t.focused && t.viewportAtBottomLockedRaw() && bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term)) {
-			cursorRow := int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
-			cursorCol := int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
-			if cursorRow >= 0 && cursorRow < height && cursorCol >= 0 && cursorCol < width {
-				win.ShowCursor(cursorCol, cursorRow, vaxis.CursorBlock)
-			}
-		}
-
-		C.ghostty_bridge_render_state_mark_clean(t.term)
-		t.redrawPending = false
-		return true
-	}) {
-		return
 	}
+
+	lineTexts := make([]string, 0, height)
+	for visibleRow := 0; visibleRow < height; visibleRow++ {
+		offset := visibleRow * width
+		if offset+width > len(viewport) {
+			break
+		}
+		lineTexts = append(lineTexts, t.drawCellsLocked(win, visibleRow, viewport[offset:offset+width]))
+	}
+
+	t.snapshot = strings.Join(lineTexts, "\n")
+
+	if t.focused && t.viewportAtBottomLockedRaw() && bool(C.ghostty_bridge_render_state_get_cursor_visible(t.term)) {
+		cursorRow := int(C.ghostty_bridge_render_state_get_cursor_y(t.term))
+		cursorCol := int(C.ghostty_bridge_render_state_get_cursor_x(t.term))
+		if cursorRow >= 0 && cursorRow < height && cursorCol >= 0 && cursorCol < width {
+			win.ShowCursor(cursorCol, cursorRow, vaxis.CursorBlock)
+		}
+	}
+
+	C.ghostty_bridge_render_state_mark_clean(t.term)
+	t.redrawPending = false
 }
 
 func (t *ghosttyTUITerminal) resizeLocked(width, height int) {
@@ -2324,10 +2342,7 @@ func (t *ghosttyTUITerminal) HyperlinkAt(col, row int) (string, bool) {
 	if row < 0 || row >= t.rows || col < 0 || col >= t.cols || t.term == nil {
 		return "", false
 	}
-	return withGhosttyStderrSuppressed(func() hyperlinkResult {
-		target, ok := t.hyperlinkAtLocked(row, col)
-		return hyperlinkResult{target: target, ok: ok}
-	}).unpack()
+	return t.hyperlinkAtLocked(row, col)
 }
 
 func (t *ghosttyTUITerminal) CapturesMouse() bool {
@@ -2337,9 +2352,7 @@ func (t *ghosttyTUITerminal) CapturesMouse() bool {
 	if t.closed || t.term == nil {
 		return false
 	}
-	return withGhosttyStderrSuppressed(func() bool {
-		return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
-	})
+	return bool(C.ghostty_bridge_terminal_has_mouse_tracking(t.term))
 }
 
 func (t *ghosttyTUITerminal) hyperlinkAtLocked(row int, col int) (string, bool) {
@@ -2424,10 +2437,11 @@ func (t *ghosttyTUITerminal) teardown(kill bool, post bool, err error) {
 		_ = t.wait()
 	}
 	if term != nil {
-		withGhosttyStderrSuppressed(func() struct{} {
-			C.ghostty_bridge_terminal_free(term)
-			return struct{}{}
-		})
+		C.ghostty_bridge_terminal_free(term)
+		// Paired with the acquire in newGhosttyTUITerminal. term is captured and
+		// nil'd under the mutex above, so this runs exactly once per terminal no
+		// matter how Close and finish interleave.
+		releaseGhosttyStderrCapture()
 	}
 	if keyEncoder != nil {
 		keyEncoder.Close()
@@ -2572,58 +2586,40 @@ func (t *ghosttyTUITerminal) getModeLocked(mode int, isANSI bool) bool {
 	if t.term == nil {
 		return false
 	}
-	return withGhosttyStderrSuppressed(func() bool {
-		return bool(C.ghostty_bridge_terminal_get_mode(t.term, C.int(mode), C.bool(isANSI)))
-	})
+	return bool(C.ghostty_bridge_terminal_get_mode(t.term, C.int(mode), C.bool(isANSI)))
 }
 
 func (t *ghosttyTUITerminal) scrollbarLocked() (ghosttyScrollbarState, bool) {
 	if t.term == nil {
 		return ghosttyScrollbarState{}, false
 	}
-	var state ghosttyScrollbarState
-	ok := withGhosttyStderrSuppressed(func() bool {
-		var rawOK bool
-		state, rawOK = t.scrollbarLockedRaw()
-		return rawOK
-	})
-	return state, ok
+	return t.scrollbarLockedRaw()
 }
 
 func (t *ghosttyTUITerminal) viewportAtBottomLocked() bool {
-	return withGhosttyStderrSuppressed(func() bool {
-		return t.viewportAtBottomLockedRaw()
-	})
+	return t.viewportAtBottomLockedRaw()
 }
 
 func (t *ghosttyTUITerminal) defaultBackgroundRGBLocked() uint32 {
 	if t.term == nil {
 		return 0
 	}
-	return withGhosttyStderrSuppressed(func() uint32 {
-		C.ghostty_bridge_render_state_update(t.term)
-		return uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
-	})
+	C.ghostty_bridge_render_state_update(t.term)
+	return uint32(C.ghostty_bridge_render_state_get_bg_color(t.term))
 }
 
 func (t *ghosttyTUITerminal) setColorThemeModeLocked(mode vaxis.ColorThemeMode) {
 	if t.term == nil {
 		return
 	}
-	withGhosttyStderrSuppressed(func() struct{} {
-		C.ghostty_bridge_terminal_set_color_theme_mode(t.term, C.int(mode))
-		return struct{}{}
-	})
+	C.ghostty_bridge_terminal_set_color_theme_mode(t.term, C.int(mode))
 }
 
 func (t *ghosttyTUITerminal) reportColorThemeModeLocked() {
 	if t.term == nil {
 		return
 	}
-	withGhosttyStderrSuppressed(func() struct{} {
-		C.ghostty_bridge_terminal_report_color_theme_mode(t.term)
-		return struct{}{}
-	})
+	C.ghostty_bridge_terminal_report_color_theme_mode(t.term)
 }
 
 func (t *ghosttyTUITerminal) scrollbarLockedRaw() (ghosttyScrollbarState, bool) {
@@ -2659,29 +2655,14 @@ func (t *ghosttyTUITerminal) scrollViewportBottomLocked() {
 	if t.term == nil {
 		return
 	}
-	withGhosttyStderrSuppressed(func() struct{} {
-		C.ghostty_bridge_terminal_scroll_viewport_bottom(t.term)
-		return struct{}{}
-	})
+	C.ghostty_bridge_terminal_scroll_viewport_bottom(t.term)
 }
 
 func (t *ghosttyTUITerminal) scrollViewportDeltaLocked(delta int) {
 	if t.term == nil || delta == 0 {
 		return
 	}
-	withGhosttyStderrSuppressed(func() struct{} {
-		C.ghostty_bridge_terminal_scroll_viewport_delta(t.term, C.intptr_t(delta))
-		return struct{}{}
-	})
-}
-
-type hyperlinkResult struct {
-	target string
-	ok     bool
-}
-
-func (r hyperlinkResult) unpack() (string, bool) {
-	return r.target, r.ok
+	C.ghostty_bridge_terminal_scroll_viewport_delta(t.term, C.intptr_t(delta))
 }
 
 func (t *ghosttyTUITerminal) invalidateLocked() {

@@ -100,15 +100,7 @@ func TestDaemonRestoreForgetReplacesSessionWithoutParsing(t *testing.T) {
 
 func newDaemonSessionTestHost(t *testing.T, restore string) (*daemonHost, string, *bytes.Buffer) {
 	t.Helper()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := filepath.Join(cwd, "..", "..", "tmp", "daemon-session-"+newID()[:8])
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root := newDaemonTestRoot(t, "daemon-session-")
 
 	logs := &bytes.Buffer{}
 	service := &Service{

@@ -12,6 +12,7 @@ GOLANGCI_LINT_VERSION ?= 1.64.8
 ZIG_VERSION ?= 0.15.2
 GHOSTTY_VT_GHOSTTY_COMMIT ?= ae52f97dcac558735cfa916ea3965f247e5c6e9e
 GO := $(TOOLS_DIR)/go/$(GO_VERSION)/bin/go
+GOFMT := $(TOOLS_DIR)/go/$(GO_VERSION)/bin/gofmt
 GOPLS := $(TOOLS_DIR)/bin/gopls
 GOLANGCI_LINT := $(TOOLS_DIR)/bin/golangci-lint
 ZIG := $(TOOLS_DIR)/zig/$(ZIG_VERSION)/zig
@@ -29,7 +30,12 @@ export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 export CGO_ENABLED := 1
 export CC
 
-.PHONY: init ghostty-vt gopls tidy fmt lint test test-race test-integration test-lima-native build run tui smoke diagnose-terminal-freeze package package-formula verify clean
+.PHONY: init ghostty-vt gopls tidy fmt fmt-check lint test test-race test-integration test-lima-native build run tui smoke diagnose-terminal-freeze package package-formula verify clean clean-all
+
+# Source roots handed to gofmt. Directories (not the ./... package pattern) so
+# build-tag-gated files such as tests/daemon_integration_test.go are covered;
+# .tooling/, tmp/ and the module cache are deliberately outside this list.
+FMT_DIRS := cmd internal tests
 
 PACKAGE_VERSION ?= 0.0.0-dev
 VERSION_LDFLAGS := -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION)
@@ -39,7 +45,17 @@ DIST_DIR ?= $(CURDIR)/dist
 FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
 INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
-GO_TEST_PARALLEL ?= 1
+
+# This was pinned to 1 because ./internal/codelima could not survive a parallel
+# run: daemon.Server bracketed its socket bind with a process-global
+# syscall.Umask(0o177), so any concurrent t.TempDir() got a 0600 base directory
+# (0700 &^ 0177) and every write beneath it failed with EACCES. A 2026-08-07
+# probe at -p 4 -parallel 4 failed 3/3 (129, 130 and 1 failures, all
+# "permission denied" on a just-created path). daemon/server.go now binds via
+# listenPrivate (chmod after Listen, inside a verified 0700 directory) and holds
+# no global umask, and the same probe passes 3/3 (~19s vs ~27s serial), so the
+# default is 4. Full history: git log for this line and for listenPrivate.
+GO_TEST_PARALLEL ?= 4
 GO_RACE_TEST_PARALLEL ?= 1
 DIAG_ARGS ?=
 
@@ -61,8 +77,18 @@ gopls: init
 tidy: init
 	$(GO) mod tidy
 
+# fmt rewrites; fmt-check only reports. verify depends on fmt-check so CI fails
+# on drift instead of silently reformatting and then building the rewrite.
 fmt: init
-	$(GO) fmt ./...
+	$(GOFMT) -l -w $(FMT_DIRS)
+
+fmt-check: init
+	@set -eu; \
+	drift="$$($(GOFMT) -l $(FMT_DIRS))"; \
+	if [ -n "$$drift" ]; then \
+		printf 'gofmt drift (run "make fmt"):\n%s\n' "$$drift" >&2; \
+		exit 1; \
+	fi
 
 lint: init
 	$(GOLANGCI_LINT) run ./...
@@ -88,7 +114,9 @@ build: init
 	mkdir -p $(BIN_DIR)
 	$(GO) build -ldflags "$(VERSION_LDFLAGS)" -o $(CODELIMA_BIN) ./cmd/codelima
 	$(GO) build -ldflags "$(VERSION_LDFLAGS)" -o $(CODELIMA_RENDERER_BIN) ./cmd/codelima-renderer-worker
-	ln -sfn $(PLATFORM_TAG)/codelima $(CODELIMA_COMPAT_BIN)
+	cp scripts/codelima_dispatch.sh $(BIN_ROOT)/.codelima-dispatch.tmp
+	chmod 0755 $(BIN_ROOT)/.codelima-dispatch.tmp
+	mv -f $(BIN_ROOT)/.codelima-dispatch.tmp $(CODELIMA_COMPAT_BIN)
 
 run: build
 	$(CODELIMA_BIN) $(ARGS)
@@ -108,7 +136,10 @@ package: init
 package-formula: init
 	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)
 
-verify: fmt lint test build
+verify: fmt-check lint test build
 
 clean:
-	rm -rf bin dist
+	rm -rf $(BIN_DIR) $(DIST_DIR)
+
+clean-all:
+	rm -rf $(BIN_ROOT) $(DIST_DIR)

@@ -64,4 +64,4 @@ Persist only the fields that differ from `config.yaml`, then apply defaults when
 
 ## Links
 
-* Refines [ADR 19](/Users/brianrackle/personal/codelima/decisions/apply_vm_resources_via_limactl_create_flags_19.md)
+* Refines [ADR 19](apply_vm_resources_via_limactl_create_flags_19.md)

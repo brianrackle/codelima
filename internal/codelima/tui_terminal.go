@@ -6,6 +6,7 @@ import (
 	"git.sr.ht/~rockorager/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type tuiTerminal interface {
@@ -61,4 +62,22 @@ func (e tuiDaemonSynchronizedEvent) complete(err error) {
 // to the single-owner TUI event loop before it touches the terminal registry.
 type tuiDaemonTerminalDirtyEvent struct {
 	TerminalID string
+}
+
+// tuiDaemonTerminalOpenedEvent carries the daemon's terminal.open reply back to
+// the event loop. The RPC runs off the loop, but the session map it produces is
+// owned by the loop, so registration happens when this event is handled.
+type tuiDaemonTerminalOpenedEvent struct {
+	TargetKey string
+	ShellKind terminal.TerminalKind
+	Label     string
+	Node      Node
+	State     daemon.TerminalState
+	Err       error
+}
+
+// tuiDaemonInputReclaimedEvent reports the outcome of the input.takeover issued
+// when this window regained focus.
+type tuiDaemonInputReclaimedEvent struct {
+	Err error
 }

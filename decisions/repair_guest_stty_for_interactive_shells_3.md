@@ -63,4 +63,4 @@ Use a different remote-shell path and try to avoid triggering the broken guest t
 
 ## Links
 
-* Related implementation: [service.go](/Users/brianrackle/Projects/codelima/internal/codelima/service.go)
+* Related implementation: [service.go](../internal/codelima/service.go)

@@ -66,5 +66,5 @@ Leave the RGB-equality workaround in place until Ghostty offers a direct way to 
 
 ## Links
 
-* Template [ADR_TEMPLATE.md](/Users/brianrackle/Projects/codelima/ADR_TEMPLATE.md)
-* Related [match_terminal_background_1.md](/Users/brianrackle/Projects/codelima/decisions/match_terminal_background_1.md)
+* Template [ADR_TEMPLATE.md](../ADR_TEMPLATE.md)
+* Related [match_terminal_background_1.md](match_terminal_background_1.md)

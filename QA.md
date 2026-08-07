@@ -42,7 +42,7 @@ Verify:
 
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
 - schema version is `4`
-- seed version is `5`
+- seed version is `6`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
 - `small` is the implicit default and exists with 2 CPUs, 4096 MiB memory, 25600 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
 - the configuration list contains only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 2/4096/25600, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments
@@ -72,6 +72,8 @@ Verify the error requests a fresh `--home`/`CODELIMA_HOME` and does not claim to
   --bootstrap-command 'printf qa-tools > .qa-tools-installed'
 
 ./bin/codelima configuration update small \
+  --environment codex \
+  --environment claude-code \
   --environment qa-tools \
   --vcpus 2 \
   --memory 4GiB \
@@ -160,8 +162,8 @@ grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
   test "$(stat -c %U "$guest_home/.local/lib/node_modules/@anthropic-ai/claude-code")" = "$guest_user"
   test "$(readlink /usr/local/bin/codex)" = "$guest_home/.local/bin/codex"
   test "$(readlink /usr/local/bin/claude)" = "$guest_home/.local/bin/claude"
-  codex --version
-  claude --version
+  sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" codex --version
+  sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" claude --version
 '
 ./bin/codelima node status qa-v3-root
 ./bin/codelima node stop qa-v3-root
@@ -169,8 +171,8 @@ grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ```
 
 Verify bootstrap prints `bootstrap-ok`; Node reports major version 22 or newer;
-both agent version commands succeed; both npm package trees are owned by the
-Lima login user; the npm prefix is that user's `~/.local`; the two
+both agent version commands succeed as the Lima login user; both npm package
+trees are owned by that user; the npm prefix is that user's `~/.local`; the two
 `/usr/local/bin` links target that prefix; the first status is running; and the
 final status is stopped. Review runtime diagnostics to confirm the VM uses the
 node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must not invoke an
@@ -263,6 +265,9 @@ Start a guest-loopback server in the running node. This uses Perl's core socket 
 ```sh
 ./bin/codelima shell qa-v3-root -- sh -lc \
   'nohup perl -MIO::Socket::INET -e '\''$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>18080,Listen=>5,Reuse=>1); while($c=$s->accept){<$c>; while(<$c>){last if /^\r?$/}; print $c "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nroot\n"; close $c}'\'' > .qa-http.log 2>&1 &'
+
+./bin/codelima shell qa-v3-root -- sh -lc \
+  'nohup perl -MIO::Socket::INET -e '\''$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>1455,Listen=>5,Reuse=>1); while($c=$s->accept){<$c>; while(<$c>){last if /^\r?$/}; print $c "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\nroot-codex\n"; close $c}'\'' > .qa-codex-callback.log 2>&1 &'
 ```
 
 Wait for daemon discovery, then:
@@ -278,11 +283,14 @@ curl --resolve "localhost:18080:[::1]" \
   "http://localhost:18080/"
 curl --resolve "qa-v3-root.localhost:18080:[::1]" \
   "http://qa-v3-root.localhost:18080/"
+curl --retry 10 --retry-delay 1 --retry-connrefused \
+  "http://localhost:1455/"
 ```
 
 Verify all five responses contain `root`, proving the first listener claims
 both generic host forms and both hostname routes work when forced through host
-IPv6 loopback. In `./bin/codelima --json daemon snapshot`, verify this port's
+IPv6 loopback. Verify the callback-port response contains `root-codex`. In
+`./bin/codelima --json daemon snapshot`, verify port 18080's
 forwarding `addresses` include both `127.0.0.1:18080` and `[::1]:18080`. Start
 a second VM on the same guest port with a distinct response:
 
@@ -291,14 +299,30 @@ a second VM on the same guest port with a distinct response:
 ./bin/codelima shell qa-v3-root-two -- sh -lc \
   'nohup perl -MIO::Socket::INET -e '\''$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>18080,Listen=>5,Reuse=>1); while($c=$s->accept){<$c>; while(<$c>){last if /^\r?$/}; print $c "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntwo\n"; close $c}'\'' > .qa-http.log 2>&1 &'
 
+./bin/codelima shell qa-v3-root-two -- sh -lc \
+  'nohup perl -MIO::Socket::INET -e '\''$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>1455,Listen=>5,Reuse=>1); while($c=$s->accept){<$c>; while(<$c>){last if /^\r?$/}; print $c "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\ntwo-codex\n"; close $c}'\'' > .qa-codex-callback.log 2>&1 &'
+
 curl --retry 10 --retry-delay 1 --retry-connrefused \
   "http://qa-v3-root-two.localhost:18080/"
 curl "http://qa-v3-root.localhost:18080/"
 curl "http://localhost:18080/"
 curl "http://127.0.0.1:18080/"
+curl --retry 10 --retry-delay 1 --retry-connrefused \
+  "http://localhost:1455/"
+curl "http://qa-v3-root.localhost:1455/"
+curl "http://qa-v3-root-two.localhost:1455/"
 ```
 
-Verify the node-specific URLs return `two` and `root` respectively while generic `localhost` and `127.0.0.1` still return `root`. Stop the first claimant and wait for the one-second reconciliation retry to transfer the generic route:
+Verify the node-specific URLs return `two` and `root` respectively while generic `localhost` and `127.0.0.1` still return `root`.
+
+For the Codex login callback port, verify generic `localhost:1455` instead
+returns `two-codex`, while the two node-qualified callback URLs return
+`root-codex` and `two-codex`. This proves a newly started Codex login listener
+in another VM takes generic callback ownership without changing ordinary
+first-claimant service routing.
+
+Stop the first claimant and wait for the one-second reconciliation retry to
+transfer the ordinary generic route:
 
 ```sh
 ./bin/codelima node stop qa-v3-root
@@ -428,7 +452,7 @@ not pin a CPU core.
 
 For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. Move the active third tab left with `Option+Shift+Left`, verify it stays active in the second position, then move it right with `Option+Shift+Right`. Move it left once more so the final order differs from creation order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the reordered left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same reordered tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
 
-For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open through at least one one-second refresh, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
+For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open for at least fifteen seconds so a node-list refresh (pushed on change, or the ten-second fallback tick) has run, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
 
 From a second real terminal, create a bounded CPU load inside the selected
 running node:
@@ -505,9 +529,11 @@ Verify:
 
 Quit with `q`.
 
-## Flow 8: macOS VirtioFS descriptor-pressure reclaim
+## Flow 8: macOS VirtioFS periodic reclaim
 
 This flow is macOS-only. On Linux, verify `daemon snapshot` reports `virtiofs_reclaim.supported: false` and skip the remaining commands.
+
+The reclaim is a workaround for an Apple Virtualization VirtioFS defect and runs on an unconditional 60-second timer, so this flow waits for a tick rather than provoking one; there is no threshold to lower and no host file-table state to arrange.
 
 Create and start a mounted node, then populate its guest dentry/inode caches:
 
@@ -527,20 +553,16 @@ done
   "find '$QA_ROOT/work/root/.qa-vfs-cache' -type f -print >/dev/null"
 ```
 
-Temporarily lower the threshold so the flow does not need to consume most of the host file table:
+Confirm the settings file carries the on/off switch and no retired threshold key, then wait out one interval and capture the snapshot:
 
 ```sh
-./bin/codelima daemon stop || true
-cp "$CODELIMA_HOME/_config/settings.yaml" "$QA_ROOT/settings.yaml.before-vfs-qa"
-perl -0pi -e 's/virtiofs_reclaim_threshold_percent: [0-9]+/virtiofs_reclaim_threshold_percent: 1/' \
-  "$CODELIMA_HOME/_config/settings.yaml"
-./bin/codelima daemon start
-sleep 5
+grep -n 'virtiofs_reclaim' "$CODELIMA_HOME/_config/settings.yaml"
+sleep 70
 ./bin/codelima --json daemon snapshot > "$QA_ROOT/virtiofs-reclaim.json"
 cat "$QA_ROOT/virtiofs-reclaim.json"
 ```
 
-Verify `virtiofs_reclaim` reports `enabled: true`, `supported: true`, threshold `1`, at least one reclaimed node, and a nonzero `last_released_files`. Verify the mounted node remains running and a host write is immediately visible in the guest:
+Verify `settings.yaml` contains `virtiofs_reclaim: true` and no `virtiofs_reclaim_threshold_percent`, and that `virtiofs_reclaim` reports `enabled: true`, `supported: true`, `interval_seconds: 60`, a `last_run_at` within the last minute, a `next_run_at` 60 seconds after it, at least one reclaimed node, and no `last_error`. Verify the mounted node remains running and a host write is immediately visible in the guest:
 
 ```sh
 printf 'still-live\n' > "$QA_ROOT/work/root/.qa-vfs-live"
@@ -548,15 +570,27 @@ printf 'still-live\n' > "$QA_ROOT/work/root/.qa-vfs-live"
   "grep -qx still-live '$QA_ROOT/work/root/.qa-vfs-live'"
 ```
 
-Restore the production threshold before continuing:
+Verify the cadence does not depend on host activity: capture a second snapshot one interval later and confirm `last_run_at` advanced by roughly 60 seconds with the host otherwise idle.
 
 ```sh
-./bin/codelima daemon stop || true
-cp "$QA_ROOT/settings.yaml.before-vfs-qa" "$CODELIMA_HOME/_config/settings.yaml"
-./bin/codelima daemon start
+sleep 70
+./bin/codelima --json daemon snapshot > "$QA_ROOT/virtiofs-reclaim.second.json"
+cat "$QA_ROOT/virtiofs-reclaim.second.json"
 rm -rf "$QA_ROOT/work/root/.qa-vfs-cache"
 rm -f "$QA_ROOT/work/root/.qa-vfs-live"
 ```
+
+Verify a settings refresh preserves operator edits. Add a comment and a user-owned key, restart the daemon so the seed-and-repair pass rewrites the file, and confirm only the `daemon` block changed:
+
+```sh
+cp "$CODELIMA_HOME/_config/settings.yaml" "$QA_ROOT/settings.yaml.before-refresh"
+printf '# qa operator note\nfuture_qa_key: 7\n' >> "$CODELIMA_HOME/_config/settings.yaml"
+./bin/codelima daemon stop || true
+./bin/codelima daemon start
+cat "$CODELIMA_HOME/_config/settings.yaml"
+```
+
+Verify the refreshed file still contains `# qa operator note` and `future_qa_key: 7`.
 
 ## Flow 9: non-mutating terminal-freeze diagnostics
 

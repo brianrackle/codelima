@@ -9,8 +9,11 @@ import (
 )
 
 const (
-	MaxMessageSize  = 1 << 20
-	ProtocolVersion = 5
+	MaxMessageSize = 1 << 20
+	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
+	// whenever a wire shape this protocol carries changes; 6 is the compact
+	// per-cell snapshot encoding (see SnapshotCell).
+	ProtocolVersion = 6
 	SessionVersion  = 2
 	HandoffVersion  = 4
 
@@ -227,22 +230,40 @@ type Session struct {
 	Terminals []TerminalState `json:"terminals"`
 }
 
+// SnapshotCell is one cell of a published terminal screen, and the single
+// definition of that shape for the whole repo: the renderer worker protocol,
+// the daemon RPC protocol and the TUI all encode and decode this struct (the
+// parent package aliases it), so the encoding cannot drift between producer and
+// consumer and a change to it is atomic in-repo.
+//
+// The tags are deliberately one or two characters and everything is omitempty.
+// This struct is serialized once per cell of every published grid -- a 160x50
+// screen is 8000 of them, up to 20 times a second per terminal -- so the key
+// names dominate the payload: descriptive keys cost more bytes than the values
+// they label. The names are not meant to be read by humans; the field names
+// are, and this is the only place the mapping exists.
+//
+//	g  grapheme       w  width          f  foreground   b  background
+//	fd foreground default              bd background default
+//	bo bold           fa faint          i  italic       u  underline
+//	st strikethrough  iv inverse        in invisible    bl blink
+//	h  hyperlink target
 type SnapshotCell struct {
-	Grapheme      string `json:"grapheme"`
-	Width         int    `json:"width"`
-	FG            uint32 `json:"fg"`
-	BG            uint32 `json:"bg"`
-	FGDefault     bool   `json:"fg_default"`
-	BGDefault     bool   `json:"bg_default"`
-	Bold          bool   `json:"bold,omitempty"`
-	Faint         bool   `json:"faint,omitempty"`
-	Italic        bool   `json:"italic,omitempty"`
-	Underline     bool   `json:"underline,omitempty"`
-	Strikethrough bool   `json:"strikethrough,omitempty"`
-	Inverse       bool   `json:"inverse,omitempty"`
-	Invisible     bool   `json:"invisible,omitempty"`
-	Blink         bool   `json:"blink,omitempty"`
-	Hyperlink     string `json:"hyperlink,omitempty"`
+	Grapheme      string `json:"g,omitempty"`
+	Width         int    `json:"w,omitempty"`
+	FG            uint32 `json:"f,omitempty"`
+	BG            uint32 `json:"b,omitempty"`
+	FGDefault     bool   `json:"fd,omitempty"`
+	BGDefault     bool   `json:"bd,omitempty"`
+	Bold          bool   `json:"bo,omitempty"`
+	Faint         bool   `json:"fa,omitempty"`
+	Italic        bool   `json:"i,omitempty"`
+	Underline     bool   `json:"u,omitempty"`
+	Strikethrough bool   `json:"st,omitempty"`
+	Inverse       bool   `json:"iv,omitempty"`
+	Invisible     bool   `json:"in,omitempty"`
+	Blink         bool   `json:"bl,omitempty"`
+	Hyperlink     string `json:"h,omitempty"`
 }
 
 type Snapshot struct {
