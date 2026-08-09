@@ -781,7 +781,12 @@ func (c *LimaClient) CopyToGuest(ctx context.Context, node Node, sourcePath, tar
 	return err
 }
 
-func (c *LimaClient) Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error {
+// Shell runs one guest command as identity. Lima logs in as its unprivileged
+// instance user, so guestLoginUser is the transport's own identity and needs no
+// wrapping; guestRootUser crosses Lima's passwordless sudo boundary with a
+// single `sudo -H --` prefix applied here and nowhere else. The choice is the
+// caller's argument, never a guess about the command (ADR 129).
+func (c *LimaClient) Shell(ctx context.Context, node Node, identity guestIdentity, command []string, workdir string, interactive bool, streams ShellStreams) error {
 	workdirFlag := ""
 	if strings.TrimSpace(workdir) != "" {
 		workdirFlag = " --workdir " + shellQuote(workdir)
@@ -793,13 +798,13 @@ func (c *LimaClient) Shell(ctx context.Context, node Node, command []string, wor
 		"command_args": "",
 	}
 	if len(command) != 0 {
-		// Pre-schema-v4 node commands ran as root. Lima logs in as its
-		// unprivileged instance user, so preserve CodeLima's shell and
-		// bootstrap contract with Lima's passwordless sudo boundary.
-		rootCommand := make([]string, 0, len(command)+3)
-		rootCommand = append(rootCommand, "sudo", "-H", "--")
-		rootCommand = append(rootCommand, command...)
-		values["command_args"] = " -- " + shellArgsFragment(rootCommand)
+		guestCommand := command
+		if identity == guestRootUser {
+			guestCommand = make([]string, 0, len(command)+3)
+			guestCommand = append(guestCommand, "sudo", "-H", "--")
+			guestCommand = append(guestCommand, command...)
+		}
+		values["command_args"] = " -- " + shellArgsFragment(guestCommand)
 	}
 	kind := runtimeCommandShellExec
 	if interactive {

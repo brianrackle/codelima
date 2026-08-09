@@ -851,11 +851,14 @@ func TestLimaClientLifecycleWithFakeLimactl(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	var shellOutput bytes.Buffer
-	if err := client.Shell(ctx, node, []string{"printf", "hello"}, "/workspace", false, ShellStreams{Stdout: &shellOutput}); err != nil {
+	if err := client.Shell(ctx, node, guestRootUser, []string{"printf", "hello"}, "/workspace", false, ShellStreams{Stdout: &shellOutput}); err != nil {
 		t.Fatalf("Shell() error = %v", err)
 	}
 	if shellOutput.String() != "shell-ok\n" {
 		t.Fatalf("Shell() output = %q", shellOutput.String())
+	}
+	if err := client.Shell(ctx, node, guestLoginUser, []string{"printf", "login-hello"}, "/workspace", false, ShellStreams{Stdout: &shellOutput}); err != nil {
+		t.Fatalf("Shell(guestLoginUser) error = %v", err)
 	}
 	if err := client.CopyToGuest(ctx, node, home, "/workspace", true); err != nil {
 		t.Fatalf("CopyToGuest() error = %v", err)
@@ -890,7 +893,12 @@ func TestLimaClientLifecycleWithFakeLimactl(t *testing.T) {
 		}
 	}
 	if !strings.Contains(logText, "sudo -H -- printf hello") {
-		t.Fatalf("guest command did not preserve root execution:\n%s", logText)
+		t.Fatalf("guestRootUser command lost the sudo -H -- wrap:\n%s", logText)
+	}
+	// The same runtime, the same transport, one different argument: the login
+	// identity must reach the guest with no privilege wrapper at all (ADR 129).
+	if !strings.Contains(logText, "-- printf login-hello") || strings.Contains(logText, "sudo -H -- printf login-hello") {
+		t.Fatalf("guestLoginUser command did not run unwrapped:\n%s", logText)
 	}
 	if strings.Contains(logText, "--nested-virt") {
 		t.Fatalf("unsupported host enabled nested virtualization:\n%s", logText)

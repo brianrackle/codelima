@@ -65,9 +65,14 @@ func fakeContextBounded(ctx context.Context) bool {
 
 type fakeShellCall struct {
 	instanceName string
-	command      []string
-	workdir      string
-	interactive  bool
+	// identity is the guest user the caller asked for. It is how tests observe
+	// the user-surface/service-surface split without a real guest: the runtime
+	// turns guestRootUser into the `sudo -H --` wrap and guestLoginUser into no
+	// wrap at all (ADR 129).
+	identity    guestIdentity
+	command     []string
+	workdir     string
+	interactive bool
 	// budget is the deadline the caller threaded through the context, or zero
 	// when it supplied none. It is how tests observe guest-command timeout
 	// classes without waiting one out.
@@ -264,7 +269,7 @@ func (f *fakeSandbox) CopyToGuest(_ context.Context, node Node, sourcePath, targ
 	return nil
 }
 
-func (f *fakeSandbox) Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, _ ShellStreams) error {
+func (f *fakeSandbox) Shell(ctx context.Context, node Node, identity guestIdentity, command []string, workdir string, interactive bool, _ ShellStreams) error {
 	f.recordCall("shell " + node.SandboxName + " " + strings.Join(command, " "))
 	var budget time.Duration
 	if deadline, ok := ctx.Deadline(); ok {
@@ -273,6 +278,7 @@ func (f *fakeSandbox) Shell(ctx context.Context, node Node, command []string, wo
 	f.mu.Lock()
 	f.shellCalls = append(f.shellCalls, fakeShellCall{
 		instanceName: node.SandboxName,
+		identity:     identity,
 		command:      append([]string(nil), command...),
 		workdir:      workdir,
 		interactive:  interactive,
@@ -1907,6 +1913,16 @@ func newTestService(t *testing.T) (*Service, string) {
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
 	service := NewService(cfg, newFakeSandbox(), strings.NewReader(""), ioDiscard{}, ioDiscard{})
 	service.localTerminals = true
+	// Point the credential import at an empty temp HOME. No test may read the
+	// developer's real ~/.ssh or agent credential caches; a test that wants
+	// something imported seeds its own HOME and overrides this seam.
+	emptyHome := filepath.Join(t.TempDir(), "empty-home")
+	if err := os.MkdirAll(emptyHome, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	service.hostAuth = func() (hostAuthCollector, error) {
+		return hostAuthCollector{home: emptyHome}, nil
+	}
 	if err := service.ensureDirectories(); err != nil {
 		t.Fatalf("ensureDirectories() error = %v", err)
 	}
@@ -1947,6 +1963,11 @@ func TestReclaimMountedNodeFilesystemCachesTargetsOnlyRunningMountedNodes(t *tes
 	}
 	if calls[0].instanceName != "mounted-running" || strings.Join(calls[0].command, " ") != "sh -c echo 2 > /proc/sys/vm/drop_caches" {
 		t.Fatalf("reclaim shell call = %#v", calls[0])
+	}
+	// Writing /proc/sys/vm/drop_caches is not something an unprivileged user may
+	// do, so this stays on the service surface (ADR 129).
+	if calls[0].identity != guestRootUser {
+		t.Fatalf("reclaim identity = %q, want %q", calls[0].identity, guestRootUser)
 	}
 }
 

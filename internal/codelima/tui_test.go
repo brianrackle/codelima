@@ -1563,6 +1563,14 @@ func TestTUISelectionDefaultsByRuntimeAndEnsuresRunningNodeTerminal(t *testing.T
 	state, err := newTUIState([]Node{
 		{ID: "node-stopped", Slug: "stopped-node", Status: NodeStatusStopped},
 		{ID: "node-running", Slug: "running-node", Status: NodeStatusRunning},
+		// A first start that has booted its VM and is still installing agents:
+		// the runtime says running, the node's own record says otherwise.
+		{
+			ID:                     "node-bootstrapping",
+			Slug:                   "bootstrapping-node",
+			Status:                 NodeStatusProvisioning,
+			LastRuntimeObservation: &RuntimeObservation{Name: "bootstrapping-node", Exists: true, Status: ObservationRunning},
+		},
 	}, sessions)
 	if err != nil {
 		t.Fatalf("newTUIState() error = %v", err)
@@ -1607,6 +1615,349 @@ func TestTUISelectionDefaultsByRuntimeAndEnsuresRunningNodeTerminal(t *testing.T
 	app.handleKey(vaxis.Key{Keycode: vaxis.KeyDown})
 	if got := sessions.opened[runningTarget]; got != 1 {
 		t.Fatalf("running-node terminal opens after revisit = %d, want reused tab", got)
+	}
+
+	// A booted VM is not a usable guest: selecting a node whose start is still
+	// bootstrapping must show its info, never a root shell without the agents.
+	app.handleKey(vaxis.Key{Keycode: vaxis.KeyDown})
+	if got := state.selectedEntry().node.ID; got != "node-bootstrapping" {
+		t.Fatalf("selected node = %q, want node-bootstrapping", got)
+	}
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("bootstrapping-node pane mode = %q, want info", state.treePaneMode)
+	}
+	if got := sessions.opened[nodeTargetKey("node-bootstrapping")]; got != 0 {
+		t.Fatalf("bootstrapping-node terminal opens = %d, want 0", got)
+	}
+}
+
+// The bootstrap window ends when NodeStart clears the node's in-flight status,
+// and the reload driven by that push is what must promote the node to its
+// terminal — the selection has not moved since it was refused a tab.
+func TestTUIBootstrappingNodeTakesItsGuestTabWhenTheRecordFlipsToRunning(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _ := newTestService(t)
+	sessions := newFakeTUISessionManager()
+	booted := &RuntimeObservation{Name: "bootstrapping-node", Exists: true, Status: ObservationRunning}
+	state, err := newTUIState([]Node{{
+		ID:                     "node-one",
+		Slug:                   "bootstrapping-node",
+		Status:                 NodeStatusProvisioning,
+		LastRuntimeObservation: booted,
+	}}, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	app := &vaxisTUIApp{
+		ctx:      ctx,
+		service:  service,
+		state:    state,
+		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
+	}
+
+	target := nodeTargetKey("node-one")
+	if state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("bootstrapping-node startup pane mode = %q, want info", state.treePaneMode)
+	}
+	if err := app.ensureSelectedNodeTerminal(); err != nil {
+		t.Fatalf("ensureSelectedNodeTerminal() error = %v", err)
+	}
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("bootstrapping-node terminal opens = %d, want 0", got)
+	}
+	if _, err := state.openTerminalTabEntry(state.selectedEntry()); err == nil ||
+		!strings.Contains(err.Error(), "still bootstrapping") {
+		t.Fatalf("explicit guest tab open during bootstrap = %v, want a bootstrap refusal", err)
+	}
+
+	if err := app.applyReloadedNodes([]Node{{
+		ID:                     "node-one",
+		Slug:                   "bootstrapping-node",
+		Status:                 NodeStatusRunning,
+		LastRuntimeObservation: booted,
+	}}, ""); err != nil {
+		t.Fatalf("applyReloadedNodes() error = %v", err)
+	}
+	if state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("completed-node pane mode = %q, want terminal", state.treePaneMode)
+	}
+	if got := sessions.opened[target]; got != 1 {
+		t.Fatalf("completed-node terminal opens = %d, want 1", got)
+	}
+	if got := state.activeSessionKey(); got != target+"#1" {
+		t.Fatalf("completed-node active terminal = %q, want %q", got, target+"#1")
+	}
+}
+
+// newOverlayGateTestApp builds an app whose background operations really run on
+// their own goroutine (the tracked-overlay path) while terminal opens land in a
+// counting fake instead of a shell.
+func newOverlayGateTestApp(t *testing.T, ctx context.Context, service *Service) (*vaxisTUIApp, *fakeTUISessionManager, chan vaxis.Event) {
+	t.Helper()
+
+	events := make(chan vaxis.Event, 64)
+	postEvent := func(event vaxis.Event) { events <- event }
+	sessions := newFakeTUISessionManager()
+	nodes, err := loadTUINodes(ctx, service, "")
+	if err != nil {
+		t.Fatalf("loadTUINodes() error = %v", err)
+	}
+	state, err := newTUIState(nodes, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+	app := &vaxisTUIApp{
+		ctx:        ctx,
+		service:    service,
+		state:      state,
+		sessions:   newTUISessionStore(ctx, service, postEvent),
+		postEvent:  postEvent,
+		operations: map[string]*tuiOperationState{},
+		messages:   newTUIMessageLog(50),
+	}
+	state.nodeOperationInFlight = app.nodeOperationInFlight
+	t.Cleanup(app.sessions.Close)
+	return app, sessions, events
+}
+
+// startBlockedNodeOperation registers the lifecycle operation a node action
+// would, and hands back the release the operation's runner waits on. It is the
+// window state that renders "starting"/"stopping" over the node's row.
+func startBlockedNodeOperation(t *testing.T, app *vaxisTUIApp, node Node, displayStatus string, result tuiOperationResult, runErr error) chan struct{} {
+	t.Helper()
+
+	release := make(chan struct{})
+	targetKey := nodeTargetKey(node.ID)
+	if err := app.startOperation(tuiOperationRequest{
+		Title:         strings.ToUpper(displayStatus[:1]) + displayStatus[1:] + " " + node.Slug,
+		DisplayStatus: displayStatus,
+		ResourceKeys:  []string{targetKey},
+		EntryKeys:     []string{targetKey},
+		Run: func(context.Context, *Service) (tuiOperationResult, error) {
+			<-release
+			return result, runErr
+		},
+	}); err != nil {
+		t.Fatalf("startOperation(%s) error = %v", displayStatus, err)
+	}
+	if app.nodeStatusText(node) != displayStatus {
+		t.Fatalf("node row status = %q, want the %q overlay", app.nodeStatusText(node), displayStatus)
+	}
+	return release
+}
+
+// The daemon persists the finished record and pushes node.status_changed before
+// the lifecycle RPC returns, so the reload that push drives lands while this
+// window still renders "starting" over the row. Terminal availability has to
+// follow the row: no tab until the completion clears the overlay, and a tab on
+// the reload that completion drives.
+func TestTUIStartOverlayWithholdsTheGuestTabUntilTheOperationCompletes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Slug: "overlay-node", Directory: workspace})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	fake, ok := service.sandbox.(*fakeSandbox)
+	if !ok {
+		t.Fatalf("test service sandbox = %T, want *fakeSandbox", service.sandbox)
+	}
+
+	app, sessions, events := newOverlayGateTestApp(t, ctx, service)
+	target := nodeTargetKey(node.ID)
+	selectTUIEntry(t, app, target)
+	release := startBlockedNodeOperation(t, app, node, "starting", tuiOperationResult{
+		Status:       "started node " + node.Slug,
+		PreferredKey: target,
+		ReloadData:   true,
+	}, nil)
+
+	// The push: NodeStart has persisted the completed record and broadcast it,
+	// but its reply has not reached this window yet.
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.Status = NodeStatusRunning
+	node.BootstrapCompleted = true
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(running) error = %v", err)
+	}
+	fake.mu.Lock()
+	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: ObservationRunning}
+	fake.mu.Unlock()
+
+	if quit, err := app.handleEvent(tuiNodesChangedEvent{}); err != nil || quit {
+		t.Fatalf("handleEvent(status push) = %v, %v", quit, err)
+	}
+	awaitAsyncTUIState(t, app, events, func() bool {
+		return app.state.selectedEntry().node.Status == NodeStatusRunning
+	}, "the pushed reload to apply the running record")
+
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("guest tabs opened under the starting overlay = %d, want 0", got)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("pane mode under the starting overlay = %q, want info", app.state.treePaneMode)
+	}
+	if got := app.nodeStatusText(app.state.selectedEntry().node); got != "starting" {
+		t.Fatalf("node row status after the push = %q, want the starting overlay to still show", got)
+	}
+
+	close(release)
+	awaitAsyncTUIState(t, app, events, func() bool {
+		return sessions.opened[target] == 1
+	}, "the completion reload to open the guest tab")
+
+	if len(app.operations) != 0 {
+		t.Fatalf("completed operation left %d overlays behind", len(app.operations))
+	}
+	if app.state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("pane mode after completion = %q, want terminal", app.state.treePaneMode)
+	}
+	if got := app.nodeStatusText(app.state.selectedEntry().node); got != string(NodeStatusRunning) {
+		t.Fatalf("node row status after completion = %q, want running", got)
+	}
+}
+
+// The same rule protects a stop: a reload carrying the still-running record
+// must not re-open a guest tab underneath a "stopping" row.
+func TestTUIStopOverlaySuppressesGuestTabReopen(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Slug: "stopping-node", Directory: workspace})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	fake, ok := service.sandbox.(*fakeSandbox)
+	if !ok {
+		t.Fatalf("test service sandbox = %T, want *fakeSandbox", service.sandbox)
+	}
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	node.Status = NodeStatusRunning
+	node.BootstrapCompleted = true
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(running) error = %v", err)
+	}
+	fake.mu.Lock()
+	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: ObservationRunning}
+	fake.mu.Unlock()
+
+	app, sessions, events := newOverlayGateTestApp(t, ctx, service)
+	target := nodeTargetKey(node.ID)
+	selectTUIEntry(t, app, target)
+	release := startBlockedNodeOperation(t, app, node, "stopping", tuiOperationResult{
+		Status:       "stopped node " + node.Slug,
+		PreferredKey: target,
+		CloseNodeID:  node.ID,
+		ReloadData:   true,
+	}, nil)
+
+	// A reload still carrying the pre-stop record lands mid-stop.
+	if quit, err := app.handleEvent(tuiNodesChangedEvent{}); err != nil || quit {
+		t.Fatalf("handleEvent(stale reload) = %v, %v", quit, err)
+	}
+	awaitAsyncTUIState(t, app, events, func() bool { return !app.refreshInFlight }, "the stale reload to apply")
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("guest tabs opened under the stopping overlay = %d, want 0", got)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("pane mode under the stopping overlay = %q, want info", app.state.treePaneMode)
+	}
+
+	node.Status = NodeStatusStopped
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(stopped) error = %v", err)
+	}
+	fake.mu.Lock()
+	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: ObservationStopped}
+	fake.mu.Unlock()
+	close(release)
+	awaitAsyncTUIState(t, app, events, func() bool { return len(app.operations) == 0 && !app.refreshInFlight }, "the stop to complete")
+
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("a completed stop opened %d guest tabs, want 0", got)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("pane mode after the stop = %q, want info", app.state.treePaneMode)
+	}
+}
+
+// A failed lifecycle operation clears its overlay like any other, reports the
+// failure, and opens nothing.
+func TestTUIFailedOperationClearsTheOverlayWithoutOpeningATab(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Slug: "failing-node", Directory: workspace})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+
+	app, sessions, events := newOverlayGateTestApp(t, ctx, service)
+	target := nodeTargetKey(node.ID)
+	selectTUIEntry(t, app, target)
+	release := startBlockedNodeOperation(t, app, node, "starting", tuiOperationResult{}, errors.New("bootstrap command failed"))
+
+	close(release)
+	awaitAsyncTUIState(t, app, events, func() bool { return len(app.operations) == 0 }, "the failed operation to be reported")
+
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("a failed operation opened %d guest tabs, want 0", got)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("pane mode after a failed operation = %q, want info", app.state.treePaneMode)
+	}
+	if app.status != "bootstrap command failed" {
+		t.Fatalf("footer status after a failed operation = %q, want the failure", app.status)
+	}
+	if got := app.nodeStatusText(app.state.selectedEntry().node); got == "starting" {
+		t.Fatal("the failed operation left its overlay on the node row")
+	}
+}
+
+// Host shells are shells on this machine and never depend on the guest, so the
+// bootstrap gate must not reach them.
+func TestTUIHostTerminalTabOpensWhileNodeIsBootstrapping(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	sessions := newFakeTUISessionManager()
+	state, err := newTUIState([]Node{{
+		ID:                     "node-one",
+		Slug:                   "bootstrapping-node",
+		DirectoryPath:          workspace,
+		Status:                 NodeStatusProvisioning,
+		LastRuntimeObservation: &RuntimeObservation{Name: "bootstrapping-node", Exists: true, Status: ObservationRunning},
+	}}, sessions)
+	if err != nil {
+		t.Fatalf("newTUIState() error = %v", err)
+	}
+
+	sessionKey, err := state.openHostTerminalTabEntry(state.selectedEntry())
+	if err != nil {
+		t.Fatalf("openHostTerminalTabEntry() error = %v", err)
+	}
+	if sessionKey == "" {
+		t.Fatal("host tab for a bootstrapping node was not opened")
+	}
+	if got := sessions.opened[nodeTargetKey("node-one")]; got != 1 {
+		t.Fatalf("host terminal opens = %d, want 1", got)
+	}
+	// The tab exists, so focusing it must not be refused for a guest readiness
+	// a host shell never needed.
+	if err := state.focusTerminal(); err != nil {
+		t.Fatalf("focusTerminal() on a bootstrapping node's host tab = %v", err)
 	}
 }
 
@@ -3442,7 +3793,7 @@ func TestTUIDialogRightStillActivatesSelectorFields(t *testing.T) {
 		"Update Configuration",
 		"Update",
 		nil,
-		[]tuiDialogField{newTUIValueSelectorField("environment", "Environment", "dev", true, nil, func() error {
+		[]tuiDialogField{newTUIValueSelectorField("environment", "Environment", "dev", nil, func() error {
 			activated = true
 			return nil
 		})},
@@ -4281,6 +4632,7 @@ func newTestTUIApp(t *testing.T, ctx context.Context, service *Service, sessions
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
+	state.nodeOperationInFlight = app.nodeOperationInFlight
 
 	return app
 }

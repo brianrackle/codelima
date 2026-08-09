@@ -211,6 +211,10 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		messages:          newTUIMessageLog(tuiMessageLogDefaultCap),
 		logoAnimation:     newTUILogoAnimation(),
 	}
+	// The state decides terminal availability and the app owns the operation
+	// overlays the tree renders, so the two are joined here — the one place both
+	// exist.
+	state.nodeOperationInFlight = app.nodeOperationInFlight
 	winWidth, winHeight := vx.Window().Size()
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
 	sessions.SetPreferredTerminalSize(cols, rows)

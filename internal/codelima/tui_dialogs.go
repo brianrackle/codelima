@@ -362,8 +362,9 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 		[]tuiDialogField{
 			newTUIDefaultInputField("slug", "Node Slug", slugify(filepath.Base(cwd)), true),
 			newTUIDefaultInputField("directory", "Directory", cwd, false),
-			newTUIValueSelectorField("configuration", "Configuration", DefaultConfigurationSlug, true, func(value string) string { return value }, nil),
-			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, true, workspaceModeDisplay, nil),
+			newTUIValueSelectorField("configuration", "Configuration", DefaultConfigurationSlug, func(value string) string { return value }, nil),
+			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, workspaceModeDisplay, nil),
+			newTUIValueSelectorField("import_host_auth", "Host Credentials", hostAuthImportChoice(a.service.cfg.ImportHostAuth), hostAuthImportDisplay, nil),
 		},
 		func(values map[string]string) error {
 			return a.startOperation(tuiOperationRequest{
@@ -373,10 +374,11 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 				EntryKeys:     []string{"nodes"},
 				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 					node, err := service.NodeCreate(ctx, NodeCreateInput{
-						Configuration: values["configuration"],
-						Directory:     values["directory"],
-						Slug:          values["slug"],
-						WorkspaceMode: values["workspace_mode"],
+						Configuration:  values["configuration"],
+						Directory:      values["directory"],
+						Slug:           values["slug"],
+						WorkspaceMode:  values["workspace_mode"],
+						ImportHostAuth: boolPointer(values["import_host_auth"] == hostAuthImportOn),
 					})
 					if err != nil {
 						return tuiOperationResult{}, err
@@ -406,7 +408,56 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 			},
 		)
 	}
+	dialog.Fields[4].Activate = func() error {
+		return a.openHostAuthImportSelector(
+			dialog.Fields[4].rawValue(),
+			func(value string) error {
+				dialog.SetFieldValue("import_host_auth", value)
+				return nil
+			},
+		)
+	}
 	a.overlay = dialog
+	return nil
+}
+
+const (
+	hostAuthImportOn  = "import"
+	hostAuthImportOff = "skip"
+)
+
+func hostAuthImportChoice(enabled bool) string {
+	if enabled {
+		return hostAuthImportOn
+	}
+	return hostAuthImportOff
+}
+
+func hostAuthImportDisplay(choice string) string {
+	if choice == hostAuthImportOff {
+		return "skip: the node starts with no host credentials"
+	}
+	return "import: copy git identity and agent logins once, at first start"
+}
+
+func (a *vaxisTUIApp) openHostAuthImportSelector(current string, onSubmit func(value string) error) error {
+	options := []tuiSelectorOption{
+		{Label: hostAuthImportDisplay(hostAuthImportOn), Value: hostAuthImportOn},
+		{Label: hostAuthImportDisplay(hostAuthImportOff), Value: hostAuthImportOff},
+	}
+	a.showSelector(newTUISelector(
+		"Host Credentials",
+		nil,
+		options,
+		[]string{coalesce(current, hostAuthImportOn)},
+		false,
+		func(values []string) error {
+			if len(values) == 0 {
+				return fmt.Errorf("select a host credential choice")
+			}
+			return onSubmit(values[0])
+		},
+	))
 	return nil
 }
 

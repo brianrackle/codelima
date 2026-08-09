@@ -99,6 +99,32 @@ func (a *vaxisTUIApp) conflictingOperation(resourceKeys []string) *tuiOperationS
 	return nil
 }
 
+// nodeOperationInFlight reports whether this window still tracks a lifecycle
+// operation over targetKey. It is deliberately not filtered by recorded
+// completion, unlike conflictingOperation: this answers "is the row still
+// showing an operation status for this node", and the row keeps showing it
+// until finishOperation removes the operation from the map. Node lifecycle
+// operations carry the node's target key in both key sets; configuration,
+// environment, and node-create operations carry "configurations", "environments",
+// or "nodes", so they never suppress an existing node's terminal.
+func (a *vaxisTUIApp) nodeOperationInFlight(targetKey string) bool {
+	if strings.TrimSpace(targetKey) == "" {
+		return false
+	}
+
+	for _, operationID := range a.operationOrder {
+		operation := a.operations[operationID]
+		if operation == nil {
+			continue
+		}
+		if containsString(operation.EntryKeys, targetKey) || containsString(operation.ResourceKeys, targetKey) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // reapCompletedOperations applies every background operation that finished but
 // whose tuiOperationCompleteEvent never reached the loop. vaxis silently drops
 // posted events when its queue is full — precisely when the loop is busy — and
@@ -158,6 +184,13 @@ func (a *vaxisTUIApp) finishOperation(event tuiOperationCompleteEvent) {
 		// its reload, and its message-ring entries.
 		return
 	}
+	// Order matters and is load-bearing, not incidental: the operation is
+	// untracked here, before applyOperationResult requests the reload below.
+	// Dropping the overlay first is what makes that reload the moment the node
+	// reads as ready — its ensure pass opens the guest tab on the same frame the
+	// row stops saying "starting". Requesting the reload first would apply it
+	// against a row that still shows the overlay and withhold the tab until some
+	// later refresh.
 	delete(a.operations, event.OperationID)
 	for index, operationID := range a.operationOrder {
 		if operationID != event.OperationID {

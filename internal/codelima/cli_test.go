@@ -204,6 +204,37 @@ func TestNodeCreateCLIDefaultsDirectoryConfigurationAndMountedWorkspace(t *testi
 	}
 }
 
+// The credential import is opt-out on the CLI: no flag means the settings
+// default decides, and --no-import-auth is the only way the command turns it
+// off.
+func TestNodeCreateCLIOptsOutOfHostCredentialImport(t *testing.T) {
+	service, _ := newTestService(t)
+
+	defaultedAny, err := dispatchNode(context.Background(), service, []string{"create", "--slug", "auth-default"})
+	if err != nil {
+		t.Fatalf("node create error = %v", err)
+	}
+	if defaulted := defaultedAny.(Node); !defaulted.ImportHostAuth {
+		t.Fatalf("node create without the flag did not take the settings default: %+v", defaulted)
+	}
+
+	optedOutAny, err := dispatchNode(context.Background(), service, []string{"create", "--slug", "auth-opt-out", "--no-import-auth"})
+	if err != nil {
+		t.Fatalf("node create --no-import-auth error = %v", err)
+	}
+	if optedOut := optedOutAny.(Node); optedOut.ImportHostAuth {
+		t.Fatalf("--no-import-auth did not freeze the opt-out: %+v", optedOut)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"--home", t.TempDir(), "node", "create", "--help"}, strings.NewReader(""), &stdout, &stderr); code != ExitSuccess {
+		t.Fatalf("Run(node create --help) code = %d, stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "-no-import-auth") {
+		t.Fatalf("node create help does not document the opt-out:\n%s", stdout.String())
+	}
+}
+
 func TestNodeCLIRequiresExplicitSlugs(t *testing.T) {
 	service, _ := newTestService(t)
 	if _, err := dispatchNode(context.Background(), service, []string{"create"}); err == nil || !strings.Contains(err.Error(), "--slug") {

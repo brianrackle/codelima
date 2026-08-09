@@ -524,6 +524,20 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 		if nodeErr != nil {
 			return daemon.TerminalState{}, toDaemonError(nodeErr)
 		}
+		// Defense in depth for the TUI's own gate, and the only gate for any
+		// other client: a guest shell for a node whose record still has a
+		// lifecycle operation in flight would land in a VM that has booted but
+		// carries none of the agents the start is still installing. The durable
+		// record is read here rather than a runtime observation precisely
+		// because the observation cannot tell those two apart. Host shells are
+		// never gated; they are shells on this machine.
+		if reason := nodeGuestShellBlocked(node); reason != "" {
+			return daemon.TerminalState{}, toDaemonError(preconditionFailed(reason, map[string]any{
+				"node":   node.Slug,
+				"status": string(node.Status),
+				"target": params.Target,
+			}))
+		}
 		if params.Label == "" {
 			params.Label = node.Slug
 		}

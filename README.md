@@ -269,6 +269,11 @@ Host and guest terminals are tabs on the same node. A red top bar identifies a
 host tab. Host tabs stay useful while the VM is stopped because they run on the
 host in the node's project directory.
 
+A guest tab — and `codelima shell` — logs you in as the VM's ordinary user, the
+same one that owns your workspace and the installed agents, with passwordless
+`sudo` when you want it. That is what lets Claude Code run with
+`--dangerously-skip-permissions` inside a node: it refuses that flag as root.
+
 ### One project, several agents
 
 Create two nodes bound to the current directory:
@@ -289,6 +294,25 @@ codelima .
 Both sandboxes see the same mounted working tree by default but have independent
 operating systems and processes. Use separate worktrees when concurrent agents
 should not edit the same files.
+
+### Agents that are already signed in
+
+The first time a new node starts, codelima copies your git identity and agent
+logins into it so the agent inside can push and work without a second login:
+your standard `~/.ssh` keys, the `github.com` lines of your `known_hosts`, your
+`~/.gitconfig`, and the Codex and Claude Code credential caches (read from the
+macOS Keychain when Claude Code keeps them there). Anything you do not have is
+skipped with a warning — it never fails the node. Everything lands with private
+modes in both of the guest's homes, so it works in your terminal, in a `sudo`
+session, and for the agent's own tooling alike, and the contents never appear in
+a log or a node event.
+
+This happens once, at first start, and never again: each node refreshes its own
+copy of those tokens from then on, so a later import would sign the node out.
+Pass `--no-import-auth` to `codelima node create`, choose "skip" in the create
+dialog's Host Credentials field, or set `import_host_auth: false` in
+`~/.codelima/_config/settings.yaml` to opt out. A cloned node inherits whatever
+its source had, because it boots from the same disk.
 
 ### Many projects at once
 

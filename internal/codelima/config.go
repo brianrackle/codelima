@@ -37,7 +37,14 @@ type Config struct {
 	DefaultPorts        []string                `json:"default_ports" yaml:"default_ports"`
 	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands" yaml:"runtime_commands"`
 	AgentProfilesDir    string                  `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
-	Daemon              struct {
+	// ImportHostAuth is the default answer to "copy my git identity and agent
+	// credentials into new nodes". It is a DEFAULT, not a live switch: node
+	// creation freezes the resolved answer onto the node record, so flipping it
+	// here affects future nodes only. Absent from settings.yaml means true —
+	// the key is never written by the settings writer, so an operator turns the
+	// import off by adding `import_host_auth: false` by hand.
+	ImportHostAuth bool `json:"import_host_auth" yaml:"import_host_auth"`
+	Daemon         struct {
 		Autostart       bool   `json:"autostart" yaml:"autostart"`
 		Restore         string `json:"restore" yaml:"restore"`
 		VirtioFSReclaim bool   `json:"virtiofs_reclaim" yaml:"virtiofs_reclaim"`
@@ -51,6 +58,7 @@ func DefaultConfig(home string) Config {
 		DefaultImage:        "template:ubuntu",
 		DefaultPorts:        []string{},
 		RuntimeCommands:     defaultRuntimeCommandTemplates(),
+		ImportHostAuth:      true,
 	}
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
 	cfg.Daemon.Autostart = true
@@ -106,7 +114,8 @@ func LoadConfig(homeOverride string) (Config, error) {
 
 func (c Config) Summary() map[string]any {
 	return map[string]any{
-		"metadata_root": c.MetadataRoot,
+		"metadata_root":    c.MetadataRoot,
+		"import_host_auth": c.ImportHostAuth,
 		"daemon": map[string]any{
 			"autostart":        c.Daemon.Autostart,
 			"restore":          c.Daemon.Restore,

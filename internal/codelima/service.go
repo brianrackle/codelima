@@ -33,6 +33,10 @@ type Service struct {
 	logLevel       slog.Level
 	daemonClient   *daemonclient.Client
 	localTerminals bool
+	// hostAuth builds the collector that reads the host's credentials. It is a
+	// field so tests can point the import at a temp HOME instead of the real
+	// one; nothing else may substitute it.
+	hostAuth func() (hostAuthCollector, error)
 }
 
 // serviceReadiness caches the once-per-instance directory bootstrap for read
@@ -51,6 +55,11 @@ type NodeCreateInput struct {
 	Provider      string
 	WorkspaceMode string
 	Ports         []string
+	// ImportHostAuth overrides the settings default for this node only. A nil
+	// pointer is "no opinion" — the CLI flag and the TUI toggle are opt-outs
+	// layered over settings.yaml, and only an explicit answer should win over
+	// what the operator configured.
+	ImportHostAuth *bool
 }
 
 type NodeCloneInput struct {
@@ -82,6 +91,7 @@ func NewService(cfg Config, sandbox SandboxClient, stdin io.Reader, stdout, stde
 		ready:    &serviceReadiness{},
 		logger:   discardLogger(),
 		logLevel: slog.LevelInfo,
+		hostAuth: newHostAuthCollector,
 	}
 }
 
@@ -440,6 +450,41 @@ func nodeStatusInFlight(status NodeStatus) bool {
 	default:
 		return false
 	}
+}
+
+// nodeGuestShellBlocked reports why a node cannot serve a guest shell right
+// now, or "" when nothing about its own record blocks one. It is the single
+// domain rule behind both the TUI's terminal default and the daemon's
+// terminal.open precondition.
+//
+// The runtime reports a VM as running the moment Lima finishes booting it,
+// which on a first start is minutes before NodeStart has seeded the workspace,
+// installed the agents, imported host credentials, and validated the profile.
+// The node's own in-flight lifecycle state is the only record of that gap, so
+// it — not the runtime sighting — decides whether a guest shell exists to open.
+func nodeGuestShellBlocked(node Node) string {
+	switch node.Status {
+	case NodeStatusProvisioning, NodeStatusRegistering:
+		return fmt.Sprintf("node %s is still bootstrapping; its terminal opens when the start completes", node.Slug)
+	case NodeStatusTerminating:
+		return fmt.Sprintf("node %s is being deleted", node.Slug)
+	default:
+		return ""
+	}
+}
+
+// nodeStatusAcceptsRuntimeSighting reports whether a runtime observation may
+// overwrite a node's durable lifecycle state. ADR 37 merges observations into
+// read surfaces but preserves CodeLima-owned lifecycle metadata; failed and
+// terminated were always preserved, and the in-flight states are preserved for
+// the same reason. NodeStart marks a node provisioning before it boots the VM
+// and clears that only after bootstrap and validation, so promoting the record
+// to running on the first sighting of a booted VM erased the one fact that says
+// the guest is not usable yet.
+func nodeStatusAcceptsRuntimeSighting(status NodeStatus) bool {
+	return !nodeStatusInFlight(status) &&
+		status != NodeStatusFailed &&
+		status != NodeStatusTerminated
 }
 
 // claimNodeOperation takes the node's lifecycle liveness token or fails fast. A
@@ -853,6 +898,14 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		return Node{}, err
 	}
 
+	// Freeze the credential-import answer here, beside the other frozen fields:
+	// the settings value is only a default, and the node keeps whatever was
+	// true at creation for the rest of its life.
+	importHostAuth := s.cfg.ImportHostAuth
+	if input.ImportHostAuth != nil {
+		importHostAuth = *input.ImportHostAuth
+	}
+
 	var (
 		node      Node
 		bootstrap BootstrapState
@@ -905,30 +958,32 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 		}
 
 		node = Node{
-			ID:                 newID(),
-			Slug:               nodeSlug,
-			ConfigurationID:    configuration.ID,
-			ConfigurationSlug:  configuration.Slug,
-			DirectoryPath:      directoryPath,
-			Runtime:            runtime,
-			Provider:           provider,
-			SandboxName:        sandboxName,
-			Image:              configuration.Image,
-			VCPUs:              configuration.VCPUs,
-			MemoryMiB:          configuration.MemoryMiB,
-			DiskMiB:            configuration.DiskMiB,
-			Environments:       append([]string(nil), configuration.Environments...),
-			Ports:              ports,
-			Status:             NodeStatusCreated,
-			AgentProfileName:   profileName,
-			BootstrapCommands:  bootstrap.CombinedCommands(),
-			WorkspaceMode:      workspaceMode,
-			GuestWorkspacePath: directoryPath,
-			WorkspaceMountPath: workspaceMountPath,
-			WorkspaceSeeded:    false,
-			BootstrapCompleted: false,
-			CreatedAt:          s.now(),
-			UpdatedAt:          s.now(),
+			ID:                  newID(),
+			Slug:                nodeSlug,
+			ConfigurationID:     configuration.ID,
+			ConfigurationSlug:   configuration.Slug,
+			DirectoryPath:       directoryPath,
+			Runtime:             runtime,
+			Provider:            provider,
+			SandboxName:         sandboxName,
+			Image:               configuration.Image,
+			VCPUs:               configuration.VCPUs,
+			MemoryMiB:           configuration.MemoryMiB,
+			DiskMiB:             configuration.DiskMiB,
+			Environments:        append([]string(nil), configuration.Environments...),
+			Ports:               ports,
+			Status:              NodeStatusCreated,
+			AgentProfileName:    profileName,
+			BootstrapCommands:   bootstrap.CombinedCommands(),
+			WorkspaceMode:       workspaceMode,
+			GuestWorkspacePath:  directoryPath,
+			WorkspaceMountPath:  workspaceMountPath,
+			WorkspaceSeeded:     false,
+			ImportHostAuth:      importHostAuth,
+			AuthImportCompleted: false,
+			BootstrapCompleted:  false,
+			CreatedAt:           s.now(),
+			UpdatedAt:           s.now(),
 		}
 
 		// The token is what tells cleanup-incomplete that this reservation
@@ -1298,6 +1353,37 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		}
 	}
 
+	// The credential import belongs here and nowhere else. NodeCreate only
+	// renders a template and runs `limactl create`, which leaves the instance
+	// stopped — there is no guest to copy into at creation time. The first
+	// moment a guest is running is right here, and running before workspace
+	// seeding and the bootstrap loop is what makes the agent that gets
+	// validated at the end of this function an already-authenticated one.
+	//
+	// The gate is the node's own record, not this call: AuthImportCompleted
+	// survives a failed start, so a retry re-runs bootstrap without re-copying
+	// credentials the guest may already have rotated.
+	if !node.AuthImportCompleted {
+		if node.ImportHostAuth {
+			if err := s.importHostAuth(ctx, node); err != nil {
+				node.Status = NodeStatusFailed
+				node.UpdatedAt = s.now()
+				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.auth.import.failed", Fields: map[string]any{"error": err.Error()}})
+				return Node{}, err
+			}
+		} else {
+			s.log().Info("skipping host credential import", "node", node.ID, "reason", "disabled for this node at creation")
+		}
+
+		node.AuthImportCompleted = true
+		node.UpdatedAt = s.now()
+		if err := s.withLocks(ctx, nil, []string{node.ID}, func() error {
+			return s.store.SaveNode(node, bootstrap)
+		}); err != nil {
+			return Node{}, err
+		}
+	}
+
 	bootstrapRan := !bootstrap.Completed
 	if bootstrapRan {
 		if !node.WorkspaceSeeded {
@@ -1609,29 +1695,36 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		}
 
 		cloneTarget = Node{
-			ID:                   newID(),
-			Slug:                 childNodeSlug,
-			ConfigurationID:      sourceNode.ConfigurationID,
-			ConfigurationSlug:    sourceNode.ConfigurationSlug,
-			DirectoryPath:        sourceNode.DirectoryPath,
-			ParentNodeID:         sourceNode.ID,
-			Runtime:              RuntimeVM,
-			Provider:             ProviderLima,
-			SandboxName:          sandboxName,
-			Image:                sourceNode.Image,
-			VCPUs:                sourceNode.VCPUs,
-			MemoryMiB:            sourceNode.MemoryMiB,
-			DiskMiB:              sourceNode.DiskMiB,
-			Environments:         append([]string(nil), sourceNode.Environments...),
-			Ports:                append([]string(nil), sourceNode.Ports...),
-			Status:               NodeStatusCreated,
-			AgentProfileName:     sourceNode.AgentProfileName,
-			RuntimeCommands:      sourceNode.RuntimeCommands,
-			BootstrapCommands:    append([]string(nil), sourceNode.BootstrapCommands...),
-			WorkspaceMode:        nodeWorkspaceMode(sourceNode),
-			GuestWorkspacePath:   sourceNode.GuestWorkspacePath,
-			WorkspaceMountPath:   sourceNode.WorkspaceMountPath,
-			WorkspaceSeeded:      sourceNode.WorkspaceSeeded,
+			ID:                 newID(),
+			Slug:               childNodeSlug,
+			ConfigurationID:    sourceNode.ConfigurationID,
+			ConfigurationSlug:  sourceNode.ConfigurationSlug,
+			DirectoryPath:      sourceNode.DirectoryPath,
+			ParentNodeID:       sourceNode.ID,
+			Runtime:            RuntimeVM,
+			Provider:           ProviderLima,
+			SandboxName:        sandboxName,
+			Image:              sourceNode.Image,
+			VCPUs:              sourceNode.VCPUs,
+			MemoryMiB:          sourceNode.MemoryMiB,
+			DiskMiB:            sourceNode.DiskMiB,
+			Environments:       append([]string(nil), sourceNode.Environments...),
+			Ports:              append([]string(nil), sourceNode.Ports...),
+			Status:             NodeStatusCreated,
+			AgentProfileName:   sourceNode.AgentProfileName,
+			RuntimeCommands:    sourceNode.RuntimeCommands,
+			BootstrapCommands:  append([]string(nil), sourceNode.BootstrapCommands...),
+			WorkspaceMode:      nodeWorkspaceMode(sourceNode),
+			GuestWorkspacePath: sourceNode.GuestWorkspacePath,
+			WorkspaceMountPath: sourceNode.WorkspaceMountPath,
+			WorkspaceSeeded:    sourceNode.WorkspaceSeeded,
+			ImportHostAuth:     sourceNode.ImportHostAuth,
+			// A clone copies the source's disk, so whatever the source imported
+			// is already inside the image the child boots from. Inheriting the
+			// completed marker is therefore the only correct answer: re-running
+			// the import on the child would overwrite the cloned credentials —
+			// which the source may have rotated since — with the host's.
+			AuthImportCompleted:  sourceNode.AuthImportCompleted,
 			BootstrapCompleted:   bootstrap.Completed,
 			BootstrapCompletedAt: bootstrap.CompletedAt,
 			CreatedAt:            s.now(),
@@ -1798,6 +1891,15 @@ func (s *Service) NodeLogs(ctx context.Context, value string) ([]Event, error) {
 	return s.store.NodeEvents(node.ID)
 }
 
+// Shell is CodeLima's single user-surface entry into a guest: it backs the
+// `codelima shell` verb and, through TerminalLaunchSpec re-entering the binary
+// as `codelima shell <nodeID>`, every managed guest terminal.
+//
+// It runs as the Lima login user, interactive or not. That is the guest's
+// native identity — the one agents, imported credentials, and the workspace
+// mount all belong to — and it is what a user gets when they type `ssh`. A
+// caller who wants root types `sudo` inside the session, exactly as they would
+// anywhere else (ADR 129).
 func (s *Service) Shell(ctx context.Context, value string, command []string) error {
 	if err := s.EnsureReady(ctx, false); err != nil {
 		return err
@@ -1814,7 +1916,7 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 	if interactive {
 		command = interactiveShellLaunchCommand()
 	}
-	return s.sandbox.Shell(ctx, node, command, workdir, interactive, ShellStreams{
+	return s.sandbox.Shell(ctx, node, guestLoginUser, command, workdir, interactive, ShellStreams{
 		Stdin:  s.stdin,
 		Stdout: s.stdout,
 		Stderr: s.stderr,
@@ -2065,6 +2167,14 @@ func (s *Service) runBootstrapGuestCommand(ctx context.Context, node Node, comma
 	return s.runGuestCommand(bootstrapCtx, node, command)
 }
 
+// runGuestCommand runs one service-issued provisioning command — a frozen
+// bootstrap/agent-install step or the agent validation probe — as root.
+//
+// These are the commands CodeLima issues on the user's behalf, not commands the
+// user typed, and they need the privileges provisioning needs: apt, NodeSource,
+// and the `/usr/local/bin` agent links. The built-in definitions drop to the
+// login user themselves for the parts that must be user-owned, reading it out
+// of `SUDO_USER`, which is exactly what this root wrap supplies (ADR 116).
 func (s *Service) runGuestCommand(ctx context.Context, node Node, command string) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
@@ -2078,7 +2188,7 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		// shellQuote is the same helper the adjacent seeding path uses.
 		script = "cd " + shellQuote(workdir) + " && " + command
 	}
-	return s.sandbox.Shell(ctx, node, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+	return s.sandbox.Shell(ctx, node, guestRootUser, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
 }
 
 func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, error) {
@@ -2094,9 +2204,12 @@ func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, 
 			continue
 		}
 		reclaimCtx, cancel := context.WithTimeout(ctx, guestFilesystemCacheReclaimTimeout)
+		// Root: the reclaim writes /proc/sys/vm/drop_caches, which no
+		// unprivileged user may open for writing.
 		shellErr := s.sandbox.Shell(
 			reclaimCtx,
 			node,
+			guestRootUser,
 			[]string{"sh", "-c", "echo 2 > /proc/sys/vm/drop_caches"},
 			"",
 			false,
@@ -2125,6 +2238,15 @@ func (s *Service) prepareGuestWorkspace(ctx context.Context, node Node) error {
 	return s.seedGuestWorkspace(ctx, node)
 }
 
+// seedGuestWorkspace materializes a copy-mode workspace inside the guest, and
+// the two halves run as deliberately different identities.
+//
+// The prepare command is root: it removes whatever tree a prior attempt left,
+// creates the target's parent anywhere on the guest filesystem, and hands that
+// parent to the login user. The copy that follows is `limactl cp`, which
+// travels over Lima's SSH login and therefore writes the whole seeded tree as
+// the login user. That is what leaves a copy-mode workspace writable by the
+// terminal the user actually types into (ADR 129).
 func (s *Service) seedGuestWorkspace(ctx context.Context, node Node) error {
 	targetPath := s.nodeGuestWorkspacePath(node)
 	sourcePath := node.DirectoryPath
@@ -2133,7 +2255,7 @@ func (s *Service) seedGuestWorkspace(ctx context.Context, node Node) error {
 		return err
 	}
 
-	if err := s.sandbox.Shell(ctx, node, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
+	if err := s.sandbox.Shell(ctx, node, guestRootUser, []string{"sh", "-lc", prepareScript}, "", false, ShellStreams{}); err != nil {
 		return err
 	}
 
@@ -2303,11 +2425,11 @@ func (s *Service) reconcileNodeWithObservations(node Node, observations []Runtim
 		node.LastRuntimeObservation = &observation
 		switch observation.Status {
 		case ObservationRunning:
-			if node.Status != NodeStatusFailed && node.Status != NodeStatusTerminating && node.Status != NodeStatusTerminated {
+			if nodeStatusAcceptsRuntimeSighting(node.Status) {
 				node.Status = NodeStatusRunning
 			}
 		case ObservationStopped:
-			if node.Status != NodeStatusFailed && node.Status != NodeStatusTerminating && node.Status != NodeStatusTerminated {
+			if nodeStatusAcceptsRuntimeSighting(node.Status) {
 				node.Status = NodeStatusStopped
 			}
 		}

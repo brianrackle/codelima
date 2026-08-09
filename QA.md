@@ -42,7 +42,7 @@ Verify:
 
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
 - schema version is `4`
-- seed version is `6`
+- seed version is `7`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
 - `small` is the implicit default and exists with 2 CPUs, 4096 MiB memory, 25600 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
 - the configuration list contains only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 2/4096/25600, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments
@@ -154,16 +154,21 @@ grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ./bin/codelima shell qa-v3-root -- sh -lc 'test -f .qa-tools-installed && printf bootstrap-ok'
 ./bin/codelima shell qa-v3-root -- sh -lc '
   test "$(node -p '\''process.versions.node.split(".")[0]'\'')" -ge 22
-  guest_user="${SUDO_USER:-$(id -un)}"
+  guest_user="$(id -un)"
+  test "$guest_user" != root
   guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"
   test -n "$guest_home"
-  test "$(sudo -u "$guest_user" -H env HOME="$guest_home" npm config get prefix)" = "$guest_home/.local"
+  test "$HOME" = "$guest_home"
+  test "$(npm config get prefix)" = "$guest_home/.local"
   test "$(stat -c %U "$guest_home/.local/lib/node_modules/@openai/codex")" = "$guest_user"
   test "$(stat -c %U "$guest_home/.local/lib/node_modules/@anthropic-ai/claude-code")" = "$guest_user"
   test "$(readlink /usr/local/bin/codex)" = "$guest_home/.local/bin/codex"
   test "$(readlink /usr/local/bin/claude)" = "$guest_home/.local/bin/claude"
-  sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" codex --version
-  sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" claude --version
+  test "$(command -v codex)" = "$guest_home/.local/bin/codex"
+  test "$(command -v claude)" = "$guest_home/.local/bin/claude"
+  codex --version
+  claude --version
+  sudo -n id -un
 '
 ./bin/codelima node status qa-v3-root
 ./bin/codelima node stop qa-v3-root
@@ -171,12 +176,42 @@ grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ```
 
 Verify bootstrap prints `bootstrap-ok`; Node reports major version 22 or newer;
-both agent version commands succeed as the Lima login user; both npm package
-trees are owned by that user; the npm prefix is that user's `~/.local`; the two
-`/usr/local/bin` links target that prefix; the first status is running; and the
-final status is stopped. Review runtime diagnostics to confirm the VM uses the
-node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must not invoke an
-`msb` subprocess.
+`codelima shell` runs as the Lima login user rather than root, with that user's
+`$HOME`; both agent version commands succeed with no privilege wrapper; both
+resolve out of `~/.local/bin`, which the Ubuntu `~/.profile` prepends to `PATH`
+ahead of the `/usr/local/bin` links that target the same binaries; both npm
+package trees are owned by that user; the npm prefix is that user's `~/.local`;
+the two `/usr/local/bin` links target that prefix; passwordless `sudo` still
+reports `root`, so a user who wants root has it on request; the first status is
+running; and the final status is stopped. Review runtime diagnostics to confirm
+the VM uses the node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must
+not invoke an `msb` subprocess.
+
+Confirm the login user owns and can write its workspace in both modes. `mounted`
+is `qa-v3-root`, already started above; `copy` is `qa-v3-prefix`, whose tree is
+seeded by `limactl cp` over the same SSH login:
+
+```sh
+./bin/codelima node start qa-v3-prefix
+for node in qa-v3-root qa-v3-prefix; do
+  ./bin/codelima shell "$node" -- sh -lc '
+    test "$(stat -c %U .)" = "$(id -un)"
+    printf ok > .qa-workspace-write
+    rm -f .qa-workspace-write
+    pwd
+  '
+done
+```
+
+Verify each command prints the node's own workspace path, the workspace is owned
+by the login user in both modes, and the unprivileged write succeeds. A
+pre-existing node whose workspace was made root-owned by a custom root bootstrap
+command is repaired by hand from its own terminal — seeding is once-only and
+CodeLima never re-chowns a workspace on start:
+
+```sh
+./bin/codelima shell qa-v3-prefix -- sh -lc 'sudo chown -R "$(id -un):$(id -gn)" "$PWD"'
+```
 
 On a macOS arm64 host where `doctor` reports `nested virtualization is enabled automatically`, verify every rendered node template reports `nestedVirtualization: true` and, while the node is running, this succeeds:
 
@@ -363,6 +398,13 @@ a second, the complete word remains stable after roughly 2.67 seconds, and
 navigation remains responsive throughout.
 
 After the TUI renders, launch the same command from a second real terminal. Confirm the second TUI starts normally and the first does not show an input-ownership warning. Return host focus to the first window and open a terminal tab, then return host focus to the second window and open another terminal tab. Repeat the switch once more in each direction; every newly focused window must work immediately and neither window may show an ownership-revoked message. Quit one TUI, then leave the remaining TUI idle for at least 35 seconds before opening a new terminal tab or switching between guest and host terminals.
+
+In an active guest tab, run `id -un` and `echo "$HOME"`. Verify the tab is the
+Lima login user with that user's home, not `root` and not `/root`. Run `sudo id
+-un` and verify it answers `root` without a password prompt. Then run `claude
+--dangerously-skip-permissions` and verify it starts instead of refusing: Claude
+Code declines that flag when it is run as root, which is the whole point of the
+login-user terminal. Exit the agent before continuing.
 
 Copy and paste these two lines into an active guest or host shell, without pressing Enter:
 

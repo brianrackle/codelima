@@ -79,6 +79,7 @@ A `Node` is a Lima VM bound to one canonical host directory:
 - frozen image, vCPUs, memory, disk, environments, bootstrap commands, and agent profile
 - optional explicit published ports
 - workspace mode and guest/mount paths
+- frozen host-credential import choice and its one-shot completion marker
 - durable bootstrap and lifecycle state
 - creation, update, and optional deletion timestamps
 
@@ -94,6 +95,8 @@ Node cloning requires a new slug and retains the source directory, configuration
 - `mounted`: one writable mount exposes the host directory at the same absolute path in the guest.
 
 New nodes default to `mounted`. `copy` remains an explicit creation option. Existing persisted nodes retain their recorded mode; blank workspace metadata from versions that predate explicit modes continues to mean `copy`.
+
+Both modes leave the guest workspace owned by Lima's login user, which is the identity a managed terminal runs as. In `copy` mode the root prepare command hands the seed target's parent to that user and `limactl cp` — which travels over Lima's SSH login — writes the tree itself. In `mounted` mode the Lima mount maps the host user's files to the guest login user. Seeding happens once, so a workspace whose contents were later made root-owned by a root bootstrap command is repaired by hand from the node's own terminal with `sudo chown -R "$(id -un):$(id -gn)" <workspace>`.
 
 Recursive copy uses `limactl copy`; workspace preparation and bootstrap execute through the Lima shell boundary.
 
@@ -123,7 +126,7 @@ terminal open|close|list|read|send|takeover
 
 There is no `project` command. `config show` is replaced by `settings show` so “configuration” unambiguously means the reusable VM recipe.
 
-`node create` requires `--slug`; `--configuration` defaults to `small`; `--directory` defaults to the current directory; and `--workspace-mode` defaults to `mounted`. It may explicitly select `copy` and explicit `--port HOST:GUEST`. It cannot override image, agent, environments, bootstrap, or VM resources.
+`node create` requires `--slug`; `--configuration` defaults to `small`; `--directory` defaults to the current directory; and `--workspace-mode` defaults to `mounted`. It may explicitly select `copy` and explicit `--port HOST:GUEST`. `--no-import-auth` opts the new node out of the host credential import; without the flag the settings default applies. It cannot override image, agent, environments, bootstrap, or VM resources.
 
 `node clone <source> --slug <new>` requires the new slug and does not accept configuration-owned overrides.
 
@@ -145,9 +148,11 @@ The left pane is a flat node list. Each fixed-height node block shows:
 
 There are no project rows. Global actions manage configurations and environments. Node actions create, start, stop, clone, and delete nodes.
 
-The directory field in the create dialog is blank with the canonical current directory displayed as a muted placeholder. Configuration defaults to `small` and workspace mode defaults to `mounted`. Clone requires an explicit blank-by-default slug and retains the source directory/configuration.
+The directory field in the create dialog is blank with the canonical current directory displayed as a muted placeholder. Configuration defaults to `small` and workspace mode defaults to `mounted`. A host-credentials field defaults to the settings value and can be set to skip. Clone requires an explicit blank-by-default slug and retains the source directory/configuration.
 
 Guest and host terminals are ordinary tabs of the selected node target. `Option+t` opens a fresh guest tab; `Option+Shift+t` opens a fresh host tab rooted in the node directory. `Option+Left`, `Option+Right`, and `Option+w` switch and close either kind uniformly. The red top bar follows the active node-host tab. Terminal creation reads durable node metadata without live runtime reconciliation, so a host tab remains available while the node is stopped or Lima is unavailable.
+
+Selecting a node defaults the pane to its terminal and ensures one guest tab, but only once the node's own record clears its in-flight lifecycle state and the window is showing no lifecycle status of its own for that node: a start that has booted the VM and is still seeding, bootstrapping, or validating shows the info view with that status instead, and so does a node whose row is displaying this window's `starting`, `stopping`, `cloning`, or `deleting` operation — the terminal never contradicts the status on the row. The guest tab appears when the operation completes, on the reload that completion drives. Guest opens for a node whose record is mid-lifecycle are refused with the reason by both the TUI and `terminal.open`. Host tabs and already-open tabs are never gated this way.
 
 ## Lima runtime mapping
 
@@ -164,8 +169,15 @@ YAML structurally, and renders:
 
 The private rendered template must pass `limactl validate` before `limactl
 create`. Lifecycle, list, copy, shell, and clone use Lima commands. Lima logs in
-as an unprivileged distribution user, so noninteractive CodeLima guest commands
-are wrapped once with `sudo -H --` to preserve the existing root contract.
+as an unprivileged distribution user, and which guest identity a command runs as
+is an explicit argument at the runtime boundary, never inferred from the command
+text. Managed terminals and `codelima shell <node>` — with or without an
+explicit command — run as that login user, which is the identity agents,
+imported credentials, and the workspace mount all belong to. Service-issued
+provisioning commands are wrapped once with `sudo -H --`: workspace seed
+preparation, frozen bootstrap and agent-install steps, the agent validation
+probe, imported-credential placement, and VirtioFS cache reclaim. A user who
+wants root in a terminal types `sudo`, which Lima leaves passwordless.
 
 Runtime commands that still resolve to the built-in definitions execute as argv
 without a host shell, so host shell profile output can never corrupt
@@ -179,12 +191,41 @@ Creation validates the home, configuration, directory, agent profile, ports, and
 
 Start reconciles live runtime state, starts the sandbox if needed, seeds copy-mode workspaces once, runs frozen agent installation and bootstrap commands once, validates the agent as Lima's unprivileged login user, and persists running state. Frozen custom bootstrap state remains authoritative. As a narrow repair exception, a command sequence or agent-profile validator that exactly matches a known defective former built-in definition is upgraded to the current built-in definition on start, recorded as `node.bootstrap.migrated`, and rerun before completion. Failed bootstrap persists failed lifecycle state and a failure event.
 
+### Host credential import
+
+The first start of a new node imports the host user's git identity and agent credentials into the guest, once, before workspace seeding, bootstrap, and agent validation. `limactl create` leaves the instance stopped, so first start is the earliest running guest; the step never repeats, because the copied caches carry refresh tokens each guest then rotates independently.
+
+Imported when present on the host, skipped with a warning when absent:
+
+| Artifact | Host source | Home-relative guest path | Mode |
+| --- | --- | --- | --- |
+| standard SSH identities `id_ed25519`, `id_ecdsa`, `id_rsa` | `~/.ssh/<name>` | `.ssh/<name>` | `0600` |
+| their public halves | `~/.ssh/<name>.pub` | `.ssh/<name>.pub` | `0644` |
+| `github.com` host keys | plaintext `~/.ssh/known_hosts` lines | `.ssh/known_hosts` | `0644` |
+| `github.com` accept-new fallback | synthesized when no plaintext line matches | `.ssh/config` | `0600` |
+| git configuration | `~/.gitconfig` | `.gitconfig` | `0644` |
+| Codex auth cache | `$CODEX_HOME/auth.json`, else `~/.codex/auth.json` | `.codex/auth.json` | `0600` |
+| Claude Code credentials | `~/.claude/.credentials.json`, else the darwin login Keychain | `.claude/.credentials.json` | `0600` |
+
+Every artifact is installed into **both** guest homes with identical contents and modes: the login user's home, owned by the login user, and root's home, owned by root. The guest has two working identities and an agent may be reached through either. The login user is the primary one — bootstrap, agent installation, the validation probe, managed terminals, and `codelima shell` all run as it. Root's home covers explicitly privileged sessions: a `sudo -i` or `sudo <agent>` the user types, and CodeLima's own service-issued provisioning commands, all of which run with `HOME=/root`. Root's home is read from passwd, which is what `sudo -H` uses, falling back to `/root`; CodeLima recognizes no other privileged user. The two copies refresh independently from the moment they are written.
+
+`.ssh`, `.codex`, and `.claude` are created `0700` in each home. Hashed `known_hosts` entries cannot be matched by hostname, so a host that has only hashed entries gets the accept-new fallback instead. SSH material is imported only when at least one identity was found. A Keychain read is bounded by a timeout; a denied or unanswered prompt is a skip.
+
+Each artifact is read from the host and copied to the guest exactly once, into a per-node `0700` staging directory owned by the login user. One root command then installs the staged files into both homes with their final owner and mode and removes the staging directory; either pass failing fails the whole placement, so the two homes never diverge in which artifacts they carry. Secret content never appears in argv, logs, error messages, or events. A secret with no host file of its own is staged in a `0600` host temp file that is removed afterward.
+
+The node event `node.auth.imported` records artifact names and skip reasons only, never contents. A missing host artifact is never a creation failure; a failure to place files in the guest fails the start with `node.auth.import.failed`.
+
+The choice is frozen at creation from `import_host_auth` in settings.yaml (absent means enabled), overridable per node by `node create --no-import-auth` and by the TUI create dialog. `node clone` inherits both the source's frozen choice and its completed marker, because the clone boots from a disk that already carries the imported credentials.
+
 Stop is idempotent against an already-stopped instance. Delete marks termination in progress, tears down the instance, then soft-deletes node metadata. Incomplete metadata cleanup tears down a referenced live instance before removing its directory.
 
 Direct CLI reads reconcile from `limactl list --json`. The daemon seeds one
 list and then owns `limactl watch --json`; recurring TUI and forwarding reads
 use the observation cache and do not spawn a recurring list process. Runtime
-truth is not persisted by ordinary reads. Once per second, the daemon's
+truth is not persisted by ordinary reads, and it never overwrites a
+CodeLima-owned lifecycle state: failed, terminated, and every in-flight status
+survive a contradicting sighting, so a node that is booted but still starting
+reads as its in-flight status rather than as running. Once per second, the daemon's
 existing persistent SSH peer for each running node reads aggregate Linux CPU
 counters, memory totals, and root-filesystem disk usage with listener discovery.
 Consecutive CPU samples produce normalized `0..100%` guest utilization; the

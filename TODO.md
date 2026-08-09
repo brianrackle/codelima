@@ -886,10 +886,10 @@ Problem:
 - Writing `2` to `/proc/sys/vm/drop_caches` requires guest root or the
   equivalent `CAP_SYS_ADMIN` privilege. The current reclaimer executes
   `sh -c 'echo 2 > /proc/sys/vm/drop_caches'` without checking either.
-- Lima logs in as its distribution user and CodeLima wraps noninteractive
-  guest commands with passwordless `sudo -H --`, so the command is expected to
-  run as root for the shipped template; custom templates can still violate
-  that elevation contract.
+- Lima logs in as its distribution user and CodeLima wraps service-issued guest
+  commands — the reclaimer among them — with passwordless `sudo -H --`, so the
+  command is expected to run as root for the shipped template; custom templates
+  can still violate that elevation contract (ADR 129).
 - Unit coverage currently uses a fake guest shell. Native macOS QA has not yet
   demonstrated that the real command can write the sysctl and release host
   descriptors. An unprivileged node reports a generic reclaim error and then

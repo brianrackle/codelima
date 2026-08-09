@@ -22,6 +22,31 @@ type ShellStreams struct {
 	Stderr io.Writer
 }
 
+// guestIdentity names the guest user one runtime command runs as. It is an
+// explicit argument at the Shell seam, decided by the calling surface and
+// never inferred from the command text: which identity a command needs is a
+// property of who issued it, not of what it happens to spell.
+//
+// The split is by surface (ADR 129). Everything the user typed — a managed
+// terminal, `codelima shell <node>`, `codelima shell <node> -- <cmd>` — runs as
+// guestLoginUser. Only service-issued provisioning runs as guestRootUser.
+type guestIdentity string
+
+const (
+	// guestLoginUser is Lima's own instance user: the identity `limactl shell`
+	// logs in as, the one the workspace mount maps host files to, and the one
+	// the coding agents and the imported host credentials are installed for
+	// (ADRs 116, 118, 128). It is the guest's native identity, so a managed
+	// terminal is left in it and a user who wants root types `sudo`.
+	guestLoginUser guestIdentity = "login"
+
+	// guestRootUser crosses Lima's passwordless sudo boundary with
+	// `sudo -H --`. It is reserved for service-issued provisioning: bootstrap
+	// and agent validation, workspace seed preparation, imported-credential
+	// placement, and guest filesystem cache reclaim.
+	guestRootUser guestIdentity = "root"
+)
+
 type SandboxClient interface {
 	Version(ctx context.Context) (string, error)
 	ResolveCommands(node Node, kind runtimeCommandKind, values map[string]string) ([]string, error)
@@ -32,7 +57,7 @@ type SandboxClient interface {
 	Delete(ctx context.Context, node Node) error
 	Clone(ctx context.Context, sourceNode, targetNode Node) error
 	CopyToGuest(ctx context.Context, node Node, sourcePath, targetPath string, recursive bool) error
-	Shell(ctx context.Context, node Node, command []string, workdir string, interactive bool, streams ShellStreams) error
+	Shell(ctx context.Context, node Node, identity guestIdentity, command []string, workdir string, interactive bool, streams ShellStreams) error
 }
 
 // uncachedSandboxLister is the optional half of SandboxClient implemented by

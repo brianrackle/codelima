@@ -128,37 +128,49 @@ type RuntimeObservation struct {
 }
 
 type Node struct {
-	ID                     string                  `json:"id" yaml:"id"`
-	Slug                   string                  `json:"slug" yaml:"slug"`
-	ConfigurationID        string                  `json:"configuration_id" yaml:"configuration_id"`
-	ConfigurationSlug      string                  `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
-	DirectoryPath          string                  `json:"directory_path" yaml:"directory_path"`
-	ParentNodeID           string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
-	Runtime                string                  `json:"runtime" yaml:"runtime"`
-	Provider               string                  `json:"provider" yaml:"provider"`
-	SandboxName            string                  `json:"sandbox_name" yaml:"sandbox_name"`
-	Image                  string                  `json:"image" yaml:"image"`
-	VCPUs                  uint8                   `json:"vcpus" yaml:"vcpus"`
-	MemoryMiB              uint32                  `json:"memory_mib" yaml:"memory_mib"`
-	DiskMiB                uint32                  `json:"disk_mib" yaml:"disk_mib"`
-	Environments           []string                `json:"environments" yaml:"environments"`
-	Ports                  []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
-	Status                 NodeStatus              `json:"status" yaml:"status"`
-	LifecycleState         NodeStatus              `json:"-" yaml:"-"`
-	AgentProfileName       string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
-	RuntimeCommands        RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
-	BootstrapCommands      []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
-	WorkspaceMode          string                  `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
-	GuestWorkspacePath     string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
-	WorkspaceMountPath     string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
-	WorkspaceSeeded        bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
-	BootstrapCompleted     bool                    `json:"bootstrap_completed" yaml:"bootstrap_completed"`
-	BootstrapCompletedAt   *time.Time              `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
-	CreatedAt              time.Time               `json:"created_at" yaml:"created_at"`
-	UpdatedAt              time.Time               `json:"updated_at" yaml:"updated_at"`
-	DeletedAt              *time.Time              `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
-	LastReconciledAt       *time.Time              `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
-	LastRuntimeObservation *RuntimeObservation     `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
+	ID                 string                  `json:"id" yaml:"id"`
+	Slug               string                  `json:"slug" yaml:"slug"`
+	ConfigurationID    string                  `json:"configuration_id" yaml:"configuration_id"`
+	ConfigurationSlug  string                  `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
+	DirectoryPath      string                  `json:"directory_path" yaml:"directory_path"`
+	ParentNodeID       string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime            string                  `json:"runtime" yaml:"runtime"`
+	Provider           string                  `json:"provider" yaml:"provider"`
+	SandboxName        string                  `json:"sandbox_name" yaml:"sandbox_name"`
+	Image              string                  `json:"image" yaml:"image"`
+	VCPUs              uint8                   `json:"vcpus" yaml:"vcpus"`
+	MemoryMiB          uint32                  `json:"memory_mib" yaml:"memory_mib"`
+	DiskMiB            uint32                  `json:"disk_mib" yaml:"disk_mib"`
+	Environments       []string                `json:"environments" yaml:"environments"`
+	Ports              []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
+	Status             NodeStatus              `json:"status" yaml:"status"`
+	LifecycleState     NodeStatus              `json:"-" yaml:"-"`
+	AgentProfileName   string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
+	RuntimeCommands    RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
+	BootstrapCommands  []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	WorkspaceMode      string                  `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded    bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
+	// ImportHostAuth is the creation-time answer to the host credential import,
+	// frozen exactly like image and resources: changing the settings default
+	// later never revisits an existing node. A record written before the field
+	// existed decodes as false, which is the safe reading — nobody chose an
+	// import for it.
+	ImportHostAuth bool `json:"import_host_auth" yaml:"import_host_auth"`
+	// AuthImportCompleted is the one-shot marker, in the shape of
+	// WorkspaceSeeded. It is set once the creation-time import step has been
+	// carried out — whether it copied anything or was declined — so a retried
+	// or repeated start never re-imports over credentials the guest has since
+	// rotated.
+	AuthImportCompleted    bool                `json:"auth_import_completed" yaml:"auth_import_completed"`
+	BootstrapCompleted     bool                `json:"bootstrap_completed" yaml:"bootstrap_completed"`
+	BootstrapCompletedAt   *time.Time          `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
+	CreatedAt              time.Time           `json:"created_at" yaml:"created_at"`
+	UpdatedAt              time.Time           `json:"updated_at" yaml:"updated_at"`
+	DeletedAt              *time.Time          `json:"deleted_at,omitempty" yaml:"deleted_at,omitempty"`
+	LastReconciledAt       *time.Time          `json:"last_reconciled_at,omitempty" yaml:"last_reconciled_at,omitempty"`
+	LastRuntimeObservation *RuntimeObservation `json:"last_runtime_observation,omitempty" yaml:"last_runtime_observation,omitempty"`
 }
 
 type nodeFileWire struct {
@@ -185,6 +197,8 @@ type nodeFileWire struct {
 	GuestWorkspacePath   string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
 	WorkspaceMountPath   string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
 	WorkspaceSeeded      bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
+	ImportHostAuth       bool                    `json:"import_host_auth" yaml:"import_host_auth"`
+	AuthImportCompleted  bool                    `json:"auth_import_completed" yaml:"auth_import_completed"`
 	BootstrapCompleted   bool                    `json:"bootstrap_completed" yaml:"bootstrap_completed"`
 	BootstrapCompletedAt *time.Time              `json:"bootstrap_completed_at,omitempty" yaml:"bootstrap_completed_at,omitempty"`
 	CreatedAt            time.Time               `json:"created_at" yaml:"created_at"`
@@ -258,6 +272,8 @@ func newNodeFileWire(node Node) nodeFileWire {
 		GuestWorkspacePath:   node.GuestWorkspacePath,
 		WorkspaceMountPath:   node.WorkspaceMountPath,
 		WorkspaceSeeded:      node.WorkspaceSeeded,
+		ImportHostAuth:       node.ImportHostAuth,
+		AuthImportCompleted:  node.AuthImportCompleted,
 		BootstrapCompleted:   node.BootstrapCompleted,
 		BootstrapCompletedAt: node.BootstrapCompletedAt,
 		CreatedAt:            node.CreatedAt,
@@ -302,6 +318,8 @@ func (w nodeFileWire) node() Node {
 		GuestWorkspacePath:   w.GuestWorkspacePath,
 		WorkspaceMountPath:   w.WorkspaceMountPath,
 		WorkspaceSeeded:      w.WorkspaceSeeded,
+		ImportHostAuth:       w.ImportHostAuth,
+		AuthImportCompleted:  w.AuthImportCompleted,
 		BootstrapCompleted:   w.BootstrapCompleted,
 		BootstrapCompletedAt: w.BootstrapCompletedAt,
 		CreatedAt:            w.CreatedAt,

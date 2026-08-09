@@ -67,10 +67,15 @@ YAML and repeat it as an idempotent lifecycle flag; nested virtualization uses
 this pattern with Apple's authoritative VZ capability query and
 `limactl start --nested-virt`.
 
-Lima logs in as an unprivileged distribution user. Preserve CodeLima's existing
-root guest-command contract at one boundary by prefixing noninteractive
-commands with `sudo -H --`; do not scatter privilege changes through bootstrap
-or workspace code.
+Lima logs in as an unprivileged distribution user, and that login user is the
+guest's native identity: it owns the workspace in both modes, the agent
+installs, and the imported credentials. Which identity a guest command runs as
+is an explicit argument at the runtime boundary, chosen by the calling surface
+and never sniffed out of the command text. Anything the user typed — a managed
+terminal, `codelima shell`, `codelima shell <node> -- <cmd>` — runs as the login
+user; only service-issued provisioning is elevated, and the `sudo -H --` prefix
+that elevates it lives at that one boundary. Do not scatter privilege changes
+through bootstrap or workspace code (ADR 129).
 
 Fullscreen terminal applications must contain every subprocess diagnostic at
 the mode boundary before taking ownership of the screen. CLI mode may forward

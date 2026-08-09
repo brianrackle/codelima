@@ -93,11 +93,15 @@ func newTUISelectorField(key, label, value string, required bool, activate func(
 	}
 }
 
-func newTUIValueSelectorField(key, label, value string, required bool, display func(string) string, activate func() error) tuiDialogField {
+// newTUIValueSelectorField builds a choose-from-a-list field. Such a field is
+// always Required: it is created with a default already selected, so it can
+// never submit blank, and every caller wants the same answer — the flag was a
+// parameter that only ever had one value.
+func newTUIValueSelectorField(key, label, value string, display func(string) string, activate func() error) tuiDialogField {
 	return tuiDialogField{
 		Key:      key,
 		Label:    label,
-		Required: required,
+		Required: true,
 		Value:    value,
 		Display:  display,
 		Activate: activate,

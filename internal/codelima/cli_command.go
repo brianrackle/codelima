@@ -259,6 +259,7 @@ var cliCommands = []*cliCommand{
 			fs.String("directory", "", "host directory the node is bound to (defaults to the current directory)")
 			fs.String("slug", "", "unique lowercase identifier for the new node")
 			fs.String("workspace-mode", DefaultWorkspaceMode, "how the workspace reaches the node: mounted or copy")
+			fs.Bool("no-import-auth", false, "do not copy host git identity and agent credentials into the new node")
 			ports := &stringSliceFlag{}
 			fs.Var(ports, "port", "port forward as HOST:GUEST (repeatable)")
 		},
@@ -267,12 +268,19 @@ var cliCommands = []*cliCommand{
 			if slug == "" {
 				return nil, invalidArgument("node create requires --slug", nil)
 			}
+			// Opt-out only: an unset flag leaves the settings default in charge,
+			// which is why this is a pointer rather than the flag's bool.
+			var importHostAuth *bool
+			if flagBool(fs, "no-import-auth") {
+				importHostAuth = boolPointer(false)
+			}
 			return service.NodeCreate(ctx, NodeCreateInput{
-				Configuration: flagString(fs, "configuration"),
-				Directory:     flagString(fs, "directory"),
-				Slug:          slug,
-				WorkspaceMode: flagString(fs, "workspace-mode"),
-				Ports:         flagStrings(fs, "port"),
+				Configuration:  flagString(fs, "configuration"),
+				Directory:      flagString(fs, "directory"),
+				Slug:           slug,
+				WorkspaceMode:  flagString(fs, "workspace-mode"),
+				Ports:          flagStrings(fs, "port"),
+				ImportHostAuth: importHostAuth,
 			})
 		},
 	},
@@ -770,6 +778,12 @@ func newCommandFlagSet(cmd *cliCommand) *flag.FlagSet {
 // table entry, so a missing name is a programming error caught by tests.
 func flagBool(fs *flag.FlagSet, name string) bool {
 	return fs.Lookup(name).Value.(flag.Getter).Get().(bool)
+}
+
+// boolPointer spells an explicit answer for the tri-state creation inputs,
+// where nil means "defer to settings".
+func boolPointer(value bool) *bool {
+	return &value
 }
 
 func flagString(fs *flag.FlagSet, name string) string {

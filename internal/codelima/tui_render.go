@@ -832,8 +832,10 @@ func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerSt
 		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Resources: %d CPU, %d MiB memory, %d MiB disk", entry.node.VCPUs, entry.node.MemoryMiB, entry.node.DiskMiB), Style: mutedStyle})
 		row++
 		row++
-		if nodeIsRunning(entry.node) {
+		if nodeGuestShellReady(entry.node) {
 			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to open a terminal tab or %s to focus its terminal.", terminalTabOpenFooterHint, terminalViewToggleTextHint), Style: mutedStyle})
+		} else if reason := nodeGuestShellBlocked(entry.node); reason != "" {
+			win.Println(row, vaxis.Segment{Text: reason + ".", Style: mutedStyle})
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node before opening its terminal tabs.", Style: mutedStyle})
 		}
@@ -885,8 +887,11 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 			row++
 			win.Println(row, vaxis.Segment{Text: err.Error(), Style: mutedStyle})
 			row++
-		} else if nodeIsRunning(entry.node) {
+		} else if nodeGuestShellReady(entry.node) {
 			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("No terminal tab is open. Press %s to open one.", terminalTabOpenFooterHint), Style: mutedStyle})
+			row++
+		} else if reason := nodeGuestShellBlocked(entry.node); reason != "" {
+			win.Println(row, vaxis.Segment{Text: reason + ".", Style: mutedStyle})
 			row++
 		} else {
 			win.Println(row, vaxis.Segment{Text: "Start the node with [s] before opening a terminal tab.", Style: mutedStyle})

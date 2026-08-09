@@ -355,6 +355,13 @@ func renderIncompleteNodeCleanupResult(result IncompleteNodeCleanupResult) strin
 }
 
 func nodeVMStatus(node Node) string {
+	// An in-flight lifecycle state outranks the runtime sighting. Lima reports a
+	// VM as running the moment it boots, so a node whose start is still
+	// bootstrapping would otherwise be displayed as plain "running" on every
+	// read surface — the exact reading that hid an unfinished node.
+	if nodeStatusInFlight(node.Status) {
+		return string(node.Status)
+	}
 	if node.LastRuntimeObservation != nil {
 		if node.LastRuntimeObservation.Status != "" {
 			return string(node.LastRuntimeObservation.Status)

@@ -46,6 +46,73 @@ func TestSettingsFileContainsOnlyDaemonSettings(t *testing.T) {
 	}
 }
 
+// import_host_auth is a general (non-daemon) setting the writer never emits, so
+// its whole contract is: absent means on, and a hand-written value both loads
+// and survives every refresh the writer performs.
+func TestImportHostAuthDefaultsOnAndSurvivesSettingsRefresh(t *testing.T) {
+	home := t.TempDir()
+	if !DefaultConfig(home).ImportHostAuth {
+		t.Fatal("host credential import must default on")
+	}
+
+	seed := NewStore(DefaultConfig(home))
+	if err := seed.EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() error = %v", err)
+	}
+
+	seeded, err := LoadConfig(home)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if !seeded.ImportHostAuth {
+		t.Fatal("an absent import_host_auth key must read as enabled")
+	}
+	if got := seeded.Summary()["import_host_auth"]; got != true {
+		t.Fatalf("settings summary import_host_auth = %v", got)
+	}
+
+	// The retired reclaim key is what forces the writer to run, so the opt-out
+	// below is asserted against a refresh that actually rewrites the file.
+	settingsPath := filepath.Join(home, "_config", "settings.yaml")
+	authored := "" +
+		"import_host_auth: false\n" +
+		"daemon:\n" +
+		"  autostart: true\n" +
+		"  restore: respawn\n" +
+		"  virtiofs_reclaim: true\n" +
+		"  virtiofs_reclaim_threshold_percent: 75\n"
+	if err := os.WriteFile(settingsPath, []byte(authored), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(home)
+	if err != nil {
+		t.Fatalf("LoadConfig() after edit error = %v", err)
+	}
+	if cfg.ImportHostAuth {
+		t.Fatal("import_host_auth: false was not loaded")
+	}
+
+	// EnsureLayout rewrites the daemon block; the operator's key must outlive it.
+	if err := NewStore(cfg).EnsureLayout(); err != nil {
+		t.Fatalf("EnsureLayout() after edit error = %v", err)
+	}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(data), "import_host_auth: false") {
+		t.Fatalf("settings refresh dropped the opt-out:\n%s", string(data))
+	}
+	reloaded, err := LoadConfig(home)
+	if err != nil {
+		t.Fatalf("LoadConfig() after refresh error = %v", err)
+	}
+	if reloaded.ImportHostAuth {
+		t.Fatalf("import_host_auth lost across refresh: %+v", reloaded)
+	}
+}
+
 func TestLoadConfigReadsSettingsYAML(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, "_config"), 0o755); err != nil {

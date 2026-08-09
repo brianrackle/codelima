@@ -343,6 +343,82 @@ func TestNodesChangedEventReloadsTheNodeList(t *testing.T) {
 	}
 }
 
+// End to end over the real store and reconciliation: a node whose start is
+// still bootstrapping is observed as a running VM, so nothing but its own
+// record can say the guest is unusable. The reload a push drives must preserve
+// that record, withhold the guest tab, and open one the moment the record says
+// the start finished.
+func TestPushedReloadWithholdsTheGuestTabUntilBootstrapCompletes(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, workspace := newTestService(t)
+	fake, ok := service.sandbox.(*fakeSandbox)
+	if !ok {
+		t.Fatalf("test service sandbox = %T, want *fakeSandbox", service.sandbox)
+	}
+
+	node, err := service.NodeCreate(ctx, NodeCreateInput{Slug: "bootstrapping-node", Directory: workspace})
+	if err != nil {
+		t.Fatalf("NodeCreate() error = %v", err)
+	}
+	bootstrap, err := service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		t.Fatalf("LoadBootstrapState() error = %v", err)
+	}
+	// The state NodeStart persists before it boots the VM, plus the booted VM
+	// the runtime then reports.
+	node.Status = NodeStatusProvisioning
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(provisioning) error = %v", err)
+	}
+	fake.mu.Lock()
+	fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: ObservationRunning}
+	fake.mu.Unlock()
+
+	sessions := newFakeTUISessionManager()
+	app := newTestTUIApp(t, ctx, service, sessions)
+	target := nodeTargetKey(node.ID)
+
+	if quit, err := app.handleEvent(tuiNodesChangedEvent{}); err != nil || quit {
+		t.Fatalf("handleEvent(bootstrapping push) = %v, %v", quit, err)
+	}
+	selected := app.state.selectedEntry()
+	if selected.node.ID != node.ID {
+		t.Fatalf("selected node = %q, want %q", selected.node.ID, node.ID)
+	}
+	if selected.node.Status != NodeStatusProvisioning {
+		t.Fatalf("reloaded record status = %q, want provisioning preserved through reconciliation", selected.node.Status)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("bootstrapping-node pane mode = %q, want info", app.state.treePaneMode)
+	}
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("bootstrapping-node terminal opens = %d, want 0", got)
+	}
+
+	// What NodeStart persists when bootstrap and validation are done.
+	node.Status = NodeStatusRunning
+	node.LifecycleState = ""
+	node.BootstrapCompleted = true
+	if err := service.store.SaveNode(node, bootstrap); err != nil {
+		t.Fatalf("SaveNode(running) error = %v", err)
+	}
+
+	if quit, err := app.handleEvent(tuiNodesChangedEvent{}); err != nil || quit {
+		t.Fatalf("handleEvent(completed push) = %v, %v", quit, err)
+	}
+	if got := app.state.selectedEntry().node.Status; got != NodeStatusRunning {
+		t.Fatalf("completed record status = %q, want running", got)
+	}
+	if app.state.treePaneMode != tuiTreePaneModeTerminal {
+		t.Fatalf("completed-node pane mode = %q, want terminal", app.state.treePaneMode)
+	}
+	if got := sessions.opened[target]; got != 1 {
+		t.Fatalf("completed-node terminal opens = %d, want 1", got)
+	}
+}
+
 // Terminal damage and daemon pushes arrive as redraw-only events at up to 20Hz.
 // Consecutive ones render identical frames, so the loop must spend one draw on
 // the whole queued run instead of one per event.

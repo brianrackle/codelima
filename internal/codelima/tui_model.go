@@ -111,6 +111,17 @@ type tuiState struct {
 	terminalTarget string
 	activeTabKeys  map[terminal.TargetKey]terminal.TabID
 	sessions       tuiSessionManager
+	// nodeOperationInFlight reports whether this window still tracks a
+	// lifecycle operation over a node target key. The app installs it; nil
+	// means this window runs no background operations. It is what keeps the
+	// terminal and the tree row telling the same story — see guestShellReady.
+	nodeOperationInFlight func(targetKey string) bool
+	// guestReadyAtDefault is the guest readiness the current treePaneMode was
+	// derived from. The default is recomputed when readiness changes, and that
+	// change can come from the node's record or from this window's own overlay
+	// clearing, so it is remembered rather than re-derived from the previously
+	// selected entry — whose record no longer describes it.
+	guestReadyAtDefault bool
 }
 
 func newTUIState(nodes []Node, sessions tuiSessionManager) (*tuiState, error) {
@@ -137,16 +148,35 @@ func newTUIState(nodes []Node, sessions tuiSessionManager) (*tuiState, error) {
 	if err := state.selectIndex(0); err != nil {
 		return nil, err
 	}
-	state.treePaneMode = defaultTUITreePaneMode(state.selectedEntry())
+	state.applyDefaultTreePaneMode(state.selectedEntry())
 
 	return state, nil
 }
 
-func defaultTUITreePaneMode(entry tuiTreeEntry) tuiTreePaneMode {
-	if entry.valid() && nodeIsRunning(entry.node) {
-		return tuiTreePaneModeTerminal
+// guestShellReady reports whether the selected entry should be shown a guest
+// terminal now. It is the record-level rule plus this window's own view of the
+// node: while a lifecycle operation is still tracked here, the tree row renders
+// that operation's status ("starting", "stopping", "cloning", "deleting") over
+// the record, and a guest tab opened underneath it would contradict the row.
+// The daemon's push lands a finished record before the completion event clears
+// the overlay, so without this the tab appears while the row still says
+// "starting".
+func (s *tuiState) guestShellReady(entry tuiTreeEntry) bool {
+	if !entry.valid() || !nodeGuestShellReady(entry.node) {
+		return false
 	}
-	return tuiTreePaneModeInfo
+	return s.nodeOperationInFlight == nil || !s.nodeOperationInFlight(entry.key())
+}
+
+// applyDefaultTreePaneMode sets the pane the entry deserves and records the
+// readiness that choice came from.
+func (s *tuiState) applyDefaultTreePaneMode(entry tuiTreeEntry) {
+	s.guestReadyAtDefault = s.guestShellReady(entry)
+	if s.guestReadyAtDefault {
+		s.treePaneMode = tuiTreePaneModeTerminal
+		return
+	}
+	s.treePaneMode = tuiTreePaneModeInfo
 }
 
 func (s *tuiState) indexNodes() {
@@ -209,7 +239,7 @@ func (s *tuiState) findEntryByKey(key string) int {
 func (s *tuiState) selectIndex(index int) error {
 	if len(s.entries) == 0 {
 		s.selection = -1
-		s.treePaneMode = tuiTreePaneModeInfo
+		s.applyDefaultTreePaneMode(tuiTreeEntry{})
 		return nil
 	}
 
@@ -227,15 +257,17 @@ func (s *tuiState) selectIndex(index int) error {
 }
 
 // applySelectedNodeDefault chooses the useful pane whenever selection changes
-// or the selected VM crosses the running boundary. An explicit i toggle remains
-// stable while the same node retains the same runtime readiness.
+// or the selected node crosses the guest-shell boundary. An explicit i toggle
+// remains stable while the same node retains the same readiness — including
+// across the whole bootstrap window and across a lifecycle operation this
+// window is running, both of which end at the reload that finds the node ready
+// and promotes it to its terminal.
 func (s *tuiState) applySelectedNodeDefault(previous tuiTreeEntry) {
 	current := s.selectedEntry()
-	if current.key() == previous.key() &&
-		nodeIsRunning(current.node) == nodeIsRunning(previous.node) {
+	if current.key() == previous.key() && s.guestShellReady(current) == s.guestReadyAtDefault {
 		return
 	}
-	s.treePaneMode = defaultTUITreePaneMode(current)
+	s.applyDefaultTreePaneMode(current)
 }
 
 func (s *tuiState) moveSelection(delta int) error {
@@ -254,8 +286,12 @@ func (s *tuiState) focusTerminalEntry(entry tuiTreeEntry) error {
 	if !entry.valid() {
 		return errors.New("select a node to focus the terminal")
 	}
-	if !nodeIsRunning(entry.node) {
-		return errors.New("selected node is not running; start it before focusing the terminal")
+	// An already-open tab is focusable at any status: host shells exist for
+	// stopped and bootstrapping nodes, and focusing one must not be refused for
+	// a guest readiness it never needed. Only the branch below that would open
+	// the node's first guest tab requires a usable guest.
+	if s.targetActiveSessionKey(entry.key()) == "" && !nodeGuestShellReady(entry.node) {
+		return errors.New(nodeGuestShellUnavailable(entry.node, "focusing the terminal"))
 	}
 
 	sessionKey, err := s.ensureTargetTab(entry)
@@ -294,8 +330,11 @@ func (s *tuiState) ensureTargetTab(entry tuiTreeEntry) (string, error) {
 }
 
 // ensureSelectedTerminalTab makes one terminal tab available for the selected
-// running node without changing tree focus or opening a shell for a stopped
-// node.
+// node without changing tree focus, and without opening a shell for a node that
+// has no usable guest yet — a stopped one, one whose start is still
+// bootstrapping, or one this window is still running a lifecycle operation
+// over. It runs on selection moves and again on every reload-apply, so the
+// reload that first finds the node ready is what opens the tab.
 func (s *tuiState) ensureSelectedTerminalTab() error {
 	entry := s.selectedEntry()
 	if !entry.valid() {
@@ -304,7 +343,7 @@ func (s *tuiState) ensureSelectedTerminalTab() error {
 	if s.targetActiveSessionKey(entry.key()) != "" || s.sessions.PendingTabOpen(entry.key()) {
 		return nil
 	}
-	if !nodeIsRunning(entry.node) {
+	if !s.guestShellReady(entry) {
 		return nil
 	}
 	_, err := s.openTerminalTabEntry(entry)
@@ -317,8 +356,8 @@ func (s *tuiState) openTerminalTabEntry(entry tuiTreeEntry) (string, error) {
 	if !entry.valid() {
 		return "", errors.New("select a node to open a terminal tab")
 	}
-	if !nodeIsRunning(entry.node) {
-		return "", errors.New("selected node is not running; start it before opening a terminal tab")
+	if !nodeGuestShellReady(entry.node) {
+		return "", errors.New(nodeGuestShellUnavailable(entry.node, "opening a terminal tab"))
 	}
 	sessionKey, err := s.sessions.OpenNodeTab(entry.node)
 	if err != nil {
@@ -517,7 +556,7 @@ func (s *tuiState) replaceNodes(nodes []Node, preferredKey string) error {
 	if len(s.entries) == 0 {
 		s.selection = -1
 		s.terminalTarget = ""
-		s.treePaneMode = tuiTreePaneModeInfo
+		s.applyDefaultTreePaneMode(tuiTreeEntry{})
 		return nil
 	}
 
@@ -623,9 +662,32 @@ func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
 	return actions
 }
 
+// nodeIsRunning reports whether the node's VM is up. It answers a runtime
+// question and is what the tree glyphs, the usage lines, and the start/stop
+// action pick from.
 func nodeIsRunning(node Node) bool {
 	if observation := node.LastRuntimeObservation; observation != nil && observation.Status == ObservationRunning {
 		return true
 	}
 	return node.Status == NodeStatusRunning
+}
+
+// nodeGuestShellReady reports whether the node can serve a guest shell now. It
+// is deliberately stricter than nodeIsRunning: a VM is observed running the
+// moment it boots, while the agents, npm, and the imported credentials only
+// exist once NodeStart has finished bootstrap and validation and cleared the
+// node's in-flight lifecycle state. Everything that opens, ensures, or defaults
+// to a guest tab asks this; host tabs ask nothing, because a host shell is
+// available at every status.
+func nodeGuestShellReady(node Node) bool {
+	return nodeIsRunning(node) && nodeGuestShellBlocked(node) == ""
+}
+
+// nodeGuestShellUnavailable phrases the refusal for a guest-tab action. A node
+// with work in flight explains that work; anything else is simply not started.
+func nodeGuestShellUnavailable(node Node, action string) string {
+	if reason := nodeGuestShellBlocked(node); reason != "" {
+		return reason
+	}
+	return "selected node is not running; start it before " + action
 }
