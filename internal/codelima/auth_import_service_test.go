@@ -28,6 +28,7 @@ func seedHostCredentials(t *testing.T) string {
 	writeHostFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Test\n")
 	writeHostFile(t, filepath.Join(home, ".codex", "auth.json"), `{"token":"`+throwawaySecret(t, "codex")+`"}`)
 	writeHostFile(t, filepath.Join(home, ".claude", ".credentials.json"), `{"token":"`+throwawaySecret(t, "claude")+`"}`)
+	writeHostFile(t, filepath.Join(home, ".claude.json"), `{"machineID":"host","oauthAccount":{"emailAddress":"`+throwawaySecret(t, "email")+`"}}`)
 	return home
 }
 
@@ -103,7 +104,7 @@ func TestNodeStartImportsHostCredentialsOnFirstStartOnly(t *testing.T) {
 	}
 
 	staging := guestAuthStagingDir(node)
-	for _, name := range []string{"id_ed25519", "id_ed25519.pub", "known_hosts", "gitconfig", "codex", "claude"} {
+	for _, name := range []string{"id_ed25519", "id_ed25519.pub", "known_hosts", "gitconfig", "codex", "claude", "claude_state"} {
 		want := "copy " + node.SandboxName + " "
 		found := false
 		for _, call := range callsMatching(fake, staging+"/"+name) {
@@ -146,12 +147,14 @@ func TestNodeStartImportsHostCredentialsOnFirstStartOnly(t *testing.T) {
 		`install -m 0644 -o "$guest_user" -g "$guest_group" "$staging"/'known_hosts' "$guest_home"/'.ssh/known_hosts'`,
 		`install -m 0600 -o "$guest_user" -g "$guest_group" "$staging"/'codex' "$guest_home"/'.codex/auth.json'`,
 		`install -m 0600 -o "$guest_user" -g "$guest_group" "$staging"/'claude' "$guest_home"/'.claude/.credentials.json'`,
+		`install -m 0600 -o "$guest_user" -g "$guest_group" "$staging"/'claude_state' "$guest_home"/'.claude.json'`,
 
 		`install -d -m 0700 -o root -g root "$root_home"/'.ssh'`,
 		`install -m 0600 -o root -g root "$staging"/'id_ed25519' "$root_home"/'.ssh/id_ed25519'`,
 		`install -m 0644 -o root -g root "$staging"/'known_hosts' "$root_home"/'.ssh/known_hosts'`,
 		`install -m 0600 -o root -g root "$staging"/'codex' "$root_home"/'.codex/auth.json'`,
 		`install -m 0600 -o root -g root "$staging"/'claude' "$root_home"/'.claude/.credentials.json'`,
+		`install -m 0600 -o root -g root "$staging"/'claude_state' "$root_home"/'.claude.json'`,
 	} {
 		if !strings.Contains(placement, want) {
 			t.Fatalf("placement command missing %q:\n%s", want, placement)
@@ -160,7 +163,7 @@ func TestNodeStartImportsHostCredentialsOnFirstStartOnly(t *testing.T) {
 
 	// Both homes are served by one staged copy per artifact: the host is read
 	// once and copied to the guest once.
-	for _, name := range []string{"id_ed25519", "id_ed25519.pub", "known_hosts", "gitconfig", "codex", "claude"} {
+	for _, name := range []string{"id_ed25519", "id_ed25519.pub", "known_hosts", "gitconfig", "codex", "claude", "claude_state"} {
 		if got := countCopiesTo(fake, staging+"/"+name); got != 1 {
 			t.Fatalf("artifact %q was copied from the host %d times, want exactly 1", name, got)
 		}
@@ -280,7 +283,7 @@ func TestNodeStartRecordsImportedAndSkippedArtifactsByNameOnly(t *testing.T) {
 	}
 	text := string(payload)
 
-	for _, want := range []string{`"id_ed25519"`, `"ssh_config"`, `"gitconfig"`, `"codex"`, `"claude"`, `"known_hosts"`} {
+	for _, want := range []string{`"id_ed25519"`, `"ssh_config"`, `"gitconfig"`, `"codex"`, `"claude"`, `"claude_state"`, `"known_hosts"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("event payload missing name %s:\n%s", want, text)
 		}
@@ -308,8 +311,14 @@ func TestNodeStartCredentialImportKeepsSecretsOutOfGuestCommands(t *testing.T) {
 	home := collectorHome(t)
 	privateKey := throwawaySecret(t, "ed25519")
 	codexToken := throwawaySecret(t, "codex")
+	claudeToken := throwawaySecret(t, "claude")
+	// The seeded oauthAccount is identity PII rather than a token, and it gets
+	// exactly the same discipline: staged file copies only, never argv.
+	accountEmail := throwawaySecret(t, "email")
 	writeHostFile(t, filepath.Join(home, ".ssh", "id_ed25519"), privateKey)
 	writeHostFile(t, filepath.Join(home, ".codex", "auth.json"), `{"token":"`+codexToken+`"}`)
+	writeHostFile(t, filepath.Join(home, ".claude", ".credentials.json"), `{"token":"`+claudeToken+`"}`)
+	writeHostFile(t, filepath.Join(home, ".claude.json"), `{"oauthAccount":{"emailAddress":"`+accountEmail+`"}}`)
 	stubHostAuth(service, home)
 
 	node, err := service.NodeCreate(ctx, NodeCreateInput{Directory: workspace, Slug: "argv-safety-node"})
@@ -321,7 +330,7 @@ func TestNodeStartCredentialImportKeepsSecretsOutOfGuestCommands(t *testing.T) {
 	}
 
 	fake := service.sandbox.(*fakeSandbox)
-	secrets := []string{privateKey, codexToken}
+	secrets := []string{privateKey, codexToken, claudeToken, accountEmail}
 
 	// Guard against a vacuous pass: the dual-home placement lines this test is
 	// meant to cover have to actually be among the commands it scans.

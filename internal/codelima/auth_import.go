@@ -13,12 +13,14 @@ package codelima
 //
 // Nothing here ever moves secret CONTENT through argv, a log record, or an
 // event payload. Files reach the guest as file copies; a secret that has no
-// host file of its own (macOS Keychain extraction) is staged into a 0600 host
-// temp file first and that path — never the value — is what a command sees.
+// host file of its own (a macOS Keychain extraction, the minimal ~/.claude.json
+// login-state seed) is staged into a 0600 host temp file first and that path —
+// never the value — is what a command sees.
 
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -351,11 +353,24 @@ func (c hostAuthCollector) collectCodexAuth(bundle *hostAuthBundle) {
 	})
 }
 
-// collectClaudeAuth prefers the credentials file and falls back to the platform
-// keyring seam. Claude Code stores credentials in a file on Linux and in the
-// macOS login Keychain on darwin, so on a macOS host the file is usually
-// absent and the seam is the only source.
+// collectClaudeAuth imports the Claude Code credential cache and, beside it,
+// the minimal ~/.claude.json login state the CLI needs before it will honor
+// those credentials without a fresh login.
 func (c hostAuthCollector) collectClaudeAuth(ctx context.Context, bundle *hostAuthBundle) error {
+	credentialsImported, err := c.collectClaudeCredentials(ctx, bundle)
+	if err != nil {
+		return err
+	}
+	return c.collectClaudeState(bundle, credentialsImported)
+}
+
+// collectClaudeCredentials prefers the credentials file and falls back to the
+// platform keyring seam. Claude Code stores credentials in a file on Linux and
+// in the macOS login Keychain on darwin, so on a macOS host the file is
+// usually absent and the seam is the only source. It reports whether the
+// credential artifact was collected, because the login-state seed rides only
+// beside imported credentials.
+func (c hostAuthCollector) collectClaudeCredentials(ctx context.Context, bundle *hostAuthBundle) (bool, error) {
 	credentialsPath := filepath.Join(c.home, ".claude", ".credentials.json")
 	if exists(credentialsPath) {
 		bundle.add(hostAuthArtifact{
@@ -364,12 +379,12 @@ func (c hostAuthCollector) collectClaudeAuth(ctx context.Context, bundle *hostAu
 			GuestPath: path.Join(".claude", ".credentials.json"),
 			Mode:      hostAuthPrivateMode,
 		})
-		return nil
+		return true, nil
 	}
 
 	if c.keychain == nil {
 		bundle.skip("claude", "no "+credentialsPath)
-		return nil
+		return false, nil
 	}
 
 	keychainCtx, cancel := context.WithTimeout(ctx, hostAuthKeychainTimeout)
@@ -381,7 +396,7 @@ func (c hostAuthCollector) collectClaudeAuth(ctx context.Context, bundle *hostAu
 		// None of them is worth failing a node creation over, and the error
 		// text comes from the tool, not from the secret.
 		bundle.skip("claude", "no "+credentialsPath+" and keychain lookup failed: "+err.Error())
-		return nil
+		return false, nil
 	}
 	// Normalize here rather than in each platform seam: `security -w` prints a
 	// trailing newline, and the credential file the guest reads should be the
@@ -389,17 +404,91 @@ func (c hostAuthCollector) collectClaudeAuth(ctx context.Context, bundle *hostAu
 	secret = bytes.TrimSpace(secret)
 	if len(secret) == 0 {
 		bundle.skip("claude", "keychain returned an empty credential")
-		return nil
+		return false, nil
 	}
 
 	staged, stageErr := bundle.stage("claude", secret)
 	if stageErr != nil {
-		return stageErr
+		return false, stageErr
 	}
 	bundle.add(hostAuthArtifact{
 		Name:      "claude",
 		HostPath:  staged,
 		GuestPath: path.Join(".claude", ".credentials.json"),
+		Mode:      hostAuthPrivateMode,
+	})
+	return true, nil
+}
+
+// guestClaudeState is the entire seeded guest ~/.claude.json. Two keys and no
+// more: everything else in the host's file is machine-specific state
+// (machineID, projects keyed by host paths, feature caches) that is wrong in
+// the guest and more than the login needs.
+type guestClaudeState struct {
+	HasCompletedOnboarding bool            `json:"hasCompletedOnboarding"`
+	OauthAccount           json.RawMessage `json:"oauthAccount"`
+}
+
+// collectClaudeState seeds the guest's ~/.claude.json login state.
+//
+// The credentials file alone does not stop Claude Code from asking for a
+// login: the CLI decides it is signed in from oauthAccount and
+// hasCompletedOnboarding in ~/.claude.json — a file a fresh guest does not
+// have — so its first run walks the interactive login flow with valid
+// imported tokens already on disk. Both keys are the CLI's private format,
+// not a documented interface; the dependency is accepted because its failure
+// mode is benign — a CLI that stops honoring the seed is back to prompting
+// for a login, never anything worse (ADR 128).
+//
+// The seed is skipped without credentials beside it: oauthAccount without
+// tokens would claim a login the guest cannot back up.
+func (c hostAuthCollector) collectClaudeState(bundle *hostAuthBundle, credentialsImported bool) error {
+	statePath := filepath.Join(c.home, ".claude.json")
+	if !credentialsImported {
+		bundle.skip("claude_state", "claude credentials were not imported")
+		return nil
+	}
+
+	data, err := os.ReadFile(statePath)
+	switch {
+	case err == nil:
+	case errors.Is(err, os.ErrNotExist):
+		bundle.skip("claude_state", "no "+statePath)
+		return nil
+	default:
+		bundle.skip("claude_state", "unreadable "+statePath)
+		return nil
+	}
+
+	// The skip reasons name the file, never its contents: oauthAccount is
+	// identity PII (an email address, org identifiers) and the rest of the
+	// file is nobody's business either.
+	var hostState struct {
+		OauthAccount json.RawMessage `json:"oauthAccount"`
+	}
+	if err := json.Unmarshal(data, &hostState); err != nil {
+		bundle.skip("claude_state", "unparseable "+statePath)
+		return nil
+	}
+	account := bytes.TrimSpace(hostState.OauthAccount)
+	if len(account) == 0 || bytes.Equal(account, []byte("null")) {
+		bundle.skip("claude_state", "no oauthAccount in "+statePath)
+		return nil
+	}
+
+	seed, err := json.Marshal(guestClaudeState{HasCompletedOnboarding: true, OauthAccount: account})
+	if err != nil {
+		bundle.skip("claude_state", "could not encode a seed from "+statePath)
+		return nil
+	}
+	staged, stageErr := bundle.stage("claude_state", seed)
+	if stageErr != nil {
+		return stageErr
+	}
+	bundle.add(hostAuthArtifact{
+		Name:      "claude_state",
+		HostPath:  staged,
+		GuestPath: ".claude.json",
 		Mode:      hostAuthPrivateMode,
 	})
 	return nil

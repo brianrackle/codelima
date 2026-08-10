@@ -1054,3 +1054,43 @@ Disadvantages:
 - Requires a native virtualization host with enough memory and cannot be
   completed reliably in the current nested 3.8 GiB workspace.
 - Downloads a full Ubuntu image plus current Node and agent packages.
+
+### 38. Verify the seeded ~/.claude.json ends the Claude first-run login prompt on a real node, and decide whether the collector should honor CLAUDE_CONFIG_DIR
+
+Problem:
+
+- ADR 128's Claude import now seeds a minimal guest `~/.claude.json`
+  (`hasCompletedOnboarding` plus the host's `oauthAccount`) beside the
+  credentials file, because the CLI gates its login flow on that state and a
+  fresh guest without it prompted for a login with valid imported tokens on
+  disk. Collector and placement behavior are covered by automated tests, but
+  the end-to-end proof — create a node on a native host, run `claude`, land in
+  a signed-in session with no login or onboarding screen — still needs a real
+  node against the current Claude Code release.
+- The collector reads fixed host paths: `~/.claude/.credentials.json`, the
+  macOS Keychain, and now `~/.claude.json`. A host that sets
+  `CLAUDE_CONFIG_DIR` keeps both files elsewhere, so both artifacts skip and
+  the guest falls back to a manual login. Codex's `CODEX_HOME` is already
+  honored; Claude's equivalent is not.
+
+Suggested solution:
+
+- On a native host with a signed-in Claude Code, create a fresh node and
+  confirm `claude` opens signed in from both the login user and `sudo claude`,
+  then confirm the skip path (host without `oauthAccount`) still imports
+  credentials and records the `claude_state` skip in `node.auth.imported`.
+- If `CLAUDE_CONFIG_DIR` hosts matter, resolve it in `newHostAuthCollector`
+  the way `CODEX_HOME` is resolved, and point both Claude reads at it.
+
+Advantages:
+
+- Proves the login-free first run against the real CLI rather than the file
+  format it happened to use when the seed was written.
+- Removes a silent skip for hosts with relocated Claude state.
+
+Disadvantages:
+
+- Needs a native Lima-capable host with a real Claude subscription login;
+  this nested Linux/aarch64 workspace cannot run the flow.
+- `CLAUDE_CONFIG_DIR` support widens the undocumented-internals surface ADR
+  128 already accepts for the Keychain service name and the state keys.

@@ -301,7 +301,9 @@ The first time a new node starts, codelima copies your git identity and agent
 logins into it so the agent inside can push and work without a second login:
 your standard `~/.ssh` keys, the `github.com` lines of your `known_hosts`, your
 `~/.gitconfig`, and the Codex and Claude Code credential caches (read from the
-macOS Keychain when Claude Code keeps them there). Anything you do not have is
+macOS Keychain when Claude Code keeps them there), plus the two `~/.claude.json`
+keys Claude Code checks before it treats those credentials as a signed-in
+account — without them it would ask you to log in anyway. Anything you do not have is
 skipped with a warning — it never fails the node. Everything lands with private
 modes in both of the guest's homes, so it works in your terminal, in a `sudo`
 session, and for the agent's own tooling alike, and the contents never appear in

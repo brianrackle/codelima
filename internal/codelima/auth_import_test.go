@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -92,6 +93,7 @@ func TestHostAuthCollectorFindsStandardIdentitiesAndAgentCaches(t *testing.T) {
 	writeHostFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Test\n")
 	writeHostFile(t, filepath.Join(home, ".codex", "auth.json"), `{"token":"`+throwawaySecret(t, "codex")+`"}`)
 	writeHostFile(t, filepath.Join(home, ".claude", ".credentials.json"), `{"token":"`+throwawaySecret(t, "claude")+`"}`)
+	writeHostFile(t, filepath.Join(home, ".claude.json"), `{"machineID":"host","oauthAccount":{"emailAddress":"`+throwawaySecret(t, "email")+`"}}`)
 
 	bundle := collectBundle(t, hostAuthCollector{home: home})
 
@@ -105,6 +107,7 @@ func TestHostAuthCollectorFindsStandardIdentitiesAndAgentCaches(t *testing.T) {
 		"gitconfig":      {".gitconfig", hostAuthPublicMode},
 		"codex":          {".codex/auth.json", hostAuthPrivateMode},
 		"claude":         {".claude/.credentials.json", hostAuthPrivateMode},
+		"claude_state":   {".claude.json", hostAuthPrivateMode},
 	}
 	for name, expected := range want {
 		artifact := artifactByName(t, bundle, name)
@@ -129,7 +132,7 @@ func TestHostAuthCollectorSkipsEveryMissingArtifactWithoutFailing(t *testing.T) 
 	bundle := collectBundle(t, hostAuthCollector{home: home})
 
 	reasons := bundle.skippedReasons()
-	for _, name := range []string{"ssh_identity", "gitconfig", "codex", "claude"} {
+	for _, name := range []string{"ssh_identity", "gitconfig", "codex", "claude", "claude_state"} {
 		if reasons[name] == "" {
 			t.Fatalf("missing artifact %q was not recorded as a skip: %v", name, reasons)
 		}
@@ -245,6 +248,7 @@ func TestHostAuthCollectorStagesKeychainCredentialAtRestrictedMode(t *testing.T)
 
 	home := collectorHome(t)
 	secret := throwawaySecret(t, "keychain")
+	writeHostFile(t, filepath.Join(home, ".claude.json"), `{"oauthAccount":{"accountUuid":"`+throwawaySecret(t, "account")+`"}}`)
 	collector := hostAuthCollector{
 		home: home,
 		keychain: func(context.Context) ([]byte, error) {
@@ -253,6 +257,13 @@ func TestHostAuthCollectorStagesKeychainCredentialAtRestrictedMode(t *testing.T)
 	}
 
 	bundle := collectBundle(t, collector)
+
+	// Keychain-sourced credentials admit the login-state seed exactly as
+	// file-sourced ones do: the seed keys off the imported artifact, not its
+	// origin.
+	if !hasArtifact(bundle, "claude_state") {
+		t.Fatalf("keychain credentials did not admit the state seed: %v", bundle.importedNames())
+	}
 
 	artifact := artifactByName(t, bundle, "claude")
 	if artifact.GuestPath != ".claude/.credentials.json" || artifact.Mode != hostAuthPrivateMode {
@@ -301,6 +312,117 @@ func TestHostAuthCollectorTreatsKeychainFailureAsSkip(t *testing.T) {
 	}
 	if reason := bundle.skippedReasons()["claude"]; !strings.Contains(reason, "keychain lookup failed") {
 		t.Fatalf("claude skip reason = %q", reason)
+	}
+}
+
+// The seeded ~/.claude.json is what keeps the guest CLI from walking its
+// first-run login flow: it decides it is signed in from oauthAccount and
+// hasCompletedOnboarding, not from the credentials file alone. Exactly those
+// two keys may cross — the rest of the host's file is machine-specific state
+// that must not follow the user into the guest.
+func TestHostAuthCollectorSeedsMinimalClaudeStateBesideCredentials(t *testing.T) {
+	t.Parallel()
+
+	home := collectorHome(t)
+	email := throwawaySecret(t, "email")
+	writeHostFile(t, filepath.Join(home, ".claude", ".credentials.json"), `{"token":"`+throwawaySecret(t, "claude")+`"}`)
+	writeHostFile(t, filepath.Join(home, ".claude.json"),
+		`{"machineID":"host-machine","numStartups":42,"oauthAccount":{"emailAddress":"`+email+`","organizationUuid":"org"},"projects":{"/host/repo":{}}}`)
+
+	bundle := collectBundle(t, hostAuthCollector{home: home})
+
+	artifact := artifactByName(t, bundle, "claude_state")
+	if artifact.GuestPath != ".claude.json" || artifact.Mode != hostAuthPrivateMode {
+		t.Fatalf("claude_state artifact = %+v", artifact)
+	}
+	info, err := os.Stat(artifact.HostPath)
+	if err != nil {
+		t.Fatalf("Stat(staged claude state) error = %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("staged state mode = %v, want 0600", info.Mode().Perm())
+	}
+
+	data, err := os.ReadFile(artifact.HostPath)
+	if err != nil {
+		t.Fatalf("ReadFile(staged claude state) error = %v", err)
+	}
+	var seeded map[string]json.RawMessage
+	if err := json.Unmarshal(data, &seeded); err != nil {
+		t.Fatalf("staged state is not JSON: %v\n%s", err, data)
+	}
+	if len(seeded) != 2 {
+		t.Fatalf("seeded state carries %d keys, want only hasCompletedOnboarding and oauthAccount:\n%s", len(seeded), data)
+	}
+	if string(seeded["hasCompletedOnboarding"]) != "true" {
+		t.Fatalf("hasCompletedOnboarding = %s, want true", seeded["hasCompletedOnboarding"])
+	}
+	var account map[string]any
+	if err := json.Unmarshal(seeded["oauthAccount"], &account); err != nil {
+		t.Fatalf("seeded oauthAccount is not an object: %v", err)
+	}
+	if account["emailAddress"] != email || account["organizationUuid"] != "org" {
+		t.Fatalf("seeded oauthAccount lost the host's fields: %v", account)
+	}
+}
+
+// oauthAccount without tokens would claim a login the guest cannot back up, so
+// the state seed rides only beside imported credentials.
+func TestHostAuthCollectorSkipsClaudeStateWhenCredentialsAreNotImported(t *testing.T) {
+	t.Parallel()
+
+	home := collectorHome(t)
+	writeHostFile(t, filepath.Join(home, ".claude.json"), `{"oauthAccount":{"emailAddress":"`+throwawaySecret(t, "email")+`"}}`)
+
+	bundle := collectBundle(t, hostAuthCollector{home: home})
+
+	if hasArtifact(bundle, "claude_state") {
+		t.Fatalf("state was seeded without credentials beside it: %v", bundle.importedNames())
+	}
+	if reason := bundle.skippedReasons()["claude_state"]; !strings.Contains(reason, "credentials were not imported") {
+		t.Fatalf("claude_state skip reason = %q", reason)
+	}
+}
+
+// A host ~/.claude.json the seed cannot be built from is a skip that names the
+// file and never quotes it, and it must not take the credential import down
+// with it.
+func TestHostAuthCollectorSkipsUnusableClaudeStateWithoutFailing(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		state      string
+		missing    bool
+		wantReason string
+	}{
+		{name: "missing file", missing: true, wantReason: "no "},
+		{name: "unparseable", state: `{"oauthAccount":`, wantReason: "unparseable"},
+		{name: "no oauthAccount key", state: `{"machineID":"host"}`, wantReason: "no oauthAccount"},
+		{name: "null oauthAccount", state: `{"oauthAccount":null}`, wantReason: "no oauthAccount"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := collectorHome(t)
+			writeHostFile(t, filepath.Join(home, ".claude", ".credentials.json"), `{"token":"`+throwawaySecret(t, "claude")+`"}`)
+			if !testCase.missing {
+				writeHostFile(t, filepath.Join(home, ".claude.json"), testCase.state)
+			}
+
+			bundle := collectBundle(t, hostAuthCollector{home: home})
+
+			if hasArtifact(bundle, "claude_state") {
+				t.Fatalf("unusable state was seeded anyway: %v", bundle.importedNames())
+			}
+			if reason := bundle.skippedReasons()["claude_state"]; !strings.Contains(reason, testCase.wantReason) {
+				t.Fatalf("claude_state skip reason = %q, want it to contain %q", reason, testCase.wantReason)
+			}
+			if !hasArtifact(bundle, "claude") {
+				t.Fatalf("an unusable state file took the credential import with it: %v", bundle.skippedReasons())
+			}
+		})
 	}
 }
 

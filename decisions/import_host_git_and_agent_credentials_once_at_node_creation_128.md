@@ -63,6 +63,19 @@ The service name is the documented one, but it is a string in another product's 
 
 The prompt is the real hazard. `security` can raise a modal authorization dialog, and a node created from the daemon or a detached TUI has nobody to answer it. The call is bounded by a 20-second timeout and the process is killed when it expires, so the worst case is a node that starts twenty seconds late without Claude credentials — never one that hangs forever.
 
+### The ~/.claude.json login-state seed
+
+The credentials file turned out to be necessary but not sufficient for Claude Code. The CLI decides whether it is signed in from `oauthAccount` and `hasCompletedOnboarding` in `~/.claude.json` — a separate file, outside `~/.claude/` — and a fresh guest has no such file, so the first run walked the interactive login flow with valid imported tokens already on disk. Codex has no such split: `auth.json` is its entire auth state, which is why the first real node came up with Codex signed in and Claude prompting.
+
+So the Claude import carries a second artifact, `claude_state`: a guest `~/.claude.json` seeded with exactly `{"hasCompletedOnboarding": true, "oauthAccount": <the host's>}` and nothing else. The host's own file must not be copied whole — it is machine-specific state (`machineID`, `projects` keyed by host paths, feature caches) that is wrong in the guest and more than the login needs. The seed is staged like the Keychain blob, a 0600 temp file whose path is all any command sees, because `oauthAccount` is identity PII: an email address and organization identifiers.
+
+Two rules bound it:
+
+* It is seeded only beside imported credentials. `oauthAccount` without tokens would claim a login the guest cannot back up, so when the credential artifact is skipped — declined Keychain prompt, no host login — the state is skipped with it.
+* It is the same one-shot as everything else. The guest's CLI rewrites this exact path as it runs — onboarding answers, per-project state, refreshed profile data — so a re-import would overwrite guest-owned state, precisely the class of clobber the once-only rule exists to forbid.
+
+Unlike the Codex copy, none of this is a documented flow: the two keys are another product's private format, with the same standing as the Keychain service name above, and the same acceptance argument — the failure mode is benign. A future CLI that stops honoring the seed puts the guest back to prompting for a login, never anything worse. The documented fallback, should that happen, is `claude setup-token` plus `CLAUDE_CODE_OAUTH_TOKEN`, at the cost of an interactive annual mint and env plumbing into every session.
+
 ### Standard identities only
 
 v1 imports exactly `id_ed25519`, `id_ecdsa`, `id_rsa` and their `.pub` halves: the names OpenSSH tries by default. Importing arbitrary key paths needs a configuration surface, and a per-node one, because "which of my keys may enter a sandbox" is a real question with a per-node answer. Shipping a half-answer now would be worse than shipping none.
@@ -119,7 +132,8 @@ A secret with no host file of its own — the Keychain blob — is written to a 
 
 * Credentials now exist in more places. A node's disk image contains a git key and agent tokens in *two* homes, and `node clone` multiplies that.
 * A node imported before dual-home placement shipped has only the login user's copy, so its managed terminal still prompts for a login. There is deliberately no re-import or migration path — that is exactly the overwrite the once-only rule forbids, and it cannot distinguish "never had a root copy" from "root copy has since rotated". The repair is a manual copy inside the guest, or recreating the node.
-* The Keychain service name is an undocumented dependency on another product's internals. When it changes, the failure is silent-by-design (a skip), which is the safe direction but not the discoverable one.
+* The Keychain service name is an undocumented dependency on another product's internals. When it changes, the failure is silent-by-design (a skip), which is the safe direction but not the discoverable one. The `~/.claude.json` login-state keys are a second dependency of exactly that kind, with the same silent-by-design failure.
+* The seeded `oauthAccount` copies identity PII — an email address, organization identifiers — into every node image that imports Claude credentials, in both homes, and `node clone` multiplies that exactly as it does the tokens.
 * The accept-new fallback is weaker than pinning, and a user with a hashed `known_hosts` gets it without being told why beyond a warning line and an event.
 * A guest-side transfer failure fails the start. That is deliberate — it is the same posture as workspace seeding, and a silent half-import is worse — but it means a convenience feature can now fail a `node start` that would otherwise have succeeded.
 * Existing nodes get nothing. The fields decode `false`, so a node created before this change never imports, even on a first start that happens afterwards.
