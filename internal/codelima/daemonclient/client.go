@@ -266,7 +266,8 @@ func (c *Client) callLocked(ctx context.Context, method string, params any, resu
 // declared degraded: the shell, its PTY and the output journal survive, so the
 // replacement replays the journal and the session continues.
 //
-// It is a mutation, so an observe-only client must call input.takeover first.
+// It is a keyed, idempotent control mutation, so any attached client may
+// issue it without holding the seat (ADR 130).
 func (c *Client) RestartRenderer(ctx context.Context, terminalID string) error {
 	var result map[string]bool
 	return c.Call(ctx, "terminal.restart_renderer", map[string]string{"terminal_id": terminalID}, &result)

@@ -1086,8 +1086,13 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 		}
 		return map[string]bool{"input_owner": true}, nil
 	}
-	if MutatingInputMethod(request.Method) && !owner {
-		return nil, Error("PreconditionFailed", "client is observe-only; request input.takeover first", 5, map[string]any{"client_id": client.id})
+	// Only replaceable per-view state (geometry, focus) consults the seat.
+	// Input and control from any authenticated client dispatch freely: input
+	// is serialized per terminal by its lane, control is keyed and idempotent,
+	// and rejecting a second window's keystrokes to protect against a resize
+	// fight it is not having was the bug, not the safety (ADR 130).
+	if SeatArbitratedMethod(request.Method) && !owner {
+		return nil, Error("PreconditionFailed", "client is observe-only; request input.takeover first", CodePreconditionFailed, map[string]any{"client_id": client.id})
 	}
 	return s.cfg.Handler.Handle(ctx, ClientContext{ID: client.id, InputOwner: owner}, request.Method, request.Params)
 }

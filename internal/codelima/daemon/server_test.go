@@ -33,11 +33,22 @@ func TestProtocolRoundTripAndOversizeRejection(t *testing.T) {
 	}
 }
 
-func TestTerminalMoveRequiresInputOwnership(t *testing.T) {
+func TestSeatGateCoversOnlyReplaceableState(t *testing.T) {
 	t.Parallel()
 
+	// terminal.move stays a mutation for delivery-outcome classification but
+	// is no longer seat-arbitrated: tab order is keyed, idempotent state any
+	// attached client may set (ADR 130).
 	if !MutatingInputMethod("terminal.move") {
-		t.Fatalf("terminal.move must be protected as a mutating input method")
+		t.Fatalf("terminal.move must classify as a mutating method")
+	}
+	if SeatArbitratedMethod("terminal.move") {
+		t.Fatalf("terminal.move must not consult the seat")
+	}
+	for _, method := range []string{"terminal.resize", "terminal.focus"} {
+		if !SeatArbitratedMethod(method) {
+			t.Fatalf("%s must consult the seat", method)
+		}
 	}
 }
 

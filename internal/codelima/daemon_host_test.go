@@ -206,7 +206,7 @@ func TestDaemonNodeListIncludesLiveResourceUsage(t *testing.T) {
 	}
 }
 
-func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.T) {
+func TestDaemonTerminalSurvivesClientDetachAndAcceptsSecondClientInput(t *testing.T) {
 	root := newDaemonTestRoot(t, "d-")
 	home := filepath.Join(root, "home")
 	workspace := filepath.Join(root, "work")
@@ -263,8 +263,10 @@ func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.
 	if observer.Hello.InputOwner {
 		t.Fatal("second client unexpectedly became input owner")
 	}
-	if err := observer.Call(context.Background(), "terminal.send_text", map[string]any{"terminal_id": state.TerminalID, "text": "blocked"}, nil); err == nil {
-		t.Fatal("observe-only client unexpectedly sent input")
+	// Input is not seat-arbitrated: a second attached client types into the
+	// same shell instead of being rejected (ADR 130).
+	if err := observer.Call(context.Background(), "terminal.send_text", map[string]any{"terminal_id": state.TerminalID, "text": "printf daemon-observer-ok\\n\r"}, nil); err != nil {
+		t.Fatalf("second client send_text error = %v, want interleaved delivery", err)
 	}
 	_ = observer.Close()
 	_ = owner.Close()
@@ -288,8 +290,8 @@ func TestDaemonTerminalSurvivesClientDetachAndEnforcesInputOwnership(t *testing.
 		if readErr := reconnected.Call(context.Background(), "terminal.read", map[string]any{"terminal_id": state.TerminalID, "source": "recent", "format": "text"}, &result); readErr != nil {
 			return false
 		}
-		return strings.Contains(result.Text, "daemon-detach-ok")
-	}, "detached daemon terminal output")
+		return strings.Contains(result.Text, "daemon-detach-ok") && strings.Contains(result.Text, "daemon-observer-ok")
+	}, "detached daemon terminal output from both clients")
 	if err := reconnected.Call(context.Background(), "terminal.close", map[string]string{"terminal_id": state.TerminalID}, nil); err != nil {
 		t.Fatalf("terminal.close error = %v", err)
 	}
@@ -400,7 +402,7 @@ func readFormatTestName(format ReadFormat) string {
 // terminal.restart_renderer over a real daemon server, so the method's delivery
 // class, the server's ownership gate and the client call are all exercised on
 // the path a TUI or CLI would take.
-func TestDaemonRestartRendererRPCReachesTheTerminalAndRequiresInputOwnership(t *testing.T) {
+func TestDaemonRestartRendererRPCReachesTheTerminalFromAnyClient(t *testing.T) {
 	root := newDaemonTestRoot(t, "drr-")
 	cfg := DefaultConfig(filepath.Join(root, "home"))
 	service := NewService(cfg, newFakeSandbox(), strings.NewReader(""), ioDiscard{}, ioDiscard{})
@@ -443,8 +445,9 @@ func TestDaemonRestartRendererRPCReachesTheTerminalAndRequiresInputOwnership(t *
 		t.Fatalf("renderer restarts = %d, want 1", got)
 	}
 
-	// The lease holder is the only client allowed to restart a renderer: it
-	// replaces a process every other viewer is watching.
+	// A renderer restart is a keyed, idempotent recovery action, not seat
+	// state: whichever window the user notices a hung renderer from may fix
+	// it, without holding or stealing the seat (ADR 130).
 	observer, err := daemonclient.Dial(context.Background(), daemonclient.Options{
 		Home: service.cfg.MetadataRoot, Version: Version, WantInput: true,
 	})
@@ -455,15 +458,11 @@ func TestDaemonRestartRendererRPCReachesTheTerminalAndRequiresInputOwnership(t *
 	if observer.Hello.InputOwner {
 		t.Fatal("second client unexpectedly became input owner")
 	}
-	restartErr := observer.RestartRenderer(context.Background(), "term-1")
-	if restartErr == nil {
-		t.Fatal("observe-only client restarted a renderer without the input lease")
+	if restartErr := observer.RestartRenderer(context.Background(), "term-1"); restartErr != nil {
+		t.Fatalf("renderer restart from a non-seat client = %v, want dispatch", restartErr)
 	}
-	if !strings.Contains(restartErr.Error(), "observe-only") {
-		t.Fatalf("observe-only restart error = %v, want the ownership gate", restartErr)
-	}
-	if got := term.restartCount(); got != 1 {
-		t.Fatalf("renderer restarts after a rejected request = %d, want 1", got)
+	if got := term.restartCount(); got != 2 {
+		t.Fatalf("renderer restarts after the second client's request = %d, want 2", got)
 	}
 
 	var rpcErr *daemon.RPCError

@@ -77,6 +77,13 @@ type tuiSessionStore struct {
 	events      *daemonclient.Client
 	eventCancel context.CancelFunc
 	daemonReady atomic.Bool
+	// windowFocused mirrors the host window's focus state (vaxis FocusIn and
+	// FocusOut). The resynchronization path reads it off the event loop to
+	// decide whether this window may reclaim the seat: the seat moves only on
+	// local user signals, and a background window's event-stream hiccup is
+	// not one (ADR 130). It starts true — a terminal that never reports
+	// focus keeps it true and degrades to the pre-seat behavior, never worse.
+	windowFocused atomic.Bool
 	// newTerminal builds the terminal backend for locally spawned tabs. It is
 	// a per-store field (defaulting to newTUITerminal) rather than a package
 	// variable so tests can swap in fakes without racing parallel tests.
@@ -164,6 +171,7 @@ func newTUISessionStore(ctx context.Context, service *Service, postEvent func(va
 		restoreTimeout:     tuiTerminalRestoreTimeout,
 		nodeChangeDebounce: tuiNodeChangeDebounce,
 	}
+	store.windowFocused.Store(true)
 	if service != nil && service.daemonClient != nil {
 		store.daemonReady.Store(true)
 		store.restoreDaemonSessions()
@@ -228,10 +236,14 @@ func (s *tuiSessionStore) prepareDaemonSynchronization(ctx context.Context, snap
 	}
 	requestClient := s.service.daemonClient
 	hello := requestClient.HelloSnapshot()
+	holdsSeat := false
 	if hello.DaemonEpoch != snapshot.DaemonEpoch {
 		if err := requestClient.Reconnect(ctx); err != nil {
 			return fmt.Errorf("reconnect daemon request stream: %w", err)
 		}
+		// Reconnect re-ran the handshake, and hello's grant against an empty
+		// lease is authoritative for the fresh connection.
+		holdsSeat = requestClient.HelloSnapshot().InputOwner
 	} else {
 		var status daemon.Status
 		pingCtx, cancel := context.WithTimeout(ctx, daemonRPCTimeout)
@@ -241,12 +253,57 @@ func (s *tuiSessionStore) prepareDaemonSynchronization(ctx context.Context, snap
 			if reconnectErr := requestClient.Reconnect(ctx); reconnectErr != nil {
 				return fmt.Errorf("reconnect daemon request stream after failed ping: %w", reconnectErr)
 			}
+			holdsSeat = requestClient.HelloSnapshot().InputOwner
+		} else {
+			// The ping the supervision already pays for carries the current
+			// seat holder, so the decision below reads authoritative daemon
+			// state instead of a client-side belief. Instance-level match is
+			// connection-exact here: the lease is cleared when its connection
+			// closes, and this client's only other connection (the event
+			// stream) never requests the seat.
+			holdsSeat = status.InputOwner != "" && status.InputOwner == hello.ClientID
 		}
 	}
-	if err := takeTUIDaemonInput(ctx, requestClient); err != nil {
-		return fmt.Errorf("reclaim daemon input after reconnect: %w", err)
+
+	// The seat moves only on local user signals, and a background window's
+	// resynchronization is not one. This replaces the unconditional takeover
+	// that let any event-stream hiccup on an idle window steal the seat from
+	// the window being worked in (ADR 130, amending ADRs 78/80). Reclaiming
+	// while already holding the seat is skipped outright — the common
+	// single-window resync now costs no ownership RPC at all.
+	if !holdsSeat && s.windowFocused.Load() {
+		if err := takeTUIDaemonInput(ctx, requestClient); err != nil {
+			return fmt.Errorf("reclaim daemon input after reconnect: %w", err)
+		}
+		if s.postEvent != nil {
+			// Seat acquisition re-presents any geometry parked on a seat
+			// rejection; the event loop owns the session map the poke walks.
+			s.postEvent(tuiDaemonInputReclaimedEvent{})
+		}
 	}
 	return s.awaitDaemonSynchronization(ctx, snapshot)
+}
+
+// setWindowFocused records the host window's focus state for the seat
+// decisions above. It is called from the TUI event loop on vaxis focus events.
+func (s *tuiSessionStore) setWindowFocused(focused bool) {
+	s.windowFocused.Store(focused)
+}
+
+// pokeResizeAll re-presents every daemon terminal's geometry after this
+// window acquires the seat: a resize the daemon rejected as another window's
+// seat state parked its reassert loop, and acquisition is the moment it may
+// win. Must run on the TUI event loop, which owns the session map.
+func (s *tuiSessionStore) pokeResizeAll() {
+	for _, session := range s.sessions {
+		runtime, ok := s.registry.Lookup(session.terminalID)
+		if !ok {
+			continue
+		}
+		if poker, ok := any(runtime.Backend).(interface{ pokeResize() }); ok {
+			poker.pokeResize()
+		}
+	}
 }
 
 // awaitDaemonSynchronization hands one authoritative snapshot to the TUI event

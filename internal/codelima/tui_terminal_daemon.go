@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -140,6 +141,13 @@ func (t *daemonTUITerminal) reassertResize() {
 			err := t.client.Call(ctx, "terminal.resize", map[string]any{"terminal_id": t.id, "cols": cols, "rows": rows}, nil)
 			cancel()
 			if err != nil {
+				if isSeatRejection(err) {
+					// Another window holds the seat, so this geometry is an
+					// observer's view, not an error to retry: park until the
+					// next local size change or a seat acquisition pokes the
+					// loop (ADR 130).
+					break
+				}
 				select {
 				case <-t.stop:
 					return
@@ -158,6 +166,31 @@ func (t *daemonTUITerminal) reassertResize() {
 		default:
 		}
 	}
+}
+
+// pokeResize re-drives the reassert loop after this client acquires the seat,
+// so a geometry parked on a seat rejection is re-presented without waiting
+// for a local size change.
+func (t *daemonTUITerminal) pokeResize() {
+	t.resizeMu.Lock()
+	wake := t.resizeWake
+	t.resizeMu.Unlock()
+	if wake == nil {
+		return
+	}
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// isSeatRejection reports whether err is the daemon's seat gate refusing
+// replaceable state from a client that does not hold the input lease. The
+// gate rejects before handler dispatch, so a seat rejection provably applied
+// nothing.
+func isSeatRejection(err error) bool {
+	var rpcErr *daemon.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == daemon.CodePreconditionFailed
 }
 
 func (t *daemonTUITerminal) Update(event vaxis.Event) {

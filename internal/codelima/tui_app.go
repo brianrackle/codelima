@@ -430,10 +430,21 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case vaxis.FocusIn:
 		// A newer TUI can revoke this request connection while both windows stay
-		// open. Window focus is an explicit user handoff, so reclaim ownership
-		// before the next key or mouse event can mutate a terminal.
+		// open. Window focus is an explicit user handoff, so reclaim the seat
+		// before the next geometry write depends on it (ADR 130 narrowed the
+		// lease to replaceable state; input no longer needs it).
+		if a.sessions != nil {
+			a.sessions.setWindowFocused(true)
+		}
 		a.startDaemonInputTakeover()
 		a.draw()
+		return false, nil
+	case vaxis.FocusOut:
+		// Focus state gates the resynchronization seat reclaim: an unfocused
+		// window resyncing in the background must not move the seat (ADR 130).
+		if a.sessions != nil {
+			a.sessions.setWindowFocused(false)
+		}
 		return false, nil
 	}
 
@@ -720,7 +731,16 @@ func (a *vaxisTUIApp) startDaemonInputTakeover() {
 }
 
 func (a *vaxisTUIApp) finishDaemonInputTakeover(event tuiDaemonInputReclaimedEvent) {
-	if event.Err == nil || a.daemonDisconnected {
+	if event.Err == nil {
+		// Seat acquired: re-present any geometry the daemon parked as another
+		// window's seat state. This handler runs on the event loop, which
+		// owns the session map the poke walks.
+		if a.sessions != nil {
+			a.sessions.pokeResizeAll()
+		}
+		return
+	}
+	if a.daemonDisconnected {
 		return
 	}
 	a.service.log().Error("reclaim terminal input ownership failed", "error", event.Err.Error())

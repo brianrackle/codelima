@@ -448,6 +448,17 @@ terminal mutations are briefly rejected instead of being applied to stale
 state. Healthy request connections may remain idle indefinitely; handshake
 timeouts are cleared before their long-lived response readers start.
 
+Any number of TUIs can attach to the same daemon at once — including from an
+SSH session on another machine — and every one of them can type: keystrokes,
+paste, scrolling, and tab controls are never rejected for coming from the
+"wrong" window, and scripted `codelima terminal` commands interleave with
+live typing instead of interrupting it. The one arbitrated thing is the
+seat: the window whose size and focus state a terminal adopts. The seat
+moves only on explicit signals — launching a TUI, focusing its window, or
+`codelima terminal takeover` — never on background reconnects or CLI
+activity, and a window that does not hold the seat simply renders the seat
+holder's geometry cropped until focus returns.
+
 Daemon-owned shells and PTYs remain in the Go control plane. Each terminal has
 its own separately packaged Ghostty renderer-worker process, immutable screen
 cache, bounded replay journal, and terminal-local restart budget. If a native
@@ -490,7 +501,9 @@ Three concepts make the system reusable:
 The persistent daemon owns terminal sessions and discovers guest services. The
 TUI is a reconnectable view onto that durable state, not the owner of it.
 Physical TUI sockets are disposable; terminal identity and lifetime belong to
-the daemon. Ghostty rendering is isolated one process per terminal so native
+the daemon. Every attached view can type into a terminal; only the seat — the
+window whose geometry and focus the terminal adopts — is exclusive, and it
+follows user focus rather than connection churn. Ghostty rendering is isolated one process per terminal so native
 liveness is never a daemon-wide lock. Full renderer snapshots are dirty-driven
 and coalesced; the one-second node CPU, memory, and disk sampler does not force
 per-terminal snapshot work. Sustained output uses ordered terminal-local

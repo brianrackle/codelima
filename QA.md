@@ -293,6 +293,35 @@ the terminal-local supervisor without manual cleanup.
 
 Close both terminal IDs before continuing.
 
+### Flow 5b: seat arbitration and shared input (interactive, two windows)
+
+Requires two interactive terminal windows on the host — the second may be an
+SSH session from another machine. In window A run `./bin/codelima`, open a
+guest terminal tab, and start typing. In window B run `./bin/codelima`
+against the same home and select the same tab, then verify all of the
+following, in order:
+
+1. Typing in window B is accepted immediately — no
+   `client is observe-only` error, no dropped keystrokes — and window A can
+   keep typing right after without refocusing. Characters from both windows
+   interleave in the shared shell.
+2. The window that last gained focus drives the terminal's geometry; the
+   other window renders that geometry cropped or padded. Refocusing each
+   window moves the geometry to it (the seat) without either window ever
+   rejecting input.
+3. While typing in window A, run
+   `./bin/codelima terminal send "$TERMINAL_ID" --text $'printf cli-interleaved\\n\r'`
+   from a third shell. The text executes, window A's typing keeps working
+   with no error, and `./bin/codelima --json daemon status` shows
+   `input_owner` unchanged.
+4. Kill window B's TUI process (or drop its SSH connection) while it holds
+   the seat. Window A must keep accepting input with no error and reclaim
+   the geometry on its next focus.
+5. Repeat step 1 with window A hosted by a terminal without focus reporting
+   (Terminal.app, or tmux without `focus-events`). Typing must still always
+   work in both windows; only the geometry may lag until focus or
+   `terminal takeover` moves the seat.
+
 ## Flow 6: dynamic generic and `{node}.localhost` forwarding
 
 Start a guest-loopback server in the running node. This uses Perl's core socket module because the default image does not promise Python:

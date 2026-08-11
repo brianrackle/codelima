@@ -1094,3 +1094,47 @@ Disadvantages:
   this nested Linux/aarch64 workspace cannot run the flow.
 - `CLAUDE_CONFIG_DIR` support widens the undocumented-internals surface ADR
   128 already accepts for the Keychain service name and the state keys.
+
+### 39. Run the two-window seat-arbitration flow (QA 5b) on a native host, then decide the input-follows-seat follow-up
+
+Problem:
+
+- ADR 130 narrowed the daemon input lease to seat arbitration: input and tab
+  control from any attached client now dispatch, only `terminal.resize` and
+  `terminal.focus` consult the lease, CLI terminal commands no longer claim
+  it, and a TUI's resynchronization reclaims it only when focused or already
+  holding it. Automated coverage spans the daemon gate contract, the
+  conditional resync reclaim, the parked resize reassert, two-client
+  interleaved input against a real shell, and the full integration suite —
+  but the interactive half (QA Flow 5b: two real windows, focus handoffs,
+  SSH drop, Terminal.app/tmux focus-eventless variant) needs a native host
+  with two displays or a second machine, which this nested Linux/aarch64
+  workspace cannot provide.
+- ADR 130 defers one QoL refinement: in a focus-eventless window, typing
+  works but geometry stays with the seat holder until an explicit takeover.
+  A fire-and-forget seat claim piggybacked on locally originated input
+  (ordered ahead of the input by `ClassOwnership`'s read-order guarantee)
+  would close it, at the cost of last-typer-wins geometry churn when two
+  windows are typed in simultaneously.
+- One release-ordering constraint from ADR 130: the CLI `want_input`
+  removal must ship in the same release as (or after) the daemon predicate
+  change, never before it.
+
+Suggested solution:
+
+- Execute QA Flow 5b on native macOS with a second window over SSH; confirm
+  zero observe-only errors, interleaved typing, seat-follows-focus geometry,
+  and survival of a seat holder's death.
+- Decide input-follows-seat from that session's evidence: implement only if
+  the cropped-geometry lag is actually noticeable in real use.
+
+Advantages:
+
+- Confirms the reported intermittent `client is observe-only` failure is
+  gone under the exact conditions that produced it (SSH second window,
+  event-stream hiccups, CLI interference).
+
+Disadvantages:
+
+- Needs a native host and a second interactive session; cannot be scripted
+  headless because focus events and window geometry are the subject.

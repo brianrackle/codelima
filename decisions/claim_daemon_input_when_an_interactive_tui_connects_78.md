@@ -22,6 +22,8 @@ The daemon grants input to the first connection that requests it and makes later
 
 Chosen option: "Complete TUI connection setup by taking ownership whenever `hello` reports observe-only", because an interactive TUI is an input client by definition and should establish that invariant before rendering a usable session.
 
+> **Amended by [ADR 130](narrow_the_input_lease_to_seat_arbitration_130.md).** The lease this decision claims at connection time now arbitrates only replaceable per-view state — the seat (geometry and focus). Connection-time takeover remains, but a client without the lease is no longer observe-only: its input and tab controls dispatch normally, so launching a second TUI no longer strands the first one's typing, and this decision's first negative consequence is reduced to a geometry handoff.
+
 ### Positive Consequences
 
 * A TUI never enters its event loop as an observe-only request client.

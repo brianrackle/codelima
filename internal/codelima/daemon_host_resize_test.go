@@ -199,3 +199,67 @@ func TestDaemonHostRedrawDefersDirtyNotificationUntilFreshSnapshot(t *testing.T)
 		t.Fatal("redraw did not schedule a fresh snapshot")
 	}
 }
+
+// seatGatedDaemonCaller rejects terminal.resize with the daemon's seat gate
+// until granted, recording every attempt.
+type seatGatedDaemonCaller struct {
+	mu      sync.Mutex
+	granted bool
+	methods []string
+}
+
+func (c *seatGatedDaemonCaller) Call(_ context.Context, method string, _ any, _ any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.methods = append(c.methods, method)
+	if method == "terminal.resize" && !c.granted {
+		return &daemon.RPCError{Category: "PreconditionFailed", Message: "client is observe-only; request input.takeover first", Code: daemon.CodePreconditionFailed}
+	}
+	return nil
+}
+
+func (c *seatGatedDaemonCaller) grant() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.granted = true
+}
+
+func (c *seatGatedDaemonCaller) resizeCalls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := 0
+	for _, method := range c.methods {
+		if method == "terminal.resize" {
+			count++
+		}
+	}
+	return count
+}
+
+// A geometry the daemon rejects as another window's seat state parks the
+// reassert loop instead of retrying on the interval — an observer's size is
+// not an error — and a seat acquisition poke re-presents it (ADR 130).
+func TestDaemonTUITerminalResizeParksOnSeatRejectionUntilPoked(t *testing.T) {
+	caller := &seatGatedDaemonCaller{}
+	term := &daemonTUITerminal{client: caller, id: "term-1", stop: make(chan struct{})}
+	t.Cleanup(term.Detach)
+
+	term.Resize(80, 24)
+	waitForCondition(t, time.Second, func() bool { return caller.resizeCalls() == 1 }, "first rejected reassert")
+	time.Sleep(3 * daemonTerminalResizeRetryInterval)
+	if got := caller.resizeCalls(); got != 1 {
+		t.Fatalf("seat-rejected resize retried %d times, want a parked loop", got)
+	}
+
+	caller.grant()
+	term.pokeResize()
+	waitForCondition(t, time.Second, func() bool { return caller.resizeCalls() == 2 }, "re-presented geometry after the seat poke")
+
+	// A poke with nothing parked and nothing changed stays off the wire: the
+	// acknowledged geometry is already the daemon's.
+	term.pokeResize()
+	time.Sleep(2 * daemonTerminalResizeRetryInterval)
+	if got := caller.resizeCalls(); got != 2 {
+		t.Fatalf("settled geometry re-sent after a redundant poke: %d calls", got)
+	}
+}

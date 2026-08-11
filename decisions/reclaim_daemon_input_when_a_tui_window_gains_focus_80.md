@@ -23,6 +23,8 @@ ADR 78 makes a newly connected interactive TUI the daemon input owner. When two 
 
 Chosen option: "Send the idempotent `input.takeover` request when Vaxis reports that the host window gained focus", because focus is an explicit user handoff that happens before the next key or mouse action and does not confuse background terminal activity with user intent.
 
+> **Amended by [ADR 130](narrow_the_input_lease_to_seat_arbitration_130.md).** Focus still moves the lease, but the lease now arbitrates only the seat — geometry and focus — so a window that lost it keeps typing and only its geometry defers until refocus. The resynchronization takeover that remained unconditional after this decision is now gated on already holding the seat or having window focus, which closes the background-window steal this ADR's problem statement described; "unexpected revocation discovered on the next terminal mutation" can no longer reject that mutation.
+
 The TUI always sends takeover on `vaxis.FocusIn`; it cannot rely on `hello.input_owner`, because that value only describes connection-time ownership and becomes stale after another client takes over. The TUI event stream does not subscribe to input events because `input.revoked` is an expected consequence of a successful focus handoff, not a user-actionable error. A failed focus takeover is surfaced in TUI status without closing the client. Terminal mutations are not automatically replayed.
 
 ### Positive Consequences

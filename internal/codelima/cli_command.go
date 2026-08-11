@@ -504,7 +504,10 @@ var cliCommands = []*cliCommand{
 		Run: func(ctx context.Context, service *Service, target string, fs *flag.FlagSet, _ []string) (any, error) {
 			kind := coalesce(flagString(fs, "kind"), "node-shell")
 			label := flagString(fs, "label")
-			return withDaemonClient(ctx, service, true, func(client *daemonclient.Client) (any, error) {
+			// No seat claim: opening a tab is keyed control state, and a CLI
+			// invocation must not perturb the geometry seat a TUI holds
+			// (ADR 130).
+			return withDaemonClient(ctx, service, false, func(client *daemonclient.Client) (any, error) {
 				var state daemon.TerminalState
 				if err := client.Call(ctx, "terminal.open", map[string]any{"target": target, "kind": kind, "label": label}, &state); err != nil {
 					return nil, fromDaemonError(err)
@@ -520,7 +523,7 @@ var cliCommands = []*cliCommand{
 		Positional: "terminal-id",
 		MinArgs:    1,
 		Run: func(ctx context.Context, service *Service, terminalID string, _ *flag.FlagSet, _ []string) (any, error) {
-			return withDaemonClient(ctx, service, true, func(client *daemonclient.Client) (any, error) {
+			return withDaemonClient(ctx, service, false, func(client *daemonclient.Client) (any, error) {
 				var result map[string]bool
 				if err := client.Call(ctx, "terminal.close", map[string]string{"terminal_id": terminalID}, &result); err != nil {
 					return nil, fromDaemonError(err)
@@ -584,7 +587,10 @@ var cliCommands = []*cliCommand{
 				method = "terminal.send_keys"
 				params = map[string]any{"terminal_id": terminalID, "keys": keys}
 			}
-			return withDaemonClient(ctx, service, true, func(client *daemonclient.Client) (any, error) {
+			// No seat claim: input is serialized per terminal daemon-side, so
+			// scripted sends interleave with a TUI instead of stranding it
+			// (ADR 130).
+			return withDaemonClient(ctx, service, false, func(client *daemonclient.Client) (any, error) {
 				var result map[string]int
 				if err := client.Call(ctx, method, params, &result); err != nil {
 					return nil, fromDaemonError(err)

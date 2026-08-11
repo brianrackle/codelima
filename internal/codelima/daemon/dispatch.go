@@ -23,7 +23,10 @@ const (
 	ClassInput
 	// ClassReplaceable is latest-value state: resize and focus. A newer value
 	// supersedes an older queued one; every superseded request still observes
-	// the winning result.
+	// the winning result. This is also the only class the input lease (the
+	// "seat") arbitrates: two attached windows rarely share a geometry, and
+	// each one reasserts its own, so exactly one client's replaceable state
+	// may win or the terminal thrashes between sizes forever.
 	ClassReplaceable
 	// ClassOwnership is a change of the input-ownership lease. It is applied in
 	// connection read order so a following input frame can never race ahead of
@@ -60,10 +63,25 @@ func ClassifyMethod(method string) DeliveryClass {
 	}
 }
 
-// MutatingInputMethod reports whether a method changes daemon-owned state and
-// therefore requires the input-ownership lease.
+// MutatingInputMethod reports whether a method changes daemon-owned state.
+// The client's delivery-outcome reporting reads it to decide which failures
+// are ambiguous mutations; it no longer implies the input lease, which
+// SeatArbitratedMethod owns.
 func MutatingInputMethod(method string) bool {
 	return ClassifyMethod(method) != ClassQuery
+}
+
+// SeatArbitratedMethod reports whether a method writes replaceable per-view
+// state that exactly one client — the seat holder — may set. Input, control,
+// and lifecycle methods are deliberately not seat-arbitrated: input is
+// serialized per terminal by its delivery lane, and control/lifecycle
+// mutations are keyed and idempotent under the handler's own locks, so a
+// second window or a CLI invocation is an ordinary concurrent writer, not a
+// conflict (ADR 130). Geometry and focus are different in kind: they are
+// last-value-wins state where two attached windows would fight indefinitely,
+// so only the seat holder's writes are accepted.
+func SeatArbitratedMethod(method string) bool {
+	return ClassifyMethod(method) == ClassReplaceable
 }
 
 // maxLanesPerConnection bounds per-terminal lane growth in each class. A real

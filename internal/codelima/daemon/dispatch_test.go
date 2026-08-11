@@ -46,11 +46,13 @@ func TestMethodDeliveryClassesCoverEveryMutation(t *testing.T) {
 			t.Errorf("MutatingInputMethod(%q) = %v", method, got)
 		}
 	}
-	// Node lifecycle and a manual renderer restart mutate daemon-owned state and
-	// must not bypass the input-ownership gate.
-	for _, method := range []string{"node.start", "node.stop", "terminal.restart_renderer"} {
-		if !MutatingInputMethod(method) {
-			t.Errorf("%s must be gated on input ownership", method)
+	// The seat arbitrates exactly the replaceable per-view state. Input,
+	// control, and lifecycle mutations dispatch from any authenticated client:
+	// input is serialized per terminal by its lane, control and lifecycle are
+	// keyed and idempotent under handler locks (ADR 130).
+	for method, want := range cases {
+		if got := SeatArbitratedMethod(method); got != (want == ClassReplaceable) {
+			t.Errorf("SeatArbitratedMethod(%q) = %v, want %v", method, got, want == ClassReplaceable)
 		}
 	}
 }
@@ -112,28 +114,68 @@ func TestFullTerminalInputLaneRejectsWithoutClosingConnection(t *testing.T) {
 	}
 }
 
-func TestInputTakeoverIsAppliedBeforeFollowingInput(t *testing.T) {
+func TestInputTakeoverIsAppliedBeforeFollowingSeatRequests(t *testing.T) {
 	handler := newLaneTestHandler()
 	home := daemonServerTestHome(t)
-	// The first connection holds the input lease, so the second starts
-	// observe-only.
+	// The first connection holds the seat, so the second starts without it.
 	_, stop := startLaneTestServer(t, Config{Home: home, Handler: handler})
 	defer stop()
 
 	observer := newLaneTestConnection(t, HomePaths(home).Socket, false)
 	defer observer.close()
-	// The first rejected frame leaves an idle input lane in place, so a
+	// The first rejected frame leaves an idle replaceable lane in place, so a
 	// concurrently dispatched takeover would have every chance to lose the
 	// race that connection read order must prevent.
-	observer.send(t, 2, "terminal.send_event", map[string]any{"terminal_id": "term-1", "type": "key"})
+	observer.send(t, 2, "terminal.resize", map[string]any{"terminal_id": "term-1", "cols": 80, "rows": 24})
 	if response := observer.await(t, 2, time.Second); response.Error == nil {
-		t.Fatal("observe-only client sent input without taking ownership")
+		t.Fatal("client without the seat resized without taking ownership")
 	}
 
 	observer.send(t, 3, "input.takeover", nil)
-	observer.send(t, 4, "terminal.send_event", map[string]any{"terminal_id": "term-1", "type": "key"})
+	observer.send(t, 4, "terminal.resize", map[string]any{"terminal_id": "term-1", "cols": 80, "rows": 24})
 	if response := observer.await(t, 4, time.Second); response.Error != nil {
-		t.Fatalf("input frame raced ahead of the takeover it depends on: %#v", response.Error)
+		t.Fatalf("seat frame raced ahead of the takeover it depends on: %#v", response.Error)
+	}
+}
+
+// The seat gate protects replaceable per-view state and nothing else: a
+// second window's keystrokes and tab controls are ordinary concurrent writers
+// (ADR 130), while its geometry must not fight the seat holder's.
+func TestSeatGateArbitratesOnlyReplaceableState(t *testing.T) {
+	handler := newLaneTestHandler()
+	home := daemonServerTestHome(t)
+	_, stop := startLaneTestServer(t, Config{Home: home, Handler: handler})
+	defer stop()
+
+	observer := newLaneTestConnection(t, HomePaths(home).Socket, false)
+	defer observer.close()
+
+	observer.send(t, 2, "terminal.send_event", map[string]any{"terminal_id": "term-1", "type": "key"})
+	if response := observer.await(t, 2, time.Second); response.Error != nil {
+		t.Fatalf("input from a non-seat client = %#v, want dispatch", response.Error)
+	}
+	observer.send(t, 3, "terminal.open", map[string]any{"target": "node:test"})
+	if response := observer.await(t, 3, time.Second); response.Error != nil {
+		t.Fatalf("control from a non-seat client = %#v, want dispatch", response.Error)
+	}
+
+	for id, method := range map[uint64]string{4: "terminal.resize", 5: "terminal.focus"} {
+		observer.send(t, id, method, map[string]any{"terminal_id": "term-1", "cols": 80, "rows": 24})
+		response := observer.await(t, id, time.Second)
+		if response.Error == nil || !strings.Contains(response.Error.Message, "observe-only") {
+			t.Fatalf("%s from a non-seat client = %#v, want the seat gate", method, response.Error)
+		}
+	}
+	// The rejections above must have happened before handler dispatch: a
+	// rejected mutation provably applied nothing.
+	if applied := handler.appliedCount("terminal.resize"); applied != 0 {
+		t.Fatalf("rejected resize reached the handler %d times", applied)
+	}
+	if applied := handler.appliedCount("terminal.focus"); applied != 0 {
+		t.Fatal("rejected focus reached the handler")
+	}
+	if applied := handler.appliedCount("terminal.send_event"); applied != 1 {
+		t.Fatalf("non-seat input handled %d times, want 1", applied)
 	}
 }
 
@@ -324,6 +366,18 @@ func (h *laneTestHandler) awaitEntered(t *testing.T, method string) {
 			t.Fatalf("handler never entered %s", method)
 		}
 	}
+}
+
+func (h *laneTestHandler) appliedCount(method string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	count := 0
+	for _, request := range h.applied {
+		if request.method == method {
+			count++
+		}
+	}
+	return count
 }
 
 func (h *laneTestHandler) appliedNumbers(method, field string) []float64 {
