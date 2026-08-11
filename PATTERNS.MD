@@ -204,6 +204,11 @@ publication once; do not precede it with a second stale dirty notification.
 Focus RPCs are transition-driven rather than repeated by periodic TUI refresh.
 Treat snapshot sequence, not only output generation or geometry, as the client
 redraw identity so cursor- and viewport-only changes remain visible.
+Each PTY read-pump generation leases its file wrapper, numeric descriptor, quit
+channel, and completion channel at launch; it never follows mutable terminal
+fields into a rollback generation. Handoff stops input admission, drains
+accepted writes, signals that exact pump, consumes its buffered boundary output,
+and observes completion before closing the outgoing PTY (ADR 131).
 Never poll immutable
 terminal grids on an idle timer: route dirty notifications through the
 single-owner UI loop, retain only a dirty version for hidden tabs, and let the

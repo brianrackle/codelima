@@ -171,7 +171,13 @@ func (t *isolatedDaemonTerminal) Start(command *exec.Cmd) error {
 		renderer.Close()
 		return err
 	}
-	if err := unix.SetNonblock(int(ptyFile.Fd()), true); err != nil {
+	ptyFD, err := ghosttyPTYFileDescriptor(ptyFile)
+	if err != nil {
+		_ = ptyFile.Close()
+		renderer.Close()
+		return fmt.Errorf("resolve terminal pty descriptor: %w", err)
+	}
+	if err := unix.SetNonblock(ptyFD, true); err != nil {
 		_ = ptyFile.Close()
 		renderer.Close()
 		return fmt.Errorf("set terminal pty nonblocking: %w", err)
@@ -504,8 +510,9 @@ func (t *isolatedDaemonTerminal) SendInput(data []byte) {
 	}
 	t.mu.Lock()
 	writer := t.ptyWriter
+	running := t.state == runtimeStateRunning
 	t.mu.Unlock()
-	if writer != nil && !writer.Enqueue(slices.Clone(data)) {
+	if running && writer != nil && !writer.Enqueue(slices.Clone(data)) {
 		t.postTerminalError(errors.New("terminal PTY writer is closed"))
 	}
 }
@@ -513,18 +520,28 @@ func (t *isolatedDaemonTerminal) SendInput(data []byte) {
 func (t *isolatedDaemonTerminal) readPump() {
 	t.mu.Lock()
 	done := t.readPumpDone
+	quit := t.quit
+	ptyFile := t.pty
+	ptyFD := -1
+	var descriptorErr error
+	if ptyFile != nil {
+		ptyFD, descriptorErr = ghosttyPTYFileDescriptor(ptyFile)
+	}
 	t.mu.Unlock()
 	if done != nil {
 		defer close(done)
 	}
+	if ptyFile == nil || descriptorErr != nil {
+		return
+	}
 	buffer := make([]byte, 32*1024)
 	for {
 		select {
-		case <-t.quit:
+		case <-quit:
 			return
 		default:
 		}
-		n, err := t.readPTY(buffer)
+		n, err := unix.Read(ptyFD, buffer)
 		if n > 0 {
 			event := t.journal.AppendOutput(buffer[:n])
 			t.mu.Lock()
@@ -547,15 +564,15 @@ func (t *isolatedDaemonTerminal) readPump() {
 		}
 		if isGhosttyPTYWouldBlockError(err) {
 			select {
-			case <-t.quit:
+			case <-quit:
 				return
 			default:
 			}
-			_ = waitGhosttyPTYReadable(int(t.currentPTYFD()), 50*time.Millisecond)
+			_ = waitGhosttyPTYReadable(ptyFD, 50*time.Millisecond)
 			continue
 		}
 		select {
-		case <-t.quit:
+		case <-quit:
 			return
 		default:
 		}
@@ -566,25 +583,6 @@ func (t *isolatedDaemonTerminal) readPump() {
 		t.closeRuntime(false, true, exitErr)
 		return
 	}
-}
-
-func (t *isolatedDaemonTerminal) readPTY(buffer []byte) (int, error) {
-	t.mu.Lock()
-	ptyFile := t.pty
-	t.mu.Unlock()
-	if ptyFile == nil {
-		return 0, io.EOF
-	}
-	return ptyFile.Read(buffer)
-}
-
-func (t *isolatedDaemonTerminal) currentPTYFD() uintptr {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.pty == nil {
-		return ^uintptr(0)
-	}
-	return t.pty.Fd()
 }
 
 func (t *isolatedDaemonTerminal) installRendererSnapshot(
@@ -689,11 +687,17 @@ func (t *isolatedDaemonTerminal) BeginHandoff() handoffTerminalState {
 		t.mu.Unlock()
 		return handoffTerminalState{Err: errTerminalClosed}
 	}
-	t.state = runtimeStateQuiescing
 	writer := t.ptyWriter
 	ptyFile := t.pty
+	ptyFD, descriptorErr := ghosttyPTYFileDescriptor(ptyFile)
+	if descriptorErr != nil {
+		t.mu.Unlock()
+		return handoffTerminalState{Err: descriptorErr}
+	}
+	t.state = runtimeStateQuiescing
 	childPID, cols, rows := t.childPID, t.cols, t.rows
 	renderer := t.renderer
+	readDone := t.readPumpDone
 	t.mu.Unlock()
 	if err := writer.Drain(2 * time.Second); err != nil {
 		t.mu.Lock()
@@ -701,14 +705,14 @@ func (t *isolatedDaemonTerminal) BeginHandoff() handoffTerminalState {
 		t.mu.Unlock()
 		return handoffTerminalState{Err: err}
 	}
-	rollbackFD, err := unix.Dup(int(ptyFile.Fd()))
+	rollbackFD, err := unix.Dup(ptyFD)
 	if err != nil {
 		t.mu.Lock()
 		t.state = runtimeStateRunning
 		t.mu.Unlock()
 		return handoffTerminalState{Err: err}
 	}
-	transferFD, err := unix.Dup(int(ptyFile.Fd()))
+	transferFD, err := unix.Dup(ptyFD)
 	if err != nil {
 		_ = unix.Close(rollbackFD)
 		t.mu.Lock()
@@ -717,18 +721,25 @@ func (t *isolatedDaemonTerminal) BeginHandoff() handoffTerminalState {
 		return handoffTerminalState{Err: err}
 	}
 	t.quitOnce.Do(func() { close(t.quit) })
-	writer.Close()
-	if renderer != nil {
-		renderer.Close()
-	}
-	t.mu.Lock()
-	readDone := t.readPumpDone
-	t.mu.Unlock()
+	writerClosed := false
 	if readDone != nil {
 		select {
 		case <-readDone:
 		case <-time.After(250 * time.Millisecond):
+			// The writer is drained and input admission stopped. Close the
+			// original wrapper to force a tardy pump out, then still observe its
+			// generation acknowledgement before transfer proceeds. The pump's
+			// immutable numeric descriptor avoids the former Fd/Close race.
+			writer.Close()
+			writerClosed = true
+			<-readDone
 		}
+	}
+	if !writerClosed {
+		writer.Close()
+	}
+	if renderer != nil {
+		renderer.Close()
 	}
 	t.mu.Lock()
 	t.pty = nil

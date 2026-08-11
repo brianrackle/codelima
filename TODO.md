@@ -991,6 +991,19 @@ Disadvantages:
 
 ### 36. Synchronize PTY handoff with the Ghostty read pump
 
+Resolution: resolved by ADR 131. Each read-pump generation now captures an
+immutable PTY file, numeric descriptor, quit channel, and completion channel at
+launch instead of consulting mutable terminal fields. The descriptor comes
+from `SyscallConn` and the pump uses raw nonblocking reads, avoiding `File.Fd()`
+silently restoring blocking mode. Handoff closes that generation's quit channel
+and waits for its completion before closing the PTY;
+the embedded actor drains boundary output during that wait, and rollback starts
+one new pump with a new lease. Isolated input admission also stops while the
+terminal is quiescing, so the writer cannot refill after its handoff drain.
+`TestGhosttyTerminalHandoffTransfersPTYAndRollbackResumes` and
+`TestHandoffRollbackReplaysALargeJournalWithinItsBudget` remain in the full
+race suite as end-to-end regressions.
+
 Problem:
 
 - `make test-race` reports `TestGhosttyTerminalHandoffTransfersPTYAndRollbackResumes` closing the `os.File` inside `ghosttyPTYWriter.Close` while the terminal read pump concurrently calls `os.File.Fd` through `currentPTYFD`.

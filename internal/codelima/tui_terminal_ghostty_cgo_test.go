@@ -288,6 +288,31 @@ func (r *rawNonblockPipeTarget) Write(p []byte) (int, error) {
 func (r *rawNonblockPipeTarget) Close() error { return unix.Close(r.fd) }
 func (r *rawNonblockPipeTarget) Fd() uintptr  { return uintptr(r.fd) }
 
+func TestGhosttyPTYFileDescriptorPreservesNonblocking(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	defer func() { _ = writer.Close() }()
+
+	initialFD := int(reader.Fd())
+	if err := unix.SetNonblock(initialFD, true); err != nil {
+		t.Fatalf("SetNonblock() error = %v", err)
+	}
+	leasedFD, err := ghosttyPTYFileDescriptor(reader)
+	if err != nil {
+		t.Fatalf("ghosttyPTYFileDescriptor() error = %v", err)
+	}
+	flags, err := unix.FcntlInt(uintptr(leasedFD), unix.F_GETFL, 0)
+	if err != nil {
+		t.Fatalf("F_GETFL error = %v", err)
+	}
+	if flags&unix.O_NONBLOCK == 0 {
+		t.Fatalf("descriptor flags = %#x, want O_NONBLOCK preserved", flags)
+	}
+}
+
 // TestStartWiresPolloutWaiterForBackpressure is the busy-spin regression guard:
 // production Start must construct the PTY writer with a real POLLOUT waiter, not
 // nil (which made an EAGAIN spin hot). It asserts both the wiring and that the

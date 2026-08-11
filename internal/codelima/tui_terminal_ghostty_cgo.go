@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -365,6 +366,40 @@ type ghosttyPTYWriter struct {
 	done   chan struct{}
 }
 
+// ghosttyPTYFileDescriptor observes an os.File's descriptor without calling
+// File.Fd. Go's File.Fd switches a pollable descriptor back to blocking mode;
+// PTY pumps and writers require the O_NONBLOCK set at terminal startup to stay
+// in force for their bounded poll loops.
+func ghosttyPTYFileDescriptor(file *os.File) (int, error) {
+	if file == nil {
+		return -1, os.ErrInvalid
+	}
+	raw, err := file.SyscallConn()
+	if err != nil {
+		return -1, err
+	}
+	fd := -1
+	if err := raw.Control(func(value uintptr) {
+		fd = int(value)
+	}); err != nil {
+		return -1, err
+	}
+	if fd < 0 {
+		return -1, os.ErrInvalid
+	}
+	return fd, nil
+}
+
+func ghosttyPTYWriteTargetDescriptor(target ghosttyPTYWriteTarget) (int, error) {
+	if file, ok := target.(*os.File); ok {
+		return ghosttyPTYFileDescriptor(file)
+	}
+	if target == nil {
+		return -1, os.ErrInvalid
+	}
+	return int(target.Fd()), nil
+}
+
 func newGhosttyKeyEncoder() (*ghosttyKeyEncoder, error) {
 	if err := loadGhosttyVT(); err != nil {
 		return nil, err
@@ -543,7 +578,11 @@ func ghosttyWriteAllToPTY(target ghosttyPTYWriteTarget, data []byte, waitWritabl
 				if waitWritable == nil {
 					return io.ErrShortWrite
 				}
-				if err := waitWritable(int(target.Fd())); err != nil {
+				fd, descriptorErr := ghosttyPTYWriteTargetDescriptor(target)
+				if descriptorErr != nil {
+					return descriptorErr
+				}
+				if err := waitWritable(fd); err != nil {
 					return err
 				}
 			}
@@ -556,7 +595,11 @@ func ghosttyWriteAllToPTY(target ghosttyPTYWriteTarget, data []byte, waitWritabl
 			if waitWritable == nil {
 				continue
 			}
-			if err := waitWritable(int(target.Fd())); err != nil {
+			fd, descriptorErr := ghosttyPTYWriteTargetDescriptor(target)
+			if descriptorErr != nil {
+				return descriptorErr
+			}
+			if err := waitWritable(fd); err != nil {
 				return err
 			}
 			continue
@@ -1319,7 +1362,12 @@ func (t *ghosttyTUITerminal) Start(cmd *exec.Cmd) error {
 	if err != nil {
 		return err
 	}
-	if err := unix.SetNonblock(int(ptyFile.Fd()), true); err != nil {
+	ptyFD, err := ghosttyPTYFileDescriptor(ptyFile)
+	if err != nil {
+		_ = ptyFile.Close()
+		return fmt.Errorf("resolve terminal pty descriptor: %w", err)
+	}
+	if err := unix.SetNonblock(ptyFD, true); err != nil {
 		_ = ptyFile.Close()
 		return fmt.Errorf("set terminal pty nonblocking: %w", err)
 	}
@@ -1382,26 +1430,41 @@ func (t *ghosttyTUITerminal) applyResize(width, height int) {
 func (t *ghosttyTUITerminal) readPump() {
 	t.mu.Lock()
 	done := t.readPumpDone
+	quit := t.quit
+	ptyFile := t.pty
+	ptyFD := -1
+	var descriptorErr error
+	if ptyFile != nil {
+		ptyFD, descriptorErr = ghosttyPTYFileDescriptor(ptyFile)
+	}
 	t.mu.Unlock()
 	if done != nil {
 		defer close(done)
 	}
+	if ptyFile == nil || descriptorErr != nil {
+		return
+	}
 	buffer := make([]byte, 32*1024)
 	for {
-		n, err := t.readPTY(buffer)
+		select {
+		case <-quit:
+			return
+		default:
+		}
+		n, err := unix.Read(ptyFD, buffer)
 		if n > 0 {
-			data := append([]byte(nil), buffer[:n]...)
+			data := slices.Clone(buffer[:n])
 			if t.handoffInProgress() {
 				t.readCh <- data
 			} else {
 				select {
-				case <-t.quit:
+				case <-quit:
 					return
 				default:
 				}
 				select {
 				case t.readCh <- data:
-				case <-t.quit:
+				case <-quit:
 					if t.handoffInProgress() {
 						t.readCh <- data
 					}
@@ -1412,37 +1475,28 @@ func (t *ghosttyTUITerminal) readPump() {
 		if err != nil {
 			if isGhosttyPTYWouldBlockError(err) {
 				select {
-				case <-t.quit:
+				case <-quit:
 					return
 				default:
 				}
-				_ = waitGhosttyPTYReadable(int(t.currentPTYFD()), 50*time.Millisecond)
+				_ = waitGhosttyPTYReadable(ptyFD, 50*time.Millisecond)
 				continue
 			}
 			if t.handoffInProgress() {
 				return
 			}
 			select {
-			case <-t.quit:
+			case <-quit:
 				return
 			default:
 			}
 			select {
 			case t.readErrCh <- err:
-			case <-t.quit:
+			case <-quit:
 			}
 			return
 		}
 	}
-}
-
-func (t *ghosttyTUITerminal) currentPTYFD() uintptr {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.pty == nil {
-		return ^uintptr(0)
-	}
-	return t.pty.Fd()
 }
 
 func waitGhosttyPTYReadable(fd int, timeout time.Duration) error {
@@ -1471,16 +1525,6 @@ func (t *ghosttyTUITerminal) handoffInProgress() bool {
 // os.ErrClosed branch.
 func isGhosttyPTYClosedReadError(err error) bool {
 	return errors.Is(err, os.ErrClosed)
-}
-
-func (t *ghosttyTUITerminal) readPTY(buffer []byte) (int, error) {
-	t.mu.Lock()
-	ptyFile := t.pty
-	t.mu.Unlock()
-	if ptyFile == nil {
-		return 0, io.EOF
-	}
-	return ptyFile.Read(buffer)
 }
 
 func (t *ghosttyTUITerminal) ingestPTY(data []byte) {
@@ -2460,10 +2504,16 @@ func (t *ghosttyTUITerminal) beginHandoff(timeout time.Duration) handoffTerminal
 		t.mu.Unlock()
 		return handoffTerminalState{Err: errTerminalClosed}
 	}
-	t.state = runtimeStateQuiescing
 	writer := t.ptyWriter
 	ptyFile := t.pty
+	ptyFD, descriptorErr := ghosttyPTYFileDescriptor(ptyFile)
+	if descriptorErr != nil {
+		t.mu.Unlock()
+		return handoffTerminalState{Err: descriptorErr}
+	}
+	t.state = runtimeStateQuiescing
 	childPID, cols, rows := t.childPID, t.cols, t.rows
+	readPumpDone := t.readPumpDone
 	t.mu.Unlock()
 	if err := writer.Drain(timeout); err != nil {
 		t.mu.Lock()
@@ -2471,14 +2521,14 @@ func (t *ghosttyTUITerminal) beginHandoff(timeout time.Duration) handoffTerminal
 		t.mu.Unlock()
 		return handoffTerminalState{Err: err}
 	}
-	rollbackFD, err := unix.Dup(int(ptyFile.Fd()))
+	rollbackFD, err := unix.Dup(ptyFD)
 	if err != nil {
 		t.mu.Lock()
 		t.state = runtimeStateRunning
 		t.mu.Unlock()
 		return handoffTerminalState{Err: err}
 	}
-	transferFD, err := unix.Dup(int(ptyFile.Fd()))
+	transferFD, err := unix.Dup(ptyFD)
 	if err != nil {
 		_ = unix.Close(rollbackFD)
 		t.mu.Lock()
@@ -2487,19 +2537,36 @@ func (t *ghosttyTUITerminal) beginHandoff(timeout time.Duration) handoffTerminal
 		return handoffTerminalState{Err: err}
 	}
 	t.quitOnce.Do(func() { close(t.quit) })
-	writer.Close()
-	t.mu.Lock()
-	readPumpDone := t.readPumpDone
-	t.mu.Unlock()
+	writerClosed := false
 	if readPumpDone != nil {
-		select {
-		case <-readPumpDone:
-		case <-time.After(250 * time.Millisecond):
-			// A blocking PTY read with no pending child output may outlive close
-			// on some kernels. The actor is already gated and the old process
-			// exits immediately after commit; drain any delivered boundary bytes
-			// below without turning an idle terminal into a failed handoff.
+		timer := time.NewTimer(250 * time.Millisecond)
+		timeoutC := timer.C
+		waiting := true
+		for waiting {
+			select {
+			case data := <-t.readCh:
+				t.ingestPTY(data)
+			case <-readPumpDone:
+				waiting = false
+			case <-timeoutC:
+				// The writer is drained and the actor is quiescing. Closing the
+				// original wrapper forces a tardy pump out without invalidating
+				// the duplicated transfer/rollback descriptors; keep draining
+				// until that exact pump generation acknowledges completion.
+				writer.Close()
+				writerClosed = true
+				timeoutC = nil
+			}
 		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}
+	if !writerClosed {
+		writer.Close()
 	}
 	for {
 		select {
