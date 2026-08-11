@@ -76,7 +76,7 @@ func TestHungCgoRendererIsTerminalLocalAndPreservesShell(t *testing.T) {
 	}
 	hungOptions := helper
 	hungOptions.Env = append(
-		append([]string(nil), helper.Env...),
+		slices.Clone(helper.Env),
 		"CODELIMA_TEST_GHOSTTY_HANG_OPERATION=output",
 	)
 
@@ -392,7 +392,11 @@ func TestSustainedFullscreenOutputDoesNotRestartRendererOrEmitQueueErrors(t *tes
 	}
 	t.Cleanup(terminal.Close)
 
-	deadline := time.Now().Add(10 * time.Second)
+	// Race instrumentation makes the cgo renderer and its framed transport
+	// substantially slower than a production build. Keep this an eventual
+	// correctness assertion; interactive throughput is qualified separately by
+	// the non-race tests and QA flow.
+	deadline := time.Now().Add(30 * time.Second)
 	for !strings.Contains(terminal.ReadVisible(ReadText).Text, "CMATRIX_BURST_DONE") {
 		if time.Now().After(deadline) {
 			t.Fatalf(

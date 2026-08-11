@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -18,7 +17,7 @@ func TestForwardingSSHConfigFallsBackToDirectListWhenCacheLacksSSHConfig(t *test
 	home, configPath, identity := newForwardingSSHConfigFixture(t)
 	client := NewLimaClient(t.TempDir())
 	client.LimaHome = home
-	client.Binary = writeLimaListStub(t, limaListRecordJSON("demo", "Running", configPath, home))
+	configureLimaListResult(client, limaListRecordJSON("demo", "Running", configPath, home))
 	seedLimaObservationCache(t, client, RuntimeObservation{Name: "demo", Exists: true, Status: ObservationRunning})
 
 	got, err := client.ForwardingSSHConfig(context.Background(), "demo")
@@ -37,7 +36,7 @@ func TestForwardingSSHConfigFallsBackWhenCacheIsEmptyButAuthoritative(t *testing
 	home, configPath, identity := newForwardingSSHConfigFixture(t)
 	client := NewLimaClient(t.TempDir())
 	client.LimaHome = home
-	client.Binary = writeLimaListStub(t, limaListRecordJSON("demo", "Running", configPath, home))
+	configureLimaListResult(client, limaListRecordJSON("demo", "Running", configPath, home))
 	seedLimaObservationCache(t, client)
 
 	got, err := client.ForwardingSSHConfig(context.Background(), "demo")
@@ -56,7 +55,7 @@ func TestForwardingSSHConfigReportsNotRunningOnlyAfterDirectConfirmation(t *test
 	home, configPath, _ := newForwardingSSHConfigFixture(t)
 	client := NewLimaClient(t.TempDir())
 	client.LimaHome = home
-	client.Binary = writeLimaListStub(t, limaListRecordJSON("demo", "Stopped", configPath, home))
+	configureLimaListResult(client, limaListRecordJSON("demo", "Stopped", configPath, home))
 	seedLimaObservationCache(t, client, RuntimeObservation{Name: "demo", Exists: true, Status: ObservationStopped})
 
 	_, err := client.ForwardingSSHConfig(context.Background(), "demo")
@@ -81,14 +80,11 @@ func limaListRecordJSON(name, status, configPath, limaHome string) string {
 		name, status, filepath.Join(limaHome, name), configPath, limaHome)
 }
 
-// writeLimaListStub installs a limactl stand-in that answers `list --json` with
-// one fixed record, so the direct-list fallback can be exercised without Lima.
-func writeLimaListStub(t *testing.T, record string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "limactl-list-stub")
-	script := "#!/bin/sh\nset -eu\nif [ \"${1:-}\" = list ]; then\n  cat <<'RECORD'\n" + record + "\nRECORD\nfi\n"
-	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return path
+// configureLimaListResult makes the direct-list fallback return one fixed
+// record without creating a just-written executable. The cache tests exercise
+// fallback selection rather than the limactl argv transport, and using the
+// supported custom-command path avoids transient ETXTBSY failures on loaded
+// Linux CI filesystems.
+func configureLimaListResult(client *LimaClient, record string) {
+	client.RuntimeCommands.List = []string{"printf '%s\\n' " + shellQuote(record)}
 }

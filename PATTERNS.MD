@@ -1,5 +1,21 @@
 # Patterns
 
+## Asynchronous verification
+
+Tests for daemon handoff, renderer publication, and other asynchronous state
+transitions wait for an observable terminal condition under a bounded deadline,
+then assert the complete result. A fixed sleep is not evidence that an event
+has arrived and turns ordinary scheduler variance into a false data-loss
+failure. Correctness deadlines that run under the race detector include room
+for its instrumentation overhead; production responsiveness stays covered by
+non-race automation and the timed manual QA flows.
+
+When a test only needs deterministic runtime-command output, use the supported
+configured-command seam instead of writing and immediately executing a scratch
+script. Keep executable fakes for tests that specifically exercise argv or
+binary transport. This avoids making unrelated cache and parsing tests depend
+on transient executable-file behavior in loaded CI filesystems.
+
 ## Schema-owned metadata home
 
 `CODELIMA_HOME` is authoritative for configurations, environments, nodes, daemon state, indexes, and locks. Durable writes use temp-file-plus-rename semantics. `_config/schema.version` is checked before metadata is interpreted; schema v4 rejects schema-v2, schema-v3, and legacy Lima homes instead of attempting an in-place migration.

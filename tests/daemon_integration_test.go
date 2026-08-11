@@ -201,13 +201,19 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		if !update.Updated || !update.LiveHandoff || update.Fallback != "" {
 			t.Fatalf("live update = %#v", update)
 		}
-		time.Sleep(500 * time.Millisecond)
 		var read struct {
 			TerminalID string `json:"terminal_id"`
 			Text       string `json:"text"`
 		}
-		if err := json.Unmarshal(h.json("terminal", "read", terminal.TerminalID, "--source", "recent"), &read); err != nil {
-			t.Fatal(err)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if err := json.Unmarshal(h.json("terminal", "read", terminal.TerminalID, "--source", "recent"), &read); err != nil {
+				t.Fatal(err)
+			}
+			if containsCounter(read.Text, "COUNT=29") || time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(25 * time.Millisecond)
 		}
 		if read.TerminalID != terminal.TerminalID {
 			t.Fatalf("terminal id changed: %q -> %q", terminal.TerminalID, read.TerminalID)
