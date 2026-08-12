@@ -390,6 +390,16 @@ func ghosttyPTYFileDescriptor(file *os.File) (int, error) {
 	return fd, nil
 }
 
+// ghosttyReadPTY preserves os.File.Read's EOF contract while using a raw read
+// so the caller can observe EAGAIN without File.Fd restoring blocking mode.
+func ghosttyReadPTY(fd int, buffer []byte) (int, error) {
+	n, err := unix.Read(fd, buffer)
+	if n == 0 && err == nil {
+		return 0, io.EOF
+	}
+	return n, err
+}
+
 func ghosttyPTYWriteTargetDescriptor(target ghosttyPTYWriteTarget) (int, error) {
 	if file, ok := target.(*os.File); ok {
 		return ghosttyPTYFileDescriptor(file)
@@ -1451,7 +1461,7 @@ func (t *ghosttyTUITerminal) readPump() {
 			return
 		default:
 		}
-		n, err := unix.Read(ptyFD, buffer)
+		n, err := ghosttyReadPTY(ptyFD, buffer)
 		if n > 0 {
 			data := slices.Clone(buffer[:n])
 			if t.handoffInProgress() {

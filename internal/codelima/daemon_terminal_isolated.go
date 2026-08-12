@@ -541,7 +541,7 @@ func (t *isolatedDaemonTerminal) readPump() {
 			return
 		default:
 		}
-		n, err := unix.Read(ptyFD, buffer)
+		n, err := ghosttyReadPTY(ptyFD, buffer)
 		if n > 0 {
 			event := t.journal.AppendOutput(buffer[:n])
 			t.mu.Lock()

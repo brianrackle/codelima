@@ -313,6 +313,23 @@ func TestGhosttyPTYFileDescriptorPreservesNonblocking(t *testing.T) {
 	}
 }
 
+func TestGhosttyReadPTYNormalizesZeroReadToEOF(t *testing.T) {
+	var fds [2]int
+	if err := unix.Pipe(fds[:]); err != nil {
+		t.Fatal(err)
+	}
+	readerFD, writerFD := fds[0], fds[1]
+	defer func() { _ = unix.Close(readerFD) }()
+	if err := unix.Close(writerFD); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := ghosttyReadPTY(readerFD, make([]byte, 1))
+	if n != 0 || !errors.Is(err, io.EOF) {
+		t.Fatalf("ghosttyReadPTY() = (%d, %v), want (0, EOF)", n, err)
+	}
+}
+
 // TestStartWiresPolloutWaiterForBackpressure is the busy-spin regression guard:
 // production Start must construct the PTY writer with a real POLLOUT waiter, not
 // nil (which made an EAGAIN spin hot). It asserts both the wiring and that the

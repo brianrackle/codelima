@@ -37,9 +37,11 @@ for its lifetime. The numeric descriptor is obtained through `SyscallConn`
 rather than `File.Fd()`: Go documents that `Fd()` may switch a pollable file
 back to blocking mode, which would defeat the pump's bounded readiness loop.
 The pump reads with `unix.Read` so `EAGAIN` remains observable and every idle
-wait stays bounded. Rollback installs a new PTY, quit channel, and completion
-channel before starting the next generation, so an old pump can never switch
-to the replacement generation's resources.
+wait stays bounded, while normalizing its zero-byte success result to the
+`io.EOF` contract previously supplied by `os.File.Read`. Rollback installs a
+new PTY, quit channel, and completion channel before starting the next
+generation, so an old pump can never switch to the replacement generation's
+resources.
 
 Handoff changes the terminal state to quiescing, which stops isolated-terminal
 input admission, drains the already accepted writer queue, closes the captured
