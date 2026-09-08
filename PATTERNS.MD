@@ -1,5 +1,21 @@
 # Patterns
 
+## Managed native build metadata tools
+
+Bootstrap build-time tools into the platform-scoped `.tooling/<os>-<arch>`
+tree and pass their absolute executable paths to consumers. Native cgo,
+contract tests, benchmarks, and direct release packaging all use the same
+managed `PKG_CONFIG`, with the matching static dependency's `.pc` directory
+on `PKG_CONFIG_PATH`. Do not assume a user's shell or package manager provides
+it, and do not replace a general metadata resolver with hard-coded flags.
+
+The `pkgconf` bootstrap consumes checksum-verified, pinned upstream source and
+the already-verified Zig compiler, so it does not need a host C compiler or
+another package manager to install itself. Keep installer scratch and caches
+project-local; publish only a complete verified install. Direct packaging
+validates the native build identity before provisioning missing tools, so an
+invalid input fails without unrelated downloads or output mutation.
+
 ## Asynchronous verification
 
 Tests for daemon handoff, renderer publication, and other asynchronous state
@@ -222,10 +238,47 @@ close request run after the client-owned tab has been removed so remote latency
 never holds the TUI event loop. Detach remains a synchronous drain because it
 preserves the daemon-owned terminal. Preserve semantic input boundaries across
 the client/daemon seam: buffer Vaxis paste keys until `PasteEndEvent`, send
-bounded UTF-8-safe semantic paste chunks, and let the isolated renderer
-re-create paste-start/payload/paste-end so Ghostty remains the owner of
-bracketed-paste mode. Preserve LF in paste data; a pasted newline is text, not
-an Enter key.
+one valid UTF-8 semantic paste of at most 64 KiB, and let the isolated renderer
+encode it with native safe-paste policy before admitting the complete output
+as one PTY write. Reject oversize/full-queue requests without partial input;
+never split a bracketed paste into independently admitted chunks. Preserve LF
+in paste data; a pasted newline is text, not an Enter key.
+
+## Bounded native terminal adoption
+
+Only the renderer executable imports `internal/ghostty`; portable data and
+process ownership live outside it. Native source, patches, features and build
+profile are an exact identity checked at compilation and worker initialization.
+Never discover arbitrary shared libraries or silently substitute an encoder.
+Use owned bulk results and explicit native errors, keep C callbacks bounded,
+copy buffers before freeing them, and free every handle on cancellation/close.
+
+Publish cells, metadata, graphics and visible text in one actor-owned cut.
+Only immutable owned values cross into asynchronous caches. Fence all results
+by terminal identity, renderer generation and request/query revision, including
+graphics chunks and search completions. A timed-out reader can detach while
+the native command keeps its independent hard liveness deadline.
+
+Wrap opaque native checkpoints with exact build/policy identity, integrity,
+complete presentation state and a contiguous applied journal watermark.
+Validate into temporary state before commit, retain an independent raw fallback,
+bound encoded and decoded allocations separately, and enforce aggregate quotas
+in addition to per-terminal limits. Do not checkpoint while native image state
+exists: absence of a visible placement is not absence of image state.
+
+Effects need an owner, delivery policy and replay policy. Clipboard writes go
+only to the subscribed physical seat holder, never every observer, never during
+replay, and never with a false host-completion acknowledgement. Guest metadata
+is sanitized presentation text, not authority to navigate, notify the desktop
+or execute commands. Local host-color discovery is cancellable, bounded and
+off the UI actor; unspecified defaults are not RGB black.
+
+Keep expensive graphics fetch/decode/raster work on one frontend-owned worker,
+clip before allocation, bound aggregate scenes, and upload under a per-frame
+wire-byte budget. Own host image identities independently of guest IDs. Release
+placements on tab/overlay transitions, assets on replacement/close, and discard
+stale results before installation. Do not leak image encoding goroutines into
+an unbounded redraw path.
 
 Terminal tabs are independent terminal instances attached to one node target. Per-target state keeps ordered tab IDs, a monotonic counter, active selection, and the last open error. Selecting a running node ensures a terminal tab, reusing any existing node tab and opening a guest tab only when none exists. `Option+t` adds another guest tab and `Option+Shift+t` adds a host tab; all use the same switch, move, close, refresh, and active-tab paths. Moving swaps the active identity with one adjacent same-target tab without wrapping or changing activation. Never open a guest tab for a stopped node.
 
@@ -301,6 +354,13 @@ not receive the supplemental redraw signal.
 The daemon lock, not the presence of socket or identity pathnames, is the authoritative shutdown/startup gate. Persist terminal restoration intent before slow cleanup, close terminal runtimes concurrently, and size legacy shutdown grace for the reported terminal count. After the bounded grace, signal only a process whose persisted token and PID still match and whose daemon lock remains held. Startup uses the same lifecycle-only recovery for a compatible daemon that has closed its socket but not yet released the lock.
 
 ## TUI data flow
+
+Keep shortcut identity separate from event activation. Vaxis key matching
+ignores press/repeat/release; focus toggles run only on `EventPress`, but their
+repeats and releases remain recognized as shortcuts and are consumed after
+focus changes. Filtering event types out of the matcher would leak the
+remaining events to the newly focused terminal. Preserve ordinary terminal
+repeat/release events and handle pasted input before shortcut dispatch (ADR 134).
 
 The production TUI loads the daemon's flat node list once per second, then optionally scopes it by canonical directory containment. Render each node as one fixed-height selectable block: the slug identifies the block, and indented property lines show its configuration, relative directory within the active scope, live status, CPU, memory, and guest root-disk usage. Derive viewport capacity from content rows divided by block height, and map mouse rows back through the same height so scrolling, highlighting, and property-line clicks keep one item identity. Configuration and environment menus are global; node actions use only the selected node.
 

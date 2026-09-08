@@ -27,7 +27,8 @@ const rendererInputEventBit = uint64(1) << 63
 // this handshake and moves snapshot cells to the compact encoding in
 // daemon.SnapshotCell. A worker that predates versioning sends no version at
 // all, which decodes as 0 and is rejected as a mismatch -- exactly the intent.
-const rendererWorkerProtocolVersion = 2
+// Version 3 adds native checkpoint envelopes and contiguous journal watermarks.
+const rendererWorkerProtocolVersion = 3
 
 // errRendererProtocolMismatch marks a version disagreement between this binary
 // and the renderer worker beside it. It is deliberately distinct from every
@@ -59,10 +60,18 @@ type rendererWorkerFrame struct {
 }
 
 type rendererInitParams struct {
-	TerminalID string                 `json:"terminal_id"`
-	Cols       int                    `json:"cols"`
-	Rows       int                    `json:"rows"`
-	Journal    []rendererJournalEvent `json:"journal,omitempty"`
+	Colors               *TerminalColors        `json:"colors,omitempty"`
+	CellWidth            int                    `json:"cell_width,omitempty"`
+	CellHeight           int                    `json:"cell_height,omitempty"`
+	TerminalID           string                 `json:"terminal_id"`
+	Cols                 int                    `json:"cols"`
+	Rows                 int                    `json:"rows"`
+	Journal              []rendererJournalEvent `json:"journal,omitempty"`
+	JournalWatermark     uint64                 `json:"journal_watermark"`
+	JournalPartial       bool                   `json:"journal_partial,omitempty"`
+	Checkpoint           *rendererCheckpoint    `json:"checkpoint,omitempty"`
+	CheckpointTail       []rendererJournalEvent `json:"checkpoint_tail,omitempty"`
+	CommandTimeoutMillis int64                  `json:"command_timeout_millis"`
 }
 
 // rendererInitResult is the worker's reply to "init" and the carrier of the
@@ -72,8 +81,11 @@ type rendererInitParams struct {
 // that point -- so a mismatched worker is rejected before a single snapshot or
 // PTY-write frame has been interpreted.
 type rendererInitResult struct {
-	Protocol int  `json:"protocol"`
-	Ready    bool `json:"ready"`
+	Protocol           int    `json:"protocol"`
+	Ready              bool   `json:"ready"`
+	BuildID            string `json:"build_id,omitempty"`
+	PartialRecovery    bool   `json:"partial_recovery,omitempty"`
+	RestoredCheckpoint bool   `json:"restored_checkpoint,omitempty"`
 }
 
 // verifyRendererProtocol checks the version a worker announced in its init
@@ -92,6 +104,9 @@ func verifyRendererProtocol(executable string, raw json.RawMessage) error {
 		)
 	}
 	if result.Protocol == rendererWorkerProtocolVersion {
+		if !result.Ready {
+			return errors.New("renderer worker did not acknowledge readiness")
+		}
 		return nil
 	}
 	announced := fmt.Sprintf("version %d", result.Protocol)
@@ -111,9 +126,16 @@ type rendererOutputParams struct {
 }
 
 type rendererResizeParams struct {
-	EventID uint64 `json:"event_id"`
-	Cols    int    `json:"cols"`
-	Rows    int    `json:"rows"`
+	CellWidth  int    `json:"cell_width,omitempty"`
+	CellHeight int    `json:"cell_height,omitempty"`
+	EventID    uint64 `json:"event_id"`
+	FirstID    uint64 `json:"first_id,omitempty"`
+	Cols       int    `json:"cols"`
+	Rows       int    `json:"rows"`
+}
+
+type rendererCheckpointParams struct {
+	Through uint64 `json:"through"`
 }
 
 type rendererUpdateParams struct {

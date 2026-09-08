@@ -121,14 +121,6 @@ func assertPersistedTerminalOrder(t *testing.T, sessionPath string, want []strin
 	}
 }
 
-func terminalStateIDs(states []daemon.TerminalState) []string {
-	ids := make([]string, len(states))
-	for index, state := range states {
-		ids[index] = state.TerminalID
-	}
-	return ids
-}
-
 func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *testing.T) {
 	service, workspace := newTestService(t)
 	fake := service.sandbox.(*fakeSandbox)
@@ -147,7 +139,7 @@ func TestDaemonNodeHostTerminalUsesStoredDirectoryWithoutRuntimeObservation(t *t
 	}
 
 	host := newDaemonHost(service)
-	host.terminalFactory = newTUITerminal
+	host.terminalFactory = testGhosttyTerminalFactory(t)
 	state, err := host.open(context.Background(), terminalOpenParams{
 		Target: "node:" + node.ID,
 		Kind:   terminal.NodeHostShell.String(),
@@ -232,7 +224,7 @@ func TestDaemonTerminalSurvivesClientDetachAndAcceptsSecondClientInput(t *testin
 		t.Fatalf("SaveNode() error = %v", err)
 	}
 	host := newDaemonHost(service)
-	host.terminalFactory = newTUITerminal
+	host.terminalFactory = testGhosttyTerminalFactory(t)
 	server := daemon.NewServer(daemon.Config{Home: service.cfg.MetadataRoot, Version: Version, Handler: host})
 	host.broadcast = server.Broadcast
 	ctx, cancel := context.WithCancel(context.Background())

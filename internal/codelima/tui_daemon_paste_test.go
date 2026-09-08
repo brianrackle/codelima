@@ -7,9 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
@@ -63,41 +62,42 @@ func TestDaemonTUITerminalBatchesPasteIntoOneSemanticEvent(t *testing.T) {
 	}
 }
 
-func TestDaemonTUITerminalChunksLargePasteOnUTF8Boundaries(t *testing.T) {
+func TestDaemonTUITerminalRejectsLargePasteWithoutSendingPrefix(t *testing.T) {
 	t.Parallel()
-
 	caller := &recordingDaemonPasteCaller{}
-	term := &daemonTUITerminal{client: caller, id: "term-1", stop: make(chan struct{})}
-	payload := strings.Repeat("界", daemonTerminalPasteChunkBytes/3+100)
-
+	var rejected error
+	term := &daemonTUITerminal{client: caller, id: "term-1", stop: make(chan struct{}),
+		postEvent: func(event vaxis.Event) {
+			if event, ok := event.(tuiTerminalErrorEvent); ok {
+				rejected = event.Err
+			}
+		},
+	}
+	payload := strings.Repeat("界", terminalMaxPasteBytes/3+100)
 	term.Update(vaxis.PasteStartEvent{})
+	term.Update(vaxis.Key{Text: "prefix", EventType: vaxis.EventPaste})
 	term.Update(vaxis.Key{Text: payload, EventType: vaxis.EventPaste})
 	term.Update(vaxis.PasteEndEvent{})
 	term.Detach()
-
-	if len(caller.calls) < 2 {
-		t.Fatalf("large paste made %d RPC calls, want multiple bounded chunks", len(caller.calls))
-	}
-	var rebuilt strings.Builder
-	for index, call := range caller.calls {
-		text, _ := call.params["text"].(string)
-		if len(text) > daemonTerminalPasteChunkBytes {
-			t.Fatalf("paste chunk %d has %d bytes, limit is %d", index, len(text), daemonTerminalPasteChunkBytes)
-		}
-		if !utf8.ValidString(text) {
-			t.Fatalf("paste chunk %d split a UTF-8 code point", index)
-		}
-		rebuilt.WriteString(text)
-	}
-	if rebuilt.String() != payload {
-		t.Fatal("chunked paste did not preserve the original text")
+	if len(caller.calls) != 0 || rejected == nil {
+		t.Fatalf("oversized paste calls=%d, error=%v; want no writes and explicit rejection", len(caller.calls), rejected)
 	}
 }
 
-func TestDaemonHostWrapsSemanticPasteInBracketedPasteEvents(t *testing.T) {
+type semanticPasteTestTerminal struct {
+	*resizeCountingDaemonTerminal
+	pastes []string
+}
+
+func (t *semanticPasteTestTerminal) Paste(text string) error {
+	t.pastes = append(t.pastes, text)
+	return nil
+}
+
+func TestDaemonHostDeliversOneSemanticPaste(t *testing.T) {
 	t.Parallel()
 
-	term := &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()}
+	term := &semanticPasteTestTerminal{resizeCountingDaemonTerminal: &resizeCountingDaemonTerminal{fakeTUITerminal: newFakeTUITerminal()}}
 	host := &daemonHost{
 		terminals: map[string]*daemonTerminalEntry{
 			"term-1": {state: daemon.TerminalState{TerminalID: "term-1"}, term: term},
@@ -116,20 +116,7 @@ func TestDaemonHostWrapsSemanticPasteInBracketedPasteEvents(t *testing.T) {
 		t.Fatalf("terminal.send_event paste error = %v", err)
 	}
 
-	if len(term.events) != 3 {
-		t.Fatalf("daemon paste produced %d terminal events, want start, key, end", len(term.events))
-	}
-	if _, ok := term.events[0].(vaxis.PasteStartEvent); !ok {
-		t.Fatalf("first paste event = %T, want vaxis.PasteStartEvent", term.events[0])
-	}
-	key, ok := term.events[1].(vaxis.Key)
-	if !ok {
-		t.Fatalf("paste payload event = %T, want vaxis.Key", term.events[1])
-	}
-	if key.EventType != vaxis.EventPaste || key.Text != "one\ntwo" {
-		t.Fatalf("paste payload = %#v, want EventPaste with LF newlines", key)
-	}
-	if _, ok := term.events[2].(vaxis.PasteEndEvent); !ok {
-		t.Fatalf("last paste event = %T, want vaxis.PasteEndEvent", term.events[2])
+	if len(term.pastes) != 1 || term.pastes[0] != "one\ntwo" || len(term.events) != 0 {
+		t.Fatalf("semantic pastes=%q, raw events=%d; want one intact paste", term.pastes, len(term.events))
 	}
 }

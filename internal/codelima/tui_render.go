@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
-	"git.sr.ht/~rockorager/vaxis/widgets/border"
+	"go.rockorager.dev/vaxis"
+	"go.rockorager.dev/vaxis/widgets/border"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
@@ -478,6 +478,9 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 			segments = append(segments, vaxis.Segment{Text: " ", Style: inactiveStyle})
 		}
 		label := terminalTabLabel(session, index, len(keys))
+		if metadata := a.terminalMetadataLabel(key); metadata != "" {
+			label += " · " + metadata
+		}
 		if key == activeKey {
 			segments = append(segments, vaxis.Segment{Text: "[" + label + "]", Style: activeStyle})
 			continue
@@ -545,6 +548,8 @@ func (a *vaxisTUIApp) drawHeaderLogo() {
 	if a.vx == nil {
 		return
 	}
+	a.beginGraphicsFrame()
+	defer a.finishGraphicsFrame()
 	window := a.vx.Window()
 	width, height := window.Size()
 	if width < 60 || height < 14 {
@@ -556,6 +561,7 @@ func (a *vaxisTUIApp) drawHeaderLogo() {
 
 func (a *vaxisTUIApp) draw() {
 	a.drawPasses++
+	a.recordTerminalNotices()
 	if a.vx == nil {
 		return
 	}
@@ -868,6 +874,10 @@ func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTr
 func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
 	if term, ok := a.sessions.SessionTerminal(a.state.activeSessionKey()); ok {
 		term.Draw(win)
+		if terminal, ok := term.(*daemonTUITerminal); ok {
+			a.drawTerminalGraphics(win, terminal)
+		}
+		a.drawTerminalSearch(win)
 		return
 	}
 

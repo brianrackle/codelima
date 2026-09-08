@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"

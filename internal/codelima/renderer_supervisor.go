@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux)
+//go:build darwin || linux
 
 package codelima
 
@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/brianrackle/codelima/internal/terminalgraphics"
+	"github.com/brianrackle/codelima/internal/terminalstate"
 	"golang.org/x/sys/unix"
 )
 
@@ -172,6 +174,12 @@ type rendererSupervisor struct {
 	onEvent    func(uint64, rendererWorkerFrame)
 	onRestart  func()
 
+	// publication orders callback installation with generation invalidation.
+	// Decode and native/process I/O stay outside this mutex. Callbacks must not
+	// reenter supervisor lifecycle methods; they only publish owned Go state or
+	// enqueue effects. The lock order is publication, then mu.
+	publication   sync.Mutex
+	colorsMu      sync.Mutex // serialize policy intent with its live RPC admission
 	mu            sync.Mutex
 	stateWake     chan struct{}
 	link          *rendererLink
@@ -187,16 +195,25 @@ type rendererSupervisor struct {
 	// the two binaries on disk rather than of this attempt. It suppresses the
 	// automatic restart path entirely (see planRestartLocked) so a stale worker
 	// cannot spin the budget, and is cleared by a successful start.
-	protocolMismatch bool
-	healthySince     time.Time
-	lastNotice       time.Time
-	restarts         []time.Time
-	lastError        string
-	lastProbe        time.Time
-	restartWake      chan struct{}
-	shutdown         chan struct{}
-	done             chan struct{}
-	status           atomic.Pointer[rendererSupervisorStatus]
+	protocolMismatch  bool
+	healthySince      time.Time
+	lastNotice        time.Time
+	restarts          []time.Time
+	lastError         string
+	lastProbe         time.Time
+	restartWake       chan struct{}
+	shutdown          chan struct{}
+	done              chan struct{}
+	status            atomic.Pointer[rendererSupervisorStatus]
+	checkpoint        *rendererCheckpoint
+	checkpointBusy    bool
+	checkpointTasks   sync.WaitGroup
+	lastCheckpoint    time.Time
+	recoveryPartial   bool
+	publishedRevision uint64
+	checkpointDirty   bool
+	colors            *TerminalColors
+	colorsRevision    uint64
 }
 
 func newRendererSupervisor(
@@ -252,14 +269,18 @@ func (s *rendererSupervisor) Start(ctx context.Context, cols, rows int) error {
 }
 
 func (s *rendererSupervisor) startRenderer(ctx context.Context, cols, rows int) error {
+	s.publication.Lock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.publication.Unlock()
 		return errTerminalClosed
 	}
 	s.generation++
+	s.acceptFrames = false
 	generation := s.generation
 	s.mu.Unlock()
+	s.publication.Unlock()
 	link, err := startRendererLink(s.options, generation, s.handleFrame)
 	if err != nil {
 		s.mu.Lock()
@@ -274,16 +295,34 @@ func (s *rendererSupervisor) startRenderer(ctx context.Context, cols, rows int) 
 		link.Fail(errors.New("renderer generation superseded before startup"))
 		return errors.New("renderer generation superseded before startup")
 	}
-	s.acceptFrames = true
 	s.mu.Unlock()
 	journal := s.journal.Snapshot()
 	params := rendererInitParams{
 		TerminalID: s.terminalID,
 		Cols:       cols,
 		Rows:       rows,
-		Journal:    journal.Events,
+		CellWidth:  journal.CellWidth, CellHeight: journal.CellHeight,
+		Journal:              journal.Events,
+		JournalWatermark:     journal.LastID,
+		JournalPartial:       journal.Partial,
+		CommandTimeoutMillis: s.options.CommandTimeout.Milliseconds(),
 	}
-	initCtx, cancel := context.WithTimeout(ctx, rendererInitDeadline(s.options.CommandTimeout, journal.Bytes))
+	s.mu.Lock()
+	checkpoint := s.checkpoint
+	params.Colors = terminalstate.CloneColors(s.colors)
+	appliedColorsRevision := s.colorsRevision
+	s.mu.Unlock()
+	if checkpoint != nil && checkpoint.validate(rendererNativeBuildIdentity(), s.terminalID) == nil {
+		if tail, complete := journal.tailAfter(checkpoint.AppliedEventID); complete {
+			params.Checkpoint = checkpoint
+			params.CheckpointTail = tail.Events
+		}
+	}
+	initBytes := journal.Bytes
+	if params.Checkpoint != nil {
+		initBytes += len(params.Checkpoint.State.Data)
+	}
+	initCtx, cancel := context.WithTimeout(ctx, rendererInitDeadline(s.options.CommandTimeout, initBytes))
 	defer cancel()
 	// CallResult, not Call: the init reply is the version handshake, and the
 	// link is not ready until the worker's protocol version has been checked
@@ -309,24 +348,60 @@ func (s *rendererSupervisor) startRenderer(ctx context.Context, cols, rows int) 
 		s.mu.Unlock()
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var initialized rendererInitResult
+	if err := json.Unmarshal(raw, &initialized); err != nil {
+		link.Fail(err)
+		return err
+	}
+	for {
+		s.mu.Lock()
+		colors, revision := terminalstate.CloneColors(s.colors), s.colorsRevision
+		s.mu.Unlock()
+		if revision != appliedColorsRevision && colors != nil {
+			if err := link.Call(initCtx, "interact", TerminalInteractionRequest{Action: "colors", Colors: colors}); err != nil {
+				link.Fail(err)
+				return err
+			}
+			appliedColorsRevision = revision
+		}
+		s.publication.Lock()
+		s.mu.Lock()
+		if s.colorsRevision == appliedColorsRevision {
+			break
+		}
+		s.mu.Unlock()
+		s.publication.Unlock()
+	}
 	if s.closed || generation != s.generation {
+		s.mu.Unlock()
+		s.publication.Unlock()
 		link.Fail(errors.New("renderer generation superseded during startup"))
 		return errors.New("renderer generation superseded during startup")
 	}
 	s.link = link
-	if len(journal.Events) > 0 {
-		s.replayThrough = journal.Events[len(journal.Events)-1].ID
-	}
+	s.acceptFrames = true
+	s.replayThrough = journal.LastID
+	s.recoveryPartial = initialized.PartialRecovery || (journal.Partial && !initialized.RestoredCheckpoint)
+	s.publishedRevision = 0
+	s.checkpointDirty = false
 	now := time.Now()
 	s.lastProbe = now
 	s.healthySince = now
+	s.lastCheckpoint = now
 	s.degraded = false
 	s.protocolMismatch = false
 	s.lastError = ""
 	s.publishStatusLocked(rendererStateReady, link.PID())
 	s.wakeLocked()
+	s.mu.Unlock()
+	s.publication.Unlock()
+	// Init may publish before announcing its protocol. Such state is never
+	// interpreted; ask for the initial screen only after verification so an
+	// otherwise idle terminal still receives a first publication.
+	if err := link.TryNotify("snapshot", nil); err != nil {
+		s.requestRestart(err)
+		return fmt.Errorf("request verified renderer snapshot: %w", err)
+	}
 	return nil
 }
 
@@ -408,7 +483,7 @@ func (s *rendererSupervisor) describeLocked(cause error) error {
 }
 
 func (s *rendererSupervisor) TryResize(event rendererJournalEvent) error {
-	return s.trySend("resize", rendererResizeParams{EventID: event.ID, Cols: event.Cols, Rows: event.Rows})
+	return s.trySend("resize", rendererResizeParams{EventID: event.ID, FirstID: event.FirstID, Cols: event.Cols, Rows: event.Rows, CellWidth: event.CellWidth, CellHeight: event.CellHeight})
 }
 
 func (s *rendererSupervisor) TryUpdate(event rendererInputEvent) error {
@@ -416,11 +491,21 @@ func (s *rendererSupervisor) TryUpdate(event rendererInputEvent) error {
 }
 
 func (s *rendererSupervisor) TryFocus(focused bool) error {
-	return s.trySend("focus", rendererInputEvent{Type: "focus", Focused: focused})
+	return s.trySendCheckpointMutation("focus", rendererInputEvent{Type: "focus", Focused: focused})
 }
 
 func (s *rendererSupervisor) TryScroll(delta int) error {
-	return s.trySend("scroll", rendererInputEvent{Type: "scroll", Delta: delta})
+	return s.trySendCheckpointMutation("scroll", rendererInputEvent{Type: "scroll", Delta: delta})
+}
+
+func (s *rendererSupervisor) trySendCheckpointMutation(method string, params any) error {
+	if err := s.trySend(method, params); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.checkpointDirty = true
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *rendererSupervisor) RequestSnapshot() error {
@@ -432,27 +517,7 @@ func (s *rendererSupervisor) RequestSnapshot() error {
 // published screen, so this is the only place their cost is paid -- once per
 // terminal.read that actually wants one.
 func (s *rendererSupervisor) Read(source ReadSource, format ReadFormat) (ReadResultDTO, error) {
-	s.mu.Lock()
-	link := s.link
-	var reason error
-	switch {
-	case s.closed:
-		reason = errTerminalClosed
-	case s.degraded:
-		reason = s.describeLocked(errRendererDegraded)
-	case link == nil:
-		reason = s.describeLocked(errRendererUnavailable)
-	}
-	s.mu.Unlock()
-	if reason != nil {
-		return ReadResultDTO{}, reason
-	}
-	// A recent read walks the retained scrollback one row at a time, so it gets
-	// a more generous budget than a control call; the health probe, not this
-	// deadline, is what detects a wedged renderer.
-	ctx, cancel := context.WithTimeout(context.Background(), rendererReadDeadlineFactor*s.options.CommandTimeout)
-	defer cancel()
-	raw, err := link.CallResult(ctx, "read", rendererReadRequest(source, format))
+	raw, err := s.call("read", rendererReadRequest(source, format), rendererReadDeadlineFactor*s.options.CommandTimeout)
 	if err != nil {
 		return ReadResultDTO{}, err
 	}
@@ -461,6 +526,67 @@ func (s *rendererSupervisor) Read(source ReadSource, format ReadFormat) (ReadRes
 		return ReadResultDTO{}, err
 	}
 	return result, nil
+}
+
+// Paste returns one native-encoded operation. The session owns the subsequent
+// all-or-nothing PTY writer admission, so other clients cannot split its frame.
+func (s *rendererSupervisor) Paste(text string) ([]byte, error) {
+	raw, err := s.call("paste", rendererPasteParams{Text: text}, s.options.CommandTimeout)
+	if err != nil {
+		return nil, err
+	}
+	var data []byte
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func (s *rendererSupervisor) Interact(request TerminalInteractionRequest) (TerminalInteractionResult, error) {
+	if err := validateTerminalInteraction(request); err != nil {
+		return TerminalInteractionResult{}, err
+	}
+	if request.Action == "colors" {
+		if request.Colors == nil {
+			return TerminalInteractionResult{}, errors.New("terminal color policy is required")
+		}
+		s.colorsMu.Lock()
+		defer s.colorsMu.Unlock()
+		// Configuration intent survives renderer admission failure and replay;
+		// it is idempotent policy, not a PTY side effect to retry implicitly.
+		s.restoreColors(request.Colors)
+		request.Colors = terminalstate.CloneColors(request.Colors)
+	}
+	raw, err := s.call("interact", request, rendererReadDeadlineFactor*s.options.CommandTimeout)
+	if err != nil {
+		return TerminalInteractionResult{}, err
+	}
+	var result TerminalInteractionResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return TerminalInteractionResult{}, err
+	}
+	return result, nil
+}
+
+func (s *rendererSupervisor) call(method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	s.mu.Lock()
+	link := s.link
+	var reason error
+	switch {
+	case s.closed:
+		reason = errTerminalClosed
+	case s.degraded:
+		reason = s.describeLocked(errRendererDegraded)
+	case link == nil || !s.acceptFrames:
+		reason = s.describeLocked(errRendererUnavailable)
+	}
+	s.mu.Unlock()
+	if reason != nil {
+		return nil, reason
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return link.CallResult(ctx, method, params)
 }
 
 // trySend delivers one semantic input or control notification, and is the whole
@@ -529,25 +655,53 @@ func (s *rendererSupervisor) Restart() {
 
 func (s *rendererSupervisor) handleFrame(frame rendererWorkerFrame) {
 	s.mu.Lock()
+	admitted := frame.Generation == s.generation && s.acceptFrames && !s.closed
+	s.mu.Unlock()
+	if !admitted {
+		return
+	}
+	// Decode before the publication boundary, then revalidate: replacement can
+	// finish while a large old frame is being decoded.
+	var state rendererPublishedState
+	var data []byte
+	switch frame.Type {
+	case rendererFrameSnapshot:
+		if json.Unmarshal(frame.Result, &state) != nil {
+			return
+		}
+		state.Snapshot.Graphics.RendererGeneration = frame.Generation
+		if validateRendererGraphics(state.Snapshot.Graphics, false) != nil {
+			state.Snapshot.Graphics = terminalgraphics.Frame{RendererGeneration: frame.Generation}
+		}
+	case rendererFramePTYWrite:
+		if json.Unmarshal(frame.Result, &data) != nil {
+			return
+		}
+	}
+	s.publication.Lock()
+	defer s.publication.Unlock()
+	s.mu.Lock()
 	current := s.generation
 	accept := s.acceptFrames && !s.closed
+	partial := s.recoveryPartial
+	if admitted := frame.Generation == current && accept; admitted && frame.Type == rendererFrameSnapshot {
+		s.publishedRevision = state.Snapshot.Generation
+	}
 	s.mu.Unlock()
 	if frame.Generation != current || !accept {
 		return
 	}
 	switch frame.Type {
 	case rendererFrameSnapshot:
-		var state rendererPublishedState
-		if json.Unmarshal(frame.Result, &state) == nil && s.onSnapshot != nil {
+		if s.onSnapshot != nil {
 			// Stats, never Snapshot: this runs on every inbound frame and only
 			// the partial-recovery flag is wanted, so deep-copying the retained
 			// journal here would memcpy up to the whole retention budget per
 			// published screen while the PTY pump waits on the same mutex.
-			s.onSnapshot(frame.Generation, state, s.journal.Stats().Partial)
+			s.onSnapshot(frame.Generation, state, partial)
 		}
 	case rendererFramePTYWrite:
-		var data []byte
-		if json.Unmarshal(frame.Result, &data) == nil && s.onPTYWrite != nil {
+		if s.onPTYWrite != nil {
 			s.onPTYWrite(frame.Generation, frame.EventID, frame.Ordinal, data)
 		}
 	case rendererFrameEvent:
@@ -559,6 +713,8 @@ func (s *rendererSupervisor) handleFrame(frame rendererWorkerFrame) {
 }
 
 func (s *rendererSupervisor) requestRestart(err error) {
+	s.publication.Lock()
+	defer s.publication.Unlock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -575,6 +731,8 @@ func (s *rendererSupervisor) requestRestart(err error) {
 	s.publishStatusLocked(rendererStateRestarting, 0)
 	s.wakeLocked()
 	s.mu.Unlock()
+	// Forced and cooldown restarts need the same stale publication as a
+	// health-triggered restart, before any replacement can install new state.
 	s.notifyStale()
 	select {
 	case s.restartWake <- struct{}{}:
@@ -664,6 +822,7 @@ func (s *rendererSupervisor) tick() bool {
 	case <-link.Done():
 		s.requestRestart(link.Failure())
 	default:
+		s.maybeCheckpoint(now)
 	}
 	return false
 }
@@ -716,7 +875,7 @@ func (s *rendererSupervisor) planRestartLocked(now time.Time, journal rendererJo
 	}
 
 	exhausted := len(s.restarts) >= s.policy.MaxRestarts
-	poisonEscape := exhausted && journal.Events > 0 && !s.cleanStarted
+	poisonEscape := exhausted && (journal.Events > 0 || s.checkpoint != nil) && !s.cleanStarted
 	switch {
 	case poisonEscape:
 		return rendererRestartPlan{allowed: true, clean: true}
@@ -730,9 +889,11 @@ func (s *rendererSupervisor) planRestartLocked(now time.Time, journal rendererJo
 }
 
 func (s *rendererSupervisor) restart() {
+	s.publication.Lock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.publication.Unlock()
 		return
 	}
 	now := time.Now()
@@ -741,6 +902,7 @@ func (s *rendererSupervisor) restart() {
 		s.enterDegradedLocked(now)
 		s.mu.Unlock()
 		s.notifyStale()
+		s.publication.Unlock()
 		return
 	}
 	if plan.charge {
@@ -748,6 +910,8 @@ func (s *rendererSupervisor) restart() {
 	}
 	if plan.clean {
 		s.cleanStarted = true
+		s.checkpoint = nil
+		processRendererCheckpointQuota.release(s)
 	}
 	attempt := len(s.restarts)
 	old := s.link
@@ -757,13 +921,11 @@ func (s *rendererSupervisor) restart() {
 	s.publishStatusLocked(rendererStateRestarting, 0)
 	s.wakeLocked()
 	s.mu.Unlock()
+	s.notifyStale()
+	s.publication.Unlock()
 	if old != nil {
 		old.Fail(errors.New("renderer replaced by supervisor"))
 	}
-	// A forced or cooled-down restart has no requestRestart ahead of it, so the
-	// cached screen has to be marked stale here too: the terminal stays visible,
-	// it just stops being current.
-	s.notifyStale()
 	if plan.clean {
 		// Every attempt so far died replaying this journal. A blank but live
 		// terminal beats a dead one, so drop the history and start clean.
@@ -837,13 +999,18 @@ func (s *rendererSupervisor) enterDegradedLocked(now time.Time) {
 }
 
 func (s *rendererSupervisor) Close() {
+	s.publication.Lock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.publication.Unlock()
 		<-s.done
+		s.checkpointTasks.Wait()
 		return
 	}
 	s.closed = true
+	s.checkpoint = nil
+	processRendererCheckpointQuota.release(s)
 	s.acceptFrames = false
 	s.degraded = false
 	close(s.shutdown)
@@ -852,6 +1019,7 @@ func (s *rendererSupervisor) Close() {
 	s.link = nil
 	s.publishStatusLocked(rendererStateClosed, 0)
 	s.mu.Unlock()
+	s.publication.Unlock()
 	if link != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), s.options.CommandTimeout)
 		_ = link.Call(ctx, "close", nil)
@@ -859,6 +1027,7 @@ func (s *rendererSupervisor) Close() {
 		link.Fail(errTerminalClosed)
 	}
 	<-s.done
+	s.checkpointTasks.Wait()
 }
 
 func (s *rendererSupervisor) Status() rendererSupervisorStatus {
@@ -899,7 +1068,7 @@ func (s *rendererSupervisor) publishStatusLocked(state string, pid int) {
 		LastProgressAt:   time.Now().UTC(),
 		RestartCount:     len(s.restarts),
 		JournalBytes:     journal.Bytes,
-		PartialRecovery:  journal.Partial,
+		PartialRecovery:  s.recoveryPartial,
 		LastError:        s.lastError,
 		OutboundDepth:    linkStats.OutboundDepth,
 		PendingRequests:  linkStats.PendingRequests,
@@ -916,9 +1085,10 @@ type rendererLinkStats struct {
 }
 
 type rendererLink struct {
-	generation uint64
-	conn       net.Conn
-	command    *exec.Cmd
+	generation     uint64
+	commandTimeout time.Duration
+	conn           net.Conn
+	command        *exec.Cmd
 	// executable is the worker path this link actually spawned, retained so a
 	// protocol-version mismatch can name the stale file instead of leaving the
 	// operator to guess which of the two binaries is wrong.
@@ -931,11 +1101,12 @@ type rendererLink struct {
 	stop     chan struct{}
 	failOnce sync.Once
 
-	nextID  atomic.Uint64
-	mu      sync.Mutex
-	pending map[uint64]rendererPending
-	waiters map[uint64]chan rendererCallOutcome
-	failure error
+	nextID        atomic.Uint64
+	mu            sync.Mutex
+	dispatchOrder uint64
+	pending       map[uint64]rendererPending
+	waiters       map[uint64]chan rendererCallOutcome
+	failure       error
 }
 
 // rendererCallOutcome is one completed request/response exchange. Calls that
@@ -983,17 +1154,18 @@ func startRendererLink(options rendererProcessOptions, generation uint64, onFram
 		return nil, fmt.Errorf("open renderer control socket: %w", err)
 	}
 	link := &rendererLink{
-		generation: generation,
-		conn:       conn,
-		command:    command,
-		executable: executable,
-		onFrame:    onFrame,
-		outbound:   make(chan rendererWorkerFrame, options.QueueFrames),
-		control:    make(chan rendererWorkerFrame, options.QueueFrames),
-		done:       make(chan struct{}),
-		stop:       make(chan struct{}),
-		pending:    make(map[uint64]rendererPending),
-		waiters:    make(map[uint64]chan rendererCallOutcome),
+		generation:     generation,
+		commandTimeout: options.CommandTimeout,
+		conn:           conn,
+		command:        command,
+		executable:     executable,
+		onFrame:        onFrame,
+		outbound:       make(chan rendererWorkerFrame, options.QueueFrames),
+		control:        make(chan rendererWorkerFrame, options.QueueFrames),
+		done:           make(chan struct{}),
+		stop:           make(chan struct{}),
+		pending:        make(map[uint64]rendererPending),
+		waiters:        make(map[uint64]chan rendererCallOutcome),
 	}
 	go link.writer()
 	go link.reader()
@@ -1008,6 +1180,16 @@ func resolveRendererWorkerExecutable() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("resolve CodeLima executable: %w", err)
+	}
+	return resolveRendererWorkerBeside(executable)
+}
+
+func resolveRendererWorkerBeside(executable string) (string, error) {
+	// On macOS os.Executable may return the invoked Homebrew symlink rather
+	// than its target. The private companion belongs beside the actual binary.
+	executable, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", fmt.Errorf("resolve CodeLima executable symlinks: %w", err)
 	}
 	renderer := rendererWorkerPathBeside(executable)
 	info, err := os.Stat(renderer)
@@ -1106,11 +1288,16 @@ func (l *rendererLink) Call(ctx context.Context, method string, params any) erro
 }
 
 func (l *rendererLink) CallResult(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	waiter := make(chan rendererCallOutcome, 1)
-	_, err := l.enqueue(method, params, waiter)
+	deadline, _ := ctx.Deadline()
+	id, err := l.enqueueDeadline(method, params, waiter, deadline)
 	if err != nil {
 		return nil, err
 	}
+	defer l.detachWaiter(id)
 	select {
 	case outcome := <-waiter:
 		return outcome.result, outcome.err
@@ -1122,6 +1309,10 @@ func (l *rendererLink) CallResult(ctx context.Context, method string, params any
 }
 
 func (l *rendererLink) enqueue(method string, params any, waiter chan rendererCallOutcome) (uint64, error) {
+	return l.enqueueDeadline(method, params, waiter, time.Time{})
+}
+
+func (l *rendererLink) enqueueDeadline(method string, params any, waiter chan rendererCallOutcome, requestedDeadline time.Time) (uint64, error) {
 	raw, err := marshalRendererParams(params)
 	if err != nil {
 		return 0, err
@@ -1135,19 +1326,48 @@ func (l *rendererLink) enqueue(method string, params any, waiter chan rendererCa
 		Params:     raw,
 	}
 	l.mu.Lock()
-	l.pending[id] = rendererPending{StartedAt: time.Now(), Method: method}
+	defer l.mu.Unlock()
+	// A pending operation already proves actor progress when it replies and has
+	// its own hard deadline. The worker dispatches serially, so queueing a short
+	// health probe behind an allowed long read would falsely declare it wedged.
+	if method == "health" && waiter == nil && len(l.pending) > 0 {
+		return 0, nil
+	}
+	started := time.Now()
+	budget := l.commandTimeout
+	if budget <= 0 {
+		budget = defaultRendererCommandTimeout
+	}
+	if method == "read" || method == "checkpoint" || method == "interact" {
+		budget *= rendererReadDeadlineFactor
+	}
+	deadline := started.Add(budget)
+	// Caller cancellation only detaches its waiter. It cannot shorten native
+	// execution budgets, especially while queued behind another operation.
+	if !requestedDeadline.IsZero() && method == "init" {
+		deadline = requestedDeadline
+		budget = max(time.Duration(0), deadline.Sub(started))
+	}
+	l.pending[id] = rendererPending{StartedAt: started, Deadline: deadline, Budget: budget, Method: method}
 	if waiter != nil {
 		l.waiters[id] = waiter
 	}
-	l.mu.Unlock()
+	queue := l.control
+	// Captures and semantic paste must not overtake already-enqueued output;
+	// health/close retain the priority lane used to supervise a stalled stream.
+	if method == "checkpoint" || method == "paste" {
+		queue = l.outbound
+	}
 	select {
-	case l.control <- frame:
+	case queue <- frame:
 		return id, nil
 	case <-l.stop:
-		l.removePending(id)
+		delete(l.pending, id)
+		delete(l.waiters, id)
 		return 0, errRendererLinkClosed
 	default:
-		l.removePending(id)
+		delete(l.pending, id)
+		delete(l.waiters, id)
 		return 0, errRendererOutboundQueueFull
 	}
 }
@@ -1165,6 +1385,7 @@ func (l *rendererLink) writer() {
 				return
 			}
 		}
+		l.markDispatched(frame.ID)
 		_ = l.conn.SetWriteDeadline(time.Now().Add(defaultRendererCommandTimeout))
 		if err := writeRendererFrame(l.conn, frame); err != nil {
 			l.Fail(fmt.Errorf("write renderer frame: %w", err))
@@ -1185,10 +1406,14 @@ func (l *rendererLink) reader() {
 		}
 		if frame.Type == rendererFrameResponse {
 			l.mu.Lock()
-			delete(l.pending, frame.ID)
+			pending := l.completePendingLocked(frame.ID)
 			waiter := l.waiters[frame.ID]
 			delete(l.waiters, frame.ID)
 			l.mu.Unlock()
+			if pending.Method == "health" && frame.Error != "" {
+				l.Fail(fmt.Errorf("renderer health failed: %s", frame.Error))
+				return
+			}
 			if l.onFrame != nil {
 				l.onFrame(frame)
 			}
@@ -1211,12 +1436,70 @@ func (l *rendererLink) HealthError(timeout time.Duration) error {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if id, pending := l.activePendingLocked(); id != 0 {
+		if !now.Before(pending.Deadline) {
+			return fmt.Errorf("renderer %s request %d exceeded execution budget %s", pending.Method, id, pending.Budget)
+		}
+		return nil
+	}
+	// If the writer never dispatches anything, admission still has a bound.
+	// Once dispatched, the serial worker's oldest outstanding call owns its
+	// execution budget; later queued calls cannot prematurely expire it.
 	for id, pending := range l.pending {
-		if now.Sub(pending.StartedAt) > timeout {
-			return fmt.Errorf("renderer request %d exceeded %s", id, timeout)
+		deadline := pending.Deadline
+		if deadline.IsZero() {
+			deadline = pending.StartedAt.Add(timeout)
+		}
+		if !now.Before(deadline) {
+			return fmt.Errorf("renderer %s request %d exceeded %s", pending.Method, id, deadline.Sub(pending.StartedAt))
 		}
 	}
 	return nil
+}
+
+// Dispatch order, not request IDs or admission order, follows the actual wire:
+// priority controls may overtake journal-lane checkpoints and semantic paste.
+func (l *rendererLink) markDispatched(id uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	pending, ok := l.pending[id]
+	if !ok {
+		return
+	}
+	active, _ := l.activePendingLocked()
+	l.dispatchOrder++
+	pending.DispatchOrder = l.dispatchOrder
+	if active == 0 {
+		pending.Deadline = time.Now().Add(pending.Budget)
+	}
+	l.pending[id] = pending
+}
+
+func (l *rendererLink) activePendingLocked() (uint64, rendererPending) {
+	var id uint64
+	var active rendererPending
+	for candidateID, candidate := range l.pending {
+		if candidate.DispatchOrder != 0 && (id == 0 || candidate.DispatchOrder < active.DispatchOrder) {
+			id, active = candidateID, candidate
+		}
+	}
+	return id, active
+}
+
+func (l *rendererLink) completePendingLocked(id uint64) rendererPending {
+	active, _ := l.activePendingLocked()
+	pending := l.pending[id]
+	delete(l.pending, id)
+	if active != 0 && active == id {
+		if nextID, next := l.activePendingLocked(); nextID != 0 {
+			// The preceding response is the earliest observable execution fence
+			// for the next serial command. Rebase once; newer arrivals never
+			// extend the currently executing operation's hard deadline.
+			next.Deadline = time.Now().Add(next.Budget)
+			l.pending[nextID] = next
+		}
+	}
+	return pending
 }
 
 func (l *rendererLink) Stats() rendererLinkStats {
@@ -1231,6 +1514,9 @@ func (l *rendererLink) Stats() rendererLinkStats {
 			stats.OldestPending = age
 			stats.CurrentOperation = pending.Method
 		}
+	}
+	if _, active := l.activePendingLocked(); active.DispatchOrder != 0 {
+		stats.CurrentOperation = active.Method
 	}
 	return stats
 }
@@ -1270,13 +1556,17 @@ func (l *rendererLink) Fail(err error) {
 }
 
 type rendererPending struct {
-	StartedAt time.Time
-	Method    string
+	StartedAt     time.Time
+	Deadline      time.Time
+	Budget        time.Duration
+	DispatchOrder uint64
+	Method        string
 }
 
-func (l *rendererLink) removePending(id uint64) {
+// A canceled caller stops retaining a reply channel, while the admitted worker
+// operation remains supervised until its reply or hard deadline.
+func (l *rendererLink) detachWaiter(id uint64) {
 	l.mu.Lock()
-	delete(l.pending, id)
 	delete(l.waiters, id)
 	l.mu.Unlock()
 }

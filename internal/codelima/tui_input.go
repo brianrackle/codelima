@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
@@ -16,6 +17,13 @@ type tuiTerminalMouseGesture struct {
 	startCol  int
 	startRow  int
 	dragged   bool
+	clicks    int
+}
+
+type tuiTerminalClick struct {
+	target          string
+	col, row, count int
+	at              time.Time
 }
 
 // tuiKeyBinding pairs a key matcher with the app action it triggers.
@@ -29,6 +37,7 @@ type tuiKeyBinding struct {
 // the same entries, so the shortcut set and the payload predicate can never
 // drift apart.
 var tuiKeyBindings = []tuiKeyBinding{
+	{match: func(key vaxis.Key) bool { return key.Matches(vaxis.KeyF07) }, run: (*vaxisTUIApp).openTerminalSearch},
 	{match: isHostTerminalTabOpenKey, run: (*vaxisTUIApp).openHostTerminalTab},
 	{match: isTerminalTabOpenKey, run: (*vaxisTUIApp).openTerminalTab},
 	{match: isTerminalTabMoveNextKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(1) }},
@@ -57,12 +66,22 @@ func isTUITerminalPayloadKey(key vaxis.Key) bool {
 }
 
 func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
+	if a.search != nil {
+		a.handleSearchKey(key)
+		return false
+	}
 	// Pasted text is terminal payload, never a TUI shortcut. Vaxis emits one
 	// EventPaste key per decoded input sequence between PasteStart/PasteEnd.
 	if key.EventType == vaxis.EventPaste {
 		if a.state.focus == tuiFocusTerminal {
 			a.forwardTerminalEvent(key)
 		}
+		return false
+	}
+	// Vaxis matches key identity independently of press/repeat/release.
+	// Consume the toggle's followup events so one press changes focus once,
+	// even after that press moves input routing into the terminal.
+	if key.EventType != vaxis.EventPress && isTerminalViewToggleKey(key) {
 		return false
 	}
 
@@ -284,6 +303,12 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 	}
 
 	translated := a.terminalBodyRect.translateMouse(mouse)
+	if mouse.Modifiers&vaxis.ModShift != 0 {
+		// Shift preserves the outer terminal's selection bypass, including when
+		// the embedded application captures ordinary mouse input.
+		a.cancelTerminalMouseGesture()
+		return
+	}
 	if mouse.Button == vaxis.MouseWheelUp || mouse.Button == vaxis.MouseWheelDown {
 		a.forwardSessionEvent(sessionKey, translated)
 		return
@@ -316,6 +341,9 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 }
 
 func (a *vaxisTUIApp) handleResize(event vaxis.Resize) {
+	if event.Cols > 0 && event.Rows > 0 && event.XPixel >= event.Cols && event.YPixel >= event.Rows {
+		a.cellPixelWidth, a.cellPixelHeight = event.XPixel/event.Cols, event.YPixel/event.Rows
+	}
 	width := event.Cols
 	height := event.Rows
 	if (width <= 0 || height <= 0) && a.vx != nil {
@@ -336,7 +364,11 @@ func (a *vaxisTUIApp) handleResize(event vaxis.Resize) {
 	if !ok || term == nil {
 		return
 	}
-	term.Resize(cols, rows)
+	if terminal, ok := term.(*daemonTUITerminal); ok {
+		terminal.resizePixels(cols, rows, a.cellPixelWidth, a.cellPixelHeight)
+	} else {
+		term.Resize(cols, rows)
+	}
 }
 
 func (a *vaxisTUIApp) mouseTerminalEntry() tuiTreeEntry {
@@ -351,16 +383,37 @@ func (a *vaxisTUIApp) handleTerminalMouseGesture(targetKey string, mouse vaxis.M
 	case vaxis.EventPress:
 		if mouse.Button == vaxis.MouseLeftButton {
 			a.beginTerminalMouseGesture(targetKey, translated)
+			if a.supportsTerminalInspection(targetKey) {
+				clicks := 1
+				last := a.lastTerminalClick
+				if last.target == targetKey && last.col == translated.Col && last.row == translated.Row && time.Since(last.at) < 400*time.Millisecond {
+					clicks = last.count%4 + 1
+				}
+				a.lastTerminalClick = tuiTerminalClick{target: targetKey, col: translated.Col, row: translated.Row, count: clicks, at: time.Now()}
+				a.terminalMouse.clicks = clicks
+				kinds := []string{"cell", "word", "line", "output"}
+				return a.queueTerminalInteraction(targetKey, TerminalInteractionRequest{Action: "press", Kind: kinds[clicks-1], Col: translated.Col, Row: translated.Row}, false, 0)
+			}
 		}
 		return nil
 	case vaxis.EventMotion:
 		a.updateTerminalMouseGesture(targetKey, translated)
+		if a.terminalMouse != nil && a.supportsTerminalInspection(targetKey) {
+			return a.queueTerminalInteraction(targetKey, TerminalInteractionRequest{Action: "drag", Col: translated.Col, Row: translated.Row}, false, 0)
+		}
 		return nil
 	case vaxis.EventRelease:
 		if mouse.Button != vaxis.MouseLeftButton {
 			return nil
 		}
-		if a.finishTerminalMouseGesture(targetKey, translated) {
+		multiple := a.terminalMouse != nil && a.terminalMouse.clicks > 1
+		dragged := a.finishTerminalMouseGesture(targetKey, translated)
+		if a.supportsTerminalInspection(targetKey) {
+			if err := a.queueTerminalInteraction(targetKey, TerminalInteractionRequest{Action: "release", Col: translated.Col, Row: translated.Row}, dragged || multiple, 0); err != nil {
+				return err
+			}
+		}
+		if dragged || multiple {
 			return nil
 		}
 		if target, ok := a.terminalLinkTargetAt(mouse); ok {
@@ -411,6 +464,9 @@ func (a *vaxisTUIApp) finishTerminalMouseGesture(targetKey string, mouse vaxis.M
 }
 
 func (a *vaxisTUIApp) cancelTerminalMouseGesture() {
+	if a.terminalMouse != nil && a.supportsTerminalInspection(a.terminalMouse.targetKey) {
+		_ = a.queueTerminalInteraction(a.terminalMouse.targetKey, TerminalInteractionRequest{Action: "cancel"}, false, 0)
+	}
 	a.terminalMouse = nil
 }
 

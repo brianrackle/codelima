@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 )
 
 // This file pins today's OBSERVABLE terminal-identity behavior across the

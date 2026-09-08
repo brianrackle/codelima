@@ -143,6 +143,14 @@ func runDaemonConnectionSupervisor(ctx context.Context, options daemonConnection
 				err = fmt.Errorf("daemon event epoch changed from %q to %q", epoch, event.DaemonEpoch)
 				break
 			}
+			if event.Event == daemon.EventTerminalClipboard && event.StateSequence == 0 {
+				// Seat-private effects are epoch-bound but not part of shared
+				// state history. They neither advance nor repair its sequence.
+				if options.OnEvent != nil {
+					options.OnEvent(event)
+				}
+				continue
+			}
 			if event.StateSequence <= sequence {
 				continue
 			}

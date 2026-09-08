@@ -43,7 +43,7 @@ func runArchive(args []string) {
 		goarch    = fs.String("goarch", "", "target architecture")
 		binary    = fs.String("binary", "", "path to the compiled codelima binary")
 		renderer  = fs.String("renderer-binary", "", "path to the compiled renderer worker binary")
-		ghostty   = fs.String("ghostty-lib", "", "path to the packaged libghostty-vt shared library")
+		buildID   = fs.String("renderer-build-id", "", "exact native renderer build fingerprint embedded in both binaries")
 		outputDir = fs.String("output-dir", "", "directory where release artifacts will be written")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -59,7 +59,7 @@ func runArchive(args []string) {
 		fatalf("output-dir is required")
 	}
 	outputPath := filepath.Join(outputDirValue, assetName)
-	manifest, err := release.BuildArchive(*version, *goos, *goarch, *binary, *renderer, *ghostty, outputPath)
+	manifest, err := release.BuildArchive(*version, *goos, *goarch, *binary, *renderer, *buildID, outputPath)
 	if err != nil {
 		fatalf("build archive: %v", err)
 	}

@@ -10,13 +10,13 @@ import (
 	"testing"
 )
 
-func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
+func TestBuildArchivePackagesOnlyCLIAndStaticRenderer(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
 	binaryPath := filepath.Join(tempDir, "codelima")
 	rendererPath := filepath.Join(tempDir, "codelima-renderer-worker")
-	libraryPath := filepath.Join(tempDir, "libghostty-vt.dylib")
+	buildID := strings.Repeat("a", 64)
 	outputPath := filepath.Join(tempDir, "dist", "artifact.tar.gz")
 
 	if err := os.WriteFile(binaryPath, []byte("binary-data"), 0o755); err != nil {
@@ -25,11 +25,7 @@ func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
 	if err := os.WriteFile(rendererPath, []byte("renderer-data"), 0o755); err != nil {
 		t.Fatalf("write renderer: %v", err)
 	}
-	if err := os.WriteFile(libraryPath, []byte("ghostty-data"), 0o644); err != nil {
-		t.Fatalf("write ghostty library: %v", err)
-	}
-
-	manifest, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, rendererPath, libraryPath, outputPath)
+	manifest, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, rendererPath, buildID, outputPath)
 	if err != nil {
 		t.Fatalf("BuildArchive() error = %v", err)
 	}
@@ -40,28 +36,21 @@ func TestBuildArchivePackagesWrapperBinaryAndGhosttyLibrary(t *testing.T) {
 	if manifest.SHA256 == "" {
 		t.Fatalf("expected sha256")
 	}
+	if manifest.RendererBuildID != buildID {
+		t.Fatalf("native build identity = %q, want %q", manifest.RendererBuildID, buildID)
+	}
 
 	files := readArchiveFiles(t, outputPath)
-	wrapperPath := "codelima_1.2.3_darwin_arm64/bin/codelima"
-	binaryArchivePath := "codelima_1.2.3_darwin_arm64/bin/codelima-real"
+	binaryArchivePath := "codelima_1.2.3_darwin_arm64/bin/codelima"
 	rendererArchivePath := "codelima_1.2.3_darwin_arm64/bin/codelima-renderer-worker"
-	libArchivePath := "codelima_1.2.3_darwin_arm64/lib/libghostty-vt.dylib"
-
-	wrapper, ok := files[wrapperPath]
-	if !ok {
-		t.Fatalf("missing wrapper %q", wrapperPath)
-	}
-	if !strings.Contains(string(wrapper.data), `CODELIMA_GHOSTTY_VT_LIB="${SCRIPT_DIR}/../lib/libghostty-vt.dylib"`) {
-		t.Fatalf("wrapper did not reference darwin ghostty library: %s", wrapper.data)
+	if len(files) != 2 {
+		t.Fatalf("static archive must contain exactly two executables, got %v", files)
 	}
 	if string(files[binaryArchivePath].data) != "binary-data" {
 		t.Fatalf("unexpected binary archive content %q", files[binaryArchivePath].data)
 	}
 	if string(files[rendererArchivePath].data) != "renderer-data" {
 		t.Fatalf("unexpected renderer archive content %q", files[rendererArchivePath].data)
-	}
-	if string(files[libArchivePath].data) != "ghostty-data" {
-		t.Fatalf("unexpected library archive content %q", files[libArchivePath].data)
 	}
 }
 
@@ -71,7 +60,6 @@ func TestBuildArchiveForcesPackagedExecutablesExecutable(t *testing.T) {
 	tempDir := t.TempDir()
 	binaryPath := filepath.Join(tempDir, "codelima")
 	rendererPath := filepath.Join(tempDir, "codelima-renderer-worker")
-	libraryPath := filepath.Join(tempDir, "libghostty-vt.dylib")
 	outputPath := filepath.Join(tempDir, "dist", "artifact.tar.gz")
 
 	if err := os.WriteFile(binaryPath, []byte("binary-data"), 0o644); err != nil {
@@ -80,18 +68,13 @@ func TestBuildArchiveForcesPackagedExecutablesExecutable(t *testing.T) {
 	if err := os.WriteFile(rendererPath, []byte("renderer-data"), 0o644); err != nil {
 		t.Fatalf("write renderer: %v", err)
 	}
-	if err := os.WriteFile(libraryPath, []byte("ghostty-data"), 0o644); err != nil {
-		t.Fatalf("write ghostty library: %v", err)
-	}
-
-	if _, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, rendererPath, libraryPath, outputPath); err != nil {
+	if _, err := BuildArchive("1.2.3", "darwin", "arm64", binaryPath, rendererPath, strings.Repeat("a", 64), outputPath); err != nil {
 		t.Fatalf("BuildArchive() error = %v", err)
 	}
 
 	files := readArchiveFiles(t, outputPath)
 	for _, archivePath := range []string{
 		"codelima_1.2.3_darwin_arm64/bin/codelima",
-		"codelima_1.2.3_darwin_arm64/bin/codelima-real",
 		"codelima_1.2.3_darwin_arm64/bin/codelima-renderer-worker",
 	} {
 		if got := files[archivePath].mode; got != 0o755 {
@@ -128,7 +111,6 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 	}
 
 	for _, snippet := range []string{
-		`require "zlib"`,
 		`class Codelima < Formula`,
 		`depends_on "git"`,
 		`depends_on "lima"`,
@@ -139,22 +121,30 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 		`on_linux do`,
 		`on_intel do`,
 		`https://github.com/brianrackle/codelima/releases/download/v1.2.3/codelima_1.2.3_linux_amd64.tar.gz`,
-		`ghostty_lib = OS.mac? ? "libghostty-vt.dylib" : "libghostty-vt.so"`,
-		`root = Dir["codelima_*/bin/codelima-real"].empty? ? "." : Dir["codelima_*"].fetch(0)`,
-		`odie "missing packaged release root" unless File.exist?(File.join(root, "bin", "codelima-real"))`,
+		`root = Dir["codelima_*/bin/codelima"].empty? ? "." : Dir["codelima_*"].fetch(0)`,
+		`odie "missing packaged release root" unless File.exist?(File.join(root, "bin", "codelima"))`,
 		`odie "missing packaged renderer worker" unless File.exist?(File.join(root, "bin", "codelima-renderer-worker"))`,
-		`chmod 0755, libexec/"bin/codelima-real"`,
+		`chmod 0755, libexec/"bin/codelima"`,
 		`(libexec/"bin").install "#{root}/bin/codelima-renderer-worker"`,
 		`chmod 0755, libexec/"bin/codelima-renderer-worker"`,
 		`assert_predicate libexec/"bin/codelima-renderer-worker", :executable?`,
-		`Zlib::GzipWriter.open(pkgshare/"#{ghostty_lib}.gz") do |gz|`,
-		`pkgshare.mkpath`,
-		`CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/codelima/#{version}"`,
-		`gzip -dc "#{pkgshare}/#{ghostty_lib}.gz" > "$RUNTIME_LIB.tmp"`,
-		`export CODELIMA_GHOSTTY_VT_LIB="$RUNTIME_LIB"`,
+		`bin.install_symlink libexec/"bin/codelima"`,
 	} {
 		if !strings.Contains(formula, snippet) {
 			t.Fatalf("formula missing %q:\n%s", snippet, formula)
+		}
+	}
+	for _, obsolete := range []string{"zlib", "CODELIMA_GHOSTTY_VT_LIB", "CACHE_ROOT", "codelima-real", "libghostty-vt.so", "libghostty-vt.dylib"} {
+		if strings.Contains(formula, obsolete) {
+			t.Fatalf("formula retained obsolete dynamic dependency %q", obsolete)
+		}
+	}
+}
+
+func TestBuildArchiveRejectsInvalidRendererIdentity(t *testing.T) {
+	for _, id := range []string{"", "abc", strings.Repeat("z", 64), strings.Repeat("A", 64)} {
+		if _, err := BuildArchive("1.2.3", "linux", "arm64", "unused-cli", "unused-worker", id, "unused-output"); err == nil || !strings.Contains(err.Error(), "renderer build identity") {
+			t.Fatalf("invalid build identity %q accepted or wrong error: %v", id, err)
 		}
 	}
 }

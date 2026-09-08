@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
-	"git.sr.ht/~rockorager/vaxis/widgets/term"
+	"go.rockorager.dev/vaxis"
+	"go.rockorager.dev/vaxis/widgets/term"
 )
 
 const tuiEmbeddedTermEnv = "xterm-256color"
@@ -18,10 +18,7 @@ const tuiEmbeddedTermEnv = "xterm-256color"
 // fallback widget and can provoke incompatible redraw behavior in interactive
 // programs such as apt/dpkg progress views.
 func newTUITerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
-	if terminal, err := newGhosttyTUITerminal(targetKey, postEvent); err == nil {
-		return terminal
-	}
-	return newTUIVaxisTerminal(targetKey, postEvent)
+	return newIsolatedDaemonTerminal(targetKey, postEvent)
 }
 
 func newTUIVaxisTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {

@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
@@ -89,6 +89,7 @@ func (t *fakeHandoffTerminal) BeginHandoff() handoffTerminalState {
 		Cols:     80,
 		Rows:     24,
 		Replay:   []byte("handoff-replay"),
+		Recovery: []byte("handoff-recovery"),
 	}
 }
 
@@ -326,6 +327,14 @@ func (h *updateHandoffHarness) receiveHandoff(t *testing.T, peer *daemon.Handoff
 			t.Fatalf("read handoff replay: %v", readErr)
 		}
 		runtimeState.Replay = replay
+	}
+	for index := range manifest.Runtimes {
+		runtimeState := &manifest.Runtimes[index]
+		recovery, readErr := peer.ReadRecovery(runtimeState.TerminalID, runtimeState.RecoverySize)
+		if readErr != nil {
+			t.Fatalf("read handoff recovery: %v", readErr)
+		}
+		runtimeState.Recovery = recovery
 	}
 	received := 0
 	for received < len(manifest.Runtimes) {
@@ -596,7 +605,7 @@ func newHandoffCallbackAdopter(
 	interval time.Duration,
 	probe func(),
 ) handoffAdopter {
-	return func(_ string, post func(vaxis.Event), pty *os.File, _, cols, rows int, _ []byte, _ bool) (daemonTerminal, error) {
+	return func(_ string, post func(vaxis.Event), pty *os.File, _, cols, rows int, _ []byte, _ bool, _ []byte) (daemonTerminal, error) {
 		// The production adopter refuses a runtime it cannot drive. A fake that
 		// accepted one would hide a manifest or descriptor mismatch instead of
 		// failing the handoff the way the real import does.
@@ -688,6 +697,15 @@ func TestDaemonImportAdoptionIsRaceFreeUnderRuntimeCallbacks(t *testing.T) {
 // may exit immediately afterwards, and nothing else rewrites that file until the
 // next mutation.
 func TestDaemonImportPersistsSessionBeforeSignalingCommit(t *testing.T) {
+	testDaemonImportPersistsSession(t, daemon.HandoffVersion)
+}
+
+func TestDaemonImportAcceptsPreviousChunkedHandoffVersion(t *testing.T) {
+	testDaemonImportPersistsSession(t, daemon.PreviousChunkedHandoffVersion)
+}
+
+func testDaemonImportPersistsSession(t *testing.T, version int) {
+	t.Helper()
 	service, _ := newHandoffTestService(t)
 	paths := daemon.HomePaths(service.cfg.MetadataRoot)
 	socketPath := filepath.Join(paths.Dir, "import-handoff.sock")
@@ -700,6 +718,12 @@ func TestDaemonImportPersistsSessionBeforeSignalingCommit(t *testing.T) {
 	ids := []string{"term-alpha", "term-beta"}
 	token := "import-token"
 	manifest := handoffManifestFor(ids, token)
+	manifest.Version = version
+	if version == daemon.HandoffVersion {
+		for index := range manifest.Runtimes {
+			manifest.Runtimes[index].RecoverySize = len("handoff-recovery")
+		}
+	}
 	fds := handoffFDs(t, ids)
 
 	stop := make(chan struct{})
@@ -734,6 +758,13 @@ func TestDaemonImportPersistsSessionBeforeSignalingCommit(t *testing.T) {
 	for _, id := range ids {
 		if err := peer.WriteReplay(id, []byte("handoff-replay")); err != nil {
 			t.Fatalf("write replay: %v", err)
+		}
+	}
+	if version == daemon.HandoffVersion {
+		for _, id := range ids {
+			if err := peer.WriteRecovery(id, []byte("handoff-recovery")); err != nil {
+				t.Fatalf("write recovery: %v", err)
+			}
 		}
 	}
 	batch := make([]int, 0, len(ids))

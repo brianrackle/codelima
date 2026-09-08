@@ -9,8 +9,8 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 1 [highest priority]: move terminal tab navigation off `Option+Left` and `Option+Right`; those key combinations must reach the guest shell unchanged for CLI word skipping. Select non-conflicting default tab-navigation bindings and update key routing, help/footer text, documentation, and automated tests.
 2 (was 1) [complete locally]: eliminate per-tab idle snapshot polling and stop permanently closed daemon event streams after one reported error; active snapshots are dirty-event driven and hidden tabs defer full-grid pulls until visible (ADR 90; native Activity Monitor verification remains in TODO #0)
 3 (was 2; originally 0.4) [complete locally]: terminal width growth uses a supplemental `SIGWINCH` redraw instead of injected `Ctrl-L`, preserving prompt rendering without `^L` text or history clearing; disconnected clients retain their daemon-owned tabs (ADRs 91 and 95; native interactive verification remains in TODO #0)
-4 (was 3; originally 0.10): support kitty graphics protocol so I can get those sweet codex pets.
-5 (was 4; originally 0.11) [partially complete]: bring in and wire up the latest libghostty improvements as demonstrated in https://github.com/ghostty-org/ghostling — Ghostling-pinned libghostty-vt and focus encoder are wired; full interactive QA remains in TODO.md
+4 (was 3; originally 0.10) [partially complete]: bounded static in-band Kitty images, generation-aware transport, clipping/pixel geometry/z-order and frontend drawing are implemented (ADR 132). Animated pets, Unicode placeholders/glyphs and full native visual qualification remain in TODO #41/#42.
+5 (was 4; originally 0.11) [partially complete]: September libghostty-vt adoption G01–G14 is implemented: exact static worker, bulk rendering/formatting, native input/effects/colors/selection/search, bounded checkpoints/compression and static graphics (ADR 132). Full upstream/native interactive qualification remains in TODO #41; see plans/libghostty_vt_adoption_progress.md.
 6 (was 5; originally 0.12): support CodeLima node renaming through the command line, including an explicit Lima clone/rename policy
 7 (was 6; originally 0.15) [complete locally]: terminal is the default view whenever the selected VM is running and its first guest tab is ensured; stopped nodes remain info-first, while `i` remains explicit for the current node (ADRs 87 and 106; native interactive QA remains in TODO #0)
 8 (was 7; originally 0.22) [partially complete]: open daemon terminal sessions and surviving terminal IDs reconnect after the TUI reopens, exited sessions are absent, per-node operator-defined order is preserved across TUI restart, daemon persistence, and live update, and disjoint path-scoped TUI processes no longer close one another's restored tabs (ADRs 88, 89, 91, and 104); restoring the previously active tab remains in TODO #34
@@ -33,6 +33,10 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
 
 ## Related Draft Plans
 
+- September 7 architectural and current libghostty-vt review [review complete;
+  adoption implemented, qualification partial]: [plans/sep_7_plan.md](plans/sep_7_plan.md).
+  Adoption status: [completion ledger](plans/libghostty_vt_adoption_progress.md).
+  Non-adoption R recommendations remain tracked in TODO #40; native gates in #41.
 - Codebase cleanup: [plans/CLEANUP_PLAN.md](plans/CLEANUP_PLAN.md)
 - Agent monitoring: [plans/AGENT_MONITORING_PLAN.md](plans/AGENT_MONITORING_PLAN.md)
 - tmux sidebar frontend: [plans/TMUX_PLAN.md](plans/TMUX_PLAN.md)

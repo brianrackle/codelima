@@ -1,0 +1,191 @@
+diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
+--- a/src/terminal/kitty/graphics_image.zig
++++ b/src/terminal/kitty/graphics_image.zig
+@@ -18,7 +18,8 @@
+ const max_dimension = 10000;
+ 
+ /// Maximum size in bytes, taken from Kitty.
+-const max_size = 400 * 1024 * 1024; // 400MB
++// CodeLima bounds accumulated chunks and decompression before storage eviction.
++const max_size = 16 * 1024 * 1024; // 16MiB
+ 
+ /// An image that is still being loaded. The image should be initialized
+ /// using init on the first chunk and then addData for each subsequent
+@@ -83,7 +84,9 @@
+             },
+             disabled: void,
+         },
+-        shared_memory: bool,
++        shared_memory: bool,
++        /// Embedders without an animation scheduler can refuse animation.
++        animation: bool = true,
+ 
+         /// Enables all filesystem-related image transmission mediums. `path`
+         /// is the temporary directory to expect files in when files are
+@@ -120,6 +123,10 @@
+         // Validated here rather than while parsing so the response can
+         // carry the image id, matching Kitty's initialize_load_data.
+         if (t.format_unknown) return error.UnsupportedFormat;
++        // PNG dimensions are checked by the bounded embedder decoder.
++        if (t.format != .png and @as(u64, t.width) * t.height > 4 * 1024 * 1024) {
++            return error.InvalidData;
++        }
+         var result: LoadingImage = .{
+             .image = .{
+                 .id = t.image_id,
+diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
+--- a/include/ghostty/vt/terminal.h
++++ b/include/ghostty/vt/terminal.h
+@@ -1544,7 +1544,12 @@
+    *
+    * Input type: size_t*
+    */
+-  GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE_MAX_BYTES = 39,
++  GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE_MAX_BYTES = 39,
++
++  /** CodeLima extension: enable Kitty animation actions (default true).
++   * False refuses frame/control/compose with ENOTSUP before mutation.
++   * Applied to all initialized screens. Input: bool*. NULL is a no-op. */
++  GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_ANIMATION = 40,
+   GHOSTTY_TERMINAL_OPT_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyTerminalOption;
+ 
+diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -1220,7 +1220,8 @@
+     unknown_max_bytes = 36,
+     terminfo_name = 37,
+     clipboard_read = 38,
+-    clipboard_write_max_bytes = 39,
++    clipboard_write_max_bytes = 39,
++    kitty_image_animation = 40,
+ 
+     /// Input type expected for setting the option.
+     pub fn InType(comptime self: Option) type {
+@@ -1245,8 +1246,9 @@
+             .color_palette => ?*const color.PaletteC,
+             .kitty_image_storage_limit => ?*const u64,
+             .kitty_image_medium_file,
+-            .kitty_image_medium_shared_mem,
+-            .glyph_protocol,
++            .kitty_image_medium_shared_mem,
++            .kitty_image_animation,
++            .glyph_protocol,
+             .title_report,
+             => ?*const bool,
+             .kitty_image_medium_temp_file => ?*const lib.String,
+@@ -1378,8 +1380,9 @@
+             }
+         },
+         .kitty_image_medium_file,
+-        .kitty_image_medium_shared_mem,
+-        => {
++        .kitty_image_medium_shared_mem,
++        .kitty_image_animation,
++        => {
+             if (comptime !build_options.kitty_graphics) return .success;
+             const val = (value orelse return .success).*;
+             var it = wrapper.terminal.screens.all.iterator();
+@@ -1387,7 +1390,8 @@
+                 const screen = entry.value.*;
+                 switch (option) {
+                     .kitty_image_medium_file => screen.kitty_images.image_limits.file = val,
+-                    .kitty_image_medium_shared_mem => screen.kitty_images.image_limits.shared_memory = val,
++                    .kitty_image_medium_shared_mem => screen.kitty_images.image_limits.shared_memory = val,
++                    .kitty_image_animation => screen.kitty_images.image_limits.animation = val,
+                     else => unreachable,
+                 }
+             }
+diff --git a/src/terminal/kitty/graphics_exec.zig b/src/terminal/kitty/graphics_exec.zig
+--- a/src/terminal/kitty/graphics_exec.zig
++++ b/src/terminal/kitty/graphics_exec.zig
+@@ -66,7 +66,24 @@
+         };
+     }
+ 
+-    const resp_: ?Response = switch (cmd.control) {
++    // CodeLima's static renderer has no public C animation scheduler.
++    // Refuse unsupported actions before they alter loading or stored images.
++    if (!terminal.screens.active.kitty_images.image_limits.animation) {
++        switch (cmd.control) {
++            .transmit_animation_frame, .control_animation, .compose_animation => {
++                const resp: Response = .{
++                    .id = identifiers.image_id,
++                    .image_number = identifiers.image_number,
++                    .placement_id = identifiers.placement_id,
++                    .message = "ENOTSUP: animation disabled by embedder",
++                };
++                return if (quiet == .failures) null else resp;
++            },
++            else => {},
++        }
++    }
++
++    const resp_: ?Response = switch (cmd.control) {
+         .query => query(io, alloc, terminal, cmd),
+         .display => display(io, alloc, terminal, cmd),
+         .delete => delete(io, alloc, terminal, cmd),
+diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
+--- a/include/ghostty/vt/terminal.h
++++ b/include/ghostty/vt/terminal.h
+@@ -1950,7 +1950,11 @@
+    *
+    * Output type: size_t *
+    */
+-  GHOSTTY_TERMINAL_DATA_CLIPBOARD_WRITE_MAX_BYTES = 40,
++  GHOSTTY_TERMINAL_DATA_CLIPBOARD_WRITE_MAX_BYTES = 40,
++
++  /** CodeLima extension: images, placements, or chunked loading exist on
++   * any initialized screen. Core snapshots omit all three. Output: bool*. */
++  GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS_PRESENT = 41,
+   GHOSTTY_TERMINAL_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttyTerminalData;
+ 
+diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -1602,7 +1602,8 @@
+     mode = 37,
+     vt_ground = 38,
+     cursor_at_prompt = 39,
+-    clipboard_write_max_bytes = 40,
++    clipboard_write_max_bytes = 40,
++    kitty_graphics_present = 41,
+ 
+     /// Output type expected for querying the data of the given kind.
+     pub fn OutType(comptime self: TerminalData) type {
+@@ -1614,8 +1615,9 @@
+             .mouse_tracking,
+             .viewport_active,
+             .vt_processing_error,
+-            .vt_ground,
+-            .cursor_at_prompt,
++            .vt_ground,
++            .cursor_at_prompt,
++            .kitty_graphics_present,
+             => bool,
+             .active_screen => TerminalScreen,
+             .kitty_keyboard_flags => u8,
+@@ -1758,7 +1760,20 @@
+             if (comptime !build_options.kitty_graphics) return .no_value;
+             out.* = t.screens.active.kitty_images.image_limits.shared_memory;
+         },
+-        .kitty_graphics => {
++        .kitty_graphics_present => {
++            out.* = false;
++            if (comptime !build_options.kitty_graphics) return .success;
++            var it = t.screens.all.iterator();
++            while (it.next()) |entry| {
++                const screen = entry.value.*;
++                const storage = &screen.kitty_images;
++                if (storage.images.count() != 0 or storage.placements.count() != 0 or storage.loading != null) {
++                    out.* = true;
++                    break;
++                }
++            }
++        },
++        .kitty_graphics => {
+             if (comptime !build_options.kitty_graphics) return .no_value;
+             out.* = &t.screens.active.kitty_images;
+         },

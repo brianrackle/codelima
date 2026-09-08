@@ -2,6 +2,166 @@
 
 ## Open Work
 
+### 43. Qualify the focus-toggle lifecycle fix and audit other shortcut actions
+
+Problem: ADR 134 fixes Option+Backtick/F6 toggling on both press and release.
+Decoded-input regressions first reproduced the return to tree focus on release;
+the fix passes whole-tree `make verify`, integration tests, focused race tests
+and gopls diagnostics. Native macOS keyboard/visual qualification is still
+unavailable. The local Linux run passed settings, metadata repair/preset listing
+and host-terminal startup; launching the real TUI in an isolated tmux session
+failed `DependencyUnavailable: list Lima instances`. Doctor and node start
+confirm missing `limactl`, and doctor also reports inaccessible `/dev/kvm`.
+The disposable host shell executed a marker command, exited normally, and
+left an empty terminal list. Its renderer and daemon exited; the temporary
+home, fixture helper, captures and isolated tmux server were removed.
+This does not complete QA Flow 7 or the full QA.md native/VM matrix tracked in
+#0/#41. Other TUI actions also match key identity without an activation policy;
+in particular F7 search handles both press and release as open/close actions.
+
+Suggested solution: run the added Flow 7 tap/release, hold/repeat and rapid
+separate-press checks on macOS in both Kitty-reporting and legacy terminals,
+alongside every remaining QA.md flow. Audit tab actions, search, tree actions
+and overlays separately: consume releases while choosing deliberately which
+navigation actions repeat, and preserve guest repeat/release/paste input.
+Add failing lifecycle tests before widening the current focus-only fix.
+
+Advantages: proves the physical-key behavior in the reporting environment
+and prevents the same event-type mistake in other controls. Disadvantages:
+requires native terminal/VM access; changing repeat policies for other actions
+needs additional behavior decisions and coverage.
+
+### 42. Upstream the narrow native/frontend contracts and extend unsupported graphics modes
+
+Problem: the adopted static graphics path deliberately does not animate pets,
+render Unicode placeholders/registered glyphs, or checkpoint native image state.
+Native clipboard reads and host-acknowledged Kitty writes remain disabled.
+CodeLima carries four attributed native patches (XTQMODKEYS compatibility,
+clipboard acknowledgement policy, graphics policy/eligibility, allocator-backed
+snapshot pages) and an additive Vaxis bounded-image API. No upstream submission
+has been made; publishing changes requires a separate external workflow.
+
+Suggested solution: propose the minimal public contracts upstream with the
+owned conformance fixtures, replacing each local patch only after its upstream
+equivalent passes those fixtures. Obtain public animation deadline/tick and
+glyph/placeholder rendering APIs before enabling those modes; define bounded
+image recovery and actual frontend clipboard completion before widening claims.
+Keep icon-title handling distinct from window-title behavior and retain only
+the independently characterized XTQMODKEYS compatibility patch. Refresh the
+terminal-freeze skill's historical stderr-mutex signatures through the skill
+maintenance workflow; the adapter now uses bounded native log records.
+
+Advantages: reduces downstream maintenance and enables richer graphics without
+inventing protocol success or losing state silently. Disadvantages: depends on
+upstream API decisions, expands runtime/transport memory and scheduling policy,
+and requires native multi-client visual/clipboard qualification. The current
+bounded static/text path remains useful independently of those extensions.
+
+### 41. Finish full libghostty adoption qualification on a native, adequately sized host
+
+Implementation is underway on `feat/libghostty-vt-adoption`; see
+[the completion ledger](plans/libghostty_vt_adoption_progress.md).
+Per-flow actual execution, the fixed handoff regression and complete disposable
+artifact cleanup are recorded in [the QA report](plans/libghostty_vt_adoption_qa.md).
+
+Problem: the upstream Debug `test-lib-vt` compiler was killed by the current
+Linux/aarch64 guest at both four jobs and one job. This is not a passing upstream
+unit suite. This environment also lacks the native macOS/Lima and two-window
+interactive context required by the full QA.md matrix. In-project automated
+and bridge checks continue; no recommendation is considered fully qualified yet.
+
+Suggested solution: rerun the pinned upstream unit recipe on a host with enough
+memory, then execute every QA.md flow, including actual packaged binaries,
+graphics/selection/search, shell reflow, shared input, sleep/wake, and live update.
+Keep source/feature/patch identities identical and clean all verification state.
+
+Native build follow-up: the reported macOS `exec: "pkg-config": executable
+file not found` exposed a missing bootstrap dependency, now fixed by ADR 133's
+managed pkgconf installer and explicit Make/package selection. Linux whole-tree,
+package, native-bridge and missing-tool regression checks pass. Rerun `make build`
+on the reporting Mac without installing Homebrew pkg-config or deleting its
+valid Ghostty cache. This directly qualifies the original environment at the
+cost of requiring access to that native host; Linux fixtures alone cannot do so.
+
+Idle compression is implemented and its Linux repeated-history fixture showed
+about 84% lower current RSS; see
+[measurements](plans/libghostty_vt_adoption_measurements.md). Still qualify
+native Darwin residency, mixed high-entropy history, multi-worker aggregate
+memory, and loaded end-to-end input latency. The suggested native-host run
+avoids overgeneralizing a synthetic workload but requires additional platforms
+and representative fixtures. `CODELIMA_GHOSTTY_IDLE_COMPRESSION=0` disables it
+while investigating a platform-specific regression.
+
+Advantages: validates real native behavior without weakening tests or substituting
+passing subsets for the full gate. Disadvantages: requires host resources and
+interactive verification unavailable in this guest; adds qualification time.
+
+### 40. Implement and qualify the September 7 architectural review recommendations
+
+Review: [plans/sep_7_plan.md](plans/sep_7_plan.md). The review is complete.
+G01–G14 and their renderer readiness/publication/replay/deadline prerequisites
+are implemented on `feat/libghostty-vt-adoption` with qualification tracked in
+#41 and the [completion ledger](plans/libghostty_vt_adoption_progress.md).
+The remaining non-adoption R recommendations below are still proposed. Stable R/G IDs
+refer to the detailed evidence, tradeoffs, and acceptance criteria in that plan.
+
+Problem:
+
+- R01–R06 and R22–R26 identify remaining event ordering, mutation freshness,
+  incomplete-cleanup races, input admission, SSH cancellation, replay,
+  request lifetime, renderer fencing, RPC validation, rollback, and workspace
+  symlink-containment gaps.
+- R07–R14 identify stale TUI completions, credential-staging failure windows,
+  incomplete inventory handling, resource/deadline limits, discovery/telemetry
+  coupling, clone preflight, and metadata identity validation work.
+- R15–R21 identify mixed application/UI/native ownership, public lifecycle/view
+  ambiguity, backend divergence and job cleanup, conflicting keybindings,
+  remaining screen/inventory costs, installer races, and qualification/docs drift.
+- G01–G14 identify supported libghostty-vt responsibilities CodeLima can adopt:
+  deterministic worker-only native linkage, rendering/formatting, hyperlinks,
+  semantic input/paste, clipboard/effects/logging, colors/reflow, selection/search,
+  core checkpoints, compression, graphics, and a bounded native adapter.
+  September upstream requires Zig 0.16.0 and changes the C ABI; it is not a
+  drop-in replacement. Checkpoints omit presentation state and images, and
+  public C animation scheduling remains unresolved.
+- The baseline review's passing test runs are not adoption qualification.
+  New implementation evidence is tracked separately in the completion ledger;
+  native Lima, macOS/VZ, two-window visual, sleep/wake, and complete live
+  diagnostic qualification remain outstanding.
+
+Suggested solution:
+
+- Deliver the review's slices A–E, starting with deterministic regressions and
+  small correctness fixes; keep the roadmap's keybinding priority independently
+  shippable. Track every R01–R26 and G01–G14 recommendation through its gate.
+- Preserve delivered isolation, backpressure, caching, seat/shared-input, and
+  descriptor-lease work. TODO #36 is resolved by ADR 131 and is not reopened.
+- Coordinate existing TODO #0/#1/#2/#4/#17/#22/#24/#25/#28/#30/#34/#35/#39
+  with the plan instead of creating conflicting implementations. In particular,
+  #1 no longer needs to wait for upstream terminal default-color options:
+  they already exist at the current pin; host discovery/propagation remains.
+- For each implemented slice, run automated tests and local execution, all
+  required QA flows, and artifact cleanup. Record actual native results, update
+  README/BUILD/PATTERNS/QA and ROADMAP status, and write numbered ADRs for
+  internal behavioral changes. Keep the existing untracked August Ghostty
+  proposal intact until its owner chooses how to consolidate it.
+
+Advantages:
+
+- Addresses concrete failure paths while preserving existing working safeguards.
+- Removes duplicated terminal semantics and gives future features supported
+  native APIs, explicit ownership, and measurable performance budgets.
+- Keeps recommendations and native qualification limits traceable to evidence.
+
+Disadvantages:
+
+- Protocol, package, and native ABI changes need staged migration and broad
+  regression coverage; some work requires native hosts and interactive QA.
+- Static linking, stricter limits, and explicit errors change packaging or
+  compatibility behavior and need documented rollout decisions.
+- Optional graphics and complete recovery require application-owned state
+  beyond what the current upstream C API can provide.
+
 ### 0. Manually verify the reworked per-node TUI terminal tabs in a real terminal
 
 Problem:
@@ -85,19 +245,20 @@ Disadvantages:
 
 - Needs a real Lima-capable host and an interactive terminal; cannot be automated in CI today.
 
-### 1. Feed the host terminal background into the Ghostty backend
+### 1. Qualify host terminal colors on native visual hosts (implementation delivered)
 
 Problem:
 
 - Embedded-terminal rendering now uses Ghostty's explicit-versus-default cell semantics, so pane rendering no longer depends on guessing based on RGB equality.
-- Ghostty itself still keeps its own internal default colors, and guest applications that query terminal defaults can still observe those Ghostty-side values rather than the outer host terminal theme.
-- If upstream Ghostty eventually exposes configurable terminal default colors, CodeLima may still want to pass the host terminal colors through so guest-visible default-color queries align with the outer terminal theme too.
+- ADR 132 now uses the supported native default-color/palette API with bounded
+  Vaxis discovery, theme refresh, hidden-tab propagation and recovery policy.
+  Unknown colors remain unspecified; actual black stays distinguishable.
+- Native macOS/outer-terminal visual and query alignment still needs QA #41.
 
 Suggested solution:
 
-- Query the host terminal foreground and background through Vaxis during TUI startup when a matching Ghostty configuration surface exists.
-- Pass those colors into Ghostty's terminal defaults or palette configuration instead of relying only on Vaxis-side `ColorDefault` rendering.
-- Refresh that configuration when the host terminal emits a color-theme change event if Ghostty terminals need to stay aligned during a long-running TUI session.
+- Run QA Flow 10 across light/dark themes, missing/partial query responses,
+  hidden tabs, seat transitions and live renderer/daemon replacement.
 
 Advantages:
 
@@ -107,7 +268,7 @@ Advantages:
 
 Disadvantages:
 
-- Depends on Ghostty exposing a supported way to configure terminal default colors at runtime or startup.
+- Requires native terminals for visual qualification; no longer waits on a missing upstream API.
 - Adds startup coordination between the Vaxis host terminal and the Ghostty backend.
 - Theme changes become more stateful if existing terminals need to be updated in place.
 

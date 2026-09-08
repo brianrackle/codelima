@@ -3,10 +3,10 @@ package codelima
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"unicode"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"github.com/brianrackle/codelima/internal/terminalstate"
+	"go.rockorager.dev/vaxis"
 )
 
 // These encoders intentionally match the Vaxis terminal widget behavior so the
@@ -103,45 +103,9 @@ func encodeTUITerminalKey(key vaxis.Key, cursorKeysApplication bool) string {
 	return buf.String()
 }
 
-func encodeTUITerminalPasteKey(key vaxis.Key) string {
-	if key.Text != "" {
-		return normalizeTUITerminalPasteText(key.Text)
-	}
+func encodeTUITerminalPasteKey(key vaxis.Key) string { return terminalstate.EncodePasteKey(key) }
 
-	switch key.Keycode {
-	case vaxis.KeyEnter, vaxis.KeyKeyPadEnter:
-		return "\r"
-	case vaxis.KeyTab:
-		return "\t"
-	case vaxis.KeyEsc:
-		return "\x1b"
-	case vaxis.KeyBackspace:
-		return "\x7f"
-	}
-
-	if key.Modifiers&vaxis.ModCtrl != 0 {
-		// Legacy parsing decodes raw C0 bytes inside a bracketed paste as
-		// Ctrl-modified keys (e.g. "\n" arrives as Ctrl+J), so recover the
-		// original byte instead of emitting the decoded letter.
-		switch {
-		case key.Keycode == '@':
-			return "\x00"
-		case key.Keycode >= 'a' && key.Keycode <= 'z':
-			return normalizeTUITerminalPasteText(string(key.Keycode - 0x60))
-		case key.Keycode >= '[' && key.Keycode <= '_':
-			return string(key.Keycode - 0x40)
-		}
-	}
-
-	if key.Keycode <= 0 || key.Keycode >= unicode.MaxRune {
-		return ""
-	}
-	return string(key.Keycode)
-}
-
-func normalizeTUITerminalPasteText(text string) string {
-	return strings.ReplaceAll(text, "\r\n", "\n")
-}
+func normalizeTUITerminalPasteText(text string) string { return terminalstate.NormalizePasteText(text) }
 
 func normalizeTUITerminalEvent(event vaxis.Event) vaxis.Event {
 	key, ok := event.(vaxis.Key)

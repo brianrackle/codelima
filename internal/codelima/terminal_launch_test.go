@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )

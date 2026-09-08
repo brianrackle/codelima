@@ -1,0 +1,288 @@
+diff --git a/include/ghostty/vt/snapshot.h b/include/ghostty/vt/snapshot.h
+index 89cb539..0b7fec9 100644
+--- a/include/ghostty/vt/snapshot.h
++++ b/include/ghostty/vt/snapshot.h
+@@ -160,6 +160,17 @@ typedef enum GHOSTTY_ENUM_TYPED {
+    */
+   GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION = 1,
+ 
++  /**
++   * Use the decoder allocator for native page backing storage as well as heap
++   * allocations. False by default. This includes temporary READY screens and
++   * page pools retained by the decoded terminal after the decoder is freed.
++   * The allocator must return ZERO-INITIALIZED memory at the requested
++   * alignment and remain valid until the returned terminal is freed.
++   * A bounded allocator can therefore reject page allocation before it occurs.
++   * Input type: bool *
++   */
++  GHOSTTY_SNAPSHOT_DECODER_OPT_USE_ALLOCATOR_FOR_PAGES = 2,
++
+   GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttySnapshotDecoderOption;
+ 
+@@ -253,6 +264,9 @@ typedef enum GHOSTTY_ENUM_TYPED {
+    */
+   GHOSTTY_SNAPSHOT_DECODER_DATA_RETAIN_CONTINUATION = 8,
+ 
++  /** Whether native pages use the decoder allocator. Output type: bool * */
++  GHOSTTY_SNAPSHOT_DECODER_DATA_USE_ALLOCATOR_FOR_PAGES = 9,
++
+   GHOSTTY_SNAPSHOT_DECODER_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
+ } GhosttySnapshotDecoderData;
+ 
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index 746a6cf..92b3be8 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -593,6 +593,9 @@ const init_tw = tripwire.module(enum {
+ }, init);
+ 
+ pub const Options = struct {
++    /// Optional zero-initializing, page-aligned allocator retained by page pools.
++    /// This lets embedders include native page storage in an allocation budget.
++    page_allocator: ?Allocator = null,
+     /// The initial active-area size. This can be resized with `resize`.
+     cols: size.CellCountInt,
+     rows: size.CellCountInt,
+@@ -646,7 +649,7 @@ pub fn init(
+     try tw.check(.init_memory_pool);
+     var pool = try MemoryPool.init(
+         alloc,
+-        pageAllocator(alloc),
++        opts.page_allocator orelse pageAllocator(alloc),
+         page_preheat,
+     );
+     errdefer pool.deinit();
+@@ -7477,7 +7480,7 @@ pub const Builder = struct {
+         return .{
+             .pool = try MemoryPool.init(
+                 alloc,
+-                pageAllocator(alloc),
++                options.page_allocator orelse pageAllocator(alloc),
+                 page_preheat,
+             ),
+             .options = options,
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index 208e276..3643203 100644
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -257,6 +257,8 @@ pub const CharsetState = struct {
+ };
+ 
+ pub const Options = struct {
++    /// Optional zero-initializing allocator for the lifetime of native pages.
++    page_allocator: ?Allocator = null,
+     cols: size.CellCountInt,
+     rows: size.CellCountInt,
+ 
+@@ -307,6 +309,7 @@ pub fn init(
+ ) Allocator.Error!Screen {
+     // Initialize our backing pages.
+     var pages = try PageList.init(alloc, .{
++        .page_allocator = opts.page_allocator,
+         .cols = opts.cols,
+         .rows = opts.rows,
+         .max_size = opts.max_scrollback_bytes,
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index e9cc3b8..98c74c4 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -264,6 +264,8 @@ pub const Cursor = struct {
+ };
+ 
+ pub const Options = struct {
++    /// Optional zero-initializing allocator for native page backing storage.
++    page_allocator: ?Allocator = null,
+     cols: size.CellCountInt,
+     rows: size.CellCountInt,
+ 
+@@ -317,6 +319,7 @@ pub fn init(
+     const rows = opts.rows;
+ 
+     var screen_set: ScreenSet = try .init(io_impl, alloc, .{
++        .page_allocator = opts.page_allocator,
+         .cols = cols,
+         .rows = rows,
+         .max_scrollback_bytes = opts.max_scrollback_bytes,
+@@ -4138,6 +4141,7 @@ pub fn resize(
+                 .cols = opts.cols,
+                 .rows = opts.rows,
+                 .max_scrollback_bytes = 0,
++                .page_allocator = primary.pages.pool.pages.allocator,
+                 .kitty_image_storage_limit = if (comptime build_options.kitty_graphics)
+                     primary.kitty_images.total_limit
+                 else
+@@ -4749,6 +4753,7 @@ pub fn switchScreen(self: *Terminal, key: ScreenSet.Key) !?*Screen {
+                     .primary => primary.pages.limits.bytes.explicit,
+                     .alternate => 0,
+                 },
++                .page_allocator = primary.pages.pool.pages.allocator,
+ 
+                 // Inherit our Kitty image settings from the primary
+                 // screen if we have to initialize.
+diff --git a/src/terminal/c/snapshot.zig b/src/terminal/c/snapshot.zig
+index 75cbc17..add6db6 100644
+--- a/src/terminal/c/snapshot.zig
++++ b/src/terminal/c/snapshot.zig
+@@ -23,6 +23,7 @@ const terminal_c = @import("terminal.zig");
+ pub const DecoderOption = enum(c_int) {
+     max_continuation_bytes = 0,
+     retain_continuation = 1,
++    use_allocator_for_pages = 2,
+     _,
+ };
+ 
+@@ -39,6 +40,7 @@ pub const DecoderData = enum(c_int) {
+     progress_rows = 6,
+     progress_remaining = 7,
+     retain_continuation = 8,
++    use_allocator_for_pages = 9,
+     _,
+ 
+     /// Return the Zig type stored through the C API output pointer for a key.
+@@ -50,7 +52,7 @@ pub const DecoderData = enum(c_int) {
+             .progress_screen => terminal_c.TerminalScreen,
+             .progress_rows => usize,
+             .progress_remaining => u32,
+-            .retain_continuation => bool,
++            .retain_continuation, .use_allocator_for_pages => bool,
+             _ => void,
+         };
+     }
+@@ -108,6 +110,7 @@ const DecoderWrapper = struct {
+     state: State,
+     max_continuation_bytes: usize,
+     retain_continuation: bool,
++    use_allocator_for_pages: bool,
+ };
+ 
+ /// C: GhosttySnapshotDecoder, an opaque nullable decoder handle.
+@@ -171,6 +174,7 @@ fn decoderNewSource(
+     wrapper.state = .configuring;
+     wrapper.max_continuation_bytes = default_max_continuation_bytes;
+     wrapper.retain_continuation = false;
++    wrapper.use_allocator_for_pages = false;
+     wrapper.decoder = .init(wrapper.source.reader());
+     out.* = wrapper;
+     return .success;
+@@ -203,6 +207,8 @@ pub fn decoder_set(
+             @as(*const usize, @ptrCast(@alignCast(value))).*,
+         .retain_continuation => decoder.retain_continuation =
+             @as(*const bool, @ptrCast(@alignCast(value))).*,
++        .use_allocator_for_pages => decoder.use_allocator_for_pages =
++            @as(*const bool, @ptrCast(@alignCast(value))).*,
+         _ => return .invalid_value,
+     }
+     return .success;
+@@ -225,6 +231,7 @@ pub fn decoder_get(
+         .progress_rows,
+         .progress_remaining,
+         .retain_continuation,
++        .use_allocator_for_pages,
+         => |comptime_data| decoderGetTyped(
+             decoder_,
+             comptime_data,
+@@ -256,6 +263,10 @@ fn decoderGetTyped(
+             if (decoderFailed(decoder)) return .no_value;
+             out.* = decoder.retain_continuation;
+         },
++        .use_allocator_for_pages => {
++            if (decoderFailed(decoder)) return .no_value;
++            out.* = decoder.use_allocator_for_pages;
++        },
+ 
+         // READY metadata remains available after history decoding completes.
+         .history_rows_primary => {
+@@ -456,7 +467,10 @@ fn decoderReadyTerminal(decoder: *DecoderWrapper) anyerror!ReadyTerminal {
+     var decoded = decoder.decoder.ready(
+         decoder.alloc,
+         io.io(),
+-        .{ .max_continuation_bytes = decoder.max_continuation_bytes },
++        .{
++            .max_continuation_bytes = decoder.max_continuation_bytes,
++            .page_allocator = if (decoder.use_allocator_for_pages) decoder.alloc else null,
++        },
+     ) catch |err| {
+         io.deinit(decoder.alloc);
+         return err;
+diff --git a/src/terminal/snapshot/screen.zig b/src/terminal/snapshot/screen.zig
+index d4ef16f..8a91682 100644
+--- a/src/terminal/snapshot/screen.zig
++++ b/src/terminal/snapshot/screen.zig
+@@ -363,6 +363,7 @@ pub fn decode(
+     // retain scrollback, while primary screens inherit the caller's limits.
+     var result: TerminalScreen = result: {
+         var builder = try TerminalPageList.Builder.init(alloc, .{
++            .page_allocator = options.page_allocator,
+             .cols = options.cols,
+             .rows = options.rows,
+             .max_size = if (key == .alternate)
+diff --git a/src/terminal/snapshot/snapshot.zig b/src/terminal/snapshot/snapshot.zig
+index 9c6dc96..06535be 100644
+--- a/src/terminal/snapshot/snapshot.zig
++++ b/src/terminal/snapshot/snapshot.zig
+@@ -100,6 +100,9 @@ pub fn encode(
+ pub const DecodeError = Decoder.ReadyError || Decoder.NextError;
+ 
+ pub const DecodeOptions = struct {
++    /// Include page storage in this allocator's accounting. The allocator must
++    /// return zero-initialized, page-aligned memory and outlive the Terminal.
++    page_allocator: ?Allocator = null,
+     /// Largest non-ground continuation the decoder may allocate and return.
+     /// Set this to zero when only ground-state snapshots are acceptable.
+     max_continuation_bytes: usize,
+@@ -303,7 +306,7 @@ pub const Decoder = struct {
+         // screen slots with their final routing. SCREEN values replace those
+         // slots in place so ScreenSet pointers, including the active
+         // pointer, stay valid.
+-        var result = try terminal.decode(reader, io_, alloc);
++        var result = try terminal.decodeWithPageAllocator(reader, io_, alloc, options.page_allocator);
+         errdefer result.deinit(alloc);
+ 
+         // TERMINAL initializes exactly the number of screen slots it
+@@ -315,6 +318,7 @@ pub const Decoder = struct {
+             const explicit_bytes = primary.pages.limits.bytes.explicit;
+             const explicit_lines = primary.pages.limits.lines.explicit;
+             break :options .{
++                .page_allocator = options.page_allocator,
+                 .cols = result.cols,
+                 .rows = result.rows,
+                 .max_scrollback_bytes = if (explicit_bytes == std.math.maxInt(usize))
+diff --git a/src/terminal/snapshot/terminal.zig b/src/terminal/snapshot/terminal.zig
+index 1930537..951af0a 100644
+--- a/src/terminal/snapshot/terminal.zig
++++ b/src/terminal/snapshot/terminal.zig
+@@ -952,6 +952,17 @@ pub fn decode(
+     source: *std.Io.Reader,
+     io_: std.Io,
+     alloc: Allocator,
++) DecodeError!Terminal {
++    return decodeWithPageAllocator(source, io_, alloc, null);
++}
++
++/// Decode with an optional allocator covering initial and future page storage.
++/// The allocator must return zeroed, page-aligned storage and outlive Terminal.
++pub fn decodeWithPageAllocator(
++    source: *std.Io.Reader,
++    io_: std.Io,
++    alloc: Allocator,
++    page_allocator: ?Allocator,
+ ) DecodeError!Terminal {
+     // Finish the complete record before constructing native terminal state.
+     var payload: DecodedPayload = payload: {
+@@ -978,6 +989,7 @@ pub fn decode(
+ 
+     // Terminal.init establishes native pools, pins, defaults, and ownership.
+     var result = try Terminal.init(io_, alloc, .{
++        .page_allocator = page_allocator,
+         .cols = header.columns,
+         .rows = header.rows,
+         .max_scrollback_bytes = max_scrollback_bytes,
+@@ -1002,6 +1014,7 @@ pub fn decode(
+     // its empty screens are replaced by the following SCREEN records.
+     if (header.screen_count == 2) {
+         _ = try result.screens.getInit(io_, alloc, .alternate, .{
++            .page_allocator = page_allocator,
+             .cols = header.columns,
+             .rows = header.rows,
+             .max_scrollback_bytes = 0,

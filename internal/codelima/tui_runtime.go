@@ -13,7 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
@@ -153,11 +153,6 @@ type tuiRefreshCompleteEvent struct {
 	Err          error
 }
 
-type tuiClipboardEvent struct {
-	TargetKey string
-	Text      string
-}
-
 type tuiProgressWriter struct {
 	post        func(vaxis.Event)
 	operationID string
@@ -281,7 +276,7 @@ func screenBufferHyperlinkAt(buffer [][]vaxis.Cell, col, row int) (string, bool)
 	return target, true
 }
 
-// Reflects into unexported vaxis internals (screenNext.buf[row][col].Style.Hyperlink); guarded by TestVaxisHyperlinkReflectionStillValid (tui_reflection_canary_test.go) until the upstream accessor proposed in plan §0.8 exists.
+// Reflects into unexported Vaxis v0.17 internals (screenNext.buf[row*cols+col].Style.Hyperlink); guarded by TestVaxisHyperlinkReflectionStillValid until an upstream cell accessor exists.
 func renderedHyperlinkAt(vx *vaxis.Vaxis, col, row int) (string, bool) {
 	if vx == nil {
 		return "", false
@@ -293,21 +288,23 @@ func renderedHyperlinkAt(vx *vaxis.Vaxis, col, row int) (string, bool) {
 	}
 
 	screen := value.Elem().FieldByName("screenNext")
-	if !screen.IsValid() || screen.IsNil() {
+	if !screen.IsValid() || screen.Kind() != reflect.Pointer || screen.IsNil() || screen.Elem().Kind() != reflect.Struct {
 		return "", false
 	}
 
-	buffer := screen.Elem().FieldByName("buf")
-	if !buffer.IsValid() || buffer.Kind() != reflect.Slice || row < 0 || row >= buffer.Len() {
+	state := screen.Elem()
+	buffer, columns, rows := state.FieldByName("buf"), state.FieldByName("cols"), state.FieldByName("rows")
+	if !buffer.IsValid() || buffer.Kind() != reflect.Slice || buffer.Type().Elem() != reflect.TypeOf(vaxis.Cell{}) ||
+		!columns.IsValid() || columns.Kind() != reflect.Int || !rows.IsValid() || rows.Kind() != reflect.Int {
+		return "", false
+	}
+	width, height := int(columns.Int()), int(rows.Int())
+	if width <= 0 || height <= 0 || width > buffer.Len() || height > buffer.Len()/width ||
+		col < 0 || col >= width || row < 0 || row >= height {
 		return "", false
 	}
 
-	rowValue := buffer.Index(row)
-	if rowValue.Kind() != reflect.Slice || col < 0 || col >= rowValue.Len() {
-		return "", false
-	}
-
-	cellStyle := rowValue.Index(col).FieldByName("Style")
+	cellStyle := buffer.Index(row*width + col).FieldByName("Style")
 	if !cellStyle.IsValid() {
 		return "", false
 	}

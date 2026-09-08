@@ -4,9 +4,9 @@ import (
 	"errors"
 	"strings"
 
-	"git.sr.ht/~rockorager/vaxis"
-	"git.sr.ht/~rockorager/vaxis/widgets/border"
-	"git.sr.ht/~rockorager/vaxis/widgets/textinput"
+	"go.rockorager.dev/vaxis"
+	"go.rockorager.dev/vaxis/widgets/border"
+	"go.rockorager.dev/vaxis/widgets/textinput"
 )
 
 // tuiOverlay is the single active right-pane override (dialog, menu,

@@ -3,6 +3,7 @@ package codelima
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -11,10 +12,20 @@ import (
 	"time"
 )
 
+func TestRendererHandshakeRequiresReadyAcknowledgement(t *testing.T) {
+	raw, err := json.Marshal(rendererInitResult{Protocol: rendererWorkerProtocolVersion, Ready: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRendererProtocol("worker", raw); err == nil {
+		t.Fatal("protocol match without readiness was accepted")
+	}
+}
+
 func TestRendererWorkerPathBesideMainExecutable(t *testing.T) {
 	t.Parallel()
 
-	got := rendererWorkerPathBeside("/opt/codelima/bin/codelima-real")
+	got := rendererWorkerPathBeside("/opt/codelima/bin/codelima")
 	if want := "/opt/codelima/bin/codelima-renderer-worker"; got != want {
 		t.Fatalf("rendererWorkerPathBeside() = %q, want %q", got, want)
 	}

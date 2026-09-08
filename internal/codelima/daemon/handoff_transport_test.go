@@ -124,6 +124,38 @@ func TestHandoffTransportRejectsDescriptorsOnControlMessage(t *testing.T) {
 }
 
 func TestHandoffTransportChunksFullTerminalReplay(t *testing.T) {
+	testHandoffBlobRoundTrip(t, MaxHandoffReplayBytesPerTerminal, (*HandoffConnection).WriteReplay, (*HandoffConnection).ReadReplay)
+}
+
+func TestHandoffTransportChunksBoundedRecoveryBundle(t *testing.T) {
+	testHandoffBlobRoundTrip(t, MaxHandoffRecoveryBytesPerTerminal, (*HandoffConnection).WriteRecovery, (*HandoffConnection).ReadRecovery)
+	connection := &HandoffConnection{}
+	if _, err := connection.ReadRecovery("terminal", MaxHandoffRecoveryBytesPerTerminal+1); err == nil {
+		t.Fatal("oversized recovery accepted before allocation")
+	}
+	if _, err := connection.ReadRecovery("terminal", -1); err == nil {
+		t.Fatal("negative recovery accepted before allocation")
+	}
+}
+
+func TestHandoffRecoveryManifestBoundsBeforePayloadAllocation(t *testing.T) {
+	for _, manifest := range []HandoffManifest{
+		{Version: HandoffVersion, Runtimes: []HandoffRuntime{{RecoverySize: -1}}},
+		{Version: HandoffVersion, Runtimes: []HandoffRuntime{{RecoverySize: MaxHandoffRecoveryBytesPerTerminal + 1}}},
+		{Version: PreviousChunkedHandoffVersion, Runtimes: []HandoffRuntime{{RecoverySize: 1}}},
+		{Version: HandoffVersion, Runtimes: []HandoffRuntime{{RecoverySize: 24 << 20}, {RecoverySize: 24 << 20}, {RecoverySize: 24 << 20}}},
+	} {
+		if err := ValidateHandoffRecoverySizes(manifest); err == nil {
+			t.Fatalf("accepted invalid recovery sizes: %+v", manifest)
+		}
+	}
+	if err := ValidateHandoffRecoverySizes(HandoffManifest{Version: HandoffVersion, Runtimes: []HandoffRuntime{{RecoverySize: 24 << 20}, {RecoverySize: 24 << 20}, {RecoverySize: 16 << 20}}}); err != nil {
+		t.Fatalf("rejected exact aggregate bound: %v", err)
+	}
+}
+
+func testHandoffBlobRoundTrip(t *testing.T, size int, write func(*HandoffConnection, string, []byte) error, read func(*HandoffConnection, string, int) ([]byte, error)) {
+	t.Helper()
 	root := handoffTestTempDir(t, "hf-replay-")
 	path := filepath.Join(root, "handoff.sock")
 
@@ -133,7 +165,7 @@ func TestHandoffTransportChunksFullTerminalReplay(t *testing.T) {
 	}
 	defer func() { _ = listener.Close() }()
 
-	replay := make([]byte, MaxHandoffReplayBytesPerTerminal)
+	replay := make([]byte, size)
 	for index := range replay {
 		replay[index] = byte(index % 251)
 	}
@@ -145,7 +177,7 @@ func TestHandoffTransportChunksFullTerminalReplay(t *testing.T) {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		serverDone <- NewHandoffConnection(conn, HandoffFramingLengthPrefixed).WriteReplay("term-large", replay)
+		serverDone <- write(NewHandoffConnection(conn, HandoffFramingLengthPrefixed), "term-large", replay)
 	}()
 
 	peer, err := DialHandoff(path)
@@ -153,7 +185,7 @@ func TestHandoffTransportChunksFullTerminalReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = peer.Close() }()
-	got, err := peer.ReadReplay("term-large", len(replay))
+	got, err := read(peer, "term-large", len(replay))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,11 +1,9 @@
 package codelima
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,8 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
-	"github.com/containerd/console"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
@@ -27,161 +24,10 @@ type fakeTUIRunner struct {
 	workspaceRoot string
 }
 
-type fakeVaxisConsole struct {
-	input bytes.Buffer
-	size  console.WinSize
-}
-
 func (f *fakeTUIRunner) Run(_ context.Context, _ *Service, workspaceRoot string) error {
 	f.calls++
 	f.workspaceRoot = workspaceRoot
 	return nil
-}
-
-func newFakeVaxisConsole(input string, width, height uint16) *fakeVaxisConsole {
-	console := &fakeVaxisConsole{
-		size: console.WinSize{
-			Width:  width,
-			Height: height,
-		},
-	}
-	console.input.WriteString(input)
-	return console
-}
-
-func (f *fakeVaxisConsole) Read(p []byte) (int, error) {
-	if f.input.Len() == 0 {
-		return 0, io.EOF
-	}
-	return f.input.Read(p)
-}
-
-func (f *fakeVaxisConsole) Write(p []byte) (int, error) {
-	return len(p), nil
-}
-
-func (f *fakeVaxisConsole) Close() error {
-	return nil
-}
-
-func (f *fakeVaxisConsole) Fd() uintptr {
-	return 0
-}
-
-func (f *fakeVaxisConsole) Name() string {
-	return "fake-vaxis-console"
-}
-
-func (f *fakeVaxisConsole) Resize(size console.WinSize) error {
-	f.size = size
-	return nil
-}
-
-func (f *fakeVaxisConsole) ResizeFrom(other console.Console) error {
-	size, err := other.Size()
-	if err != nil {
-		return err
-	}
-	f.size = size
-	return nil
-}
-
-func (f *fakeVaxisConsole) SetRaw() error {
-	return nil
-}
-
-func (f *fakeVaxisConsole) DisableEcho() error {
-	return nil
-}
-
-func (f *fakeVaxisConsole) Reset() error {
-	return nil
-}
-
-func (f *fakeVaxisConsole) Size() (console.WinSize, error) {
-	return f.size, nil
-}
-
-func newRenderTestVaxis(t *testing.T, width, height int) *vaxis.Vaxis {
-	t.Helper()
-
-	console := newFakeVaxisConsole("\x1b[?1;2c", uint16(width), uint16(height))
-	vx, err := vaxis.New(vaxis.Options{
-		WithConsole:  console,
-		DisableMouse: true,
-		NoSignals:    true,
-	})
-	if err != nil {
-		t.Fatalf("vaxis.New() error = %v", err)
-	}
-	return vx
-}
-
-func decodedVaxisInputKey(t *testing.T, input string) vaxis.Key {
-	t.Helper()
-
-	console := newFakeVaxisConsole("\x1b[?1;2c"+input, 80, 24)
-	vx, err := vaxis.New(vaxis.Options{
-		WithConsole:  console,
-		DisableMouse: true,
-		NoSignals:    true,
-	})
-	if err != nil {
-		t.Fatalf("vaxis.New() error = %v", err)
-	}
-	defer vx.Close()
-
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case event := <-vx.Events():
-			key, ok := event.(vaxis.Key)
-			if ok {
-				return key
-			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for decoded key input %q", input)
-		}
-	}
-}
-
-func renderedCellGrapheme(t *testing.T, vx *vaxis.Vaxis, col, row int) string {
-	t.Helper()
-
-	buf := reflect.ValueOf(vx).Elem().FieldByName("screenNext").Elem().FieldByName("buf")
-	cell := buf.Index(row).Index(col)
-	return cell.FieldByName("Character").FieldByName("Grapheme").String()
-}
-
-func renderedCellStyle(t *testing.T, vx *vaxis.Vaxis, col, row int) vaxis.Style {
-	t.Helper()
-
-	buf := reflect.ValueOf(vx).Elem().FieldByName("screenNext").Elem().FieldByName("buf")
-	cell := buf.Index(row).Index(col)
-	style := cell.FieldByName("Style")
-	return vaxis.Style{
-		Hyperlink:       style.FieldByName("Hyperlink").String(),
-		HyperlinkParams: style.FieldByName("HyperlinkParams").String(),
-		Foreground:      vaxis.Color(style.FieldByName("Foreground").Uint()),
-		Background:      vaxis.Color(style.FieldByName("Background").Uint()),
-		UnderlineColor:  vaxis.Color(style.FieldByName("UnderlineColor").Uint()),
-		UnderlineStyle:  vaxis.UnderlineStyle(style.FieldByName("UnderlineStyle").Uint()),
-		Attribute:       vaxis.AttributeMask(style.FieldByName("Attribute").Uint()),
-	}
-}
-
-func renderedScreenText(t *testing.T, vx *vaxis.Vaxis, width, height int) string {
-	t.Helper()
-
-	var lines []string
-	for row := range height {
-		var line strings.Builder
-		for col := range width {
-			line.WriteString(renderedCellGrapheme(t, vx, col, row))
-		}
-		lines = append(lines, strings.TrimRight(line.String(), " "))
-	}
-	return strings.Join(lines, "\n")
 }
 
 type fakeTUISessionManager struct {
@@ -518,20 +364,6 @@ func TestNewTUITerminalUsesCompatibleTERM(t *testing.T) {
 	terminal := newTUITerminal("node-root", func(vaxis.Event) {})
 	if terminal.TermEnv() != tuiEmbeddedTermEnv {
 		t.Fatalf("expected embedded terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TermEnv())
-	}
-}
-
-func TestNewGhosttyTUITerminalLoadsWhenLibraryInstalled(t *testing.T) {
-	t.Parallel()
-
-	terminal, err := newGhosttyTUITerminal("node-root", func(vaxis.Event) {})
-	if err != nil {
-		t.Skipf("ghostty terminal unavailable in this test environment: %v", err)
-	}
-	defer terminal.Close()
-
-	if terminal.TermEnv() != tuiEmbeddedTermEnv {
-		t.Fatalf("expected ghostty terminal TERM %q, got %q", tuiEmbeddedTermEnv, terminal.TermEnv())
 	}
 }
 
@@ -3679,7 +3511,7 @@ func TestTUIMouseDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 	}
 }
 
-func TestTUIShiftDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
+func TestTUIShiftDragPreservesHostSelectionBypass(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -3714,8 +3546,8 @@ func TestTUIShiftDragForwardsToGuestWhenTerminalCapturesMouse(t *testing.T) {
 		app.handleMouse(event)
 	}
 
-	if len(terminal.events) != 3 {
-		t.Fatalf("expected shift-drag to reach the guest when it captures mouse, got %d events", len(terminal.events))
+	if len(terminal.events) != 0 {
+		t.Fatalf("host-selection bypass must not reach the guest, got %d events", len(terminal.events))
 	}
 }
 

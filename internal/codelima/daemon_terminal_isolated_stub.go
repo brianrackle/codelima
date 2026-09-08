@@ -1,4 +1,4 @@
-//go:build !cgo || (!darwin && !linux)
+//go:build !darwin && !linux
 
 package codelima
 
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"os"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 )
 
 func newIsolatedDaemonTerminal(targetKey string, postEvent func(vaxis.Event)) tuiTerminal {
@@ -22,6 +22,7 @@ func adoptIsolatedDaemonTerminal(
 	int,
 	[]byte,
 	bool,
+	[]byte,
 ) (daemonTerminal, error) {
 	return nil, errors.New("isolated daemon terminals are unavailable on this build")
 }

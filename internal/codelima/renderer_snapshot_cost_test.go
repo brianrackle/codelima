@@ -10,14 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 )
 
 // publishStatusLocked runs on every inbound renderer frame. It used to take a
 // deep copy of the whole retained journal to read two numbers off it, which cost
 // roughly one journal-sized memcpy per PTY frame while holding the mutex the
-// read pump needs to append. The published contract is unchanged; the copy is
-// not allowed back.
+// read pump needs to append. The copy is not allowed back.
 func TestRendererStatusPublicationDoesNotCopyTheJournal(t *testing.T) {
 	t.Parallel()
 
@@ -59,14 +58,21 @@ func TestRendererStatusPublicationDoesNotCopyTheJournal(t *testing.T) {
 		t.Fatalf("published status = %#v", status)
 	}
 
-	// The trimming path is where partial recovery becomes true; the cheap stats
-	// accessor must keep reporting it.
+	// Trimming the raw fallback does not make the current complete emulator
+	// partial. That classification now follows the actual recovery source.
 	for range 400 {
 		journal.AppendOutput(payload)
 	}
 	supervisor.publishStatus(rendererStateReady, 1)
+	if supervisor.Status().PartialRecovery {
+		t.Fatal("raw journal trimming changed current recovery provenance")
+	}
+	supervisor.mu.Lock()
+	supervisor.recoveryPartial = true
+	supervisor.mu.Unlock()
+	supervisor.publishStatus(rendererStateReady, 1)
 	if !supervisor.Status().PartialRecovery {
-		t.Fatal("published status lost the partial-recovery flag after journal trimming")
+		t.Fatal("published status lost the actual partial recovery flag")
 	}
 }
 

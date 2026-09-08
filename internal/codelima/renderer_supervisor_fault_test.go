@@ -17,14 +17,16 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
 	"github.com/creack/pty"
+	"go.rockorager.dev/vaxis"
 )
 
 const (
-	rendererFaultWorkerEnv    = "CODELIMA_TEST_RENDERER_FAULT_MODE"
-	rendererFaultReadyEnv     = "CODELIMA_TEST_RENDERER_FAULT_READY_FILE"
-	rendererFaultInitDelayEnv = "CODELIMA_TEST_RENDERER_FAULT_INIT_DELAY"
+	rendererFaultWorkerEnv        = "CODELIMA_TEST_RENDERER_FAULT_MODE"
+	rendererFaultReadyEnv         = "CODELIMA_TEST_RENDERER_FAULT_READY_FILE"
+	rendererFaultInitDelayEnv     = "CODELIMA_TEST_RENDERER_FAULT_INIT_DELAY"
+	rendererFaultEarlySnapshotEnv = "CODELIMA_TEST_RENDERER_FAULT_EARLY_SNAPSHOT"
+	rendererFaultReadDelayEnv     = "CODELIMA_TEST_RENDERER_FAULT_READ_DELAY"
 	// rendererFaultProtocolEnv overrides the protocol version the fault worker
 	// announces in its init reply, which is how on-disk binary skew is
 	// reproduced without building a second binary. Unset means "agree with this
@@ -99,12 +101,28 @@ func runRendererFaultWorker(mode, readyFile string) int {
 			if mode == rendererFaultPoison && len(params.Journal) > 0 {
 				return 5
 			}
+			if os.Getenv(rendererFaultEarlySnapshotEnv) == "1" {
+				state, _ := json.Marshal(rendererPublishedState{Snapshot: TerminalSnapshot{Generation: 1}, VisibleText: ReadResultDTO{Text: "unverified"}})
+				if err := writeRendererFrame(conn, rendererWorkerFrame{Type: rendererFrameSnapshot, Generation: frame.Generation, Result: state}); err != nil {
+					return 6
+				}
+			}
 			// Stands in for the replay work a real renderer does before it can
 			// answer init.
 			if delay, err := time.ParseDuration(os.Getenv(rendererFaultInitDelayEnv)); err == nil {
 				time.Sleep(delay)
 			}
 			response.Result, _ = json.Marshal(rendererFaultInitReply(os.Getenv(rendererFaultProtocolEnv)))
+		case "snapshot":
+			state, _ := json.Marshal(rendererPublishedState{Snapshot: TerminalSnapshot{Generation: 2}, VisibleText: ReadResultDTO{Text: "verified"}})
+			if err := writeRendererFrame(conn, rendererWorkerFrame{Type: rendererFrameSnapshot, Generation: frame.Generation, Result: state}); err != nil {
+				return 6
+			}
+		case "read":
+			if delay, err := time.ParseDuration(os.Getenv(rendererFaultReadDelayEnv)); err == nil {
+				time.Sleep(delay)
+			}
+			response.Result, _ = json.Marshal(ReadResultDTO{Text: "read-result", Generation: 2})
 		case "close":
 			response.Result, _ = json.Marshal(map[string]bool{"closed": true})
 			if frame.ID != 0 && !frame.NoReply {
@@ -356,7 +374,7 @@ func TestLiveUpdateAlwaysRespawnsTheRendererWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ttyFile.Close() }()
-	_, adoptErr := adoptIsolatedDaemonTerminal("adopted", func(vaxis.Event) {}, ptyFile, 0, 80, 24, state.Replay, state.ReplayPartial)
+	_, adoptErr := adoptIsolatedDaemonTerminal("handoff-renderer", func(vaxis.Event) {}, ptyFile, 0, 80, 24, state.Replay, state.ReplayPartial, state.Recovery)
 	if adoptErr == nil {
 		t.Fatal("adoption reused a renderer instead of resolving one beside the running binary")
 	}

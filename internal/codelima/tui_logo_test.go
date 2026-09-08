@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 )
 
 func TestTUILogoAnimationSettlesLeftToRightEveryThirdSecond(t *testing.T) {

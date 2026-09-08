@@ -20,13 +20,13 @@ make diagnose-terminal-freeze
 What each target does:
 
 - `make init`
-  - installs Go, `gopls`, `golangci-lint`, Zig, and a locally patched upstream `libghostty-vt` build
+  - installs Go, `gopls`, `golangci-lint`, Zig, `pkgconf` (as `pkg-config`), and a locally patched upstream `libghostty-vt` build
   - downloads Go modules
 - `make build`
-  - builds `./bin/<os>-<arch>/codelima`
+  - builds `./bin/<os>-<arch>/codelima` and its `codelima-renderer-worker` companion
   - refreshes `./bin/codelima` as a compatibility symlink to the current platform's binary
 - `make verify`
-  - runs `fmt`, `lint`, `test`, and `build`
+  - runs `fmt-check`, `lint`, `test`, `test-vaxis-fork`, and `build`
 - `make test-race`
   - runs every Go package with the race detector serially by default
 - `make test-integration`
@@ -36,12 +36,33 @@ What each target does:
   - runs the repository `diagnose-codelima-terminal-freezes` skill's read-only capture script without rebuilding or restarting CodeLima
   - writes incident evidence under `./tmp/terminal-freeze-*`; pass `DIAG_ARGS='--home PATH --binary PATH --terminal-id ID'` to override discovery
 
-All test recipes run packages and tests within each package serially by
-default, avoiding filesystem-resource spikes on virtualized development hosts.
-Override `GO_TEST_PARALLEL` or `GO_RACE_TEST_PARALLEL` only after qualifying
-the host.
+Ordinary Go tests use `GO_TEST_PARALLEL=4`; race tests default to
+`GO_RACE_TEST_PARALLEL=1`. Override these only after qualifying the host.
 
-The Ghostty terminal integration requires cgo. Make enables cgo for every recipe, uses a host `cc` when present, and otherwise uses the managed Zig compiler. Zig is installed before Go-based development tools so `make init` also succeeds in minimal sandboxes without a system C compiler.
+The Ghostty worker requires cgo and `pkg-config`. Make enables cgo and exports
+`PKG_CONFIG` as the exact platform-local `.tooling/<os>-<arch>/bin/pkg-config`
+path for cgo, native bridge checks, and benchmarks. This is upstream
+`pkgconf` `2.5.1`, built from pinned, checksum-verified source using
+managed Zig, not a script that special-cases Ghostty flags. No system
+`pkg-config`, Homebrew package, or host C compiler is needed to provision it.
+Make uses a host `cc` for cgo when present and otherwise uses managed Zig.
+Zig and `pkgconf` are installed before Go-based development tools. The
+CLI/daemon package graph contains no Ghostty cgo; release packaging builds the
+main executable with `CGO_ENABLED=0`.
+
+`make pkg-config` provisions just Go, Zig, and the metadata resolver;
+`make test-pkgconf` adds its focused installer and resolver tests. Both
+`make init` and `make ghostty-vt` share this prerequisite so a native-only
+recipe works from a checkout without preinstalled Go or `pkg-config`.
+
+Vaxis is pinned to `v0.17.1` with a local replacement in `third_party/vaxis`.
+The complete upstream module, tests, and Apache-2.0 license are retained;
+`UPSTREAM.md` records the verified module checksums and narrow encoded-image
+API delta. `make test-vaxis-fork` runs its full module suite. Keep dependency
+changes in this reviewed copy, never in the Go module cache. The added API
+uploads already-encoded PNGs synchronously within a wire-byte budget, keeps
+multipart Kitty transfers serialized, and exposes exact-pixel/z-order placement
+without asynchronous resizing workers.
 
 `make build` produces both `codelima` and the private
 `codelima-renderer-worker` helper beside it. Release archives package both
@@ -60,13 +81,85 @@ Keeping the worker as a separate executable makes the native-code boundary
 visible in the package graph and prevents the daemon from entering Ghostty
 through a hidden mode of its own executable.
 
-Handoff version 4 keeps terminal metadata in the manifest and transfers each
-renderer replay through ordered 512 KiB raw chunks. JSON base64 expansion keeps
-every encoded chunk below the 1 MiB frame limit. Import caps one terminal at 1
-MiB and the complete handoff at 64 MiB before allocating or accepting replay.
-A new importer accepts a version-3 stream manifest when that old daemon can
-encode it below its compiled limit; an already-oversized version-3 sender
-requires closing high-history tabs or one terminal-restarting stop/start.
+### Native Renderer Dependency
+
+The audited dependency is Ghostty commit
+`82232ecde55405559dec29c5466cb9e39938cb41`, compiled with Zig `0.16.0` as a
+static archive. The selected features are formatter, selection, render-state,
+input-encode, color, grid-introspection, snapshot, search, and kitty-graphics;
+all other optional features are disabled. The default profile is
+`ReleaseSmall`, target `native`, CPU `baseline`.
+
+Four separately checksummed patches retain the characterized XTQMODKEYS
+reply, expose clipboard acknowledgement requirements, and enforce the bounded
+static-graphics policy/checkpoint guard and allocation-bounded snapshot decode.
+Their digests and the native inputs
+are reviewed in `internal/rendererbuild/profile.go`. The installer checks
+these inputs before cache reuse, verifies the official Zig archive checksum,
+and retains upstream Zig dependency hashes. It does not replace dependency
+manifests with unverified local paths.
+
+Builds are isolated under `.tooling/<os>-<arch>/ghostty-vt`. The exact upstream
+checkout lives in `sources/<commit>`; `current/source` is the matching patched
+build tree. A completed immutable install is published through the platform's
+`current` link only after successful compilation. A kernel lock serializes
+installers, and failed builds leave the previous current install available.
+There is no cross-platform `.tooling/ghostty-vt/current` include-path alias.
+
+The managed `pkg-config` resolves `libghostty-vt-static` through
+`current/share/pkgconfig`, using `current/include` and
+`current/lib/libghostty-vt.a`. The native fingerprint covers source, Zig,
+features, patch digests, width policy, platform and compiler options. The same
+fingerprint is embedded in the C header, static archive, CLI and worker, and
+checked at native initialization and the worker handshake. Runtime loading,
+library-path search, and `CODELIMA_GHOSTTY_VT_LIB` overrides are not supported.
+The worker still uses the platform's normal system C libraries.
+
+Use these qualification targets when changing the native boundary:
+
+```sh
+make test-installers
+make test-renderer-boundary
+make test-ghostty-vt-schema
+make test-ghostty-vt-build
+make test-ghostty-vt
+make test-ghostty-bridge
+make test-ghostty-adapter GHOSTTY_TEST_FILTER='Ghostty|CloneColors|ValidateColors'
+make benchmark-ghostty-compression
+make test-package
+```
+
+Upstream unit execution and compile-only unit validation use `Debug`, since
+the upstream page-list tests require tracked-pin safety instrumentation.
+They default to `GHOSTTY_VT_TEST_JOBS=1` and can require substantial memory;
+`GHOSTTY_VT_UNIT_FILTER=clipboard` is a focused diagnostic, not a substitute for
+the full suite. ABI schema and adapter checks use the selected production
+profile. The compression benchmark runs fresh off/on processes and reports
+current RSS on Linux, bounded-step latency and resumed-input timings; RSS is
+reported as unavailable on other platforms.
+
+Changing the source or a patch requires reviewing its profile constant and
+rebasing the narrow patches before rebuilding. Compiler-profile overrides
+(`GHOSTTY_VT_TARGET`, `GHOSTTY_VT_CPU`, `GHOSTTY_VT_OPTIMIZE`, or
+`GHOSTTY_VT_FEATURES`) require rebuilding both executables with Make so their
+embedded fingerprint follows the installed dependency. Qualify release
+packages on each native target rather than reusing another platform's cache.
+
+Handoff version 5 keeps terminal metadata in the manifest and transfers raw
+replay and renderer recovery envelopes through ordered 512 KiB chunks. JSON
+base64 expansion keeps every encoded chunk below the 1 MiB frame limit. Raw
+replay is capped at 1 MiB per terminal and 64 MiB per handoff. Recovery envelopes
+are separately capped at 24 MiB per terminal and 64 MiB per handoff before
+allocation; retained native checkpoints also share a 64 MiB daemon memory quota.
+An envelope binds terminal identity, native build identity, integrity, application
+color policy, and ordered journal watermarks. Same-build recovery uses an eligible
+checkpoint plus a complete tail; cross-build recovery keeps the bounded ordered
+raw fallback. Native snapshots exclude image state, so live or in-progress images
+prevent new checkpoints. A truncated raw fallback reports partial recovery.
+The importer also accepts version-4 chunked replay and version-3 stream manifests
+when the old daemon can encode them below its compiled limit. An already-oversized
+version-3 sender requires closing high-history tabs or one terminal-restarting
+stop/start.
 
 Useful supporting targets:
 
@@ -138,14 +231,17 @@ The packaging script builds from the platform-scoped source binary, but the arch
 Each packaged archive contains:
 
 - `bin/codelima`
-  - wrapper script that exports `CODELIMA_GHOSTTY_VT_LIB`
-- `bin/codelima-real`
-  - compiled Go binary
-- `lib/libghostty-vt.dylib` on macOS or `lib/libghostty-vt.so` on Linux
-- `<asset>.json`
-  - manifest with version, target platform, asset name, and SHA-256
+  - the compiled CLI/daemon executable, with no Ghostty dependency
+- `bin/codelima-renderer-worker`
+  - the private renderer executable, statically linked to the audited Ghostty archive
 
-Artifact size varies by target, Ghostty library, and Go toolchain and must be
+The adjacent `<asset>.json` manifest records version, target platform, asset
+name, archive SHA-256, and `renderer_build_id`. It is not an entry inside the
+tar archive. There is no wrapper script, `codelima-real`, or packaged Ghostty
+shared library. Keep both executables together: the daemon resolves the
+worker beside its own executable, not through `PATH`.
+
+Artifact size varies by target, Ghostty features, and Go toolchain and must be
 recorded during release qualification.
 
 Build a release archive for the current platform:
@@ -160,7 +256,26 @@ That target uses:
 - `cmd/codelima-release`
 - `internal/release`
 
-`make package` rebuilds the platform-scoped source binary with `PACKAGE_VERSION` before archiving it. Stop or live-update any daemon running from that path first: the daemon protocol requires an exact binary version, so a newly packaged CLI correctly rejects an older development daemon. Run `make build` afterward to restore the normal development version.
+`make package` validates the selected native profile and rebuilds both
+platform-scoped executables with the same `PACKAGE_VERSION` and native
+fingerprint before archiving them. Stop or live-update any daemon running from
+those paths first: the daemon protocol requires an exact binary version, so a
+newly packaged CLI correctly rejects an older development daemon. Run
+`make build` afterward to restore the normal development version.
+
+Direct `scripts/package_release.sh` invocation still requires the verified
+static renderer install. After checking its identity, the script provisions
+the pinned Zig/`pkgconf` tools and exports the same absolute `PKG_CONFIG` path
+as Make; it does not depend on a developer's shell finding `pkg-config`.
+Neither build-time tool is included in the release archive.
+
+`make test-package` performs a self-cleaning release smoke test under `./tmp`
+without replacing development binaries. It verifies the two-entry archive,
+checksum, executable modes, embedded build identities, CLI help/version, and
+native worker initialization/output/read with an empty `PATH` and unavailable
+legacy shared-library paths. Packaging is deliberately passed an invalid
+inherited `PKG_CONFIG` to verify that direct packaging selects the managed
+resolver itself. Run it on every release platform.
 
 ## Homebrew Formula Generation
 
@@ -180,8 +295,8 @@ make package-formula \
 The generated formula:
 
 - installs `git` and Lima as runtime dependencies
-- installs the packaged binary and Ghostty library into `libexec`
-- writes a wrapper `bin/codelima` that points `CODELIMA_GHOSTTY_VT_LIB` at the packaged library
+- installs both executables together in `libexec/bin`
+- links `bin/codelima` to the installed CLI; no library cache or launcher is required
 
 ## GitHub Actions
 
@@ -254,8 +369,10 @@ Standard release flow:
    freezing cursor or tab selection while daemon cleanup completes.
 5. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
    Fill at least one renderer journal above 900 KiB before one update and
-   verify handoff version 4 preserves its terminal ID, shell PID, final replay
-   marker, and responsive daemon.
+   verify handoff version 5 preserves its terminal ID, shell PID, final replay
+   marker, and responsive daemon. Exercise both eligible same-build checkpoint
+   recovery and cross-build bounded raw fallback; verify a truncated fallback is
+   marked partial rather than claiming full terminal-state preservation.
 6. Ensure the tap repo settings and token are configured.
 7. Create and push the release tag:
 
@@ -284,6 +401,7 @@ Before the first real release, do a local dry run:
 make verify
 make test-race
 make test-integration
+make test-package
 make package PACKAGE_VERSION=0.0.0-qa DIST_DIR=./tmp/dist
 make package-formula \
   PACKAGE_VERSION=0.0.0-qa \
@@ -318,25 +436,33 @@ probe, daemon metadata and logs, process state, and a non-terminating macOS
 otherwise defaults to `~/.codelima`. Interpret the bundle with
 `.agents/skills/diagnose-codelima-terminal-freezes/references/interpretation.md`.
 
-### `make init` fails when relinking Ghostty
+### Native build identity or header/archive mismatch
 
-The Ghostty installer maintains both:
+Run `make init` and then `make build` using the same selected compiler profile.
+Do not copy headers or archives between installs, or mix a release worker with
+a different CLI. If an audited patch changed, update its reviewed profile
+digest only after reviewing the patch. Cache reuse deliberately rejects
+unreviewed inputs; bypassing that check can invalidate checkpoint compatibility.
 
-- `.tooling/<os>-<arch>/ghostty-vt/current`
-- `.tooling/ghostty-vt/current`
+### `pkg-config` executable not found
 
-The first path is the real per-platform install root.
-The second path is a compatibility link used by the cgo bridge include path.
-
-If relinking fails, rerun `make init`; the installer removes and recreates both links.
+Use `make build` or `make init` to provision the managed binary; installing a
+Homebrew package is not necessary. Make and the release script select it
+explicitly even when the host has no `pkg-config`. For ad-hoc `go` commands,
+export `PKG_CONFIG` to `.tooling/<os>-<arch>/bin/pkg-config` using an absolute
+path, and set `PKG_CONFIG_PATH` to the matching Ghostty install's
+`current/share/pkgconfig`. Prefer the Make targets so these paths and the
+embedded native build identity remain consistent.
 
 ### `make init` stalls while building Ghostty
 
-The Ghostty installer now vendors Ghostty's `uucode` package into its temporary checkout before running Zig.
-That keeps the local `libghostty-vt` build from depending on a live Zig package fetch in the middle of `make init` or `make ghostty-vt`.
-The packaged Ghostty source commit is controlled by `GHOSTTY_VT_GHOSTTY_COMMIT` in `Makefile` and is intentionally kept aligned with the Ghostling `libghostty-vt` demo API surface.
-When rebasing that commit, rebase `scripts/patches/ghostty-vt-codelima.patch` at the same time and verify it with `make ghostty-vt`.
-On macOS the installer passes `-Demit-xcframework=false` because CodeLima loads `libghostty-vt.dylib` directly and does not consume Ghostty's lib-vt xcframework output.
+The first build downloads the pinned upstream source and content-addressed Zig
+dependencies; a cold cache therefore needs network access. Subsequent builds
+reuse the verified caches in `.tooling/<os>-<arch>/cache`. Reduce
+`GHOSTTY_VT_BUILD_JOBS` if the compiler exhausts host memory. The installer
+passes `-Demit-xcframework=false` on all platforms: CodeLima consumes a static C
+archive, not an xcframework or shared library. A failed build does not publish
+its staging tree or replace the previous working install.
 
 ### Release publishes assets but does not update Homebrew
 

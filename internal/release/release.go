@@ -24,11 +24,12 @@ const (
 )
 
 type Manifest struct {
-	Version   string `json:"version"`
-	GOOS      string `json:"goos"`
-	GOARCH    string `json:"goarch"`
-	AssetName string `json:"asset_name"`
-	SHA256    string `json:"sha256"`
+	Version         string `json:"version"`
+	GOOS            string `json:"goos"`
+	GOARCH          string `json:"goarch"`
+	AssetName       string `json:"asset_name"`
+	SHA256          string `json:"sha256"`
+	RendererBuildID string `json:"renderer_build_id"`
 }
 
 type FormulaSpec struct {
@@ -61,17 +62,6 @@ func ArchiveName(version, goos, goarch string) (string, error) {
 	return base + ".tar.gz", nil
 }
 
-func LibraryFilename(goos string) (string, error) {
-	switch strings.TrimSpace(goos) {
-	case "darwin":
-		return "libghostty-vt.dylib", nil
-	case "linux":
-		return "libghostty-vt.so", nil
-	default:
-		return "", fmt.Errorf("unsupported goos %q", goos)
-	}
-}
-
 // ValidateTarget enforces the platforms for which Lima and the packaged
 // Ghostty terminal bridge are release-qualified.
 func ValidateTarget(goos, goarch string) error {
@@ -87,7 +77,7 @@ func ValidateTarget(goos, goarch string) error {
 	}
 }
 
-func BuildArchive(version, goos, goarch, binaryPath, rendererPath, libraryPath, outputPath string) (Manifest, error) {
+func BuildArchive(version, goos, goarch, binaryPath, rendererPath, rendererBuildID, outputPath string) (Manifest, error) {
 	if err := ValidateTarget(goos, goarch); err != nil {
 		return Manifest{}, err
 	}
@@ -99,8 +89,7 @@ func BuildArchive(version, goos, goarch, binaryPath, rendererPath, libraryPath, 
 	if err != nil {
 		return Manifest{}, err
 	}
-	libFilename, err := LibraryFilename(goos)
-	if err != nil {
+	if err := validateRendererBuildID(rendererBuildID); err != nil {
 		return Manifest{}, err
 	}
 	if strings.TrimSpace(binaryPath) == "" {
@@ -109,24 +98,17 @@ func BuildArchive(version, goos, goarch, binaryPath, rendererPath, libraryPath, 
 	if strings.TrimSpace(rendererPath) == "" {
 		return Manifest{}, fmt.Errorf("renderer binary path is required")
 	}
-	if strings.TrimSpace(libraryPath) == "" {
-		return Manifest{}, fmt.Errorf("ghostty library path is required")
-	}
 	if strings.TrimSpace(outputPath) == "" {
 		return Manifest{}, fmt.Errorf("output path is required")
 	}
 
-	binaryData, _, err := readArchiveFile(binaryPath)
+	binaryData, err := os.ReadFile(binaryPath)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read binary: %w", err)
 	}
-	rendererData, _, err := readArchiveFile(rendererPath)
+	rendererData, err := os.ReadFile(rendererPath)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read renderer binary: %w", err)
-	}
-	libraryData, libraryMode, err := readArchiveFile(libraryPath)
-	if err != nil {
-		return Manifest{}, fmt.Errorf("read ghostty library: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return Manifest{}, err
@@ -145,16 +127,10 @@ func BuildArchive(version, goos, goarch, binaryPath, rendererPath, libraryPath, 
 	gzipWriter := gzip.NewWriter(multiWriter)
 	tarWriter := tar.NewWriter(gzipWriter)
 
-	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima", []byte(wrapperScript(goos)), executableMode); err != nil {
-		return Manifest{}, err
-	}
-	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima-real", binaryData, executableMode); err != nil {
+	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima", binaryData, executableMode); err != nil {
 		return Manifest{}, err
 	}
 	if err := writeArchiveEntry(tarWriter, rootName+"/bin/codelima-renderer-worker", rendererData, executableMode); err != nil {
-		return Manifest{}, err
-	}
-	if err := writeArchiveEntry(tarWriter, rootName+"/lib/"+libFilename, libraryData, libraryMode); err != nil {
 		return Manifest{}, err
 	}
 	if err := tarWriter.Close(); err != nil {
@@ -165,12 +141,23 @@ func BuildArchive(version, goos, goarch, binaryPath, rendererPath, libraryPath, 
 	}
 
 	return Manifest{
-		Version:   version,
-		GOOS:      goos,
-		GOARCH:    goarch,
-		AssetName: assetName,
-		SHA256:    hex.EncodeToString(hash.Sum(nil)),
+		Version:         version,
+		GOOS:            goos,
+		GOARCH:          goarch,
+		AssetName:       assetName,
+		SHA256:          hex.EncodeToString(hash.Sum(nil)),
+		RendererBuildID: rendererBuildID,
 	}, nil
+}
+
+func validateRendererBuildID(id string) error {
+	if len(id) != 64 || id != strings.ToLower(id) {
+		return fmt.Errorf("renderer build identity must be a lowercase SHA-256 fingerprint")
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return fmt.Errorf("renderer build identity must be a lowercase SHA-256 fingerprint: %w", err)
+	}
+	return nil
 }
 
 func ReadManifest(path string) (Manifest, error) {
@@ -184,6 +171,9 @@ func ReadManifest(path string) (Manifest, error) {
 	}
 	if strings.TrimSpace(manifest.Version) == "" || strings.TrimSpace(manifest.GOOS) == "" || strings.TrimSpace(manifest.GOARCH) == "" || strings.TrimSpace(manifest.AssetName) == "" || strings.TrimSpace(manifest.SHA256) == "" {
 		return Manifest{}, fmt.Errorf("manifest %s is incomplete", path)
+	}
+	if err := validateRendererBuildID(manifest.RendererBuildID); err != nil {
+		return Manifest{}, fmt.Errorf("manifest %s: %w", path, err)
 	}
 	return manifest, nil
 }
@@ -218,9 +208,6 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 		if err := ValidateTarget(goos, goarch); err != nil {
 			return "", err
 		}
-		if _, err := LibraryFilename(goos); err != nil {
-			return "", err
-		}
 		if _, ok := assetsByTarget[goos]; !ok {
 			assetsByTarget[goos] = map[string]Manifest{}
 		}
@@ -235,9 +222,6 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("require ")
-	builder.WriteString(rubyString("zlib"))
-	builder.WriteString("\n\n")
 	builder.WriteString("class ")
 	builder.WriteString(FormulaClassName)
 	builder.WriteString(" < Formula\n")
@@ -289,34 +273,14 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	builder.WriteString("\n")
 	builder.WriteString("\n")
 	builder.WriteString("  def install\n")
-	builder.WriteString("    root = Dir[\"codelima_*/bin/codelima-real\"].empty? ? \".\" : Dir[\"codelima_*\"].fetch(0)\n")
-	builder.WriteString("    odie \"missing packaged release root\" unless File.exist?(File.join(root, \"bin\", \"codelima-real\"))\n")
+	builder.WriteString("    root = Dir[\"codelima_*/bin/codelima\"].empty? ? \".\" : Dir[\"codelima_*\"].fetch(0)\n")
+	builder.WriteString("    odie \"missing packaged release root\" unless File.exist?(File.join(root, \"bin\", \"codelima\"))\n")
 	builder.WriteString("    odie \"missing packaged renderer worker\" unless File.exist?(File.join(root, \"bin\", \"codelima-renderer-worker\"))\n")
-	builder.WriteString("    ghostty_lib = OS.mac? ? \"libghostty-vt.dylib\" : \"libghostty-vt.so\"\n")
-	builder.WriteString("    source_ghostty_lib = File.join(root, \"lib\", ghostty_lib)\n")
-	builder.WriteString("    (libexec/\"bin\").install \"#{root}/bin/codelima-real\"\n")
-	builder.WriteString("    chmod 0755, libexec/\"bin/codelima-real\"\n")
+	builder.WriteString("    (libexec/\"bin\").install \"#{root}/bin/codelima\"\n")
+	builder.WriteString("    chmod 0755, libexec/\"bin/codelima\"\n")
 	builder.WriteString("    (libexec/\"bin\").install \"#{root}/bin/codelima-renderer-worker\"\n")
 	builder.WriteString("    chmod 0755, libexec/\"bin/codelima-renderer-worker\"\n")
-	builder.WriteString("    pkgshare.mkpath\n")
-	builder.WriteString("    Zlib::GzipWriter.open(pkgshare/\"#{ghostty_lib}.gz\") do |gz|\n")
-	builder.WriteString("      gz.write File.binread(source_ghostty_lib)\n")
-	builder.WriteString("    end\n")
-	builder.WriteString("    (bin/\"codelima\").write <<~SH\n")
-	builder.WriteString("#!/bin/bash\n")
-	builder.WriteString("set -eu\n")
-	builder.WriteString("CACHE_ROOT=\"${XDG_CACHE_HOME:-$HOME/.cache}/codelima/#{version}\"\n")
-	builder.WriteString("mkdir -p \"$CACHE_ROOT\"\n")
-	builder.WriteString("RUNTIME_LIB=\"$CACHE_ROOT/#{ghostty_lib}\"\n")
-	builder.WriteString("if [ ! -f \"$RUNTIME_LIB\" ] || [ \"#{pkgshare}/#{ghostty_lib}.gz\" -nt \"$RUNTIME_LIB\" ]; then\n")
-	builder.WriteString("  gzip -dc \"#{pkgshare}/#{ghostty_lib}.gz\" > \"$RUNTIME_LIB.tmp\"\n")
-	builder.WriteString("  chmod 0755 \"$RUNTIME_LIB.tmp\"\n")
-	builder.WriteString("  mv \"$RUNTIME_LIB.tmp\" \"$RUNTIME_LIB\"\n")
-	builder.WriteString("fi\n")
-	builder.WriteString("export CODELIMA_GHOSTTY_VT_LIB=\"$RUNTIME_LIB\"\n")
-	builder.WriteString("exec \"#{libexec}/bin/codelima-real\" \"$@\"\n")
-	builder.WriteString("SH\n")
-	builder.WriteString("    chmod 0755, bin/\"codelima\"\n")
+	builder.WriteString("    bin.install_symlink libexec/\"bin/codelima\"\n")
 	builder.WriteString("  end\n\n")
 	builder.WriteString("  test do\n")
 	builder.WriteString("    assert_match \"Usage:\", shell_output(\"#{bin}/codelima --help\")\n")
@@ -325,22 +289,6 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	builder.WriteString("end\n")
 
 	return builder.String(), nil
-}
-
-func readArchiveFile(path string) ([]byte, int64, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, 0, err
-	}
-	mode := int64(info.Mode().Perm())
-	if mode == 0 {
-		mode = 0o644
-	}
-	return data, mode, nil
 }
 
 func writeArchiveEntry(tw *tar.Writer, name string, data []byte, mode int64) error {
@@ -354,18 +302,6 @@ func writeArchiveEntry(tw *tar.Writer, name string, data []byte, mode int64) err
 	}
 	_, err := tw.Write(data)
 	return err
-}
-
-func wrapperScript(goos string) string {
-	libName, _ := LibraryFilename(goos)
-	return strings.Join([]string{
-		"#!/usr/bin/env sh",
-		"set -eu",
-		`SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)`,
-		fmt.Sprintf(`export CODELIMA_GHOSTTY_VT_LIB="${SCRIPT_DIR}/../lib/%s"`, libName),
-		`exec "${SCRIPT_DIR}/codelima-real" "$@"`,
-		"",
-	}, "\n")
 }
 
 func formulaArchBlock(goarch string) string {

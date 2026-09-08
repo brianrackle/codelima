@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux)
+//go:build darwin || linux
 
 package codelima
 
@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
 	"github.com/creack/pty"
+	"go.rockorager.dev/vaxis"
 	"golang.org/x/sys/unix"
 )
 
@@ -44,14 +44,21 @@ type isolatedReadVariant struct {
 // retained scrollback, so they are fetched the first time a terminal.read wants
 // one and reused for the rest of that screen's epoch.
 type isolatedReadVariants struct {
-	mu     sync.Mutex
-	epoch  uint64
-	values map[isolatedReadVariant]ReadResultDTO
+	mu       sync.Mutex
+	epoch    uint64
+	values   map[isolatedReadVariant]ReadResultDTO
+	inflight map[isolatedReadVariant]*isolatedReadFlight
 	// last retains the newest successful rendering of each variant regardless of
 	// epoch. A renderer that is restarting or degraded cannot answer, and
 	// serving its last text preserves the behaviour of the era when every
 	// variant was pushed with the snapshot: stale, but present.
 	last map[isolatedReadVariant]ReadResultDTO
+}
+
+type isolatedReadFlight struct {
+	epoch  uint64
+	done   chan struct{}
+	result ReadResult
 }
 
 type rendererResponseKey struct {
@@ -70,24 +77,27 @@ type isolatedDaemonTerminal struct {
 	postEvent func(vaxis.Event)
 	options   rendererProcessOptions
 
-	mu           sync.Mutex
-	cmd          *exec.Cmd
-	pty          *os.File
-	ptyWriter    *ghosttyPTYWriter
-	childPID     int
-	cols         int
-	rows         int
-	focused      bool
-	closed       bool
-	state        runtimeState
-	waitOnce     sync.Once
-	waitErr      error
-	waitDone     chan struct{}
-	readPumpDone chan struct{}
-	quit         chan struct{}
-	quitOnce     sync.Once
-	closeOnce    sync.Once
-	handoffPTY   *os.File
+	mu                    sync.Mutex
+	resizeMu              sync.Mutex
+	cmd                   *exec.Cmd
+	pty                   *os.File
+	ptyWriter             *ghosttyPTYWriter
+	childPID              int
+	cols                  int
+	rows                  int
+	cellWidth, cellHeight int
+	focused               bool
+	closed                bool
+	state                 runtimeState
+	waitOnce              sync.Once
+	waitErr               error
+	waitDone              chan struct{}
+	readPumpDone          chan struct{}
+	quit                  chan struct{}
+	quitOnce              sync.Once
+	closeOnce             sync.Once
+	handoffPTY            *os.File
+	handoffRecovery       []byte
 
 	journal    *rendererJournal
 	renderer   *rendererSupervisor
@@ -127,15 +137,19 @@ func newIsolatedDaemonTerminalWithOptions(
 }
 
 func (t *isolatedDaemonTerminal) newRenderer() *rendererSupervisor {
-	return newRendererSupervisor(
+	var renderer *rendererSupervisor
+	renderer = newRendererSupervisor(
 		t.targetKey,
 		t.journal,
 		t.options,
-		t.installRendererSnapshot,
+		func(generation uint64, state rendererPublishedState, partial bool) {
+			t.installRendererSnapshot(renderer, generation, state, partial)
+		},
 		t.applyRendererPTYWrite,
 		t.handleRendererEvent,
-		t.markRendererStale,
+		func() { t.markRendererStaleFrom(renderer) },
 	)
+	return renderer
 }
 
 func (t *isolatedDaemonTerminal) Start(command *exec.Cmd) error {
@@ -204,30 +218,59 @@ func (t *isolatedDaemonTerminal) Resize(cols, rows int) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
+	if err := t.resizePixels(cols, rows, 0, 0); err != nil {
+		t.postTerminalError(err)
+	}
+}
+
+func (t *isolatedDaemonTerminal) ResizePixels(cols, rows, cellWidth, cellHeight int) error {
+	if cellWidth <= 0 || cellHeight <= 0 {
+		return errors.New("terminal pixel geometry must be positive")
+	}
+	return t.resizePixels(cols, rows, cellWidth, cellHeight)
+}
+
+func (t *isolatedDaemonTerminal) resizePixels(cols, rows, cellWidth, cellHeight int) error {
+	if !rendererValidGeometry(cols, rows) || !rendererValidPixels(cellWidth, cellHeight) {
+		return errors.New("terminal geometry exceeds renderer bounds")
+	}
+	t.resizeMu.Lock()
+	defer t.resizeMu.Unlock()
 	t.mu.Lock()
-	if t.closed || (t.cols == cols && t.rows == rows) {
+	if t.closed || t.state != runtimeStateRunning {
 		t.mu.Unlock()
-		return
+		return errTerminalClosed
+	}
+	if cellWidth == 0 {
+		cellWidth, cellHeight = t.cellWidth, t.cellHeight
+	}
+	if t.cols == cols && t.rows == rows && t.cellWidth == cellWidth && t.cellHeight == cellHeight {
+		t.mu.Unlock()
+		return nil
 	}
 	oldCols := t.cols
 	t.cols, t.rows = cols, rows
+	t.cellWidth, t.cellHeight = cellWidth, cellHeight
 	ptyFile := t.pty
 	childPID := t.childPID
 	renderer := t.renderer
 	t.mu.Unlock()
 
-	event := t.journal.AppendResize(cols, rows)
+	event := t.journal.AppendResizePixels(cols, rows, cellWidth, cellHeight)
 	if ptyFile != nil {
-		_ = pty.Setsize(ptyFile, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+		if err := pty.Setsize(ptyFile, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows), X: uint16(min(cols*cellWidth, 65535)), Y: uint16(min(rows*cellHeight, 65535))}); err != nil {
+			return err
+		}
 		if cols != oldCols && childPID > 0 {
 			_ = syscall.Kill(-childPID, syscall.SIGWINCH)
 		}
 	}
 	if renderer != nil {
 		if err := renderer.TryResize(event); err != nil {
-			t.postTerminalError(fmt.Errorf("resize renderer: %w", err))
+			return fmt.Errorf("resize renderer: %w", err)
 		}
 	}
+	return nil
 }
 
 func (t *isolatedDaemonTerminal) Update(event vaxis.Event) {
@@ -301,6 +344,8 @@ func (t *isolatedDaemonTerminal) closeRuntime(kill, post bool, closeErr error) {
 	t.ptyWriter = nil
 	t.renderer = nil
 	t.handoffPTY = nil
+	t.handoffRecovery = nil
+	rendererHandoffRecoveryQuota.release(t)
 	if kill {
 		t.childPID = 0
 	}
@@ -395,62 +440,73 @@ func (t *isolatedDaemonTerminal) ReadRecent(format ReadFormat) ReadResult {
 // time it is asked for and memoized for the rest of that screen's epoch, so a
 // terminal nobody reads never pays for a scrollback walk.
 func (t *isolatedDaemonTerminal) readVariant(source ReadSource, format ReadFormat) ReadResult {
-	cache := t.cache.Load()
-	if cache == nil {
-		return ReadResult{Err: errSnapshotFailed}
-	}
-	if source == ReadVisible && format == ReadText {
-		return cache.state.VisibleText.readResult()
-	}
 	key := isolatedReadVariant{source: source, format: format}
-	if value, ok := t.memoizedReadVariant(cache.epoch, key); ok {
-		return value.readResult()
-	}
+	for {
+		cache := t.cache.Load()
+		if cache == nil {
+			return ReadResult{Err: errSnapshotFailed}
+		}
+		if source == ReadVisible && format == ReadText {
+			return cache.state.VisibleText.readResult()
+		}
+		t.variants.mu.Lock()
+		if t.variants.epoch == cache.epoch {
+			if value, ok := t.variants.values[key]; ok {
+				t.variants.mu.Unlock()
+				return value.readResult()
+			}
+		}
+		if flight := t.variants.inflight[key]; flight != nil {
+			t.variants.mu.Unlock()
+			// At most one renderer read per variant is active, even if output
+			// publishes many new epochs while the first reader is still busy.
+			<-flight.done
+			if flight.epoch == cache.epoch {
+				return flight.result
+			}
+			continue
+		}
+		flight := &isolatedReadFlight{epoch: cache.epoch, done: make(chan struct{})}
+		if t.variants.inflight == nil {
+			t.variants.inflight = map[isolatedReadVariant]*isolatedReadFlight{}
+		}
+		t.variants.inflight[key] = flight
+		t.variants.mu.Unlock()
 
-	t.mu.Lock()
-	renderer := t.renderer
-	t.mu.Unlock()
-	if renderer == nil {
-		return t.lastReadVariant(key)
+		t.mu.Lock()
+		renderer := t.renderer
+		t.mu.Unlock()
+		var value ReadResultDTO
+		err := errRendererUnavailable
+		if renderer != nil {
+			t.readFetches.Add(1)
+			value, err = renderer.Read(source, format)
+		}
+		result := value.readResult()
+		if err != nil {
+			result = t.lastReadVariant(key)
+		}
+		t.variants.mu.Lock()
+		if err == nil && result.Err == nil {
+			t.rememberReadVariantLocked(key, value)
+			// Reads execute against live state. A result from another output
+			// generation or an epoch replaced during the RPC cannot populate
+			// this published screen's memo.
+			current := t.cache.Load()
+			if current != nil && current.epoch == cache.epoch && value.Generation == cache.state.Snapshot.Generation {
+				if t.variants.epoch != cache.epoch || t.variants.values == nil {
+					t.variants.epoch = cache.epoch
+					t.variants.values = map[isolatedReadVariant]ReadResultDTO{}
+				}
+				t.variants.values[key] = value
+			}
+		}
+		flight.result = result
+		delete(t.variants.inflight, key)
+		close(flight.done)
+		t.variants.mu.Unlock()
+		return result
 	}
-	t.readFetches.Add(1)
-	value, err := renderer.Read(source, format)
-	if err != nil {
-		return t.lastReadVariant(key)
-	}
-	t.storeReadVariant(cache.epoch, key, value)
-	return value.readResult()
-}
-
-func (t *isolatedDaemonTerminal) memoizedReadVariant(epoch uint64, key isolatedReadVariant) (ReadResultDTO, bool) {
-	t.variants.mu.Lock()
-	defer t.variants.mu.Unlock()
-	if t.variants.epoch != epoch {
-		return ReadResultDTO{}, false
-	}
-	value, ok := t.variants.values[key]
-	return value, ok
-}
-
-func (t *isolatedDaemonTerminal) storeReadVariant(epoch uint64, key isolatedReadVariant, value ReadResultDTO) {
-	t.variants.mu.Lock()
-	defer t.variants.mu.Unlock()
-	if epoch < t.variants.epoch {
-		// A newer screen was published while this render was in flight; the
-		// value is still worth retaining as the newest known text, but it must
-		// not reopen the memo for an epoch that has already been superseded.
-		t.rememberReadVariantLocked(key, value)
-		return
-	}
-	if t.variants.epoch != epoch {
-		t.variants.epoch = epoch
-		t.variants.values = nil
-	}
-	if t.variants.values == nil {
-		t.variants.values = map[isolatedReadVariant]ReadResultDTO{}
-	}
-	t.variants.values[key] = value
-	t.rememberReadVariantLocked(key, value)
 }
 
 func (t *isolatedDaemonTerminal) rememberReadVariantLocked(key isolatedReadVariant, value ReadResultDTO) {
@@ -490,6 +546,7 @@ func (t *isolatedDaemonTerminal) Snapshot() SnapshotResult {
 
 func cloneTerminalSnapshot(snapshot TerminalSnapshot) TerminalSnapshot {
 	snapshot.Cells = slices.Clone(snapshot.Cells)
+	snapshot.Graphics = cloneGraphicsMetadata(snapshot.Graphics)
 	return snapshot
 }
 
@@ -586,31 +643,48 @@ func (t *isolatedDaemonTerminal) readPump() {
 }
 
 func (t *isolatedDaemonTerminal) installRendererSnapshot(
+	source *rendererSupervisor,
 	generation uint64,
 	state rendererPublishedState,
 	partial bool,
 ) {
+	state.Snapshot = cloneTerminalSnapshot(state.Snapshot)
 	t.mu.Lock()
-	renderer := t.renderer
-	t.mu.Unlock()
-	if renderer == nil {
+	if source == nil || t.renderer != source || t.closed {
+		t.mu.Unlock()
 		return
 	}
-	_ = generation
-	state.Snapshot = cloneTerminalSnapshot(state.Snapshot)
+	source.mu.Lock()
+	if source.generation != generation || !source.acceptFrames || source.closed {
+		source.mu.Unlock()
+		t.mu.Unlock()
+		return
+	}
 	t.cache.Store(&isolatedTerminalCache{state: state, partial: partial, epoch: t.cacheEpoch.Add(1)})
+	source.mu.Unlock()
+	t.mu.Unlock()
 	if t.postEvent != nil {
 		t.postEvent(vaxis.Redraw{})
 	}
 }
 
 func (t *isolatedDaemonTerminal) markRendererStale() {
+	t.markRendererStaleFrom(nil)
+}
+
+func (t *isolatedDaemonTerminal) markRendererStaleFrom(source *rendererSupervisor) {
+	t.mu.Lock()
+	if source != nil && t.renderer != source {
+		t.mu.Unlock()
+		return
+	}
 	if current := t.cache.Load(); current != nil && !current.state.Snapshot.Stale {
 		next := *current
 		next.state.Snapshot = cloneTerminalSnapshot(current.state.Snapshot)
 		next.state.Snapshot.Stale = true
 		t.cache.Store(&next)
 	}
+	t.mu.Unlock()
 	if t.postEvent != nil {
 		t.postEvent(vaxis.Redraw{})
 	}
@@ -738,7 +812,19 @@ func (t *isolatedDaemonTerminal) BeginHandoff() handoffTerminalState {
 	if !writerClosed {
 		writer.Close()
 	}
+	journalSnapshot := t.journal.Snapshot()
+	var recovery []byte
 	if renderer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), rendererReadDeadlineFactor*t.options.CommandTimeout)
+		_ = renderer.captureCheckpoint(ctx)
+		cancel()
+		recovery = renderer.handoffRecovery(journalSnapshot)
+		if len(recovery) > 0 && !rendererHandoffRecoveryQuota.reserve(t, len(recovery)) {
+			recovery = renderer.handoffRecovery(journalSnapshot, false)
+			if len(recovery) > 0 && !rendererHandoffRecoveryQuota.reserve(t, len(recovery)) {
+				recovery = nil
+			}
+		}
 		renderer.Close()
 	}
 	t.mu.Lock()
@@ -746,8 +832,8 @@ func (t *isolatedDaemonTerminal) BeginHandoff() handoffTerminalState {
 	t.ptyWriter = nil
 	t.renderer = nil
 	t.handoffPTY = os.NewFile(uintptr(rollbackFD), "codelima-isolated-handoff-rollback")
+	t.handoffRecovery = recovery
 	t.state = runtimeStateQuiesced
-	journalSnapshot := t.journal.Snapshot()
 	replay := rendererJournalReplay(journalSnapshot)
 	t.mu.Unlock()
 	return handoffTerminalState{
@@ -757,6 +843,7 @@ func (t *isolatedDaemonTerminal) BeginHandoff() handoffTerminalState {
 		Rows:          rows,
 		Replay:        replay,
 		ReplayPartial: journalSnapshot.Partial,
+		Recovery:      recovery,
 	}
 }
 
@@ -776,6 +863,8 @@ func (t *isolatedDaemonTerminal) ReleaseAfterHandoff() {
 	t.closed = true
 	handoffPTY := t.handoffPTY
 	t.handoffPTY = nil
+	t.handoffRecovery = nil
+	rendererHandoffRecoveryQuota.release(t)
 	t.mu.Unlock()
 	if handoffPTY != nil {
 		_ = handoffPTY.Close()
@@ -789,6 +878,9 @@ func (t *isolatedDaemonTerminal) RollbackHandoff() error {
 		return errors.New("terminal is not quiesced")
 	}
 	ptyFile := t.handoffPTY
+	recovery := t.handoffRecovery
+	t.handoffRecovery = nil
+	rendererHandoffRecoveryQuota.release(t)
 	t.handoffPTY = nil
 	t.quit = make(chan struct{})
 	t.quitOnce = sync.Once{}
@@ -797,10 +889,16 @@ func (t *isolatedDaemonTerminal) RollbackHandoff() error {
 	t.readPumpDone = make(chan struct{})
 	t.state = runtimeStateRunning
 	renderer := t.newRenderer()
+	if len(recovery) > 0 {
+		if bundle, err := decodeRendererRecovery(t.targetKey, recovery); err == nil {
+			renderer.restoreCheckpoint(bundle.Checkpoint)
+			renderer.restoreColors(bundle.Colors)
+		}
+	}
 	t.renderer = renderer
 	cols, rows := t.cols, t.rows
 	t.mu.Unlock()
-	ctx, cancel := rendererStartContext(t.options.CommandTimeout, t.journal)
+	ctx, cancel := context.WithTimeout(context.Background(), maxRendererInitDeadline)
 	defer cancel()
 	if err := renderer.Start(ctx, cols, rows); err != nil {
 		return err
@@ -850,6 +948,7 @@ func adoptIsolatedDaemonTerminal(
 	childPID, cols, rows int,
 	replay []byte,
 	replayPartial bool,
+	recovery []byte,
 ) (daemonTerminal, error) {
 	if cols <= 0 || rows <= 0 || ptyFile == nil {
 		return nil, fmt.Errorf("adopt isolated terminal with invalid runtime")
@@ -864,12 +963,26 @@ func adoptIsolatedDaemonTerminal(
 	terminal.journal.mu.Lock()
 	terminal.journal.partial = replayPartial
 	terminal.journal.mu.Unlock()
+	var checkpoint *rendererCheckpoint
+	var colors *TerminalColors
+	if len(recovery) > 0 {
+		bundle, err := decodeRendererRecovery(targetKey, recovery)
+		if err != nil {
+			return nil, fmt.Errorf("adopt renderer recovery: %w", err)
+		}
+		terminal.journal = journalFromRendererRecovery(bundle.Journal)
+		terminal.cellWidth, terminal.cellHeight = bundle.Journal.CellWidth, bundle.Journal.CellHeight
+		checkpoint = bundle.Checkpoint
+		colors = bundle.Colors
+	}
 	terminal.pty = ptyFile
 	terminal.childPID = childPID
 	terminal.ptyWriter = newGhosttyPTYWriter(ptyFile, waitGhosttyPTYWritable, terminal.postPTYError)
 	terminal.readPumpDone = make(chan struct{})
 	terminal.renderer = terminal.newRenderer()
-	ctx, cancel := rendererStartContext(terminal.options.CommandTimeout, terminal.journal)
+	terminal.renderer.restoreCheckpoint(checkpoint)
+	terminal.renderer.restoreColors(colors)
+	ctx, cancel := context.WithTimeout(context.Background(), maxRendererInitDeadline)
 	defer cancel()
 	if err := terminal.renderer.Start(ctx, cols, rows); err != nil {
 		terminal.renderer.Close()

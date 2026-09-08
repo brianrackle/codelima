@@ -9,13 +9,24 @@ CODELIMA_COMPAT_BIN := $(BIN_ROOT)/codelima
 GO_VERSION ?= 1.24.1
 GOPLS_VERSION ?= v0.18.1
 GOLANGCI_LINT_VERSION ?= 1.64.8
-ZIG_VERSION ?= 0.15.2
-GHOSTTY_VT_GHOSTTY_COMMIT ?= ae52f97dcac558735cfa916ea3965f247e5c6e9e
+ZIG_VERSION ?= 0.16.0
+PKGCONF_VERSION ?= 2.5.1
+GHOSTTY_VT_GHOSTTY_COMMIT ?= 82232ecde55405559dec29c5466cb9e39938cb41
+GHOSTTY_VT_FEATURES ?= -all,+formatter,+selection,+render-state,+input-encode,+color,+grid-introspection,+snapshot,+search,+kitty-graphics
+GHOSTTY_VT_OPTIMIZE ?= ReleaseSmall
+GHOSTTY_VT_TARGET ?= native
+GHOSTTY_VT_CPU ?= baseline
+GHOSTTY_VT_BUILD_JOBS ?= 4
+GHOSTTY_VT_TEST_JOBS ?= 1
+GHOSTTY_VT_UNIT_FILTER ?=
+GHOSTTY_TEST_FILTER ?= Ghostty
+GHOSTTY_VT_CURRENT := $(TOOLS_DIR)/ghostty-vt/current
 GO := $(TOOLS_DIR)/go/$(GO_VERSION)/bin/go
 GOFMT := $(TOOLS_DIR)/go/$(GO_VERSION)/bin/gofmt
 GOPLS := $(TOOLS_DIR)/bin/gopls
 GOLANGCI_LINT := $(TOOLS_DIR)/bin/golangci-lint
 ZIG := $(TOOLS_DIR)/zig/$(ZIG_VERSION)/zig
+PKG_CONFIG := $(TOOLS_DIR)/bin/pkg-config
 
 ifeq ($(origin CC),default)
   ifeq ($(shell command -v cc 2>/dev/null),)
@@ -29,16 +40,23 @@ export GOCACHE := $(TOOLS_DIR)/gocache
 export GOLANGCI_LINT_CACHE := $(TOOLS_DIR)/golangci-lint-cache
 export CGO_ENABLED := 1
 export CC
+export PKG_CONFIG
+export CODELIMA_TOOLING_GO := $(GO)
+export ZIG_VERSION PKGCONF_VERSION
+export GHOSTTY_VT_FEATURES GHOSTTY_VT_OPTIMIZE GHOSTTY_VT_TARGET GHOSTTY_VT_CPU GHOSTTY_VT_BUILD_JOBS
+export PKG_CONFIG_PATH := $(GHOSTTY_VT_CURRENT)/share/pkgconfig:$(PKG_CONFIG_PATH)
 
-.PHONY: init ghostty-vt gopls tidy fmt fmt-check lint test test-race test-integration test-lima-native build run tui smoke diagnose-terminal-freeze package package-formula verify clean clean-all
+.PHONY: init pkg-config ghostty-vt test-pkgconf test-ghostty-vt test-ghostty-vt-build test-ghostty-vt-schema test-ghostty-bridge test-ghostty-adapter benchmark-ghostty-compression test-renderer-boundary test-installers test-package gopls tidy fmt fmt-check lint test test-race test-integration test-lima-native build run tui smoke diagnose-terminal-freeze package package-formula verify clean clean-all
 
 # Source roots handed to gofmt. Directories (not the ./... package pattern) so
 # build-tag-gated files such as tests/daemon_integration_test.go are covered;
 # .tooling/, tmp/ and the module cache are deliberately outside this list.
-FMT_DIRS := cmd internal tests
+FMT_DIRS := cmd internal tests scripts/tooling_lock.go scripts/renderer_build.go
+FMT_DIRS += third_party/vaxis/encoded_kitty_image.go third_party/vaxis/encoded_kitty_image_test.go third_party/vaxis/image.go third_party/vaxis/vaxis.go
 
 PACKAGE_VERSION ?= 0.0.0-dev
-VERSION_LDFLAGS := -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION)
+RENDERER_LDFLAGS = $(if $(wildcard $(GHOSTTY_VT_CURRENT)/.native-build-id),-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=$(shell cat $(GHOSTTY_VT_CURRENT)/.native-build-id))
+VERSION_LDFLAGS = -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION) $(RENDERER_LDFLAGS)
 RELEASE_TAG ?= v$(PACKAGE_VERSION)
 RELEASE_REPO ?= brianrackle/codelima
 DIST_DIR ?= $(CURDIR)/dist
@@ -59,17 +77,65 @@ GO_TEST_PARALLEL ?= 4
 GO_RACE_TEST_PARALLEL ?= 1
 DIAG_ARGS ?=
 
-init:
+pkg-config:
 	./scripts/install_go.sh $(GO_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_zig.sh $(ZIG_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
+	./scripts/install_pkgconf.sh $(PKGCONF_VERSION) '$(TOOLS_DIR)' '$(CURDIR)/tmp' '$(ZIG)'
+
+init: pkg-config
 	./scripts/install_gopls.sh $(GOPLS_VERSION) $(GO) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_golangci_lint.sh $(GOLANGCI_LINT_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_ghostty_vt.sh $(GHOSTTY_VT_GHOSTTY_COMMIT) $(ZIG) $(TOOLS_DIR) $(CURDIR)/tmp
 	$(GO) mod download
 
-ghostty-vt:
-	./scripts/install_zig.sh $(ZIG_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
+ghostty-vt: pkg-config
 	./scripts/install_ghostty_vt.sh $(GHOSTTY_VT_GHOSTTY_COMMIT) $(ZIG) $(TOOLS_DIR) $(CURDIR)/tmp
+
+test-pkgconf: pkg-config
+	$(GO) test ./internal/release -run Pkgconf -count=1
+
+# Run the upstream tests against the exact patched source installed with the
+# archive. Its dependency hashes remain intact, and caches stay project-local.
+# Unit execution and compile-only tests require Debug's tracked-pin safety
+# instrumentation. Schema/bridge checks use the selected production profile.
+test-ghostty-vt test-ghostty-vt-build test-ghostty-vt-schema: ghostty-vt
+	cd $(GHOSTTY_VT_CURRENT)/source && ZIG_GLOBAL_CACHE_DIR=$(TOOLS_DIR)/cache/zig-global ZIG_LOCAL_CACHE_DIR=$(TOOLS_DIR)/cache/ghostty-native-tests $(ZIG) build $(patsubst test-ghostty-vt%,test-lib-vt%,$@) -j$(GHOSTTY_VT_TEST_JOBS) -Demit-lib-vt=true -Demit-xcframework=false -Dversion-string=1.3.2-dev+$(GHOSTTY_VT_GHOSTTY_COMMIT) -Dlib-version-string=0.1.0-dev+$(GHOSTTY_VT_GHOSTTY_COMMIT) -Doptimize=$(if $(filter test-ghostty-vt test-ghostty-vt-build,$@),Debug,$(GHOSTTY_VT_OPTIMIZE)) -Dtarget=$(GHOSTTY_VT_TARGET) -Dcpu=$(GHOSTTY_VT_CPU) -Dvt-features=$(GHOSTTY_VT_FEATURES) $(if $(GHOSTTY_VT_UNIT_FILTER),-Dtest-filter='$(GHOSTTY_VT_UNIT_FILTER)')
+
+test-ghostty-bridge: ghostty-vt
+	@set -eu; mkdir -p '$(CURDIR)/tmp'; \
+	bridge_test_tmp=$$(mktemp -d '$(CURDIR)/tmp/ghostty-bridge.XXXXXX'); \
+	trap 'rm -rf "$$bridge_test_tmp"' EXIT; \
+	$(CC) -std=c11 -Wall -Wextra -Werror $$('$(PKG_CONFIG)' --cflags libghostty-vt-static) internal/ghostty/testdata/ghostty_bridge_test.c $$('$(PKG_CONFIG)' --libs libghostty-vt-static) -lpthread -lm -o "$$bridge_test_tmp/test"; \
+	"$$bridge_test_tmp/test"
+
+benchmark-ghostty-compression: ghostty-vt
+	@set -eu; mkdir -p '$(CURDIR)/tmp'; \
+	compression_bench_tmp=$$(mktemp -d '$(CURDIR)/tmp/ghostty-compression.XXXXXX'); \
+	trap 'rm -rf "$$compression_bench_tmp"' EXIT; \
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror $$('$(PKG_CONFIG)' --cflags libghostty-vt-static) internal/ghostty/testdata/ghostty_compression_bench.c $$('$(PKG_CONFIG)' --libs libghostty-vt-static) -lpthread -lm -o "$$compression_bench_tmp/bench"; \
+	"$$compression_bench_tmp/bench" off; \
+	"$$compression_bench_tmp/bench" on
+
+test-installers:
+	$(GO) test ./internal/release -run Installer
+
+test-renderer-boundary:
+	$(GO) test ./internal/release -run 'TestRenderer(NativeDependency|PortablePackages)'
+
+.PHONY: test-vaxis-fork
+test-vaxis-fork:
+	$(GO) test go.rockorager.dev/vaxis/...
+
+test-ghostty-adapter: ghostty-vt
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/ghostty ./internal/codelima ./internal/terminalstate -run '$(GHOSTTY_TEST_FILTER)' -count=1
+
+# Exercise the actual release pair without replacing development executables.
+test-package: init
+	@set -eu; mkdir -p '$(CURDIR)/tmp'; \
+	package_test_tmp=$$(mktemp -d '$(CURDIR)/tmp/package-test.XXXXXX'); \
+	trap 'rm -rf "$$package_test_tmp"' EXIT; \
+	PKG_CONFIG="$$package_test_tmp/unavailable-pkg-config" /bin/sh ./scripts/package_release.sh 0.0.0-package-test '$(GO)' '$(TOOLS_DIR)' "$$package_test_tmp/dist" "$$package_test_tmp/build/codelima" '$(PLATFORM_TAG)' "$$package_test_tmp/build/codelima-renderer-worker"; \
+	CODELIMA_PACKAGE_TEST_DIST="$$package_test_tmp/dist" $(GO) test -ldflags "$(RENDERER_LDFLAGS)" -tags=packageintegration ./internal/codelima -run '^TestPackagedStaticRenderer$$' -count=1
 
 gopls: init
 	$(GOPLS) $(GOPLS_ARGS)
@@ -94,21 +160,21 @@ lint: init
 	$(GOLANGCI_LINT) run ./...
 
 test: init
-	$(GO) test -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) ./...
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) ./...
 
 test-race: init
-	$(GO) test -race -p $(GO_RACE_TEST_PARALLEL) -parallel $(GO_RACE_TEST_PARALLEL) ./...
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -race -p $(GO_RACE_TEST_PARALLEL) -parallel $(GO_RACE_TEST_PARALLEL) ./...
 
 test-integration: build
 	mkdir -p $(INTEGRATION_TMP)
-	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
+	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -ldflags "$(RENDERER_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
 	rm -rf $(INTEGRATION_TMP)
 
 test-lima-native: init
 	@set -eu; native_lima_tmp='$(CURDIR)/tmp/native-lima'; \
 	trap 'rm -rf "$$native_lima_tmp"' EXIT; \
 	mkdir -p "$$native_lima_tmp"; \
-	CODELIMA_NATIVE_LIMA=1 TMPDIR="$$native_lima_tmp" $(GO) test -run '^TestNativeLimaTemplateValidation$$' ./internal/codelima
+	CODELIMA_NATIVE_LIMA=1 TMPDIR="$$native_lima_tmp" $(GO) test -ldflags "$(RENDERER_LDFLAGS)" -run '^TestNativeLimaTemplateValidation$$' ./internal/codelima
 
 build: init
 	mkdir -p $(BIN_DIR)
@@ -136,7 +202,7 @@ package: init
 package-formula: init
 	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)
 
-verify: fmt-check lint test build
+verify: fmt-check lint test test-vaxis-fork build
 
 clean:
 	rm -rf $(BIN_DIR) $(DIST_DIR)

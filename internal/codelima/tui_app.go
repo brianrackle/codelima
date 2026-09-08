@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
-	"git.sr.ht/~rockorager/vaxis/widgets/term"
+	"go.rockorager.dev/vaxis"
+	"go.rockorager.dev/vaxis/widgets/term"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
@@ -38,6 +38,25 @@ type vaxisTUIApp struct {
 	operationOrder    []string
 	linkRegions       []tuiLinkRegion
 	terminalMouse     *tuiTerminalMouseGesture
+	inspector         *tuiTerminalInspector
+	search            *tuiTerminalSearch
+	searchVersion     uint64
+	lastTerminalClick tuiTerminalClick
+	hostColorResults  chan tuiHostColorResult
+	colorQueryCancel  context.CancelFunc
+	colorQueryDone    chan struct{}
+	colorQueryBusy    bool
+	colorQueryVersion uint64
+	desiredColorTheme vaxis.ColorThemeMode
+	hostColors        *TerminalColors
+	hostColorsSent    map[string]bool
+	hostColorsRetry   time.Time
+	hostColorsTick    *time.Timer
+	terminalNotices   map[string]string
+	cellPixelWidth    int
+	cellPixelHeight   int
+	graphics          *tuiGraphicsPresenter
+	graphicsEpoch     uint64
 	// logoAnimation is non-nil only during the bounded startup logo effect.
 	// It is owned by the UI event loop alongside every other presentation
 	// state; nil renders the stable product name.
@@ -222,6 +241,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		app.setStatus(slog.LevelError, err.Error())
 	}
 	app.syncSessionFocus()
+	app.startHostColorQuery(0)
 	app.draw()
 
 	stopLogoAnimation := startTUILogoAnimation(ctx, vx.PostEvent)
@@ -246,6 +266,16 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.sessions.Close()
+	defer func() { a.graphics.close() }()
+	defer a.closeTerminalInspector()
+	defer func() {
+		if a.colorQueryCancel != nil {
+			a.colorQueryCancel()
+		}
+		if a.colorQueryDone != nil {
+			<-a.colorQueryDone
+		}
+	}()
 
 	// carried holds the one event pulled off the queue while collapsing a
 	// redraw burst. A channel cannot be un-read, so the first non-redraw event
@@ -257,6 +287,20 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 		carried = nil
 		if event == nil {
 			select {
+			case result := <-a.graphicsResults():
+				event = result
+			case <-a.graphicsTicks():
+				a.graphics.tick = nil
+				event = vaxis.Redraw{}
+			case <-a.hostColorTicks():
+				a.hostColorsTick = nil
+				event = vaxis.Redraw{}
+			case result := <-a.hostColorResults:
+				event = result
+			case result := <-a.inspectionResults():
+				event = result
+			case <-a.searchTickEvents():
+				event = tuiTerminalSearchTick{version: a.search.version}
 			case <-a.ctx.Done():
 				return a.ctx.Err()
 			case queued, ok := <-events:
@@ -330,6 +374,22 @@ func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) (
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case tuiGraphicsResult:
+		a.applyGraphicsResult(event)
+		a.draw()
+		return false, nil
+	case tuiHostColorResult:
+		a.applyHostColorResult(event)
+		return false, nil
+	case tuiInspectionResult:
+		a.handleInspectionResult(event)
+		a.draw()
+		return false, nil
+	case tuiTerminalSearchTick:
+		if a.search != nil && a.search.version == event.version {
+			a.searchTick()
+		}
+		return false, nil
 	case tuiLogoAnimationTickEvent:
 		if a.logoAnimation == nil {
 			return false, nil
@@ -341,6 +401,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiDaemonTerminalDirtyEvent:
 		a.sessions.markDaemonTerminalDirty(event.TerminalID, a.state.activeSessionKey())
+		a.searchTick()
 		return false, nil
 	case tuiRefreshTickEvent:
 		a.reapCompletedOperations()
@@ -393,11 +454,13 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case tuiDaemonDisconnectedEvent:
+		a.resetGraphicsEpoch()
 		a.daemonDisconnected = true
 		a.setStatus(slog.LevelError, event.Err.Error())
 		a.draw()
 		return false, nil
 	case tuiDaemonSynchronizedEvent:
+		a.resetGraphicsEpoch()
 		var syncErr error
 		if a.sessions != nil {
 			syncErr = a.sessions.applyDaemonSynchronization(event.Snapshot)
@@ -410,6 +473,8 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 			}
 		}
 		event.complete(nil)
+		a.hostColorsSent = nil
+		a.propagateHostColors()
 		wasDisconnected := a.daemonDisconnected
 		a.daemonDisconnected = false
 		if wasDisconnected {
@@ -474,6 +539,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 
 	switch event := event.(type) {
 	case vaxis.Key:
+		if a.search != nil {
+			a.handleSearchKey(event)
+			a.draw()
+			return false, nil
+		}
 		if a.state != nil && a.state.focus == tuiFocusTerminal && isTUITerminalPayloadKey(event) {
 			a.forwardTerminalEvent(event)
 			return false, nil
@@ -490,12 +560,13 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	case vaxis.PasteEndEvent:
 		a.forwardTerminalEvent(event)
 	case vaxis.ColorThemeUpdate:
-		a.forwardTerminalEvent(event)
+		a.startHostColorQuery(event.Mode)
 		a.draw()
 	case vaxis.Resize:
 		a.handleResize(event)
 		a.draw()
 	case vaxis.Redraw:
+		a.propagateHostColors()
 		a.draw()
 	case vaxis.SyncFunc:
 		event()
@@ -738,6 +809,8 @@ func (a *vaxisTUIApp) finishDaemonInputTakeover(event tuiDaemonInputReclaimedEve
 		if a.sessions != nil {
 			a.sessions.pokeResizeAll()
 		}
+		a.hostColorsSent = nil
+		a.propagateHostColors()
 		return
 	}
 	if a.daemonDisconnected {
@@ -918,5 +991,8 @@ func (a *vaxisTUIApp) forwardSessionEvent(sessionKey string, event vaxis.Event) 
 }
 
 func (a *vaxisTUIApp) syncSessionFocus() {
+	if a.search != nil && a.search.target != a.state.activeSessionKey() {
+		a.closeTerminalSearch()
+	}
 	a.sessions.SyncFocus(a.state.activeSessionKey(), a.effectiveLayoutFocus() == tuiFocusTerminal)
 }

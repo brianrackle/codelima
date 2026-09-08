@@ -19,6 +19,7 @@ func TestMethodDeliveryClassesCoverEveryMutation(t *testing.T) {
 		"terminal.send_keys":  ClassInput,
 		"terminal.send_input": ClassInput,
 		"terminal.scroll":     ClassInput,
+		"terminal.interact":   ClassInput,
 		"terminal.resize":     ClassReplaceable,
 		"terminal.focus":      ClassReplaceable,
 		"terminal.open":       ClassControl,
@@ -51,8 +52,9 @@ func TestMethodDeliveryClassesCoverEveryMutation(t *testing.T) {
 	// input is serialized per terminal by its lane, control and lifecycle are
 	// keyed and idempotent under handler locks (ADR 130).
 	for method, want := range cases {
-		if got := SeatArbitratedMethod(method); got != (want == ClassReplaceable) {
-			t.Errorf("SeatArbitratedMethod(%q) = %v, want %v", method, got, want == ClassReplaceable)
+		seat := want == ClassReplaceable || method == "terminal.interact"
+		if got := SeatArbitratedMethod(method); got != seat {
+			t.Errorf("SeatArbitratedMethod(%q) = %v, want %v", method, got, seat)
 		}
 	}
 }

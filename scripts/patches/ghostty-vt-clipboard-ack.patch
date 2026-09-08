@@ -1,0 +1,62 @@
+diff --git a/include/ghostty/vt/terminal.h b/include/ghostty/vt/terminal.h
+--- a/include/ghostty/vt/terminal.h
++++ b/include/ghostty/vt/terminal.h
+@@ -589,7 +589,11 @@
+   const void* ctx;
+ 
+   /** Answer the write; see the struct documentation. */
+   GhosttyClipboardWriteReplyFn reply;
++
++  /** True when the protocol requires a synchronous commit acknowledgement.
++   * Queued host writes must reject these until an acknowledged host path exists. */
++  bool ack_required;
+ };
+ 
+ /**
+diff --git a/src/terminal/clipboard.zig b/src/terminal/clipboard.zig
+--- a/src/terminal/clipboard.zig
++++ b/src/terminal/clipboard.zig
+@@ -95,7 +95,10 @@
+     /// True if the program supplied a session password, so the embedder
+     /// may offer to remember the user's decision via
+     /// Result.Success.remember. When false, remember is ignored.
+     can_remember: bool,
++
++    /// Whether this write requires a synchronous protocol acknowledgement.
++    ack_required: bool = false,
+ 
+     /// Terminal-owned reply state, only valid during the callback.
+     reply_ctx: *anyopaque,
+diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+--- a/src/terminal/c/terminal.zig
++++ b/src/terminal/c/terminal.zig
+@@ -147,7 +147,8 @@
+     can_remember: bool,
+     /// Terminal-owned reply state; opaque to the embedder.
+     ctx: *const anyopaque,
+     reply: ClipboardWriteReplyFn,
++    ack_required: bool,
+ };
+ 
+ /// The reply to a clipboard write request.
+@@ -436,7 +437,8 @@
+             .granted = write.granted,
+             .can_remember = write.can_remember,
+             .ctx = &ctx,
+             .reply = &clipboardWriteReplyTrampoline,
++            .ack_required = write.ack_required,
+         };
+         func(@ptrCast(wrapper), wrapper.effects.userdata, &request);
+     }
+diff --git a/src/terminal/stream_terminal.zig b/src/terminal/stream_terminal.zig
+--- a/src/terminal/stream_terminal.zig
++++ b/src/terminal/stream_terminal.zig
+@@ -1175,7 +1175,8 @@
+             .contents = committed.contents,
+             .name = committed.name,
+             .granted = granted,
+             .can_remember = pw.len > 0,
++            .ack_required = true,
+             .reply_ctx = &reply_state,
+             .reply_fn = &KittyClipboardWriteReplyState.reply,
+         });

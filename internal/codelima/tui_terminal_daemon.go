@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"github.com/brianrackle/codelima/internal/terminalstate"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
@@ -22,9 +22,8 @@ type daemonRPCCaller interface {
 	Call(context.Context, string, any, any) error
 }
 
-// Keep worst-case JSON escaping (six bytes for one control byte), request
-// metadata, and the newline delimiter comfortably below daemon.MaxMessageSize.
-const daemonTerminalPasteChunkBytes = daemon.MaxMessageSize / 16
+const daemonTerminalInputQueueBytes = 1024 * 1024
+const daemonTerminalInputQueueEvents = 1024
 
 // daemonRPCTimeout bounds every fire-and-forget daemon terminal RPC issued by
 // this client-side view (resize, input, snapshot, focus, close).
@@ -47,17 +46,23 @@ type daemonTUITerminal struct {
 	inputMu             sync.Mutex
 	inputOnce           sync.Once
 	inputQueue          []daemonTerminalInputRequest
+	inputBytes          int
 	inputWake           chan struct{}
 	inputDone           chan struct{}
 	pasting             bool
+	pasteRejected       bool
 	paste               strings.Builder
 	resizeMu            sync.Mutex
 	resizeOnce          sync.Once
 	resizeWake          chan struct{}
 	desiredCols         int
 	desiredRows         int
+	desiredCellWidth    int
+	desiredCellHeight   int
 	resizeCols          int
 	resizeRows          int
+	resizeCellWidth     int
+	resizeCellHeight    int
 	snapshot            daemon.Snapshot
 	text                string
 	focused             bool
@@ -74,6 +79,7 @@ type daemonTUITerminal struct {
 
 type daemonTerminalInputRequest struct {
 	params map[string]any
+	bytes  int
 }
 
 func newDaemonTUITerminal(client daemonRPCCaller, id string, postEvent func(vaxis.Event)) *daemonTUITerminal {
@@ -95,15 +101,23 @@ func (t *daemonTUITerminal) Start(*exec.Cmd) error { return nil }
 // must never touch the socket: the size is replaceable latest-value state, and
 // a background reassert loop drives it to the daemon and retries on failure.
 func (t *daemonTUITerminal) Resize(width, height int) {
+	t.resizePixels(width, height, 0, 0)
+}
+
+func (t *daemonTUITerminal) resizePixels(width, height, cellWidth, cellHeight int) {
 	if width <= 0 || height <= 0 || t.isClosed() {
 		return
 	}
 	t.resizeMu.Lock()
-	if width == t.desiredCols && height == t.desiredRows {
+	if cellWidth == 0 || cellHeight == 0 {
+		cellWidth, cellHeight = t.desiredCellWidth, t.desiredCellHeight
+	}
+	if width == t.desiredCols && height == t.desiredRows && cellWidth == t.desiredCellWidth && cellHeight == t.desiredCellHeight {
 		t.resizeMu.Unlock()
 		return
 	}
 	t.desiredCols, t.desiredRows = width, height
+	t.desiredCellWidth, t.desiredCellHeight = cellWidth, cellHeight
 	t.resizeOnce.Do(func() {
 		t.resizeWake = make(chan struct{}, 1)
 		go t.reassertResize()
@@ -131,14 +145,15 @@ func (t *daemonTUITerminal) reassertResize() {
 		for {
 			t.resizeMu.Lock()
 			cols, rows := t.desiredCols, t.desiredRows
-			settled := cols == t.resizeCols && rows == t.resizeRows
+			cellWidth, cellHeight := t.desiredCellWidth, t.desiredCellHeight
+			settled := cols == t.resizeCols && rows == t.resizeRows && cellWidth == t.resizeCellWidth && cellHeight == t.resizeCellHeight
 			t.resizeMu.Unlock()
 			if settled || t.isClosed() {
 				break
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), daemonRPCTimeout)
-			err := t.client.Call(ctx, "terminal.resize", map[string]any{"terminal_id": t.id, "cols": cols, "rows": rows}, nil)
+			err := t.client.Call(ctx, "terminal.resize", map[string]any{"terminal_id": t.id, "cols": cols, "rows": rows, "cell_width": cellWidth, "cell_height": cellHeight}, nil)
 			cancel()
 			if err != nil {
 				if isSeatRejection(err) {
@@ -157,6 +172,7 @@ func (t *daemonTUITerminal) reassertResize() {
 			}
 			t.resizeMu.Lock()
 			t.resizeCols, t.resizeRows = cols, rows
+			t.resizeCellWidth, t.resizeCellHeight = cellWidth, cellHeight
 			t.resizeMu.Unlock()
 		}
 
@@ -204,6 +220,7 @@ func (t *daemonTUITerminal) Update(event vaxis.Event) {
 	switch value := event.(type) {
 	case vaxis.PasteStartEvent:
 		t.pasting = true
+		t.pasteRejected = false
 		t.paste.Reset()
 		return
 	case vaxis.PasteEndEvent:
@@ -211,7 +228,14 @@ func (t *daemonTUITerminal) Update(event vaxis.Event) {
 		return
 	case vaxis.Key:
 		if t.pasting && value.EventType == vaxis.EventPaste {
-			t.paste.WriteString(encodeTUITerminalPasteKey(value))
+			text := encodeTUITerminalPasteKey(value)
+			if !t.pasteRejected && len(text) <= terminalMaxPasteBytes-t.paste.Len() {
+				t.paste.WriteString(text)
+			} else if !t.pasteRejected {
+				t.pasteRejected = true
+				t.paste.Reset()
+				t.reportInputErrorLocked(fmt.Errorf("paste exceeds the %d-byte limit; nothing was sent", terminalMaxPasteBytes))
+			}
 			return
 		}
 		if t.pasting {
@@ -242,34 +266,40 @@ func (t *daemonTUITerminal) finishPasteLocked() {
 	text := normalizeTUITerminalPasteText(t.paste.String())
 	t.pasting = false
 	t.paste.Reset()
-
-	for text != "" {
-		end := min(len(text), daemonTerminalPasteChunkBytes)
-		if end < len(text) {
-			for end > 0 && !utf8.RuneStart(text[end]) {
-				end--
-			}
-		}
-		chunk := text[:end]
-		text = text[end:]
-		t.enqueueInputLocked(map[string]any{
-			"terminal_id": t.id,
-			"type":        "paste",
-			"text":        chunk,
-		})
+	if t.pasteRejected || text == "" {
+		return
 	}
+	t.enqueueInputLocked(map[string]any{
+		"terminal_id": t.id,
+		"type":        "paste",
+		"text":        text,
+	})
 }
 
 func (t *daemonTUITerminal) enqueueInputLocked(params map[string]any) {
+	text, _ := params["text"].(string)
+	// Include fixed overhead so zero-text key and mouse floods are bounded too.
+	cost := len(text) + 128
+	if len(t.inputQueue) >= daemonTerminalInputQueueEvents || cost > daemonTerminalInputQueueBytes-t.inputBytes {
+		t.reportInputErrorLocked(errors.New("terminal input queue is full; input was not admitted"))
+		return
+	}
 	t.inputOnce.Do(func() {
 		t.inputWake = make(chan struct{}, 1)
 		t.inputDone = make(chan struct{})
 		go t.deliverInput()
 	})
-	t.inputQueue = append(t.inputQueue, daemonTerminalInputRequest{params: params})
+	t.inputQueue = append(t.inputQueue, daemonTerminalInputRequest{params: params, bytes: cost})
+	t.inputBytes += cost
 	select {
 	case t.inputWake <- struct{}{}:
 	default:
+	}
+}
+
+func (t *daemonTUITerminal) reportInputErrorLocked(err error) {
+	if t.postEvent != nil {
+		t.postEvent(tuiTerminalErrorEvent{Err: err})
 	}
 }
 
@@ -289,6 +319,7 @@ func (t *daemonTUITerminal) deliverInput() {
 				break
 			}
 			request := t.inputQueue[0]
+			t.inputBytes -= request.bytes
 			t.inputQueue[0] = daemonTerminalInputRequest{}
 			t.inputQueue = t.inputQueue[1:]
 			t.inputMu.Unlock()
@@ -347,41 +378,7 @@ func (t *daemonTUITerminal) Draw(win vaxis.Window) {
 	}
 }
 
-func daemonCellStyle(cell daemon.SnapshotCell) vaxis.Style {
-	style := vaxis.Style{}
-	if !cell.FGDefault {
-		style.Foreground = vaxis.HexColor(cell.FG)
-	}
-	if !cell.BGDefault {
-		style.Background = vaxis.HexColor(cell.BG)
-	}
-	if cell.Bold {
-		style.Attribute |= vaxis.AttrBold
-	}
-	if cell.Faint {
-		style.Attribute |= vaxis.AttrDim
-	}
-	if cell.Italic {
-		style.Attribute |= vaxis.AttrItalic
-	}
-	if cell.Strikethrough {
-		style.Attribute |= vaxis.AttrStrikethrough
-	}
-	if cell.Inverse {
-		style.Attribute |= vaxis.AttrReverse
-	}
-	if cell.Invisible {
-		style.Attribute |= vaxis.AttrInvisible
-	}
-	if cell.Blink {
-		style.Attribute |= vaxis.AttrBlink
-	}
-	if cell.Underline || cell.Hyperlink != "" {
-		style.UnderlineStyle = vaxis.UnderlineSingle
-	}
-	style.Hyperlink = cell.Hyperlink
-	return style
-}
+func daemonCellStyle(cell daemon.SnapshotCell) vaxis.Style { return terminalstate.CellStyle(cell) }
 
 func (t *daemonTUITerminal) Close() {
 	// CloseSession runs on the Vaxis event loop. Stop local input admission
@@ -583,25 +580,5 @@ func (t *daemonTUITerminal) snapshotLoop() {
 }
 
 func daemonSnapshotText(snapshot daemon.Snapshot) string {
-	lines := make([]string, 0, snapshot.Rows)
-	for row := 0; row < snapshot.Rows; row++ {
-		var line strings.Builder
-		for col := 0; col < snapshot.Cols; col++ {
-			index := row*snapshot.Cols + col
-			if index >= len(snapshot.Cells) {
-				break
-			}
-			cell := snapshot.Cells[index]
-			if cell.Width == 0 {
-				continue
-			}
-			grapheme := cell.Grapheme
-			if grapheme == "" {
-				grapheme = " "
-			}
-			line.WriteString(grapheme)
-		}
-		lines = append(lines, strings.TrimRight(line.String(), " "))
-	}
-	return strings.Join(lines, "\n")
+	return terminalstate.SnapshotText(terminalstate.Snapshot{Rows: snapshot.Rows, Cols: snapshot.Cols, Cells: snapshot.Cells})
 }

@@ -3,7 +3,7 @@ package codelima
 import (
 	"os/exec"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
@@ -21,18 +21,6 @@ type tuiTerminal interface {
 	TermEnv() string
 	HyperlinkAt(col, row int) (string, bool)
 	CapturesMouse() bool
-}
-
-// tuiTerminalClosedEvent reports that one terminal tab (session) closed;
-// SessionKey is the tab's session key ("<target>#<n>"), not a target key.
-type tuiTerminalClosedEvent struct {
-	SessionKey string
-	Err        error
-}
-
-type tuiTerminalErrorEvent struct {
-	TargetKey string
-	Err       error
 }
 
 // tuiDaemonDisconnectedEvent reports that the current physical daemon

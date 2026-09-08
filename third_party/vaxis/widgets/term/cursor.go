@@ -1,0 +1,19 @@
+package term
+
+import (
+	"go.rockorager.dev/vaxis"
+)
+
+type cursor struct {
+	vaxis.Cell
+	style vaxis.CursorStyle
+
+	// position
+	row row    // 0-indexed
+	col column // 0-indexed
+
+	protected bool
+
+	semanticContent  semanticContent
+	semanticClearEOL bool
+}

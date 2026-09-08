@@ -17,10 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
+	"github.com/brianrackle/codelima/internal/ghostty"
 	"github.com/brianrackle/codelima/internal/testutil"
 )
 
@@ -30,7 +31,9 @@ func TestRendererWorkerProcess(t *testing.T) {
 	if os.Getenv(rendererWorkerHelperEnv) != "1" {
 		return
 	}
-	if err := RunRendererWorker(context.Background()); err != nil {
+	if err := RunRendererWorker(context.Background(), func(id string, event func(vaxis.Event), write func(uint64, uint32, []byte)) (RendererTerminal, error) {
+		return ghostty.New(id, event, write)
+	}); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}

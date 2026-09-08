@@ -16,41 +16,51 @@ const defaultRendererJournalBytes = daemon.MaxHandoffReplayBytesPerTerminal
 const rendererResizeEventBytes = 64
 
 type rendererJournalEvent struct {
-	ID   uint64 `json:"id"`
-	Type string `json:"type"`
-	Data []byte `json:"data,omitempty"`
-	Cols int    `json:"cols,omitempty"`
-	Rows int    `json:"rows,omitempty"`
+	ID uint64 `json:"id"`
+	// FirstID is the first geometry replaced by a coalesced resize. Zero means
+	// ID itself. It distinguishes supersession from missing replay output.
+	FirstID    uint64 `json:"first_id,omitempty"`
+	Type       string `json:"type"`
+	Data       []byte `json:"data,omitempty"`
+	Cols       int    `json:"cols,omitempty"`
+	Rows       int    `json:"rows,omitempty"`
+	CellWidth  int    `json:"cell_width,omitempty"`
+	CellHeight int    `json:"cell_height,omitempty"`
 }
 
 type rendererJournalSnapshot struct {
-	Events  []rendererJournalEvent
-	Partial bool
-	Bytes   int
-	Cols    int
-	Rows    int
+	CellWidth, CellHeight int
+	Events                []rendererJournalEvent
+	Partial               bool
+	Bytes                 int
+	Cols                  int
+	Rows                  int
+	LastID                uint64
 }
 
 // rendererJournalStats reports journal accounting without copying the retained
 // events, so supervisor decisions that only need sizes never pay for a deep
 // copy of the history.
 type rendererJournalStats struct {
-	Events  int
-	Bytes   int
-	Partial bool
-	Cols    int
-	Rows    int
+	CellWidth, CellHeight int
+	Events                int
+	Bytes                 int
+	Partial               bool
+	Cols                  int
+	Rows                  int
+	LastID                uint64
 }
 
 type rendererJournal struct {
-	mu       sync.Mutex
-	maxBytes int
-	nextID   uint64
-	events   []rendererJournalEvent
-	bytes    int
-	partial  bool
-	cols     int
-	rows     int
+	mu                    sync.Mutex
+	maxBytes              int
+	nextID                uint64
+	events                []rendererJournalEvent
+	bytes                 int
+	partial               bool
+	cols                  int
+	rows                  int
+	cellWidth, cellHeight int
 }
 
 func newRendererJournal(maxBytes int) *rendererJournal {
@@ -75,11 +85,22 @@ func (j *rendererJournal) AppendOutput(data []byte) rendererJournalEvent {
 // only the newest geometry is state-affecting, so a window-drag storm collapses
 // to a single retained event instead of bloating every future replay.
 func (j *rendererJournal) AppendResize(cols, rows int) rendererJournalEvent {
+	return j.AppendResizePixels(cols, rows, 0, 0)
+}
+
+func (j *rendererJournal) AppendResizePixels(cols, rows, cellWidth, cellHeight int) rendererJournalEvent {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if cellWidth > 0 && cellHeight > 0 {
+		j.cellWidth, j.cellHeight = cellWidth, cellHeight
+	}
 	j.nextID++
-	event := rendererJournalEvent{ID: j.nextID, Type: "resize", Cols: cols, Rows: rows}
+	event := rendererJournalEvent{ID: j.nextID, Type: "resize", Cols: cols, Rows: rows, CellWidth: j.cellWidth, CellHeight: j.cellHeight}
 	if last := len(j.events) - 1; last >= 0 && j.events[last].Type == "resize" {
+		event.FirstID = j.events[last].FirstID
+		if event.FirstID == 0 {
+			event.FirstID = j.events[last].ID
+		}
 		j.bytes -= rendererJournalEventBytes(j.events[last])
 		j.events[last] = event
 	} else {
@@ -100,11 +121,13 @@ func (j *rendererJournal) Snapshot() rendererJournalSnapshot {
 		events[index].Data = slices.Clone(event.Data)
 	}
 	return rendererJournalSnapshot{
+		CellWidth: j.cellWidth, CellHeight: j.cellHeight,
 		Events:  events,
 		Partial: j.partial,
 		Bytes:   j.bytes,
 		Cols:    j.cols,
 		Rows:    j.rows,
+		LastID:  j.nextID,
 	}
 }
 
@@ -112,11 +135,13 @@ func (j *rendererJournal) Stats() rendererJournalStats {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return rendererJournalStats{
+		CellWidth: j.cellWidth, CellHeight: j.cellHeight,
 		Events:  len(j.events),
 		Bytes:   j.bytes,
 		Partial: j.partial,
 		Cols:    j.cols,
 		Rows:    j.rows,
+		LastID:  j.nextID,
 	}
 }
 

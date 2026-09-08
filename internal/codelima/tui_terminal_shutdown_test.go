@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 )
 
 func TestShutdownTerminalProcessEscalatesToSIGKILLForStubbornGroup(t *testing.T) {

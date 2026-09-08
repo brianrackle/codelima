@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
+	"go.rockorager.dev/vaxis"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
@@ -100,6 +100,7 @@ type daemonHost struct {
 	terminals            map[string]*daemonTerminalEntry
 	terminalOrder        []string
 	broadcast            func(string, any)
+	emitInputOwner       func(string, any)
 	prepareReplacement   func() error
 	resumeReplacement    func() error
 	stopServer           func()
@@ -112,6 +113,7 @@ func newDaemonHost(service *Service) *daemonHost {
 	host := &daemonHost{
 		service: service, restore: service.cfg.Daemon.Restore, session: paths.Session,
 		terminals: map[string]*daemonTerminalEntry{}, broadcast: func(string, any) {},
+		emitInputOwner:       func(string, any) {},
 		prepareReplacement:   func() error { return errors.New("daemon replacement unavailable") },
 		resumeReplacement:    func() error { return errors.New("daemon replacement unavailable") },
 		stopServer:           func() {},
@@ -299,6 +301,8 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 			TerminalID string `json:"terminal_id"`
 			Cols       int    `json:"cols"`
 			Rows       int    `json:"rows"`
+			CellWidth  int    `json:"cell_width"`
+			CellHeight int    `json:"cell_height"`
 		}
 		if err := json.Unmarshal(raw, &params); err != nil || params.Cols <= 0 || params.Rows <= 0 {
 			return nil, daemon.Error("InvalidArgument", "positive terminal size is required", ExitInvalidArgument, nil)
@@ -311,10 +315,22 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 		unchanged := entry.state.Cols == params.Cols && entry.state.Rows == params.Rows
 		state := entry.state
 		h.mu.RUnlock()
-		if unchanged {
+		if unchanged && params.CellWidth == 0 && params.CellHeight == 0 {
 			return state, nil
 		}
-		entry.term.Resize(params.Cols, params.Rows)
+		if params.CellWidth != 0 || params.CellHeight != 0 {
+			receiver, ok := entry.term.(interface {
+				ResizePixels(int, int, int, int) error
+			})
+			if !ok || params.CellWidth <= 0 || params.CellHeight <= 0 || params.CellWidth > 4096 || params.CellHeight > 4096 {
+				return nil, daemon.Error("InvalidArgument", "invalid terminal pixel geometry", ExitInvalidArgument, nil)
+			}
+			if err := receiver.ResizePixels(params.Cols, params.Rows, params.CellWidth, params.CellHeight); err != nil {
+				return nil, toDaemonError(err)
+			}
+		} else {
+			entry.term.Resize(params.Cols, params.Rows)
+		}
 		h.mu.Lock()
 		entry.state.Cols, entry.state.Rows = params.Cols, params.Rows
 		state = entry.state
@@ -410,6 +426,44 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 		}
 		entry.term.SendInput(data)
 		return map[string]int{"bytes": len(data)}, nil
+	case "terminal.graphics":
+		var params daemon.TerminalGraphicsParams
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, daemon.Error("InvalidArgument", "invalid graphics asset request", ExitInvalidArgument, nil)
+		}
+		entry, err := h.lookup(params.TerminalID)
+		if err != nil {
+			return nil, err
+		}
+		receiver, ok := entry.term.(interface {
+			GraphicsAsset(daemon.TerminalGraphicsParams) (daemon.TerminalGraphicsChunk, error)
+		})
+		if !ok {
+			return nil, daemon.Error("DependencyUnavailable", "terminal graphics unavailable", ExitDependencyUnavailable, nil)
+		}
+		result, err := receiver.GraphicsAsset(params)
+		return result, toDaemonError(err)
+	case "terminal.interact":
+		var params struct {
+			TerminalID string                     `json:"terminal_id"`
+			Request    TerminalInteractionRequest `json:"request"`
+		}
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return nil, daemon.Error("InvalidArgument", "invalid terminal interaction", ExitInvalidArgument, nil)
+		}
+		if err := validateTerminalInteraction(params.Request); err != nil {
+			return nil, daemon.Error("InvalidArgument", err.Error(), ExitInvalidArgument, nil)
+		}
+		entry, err := h.lookup(params.TerminalID)
+		if err != nil {
+			return nil, err
+		}
+		receiver, ok := entry.term.(terminalInteractionReceiver)
+		if !ok {
+			return nil, daemon.Error("DependencyUnavailable", "terminal inspection is unavailable", ExitDependencyUnavailable, nil)
+		}
+		result, interactionErr := receiver.Interact(params.Request)
+		return result, toDaemonError(interactionErr)
 	case "terminal.send_event":
 		var params struct {
 			TerminalID string `json:"terminal_id"`
@@ -436,9 +490,16 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 		case "mouse":
 			entry.term.Update(vaxis.Mouse{Col: params.Col, Row: params.Row, Button: vaxis.MouseButton(params.Button), EventType: vaxis.EventType(params.EventType)})
 		case "paste":
-			entry.term.Update(vaxis.PasteStartEvent{})
-			entry.term.Update(normalizeTUITerminalEvent(vaxis.Key{Text: params.Text, EventType: vaxis.EventPaste}))
-			entry.term.Update(vaxis.PasteEndEvent{})
+			if err := validateTerminalPaste(params.Text); err != nil {
+				return nil, daemon.Error("InvalidArgument", err.Error(), ExitInvalidArgument, nil)
+			}
+			receiver, ok := entry.term.(terminalPasteReceiver)
+			if !ok {
+				return nil, daemon.Error("DependencyUnavailable", "terminal does not support semantic paste", ExitDependencyUnavailable, nil)
+			}
+			if err := receiver.Paste(params.Text); err != nil {
+				return nil, toDaemonError(err)
+			}
 		default:
 			return nil, daemon.Error("InvalidArgument", "terminal event type must be key, paste, or mouse", ExitInvalidArgument, nil)
 		}
@@ -1086,11 +1147,11 @@ func (h *daemonHost) handleTerminalEvent(id string, event vaxis.Event) {
 			entry.markSnapshotStale()
 		}
 	case tuiClipboardEvent:
-		tabID := ""
-		if entry, err := h.lookup(id); err == nil {
-			tabID = entry.state.TabID
+		entry, err := h.lookup(id)
+		if err != nil || h.emitInputOwner == nil {
+			return
 		}
-		h.broadcast(daemon.EventTerminalClipboard, daemon.TerminalClipboardEvent{TabID: tabID, TerminalID: id, Text: value.Text})
+		h.emitInputOwner(daemon.EventTerminalClipboard, daemon.TerminalClipboardEvent{TabID: entry.state.TabID, TerminalID: id, Text: value.Text})
 	case tuiTerminalClosedEvent:
 		h.mu.Lock()
 		entry := h.terminals[id]
@@ -1117,6 +1178,8 @@ func (h *daemonHost) handleTerminalEvent(id string, event vaxis.Event) {
 // encoding cannot drift between the renderer worker link and the daemon RPC.
 func daemonSnapshot(snapshot TerminalSnapshot) daemon.Snapshot {
 	return daemon.Snapshot{
+		Metadata:      snapshot.Metadata,
+		Graphics:      snapshot.Graphics,
 		Cols:          snapshot.Cols,
 		Rows:          snapshot.Rows,
 		Cells:         slices.Clone(snapshot.Cells),
@@ -1363,6 +1426,11 @@ type quiescedTerminal struct {
 // read that state concurrently. Nothing can be subscribed before the server
 // serves, so a suppressed event has no audience.
 func (h *daemonHost) wireServerLinks(server *daemon.Server) {
+	h.emitInputOwner = func(name string, data any) {
+		if h.serving.Load() {
+			server.EmitInputOwner(name, data)
+		}
+	}
 	h.broadcast = func(name string, data any) {
 		if !h.serving.Load() {
 			return
@@ -1407,6 +1475,7 @@ type handoffAdopter func(
 	childPID, cols, rows int,
 	replay []byte,
 	replayPartial bool,
+	recovery []byte,
 ) (daemonTerminal, error)
 
 // adoptHandoffTerminals installs the handed-off runtimes on the importing host.
@@ -1448,7 +1517,9 @@ func (h *daemonHost) adoptHandoffTerminals(
 		delete(fdsByID, runtimeState.TerminalID)
 		ptyFile := os.NewFile(uintptr(fd), "codelima-imported-pty")
 		term, adoptErr := adopt(
-			state.TabID,
+			// Match open's terminal factory identity. TabID is a presentation
+			// key (target#terminal), not the renderer/recovery envelope identity.
+			state.TerminalID,
 			func(event vaxis.Event) { h.handleTerminalEvent(state.TerminalID, event) },
 			ptyFile,
 			runtimeState.ChildPID,
@@ -1456,6 +1527,7 @@ func (h *daemonHost) adoptHandoffTerminals(
 			runtimeState.Rows,
 			runtimeState.Replay,
 			runtimeState.ReplayPartial,
+			runtimeState.Recovery,
 		)
 		if adoptErr != nil {
 			_ = ptyFile.Close()
@@ -1593,6 +1665,7 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	}
 	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
 	totalReplayBytes := 0
+	totalRecoveryBytes := 0
 	for _, item := range quiesced {
 		if len(item.state.Replay) > daemon.MaxHandoffReplayBytesPerTerminal {
 			return nil, rollback(fmt.Errorf(
@@ -1614,13 +1687,26 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 			TerminalID: item.id, ChildPID: item.state.ChildPID,
 			Cols: item.state.Cols, Rows: item.state.Rows,
 			ReplaySize: len(item.state.Replay), ReplayPartial: item.state.ReplayPartial,
+			RecoverySize: len(item.state.Recovery),
 		})
+		if len(item.state.Recovery) > daemon.MaxHandoffRecoveryBytesPerTerminal {
+			return nil, rollback(errors.New("handoff terminal recovery exceeds size bound"), false, process)
+		}
+		totalRecoveryBytes += len(item.state.Recovery)
+		if totalRecoveryBytes > daemon.MaxHandoffTotalRecoveryBytes {
+			return nil, rollback(errors.New("handoff aggregate recovery exceeds size bound"), false, process)
+		}
 	}
 	if err := peer.WriteJSON(manifest, nil); err != nil {
 		return nil, rollback(err, false, process)
 	}
 	for _, item := range quiesced {
 		if err := peer.WriteReplay(item.id, item.state.Replay); err != nil {
+			return nil, rollback(err, false, process)
+		}
+	}
+	for _, item := range quiesced {
+		if err := peer.WriteRecovery(item.id, item.state.Recovery); err != nil {
 			return nil, rollback(err, false, process)
 		}
 	}
@@ -1702,7 +1788,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	}
 	validHandoffVersion := manifest.Version == daemon.HandoffVersion
 	if peer.Framing == daemon.HandoffFramingLengthPrefixed {
-		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion
+		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion || manifest.Version == daemon.PreviousChunkedHandoffVersion
 	} else {
 		validHandoffVersion = manifest.Version == daemon.LegacyHandoffVersion
 	}
@@ -1712,6 +1798,9 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	}
 	runtimeIDs := make(map[string]struct{}, len(manifest.Runtimes))
 	totalReplayBytes := 0
+	if err := daemon.ValidateHandoffRecoverySizes(manifest); err != nil {
+		return err
+	}
 	for index := range manifest.Runtimes {
 		runtimeState := &manifest.Runtimes[index]
 		if runtimeState.TerminalID == "" {
@@ -1722,7 +1811,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 		}
 		runtimeIDs[runtimeState.TerminalID] = struct{}{}
 		replayBytes := len(runtimeState.Replay)
-		if manifest.Version == daemon.HandoffVersion {
+		if manifest.Version >= daemon.PreviousChunkedHandoffVersion {
 			if replayBytes != 0 {
 				return errors.New("chunked handoff manifest contains inline replay")
 			}
@@ -1745,7 +1834,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			)
 		}
 	}
-	if manifest.Version == daemon.HandoffVersion {
+	if manifest.Version >= daemon.PreviousChunkedHandoffVersion {
 		for index := range manifest.Runtimes {
 			runtimeState := &manifest.Runtimes[index]
 			replay, readErr := peer.ReadReplay(runtimeState.TerminalID, runtimeState.ReplaySize)
@@ -1753,6 +1842,16 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 				return readErr
 			}
 			runtimeState.Replay = replay
+		}
+	}
+	if manifest.Version == daemon.HandoffVersion {
+		for index := range manifest.Runtimes {
+			runtimeState := &manifest.Runtimes[index]
+			recovery, readErr := peer.ReadRecovery(runtimeState.TerminalID, runtimeState.RecoverySize)
+			if readErr != nil {
+				return readErr
+			}
+			runtimeState.Recovery = recovery
 		}
 	}
 	fdsByID := map[string]int{}

@@ -36,6 +36,29 @@ func (c *scriptedDaemonEventConnection) Close() error {
 	return nil
 }
 
+func TestDaemonConnectionDispatchesPrivateClipboardWithoutConsumingStateSequence(t *testing.T) {
+	connection := &scriptedDaemonEventConnection{snapshot: daemon.SyncSnapshot{DaemonEpoch: "epoch", StateSequence: 4}, events: []daemon.Event{
+		{Event: daemon.EventTerminalClipboard, DaemonEpoch: "epoch"},
+		{Event: daemon.EventTerminalDirty, DaemonEpoch: "epoch", StateSequence: 5},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var handled []string
+	err := runDaemonConnectionSupervisor(ctx, daemonConnectionSupervisorOptions{
+		Dial: func(context.Context) (daemonEventConnection, error) { return connection, nil },
+		OnEvent: func(event daemon.Event) {
+			handled = append(handled, event.Event)
+			if len(handled) == 2 {
+				cancel()
+			}
+		},
+		Sleep: func(context.Context, time.Duration) error { cancel(); return context.Canceled },
+	})
+	if !errors.Is(err, context.Canceled) || len(handled) != 2 || handled[0] != daemon.EventTerminalClipboard || handled[1] != daemon.EventTerminalDirty {
+		t.Fatalf("private effect sequence handling: events=%v err=%v", handled, err)
+	}
+}
+
 func TestDaemonConnectionSupervisorReconnectsAndResynchronizes(t *testing.T) {
 	t.Parallel()
 

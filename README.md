@@ -182,7 +182,8 @@ layer. Linux uses Lima's QEMU/KVM path.
 
 ## Install
 
-Homebrew installs codelima, Lima, Git, and the bundled Ghostty terminal library:
+Homebrew installs codelima, Lima, Git, and the private renderer worker. Ghostty
+is statically linked into that worker; no separate Ghostty library is needed:
 
 ```sh
 brew tap brianrackle/codelima
@@ -191,6 +192,15 @@ brew install codelima
 
 Release archives are available for macOS arm64, Linux amd64, and Linux arm64
 from [GitHub Releases](https://github.com/brianrackle/codelima/releases).
+Keep `codelima` and `codelima-renderer-worker` beside each other when installing
+an archive manually. Source builds and release verification are documented in
+[BUILD.md](BUILD.md).
+
+To build from a checkout, run `make build`. Its `make init` prerequisite installs
+the pinned Go and Zig toolchains, development tools, a real `pkg-config`
+implementation (`pkgconf`), and the static Ghostty dependency under
+`.tooling/<os>-<arch>`. No Homebrew or system `pkg-config` installation is needed
+for source builds; the first bootstrap requires network access.
 
 Requirements:
 
@@ -264,6 +274,10 @@ text and disappear when you type an explicit value.
 On macOS, configure the terminal with `macos-option-as-alt = true` when
 available. codelima also recognizes the standard US-layout Option glyphs for
 its core shortcuts.
+
+When the terminal reports key repeats and releases, the focus shortcut toggles
+once per press. Holding or releasing `Option+Backtick` or `F6` keeps the new
+focus until the next press.
 
 Host and guest terminals are tabs on the same node. A red top bar identifies a
 host tab. Host tabs stay useful while the VM is stopped because they run on the
@@ -452,8 +466,8 @@ Any number of TUIs can attach to the same daemon at once — including from an
 SSH session on another machine — and every one of them can type: keystrokes,
 paste, scrolling, and tab controls are never rejected for coming from the
 "wrong" window, and scripted `codelima terminal` commands interleave with
-live typing instead of interrupting it. The one arbitrated thing is the
-seat: the window whose size and focus state a terminal adopts. The seat
+live typing instead of interrupting it. The seat selects the window whose
+size, focus, theme, selection and search state a terminal adopts. The seat
 moves only on explicit signals — launching a TUI, focusing its window, or
 `codelima terminal takeover` — never on background reconnects or CLI
 activity, and a window that does not hold the seat simply renders the seat
@@ -482,8 +496,52 @@ by the old daemon. Inspect `terminal_runtimes.*.journal_bytes` in `daemon
 snapshot`. To preserve as many live shells as possible, close only expendable
 high-history tabs until the old inline manifest fits, then retry the update.
 The alternative is `daemon stop` followed by `daemon start`, which deploys the
-new binary but restarts terminal child processes. Handoff version 4 chunks
-replay so later updates do not have this limitation.
+new binary but restarts terminal child processes. Handoff versions 4 and 5
+chunk replay so later updates do not have this limitation.
+
+### Embedded terminal features
+
+Press **F7** in a terminal tab for literal history search. Type the query,
+use Enter/Shift+Enter for the next/previous match, and Esc or F7 to close.
+Search progresses incrementally through native terminal history; switching
+tabs cancels the old query. Drag to select and copy text. Repeated clicks select
+a word, line, then command output (the last requires shell-integration marks).
+Hold Shift to select locally when the guest application captures the mouse.
+Selection and search follow the seat because the native viewport is shared.
+
+Paste is admitted as one operation, with a **64 KiB UTF-8 limit**. Oversize,
+unsafe or queue-full pastes fail without sending a prefix. Guest clipboard
+writes are limited to bounded text and go only to the current seat's attached
+frontend; clipboard reads and Kitty acknowledged writes are unsupported.
+Outer-terminal clipboard permissions still apply. Titles, bell/progress and
+notification badges appear in tabs; notification text is retained in the local
+messages view, not sent as unsolicited desktop notifications.
+
+Host default foreground/background, palette and light/dark changes are queried
+with a bounded deadline and propagated to hidden tabs too. An unanswered color
+query leaves the corresponding native default unspecified. The renderer uses
+native formatting for `terminal read`; `--source recent` includes the most
+recent 2,000 history rows plus the visible screen, with a 4 MiB output bound.
+
+Static in-band Kitty RGB/RGBA/PNG images display when the outer terminal supports
+Kitty graphics and reports cell pixel dimensions. The frontend preserves
+source cropping, clipping, pixel offsets and z-order, uploading at most 64 KiB
+per draw. Assets and prepared scenes each have a 16 MiB budget. Unsupported
+outer terminals keep the text view; file/shared-memory transfers, animation,
+registered glyphs and Unicode-placeholder placements are not supported.
+
+Compatible renderer replacement/live update uses a bounded native checkpoint
+plus its ordered output tail. Cross-build recovery, exhausted checkpoint quota
+and live/in-flight image state use the independent bounded raw fallback, which
+can be partial. This is not a promise to restore images or transient selection
+and search handles from a checkpoint. History is capped at 10,000 rows/64 MiB.
+Idle history compression is enabled; set
+`CODELIMA_GHOSTTY_IDLE_COMPRESSION=0` before starting the daemon to disable it.
+
+These changes use the exact statically linked worker described in
+[ADR 132](decisions/adopt_static_libghostty_vt_with_bounded_worker_contracts_132.md).
+Native release qualification and unavailable manual environments remain tracked
+in [TODO #41](TODO.md).
 
 ## How codelima works
 

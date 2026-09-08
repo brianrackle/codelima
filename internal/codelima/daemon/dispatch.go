@@ -48,7 +48,7 @@ const (
 // outcome classification read it, so the two can no longer drift.
 func ClassifyMethod(method string) DeliveryClass {
 	switch method {
-	case "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.scroll":
+	case "terminal.send_text", "terminal.send_keys", "terminal.send_input", "terminal.send_event", "terminal.scroll", "terminal.interact":
 		return ClassInput
 	case "terminal.resize", "terminal.focus":
 		return ClassReplaceable
@@ -81,7 +81,9 @@ func MutatingInputMethod(method string) bool {
 // last-value-wins state where two attached windows would fight indefinitely,
 // so only the seat holder's writes are accepted.
 func SeatArbitratedMethod(method string) bool {
-	return ClassifyMethod(method) == ClassReplaceable
+	// Inspection owns shared viewport/selection/search state but its gestures
+	// must remain ordered: never coalesce a press or release as latest-value.
+	return ClassifyMethod(method) == ClassReplaceable || method == "terminal.interact"
 }
 
 // maxLanesPerConnection bounds per-terminal lane growth in each class. A real

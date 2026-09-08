@@ -1,4 +1,4 @@
-//go:build !cgo || (!darwin && !linux)
+//go:build !darwin && !linux
 
 package codelima
 
@@ -7,6 +7,6 @@ import (
 	"errors"
 )
 
-func RunRendererWorker(context.Context) error {
+func RunRendererWorker(context.Context, RendererTerminalFactory) error {
 	return errors.New("Ghostty renderer worker is unavailable on this build")
 }

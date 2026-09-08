@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/brianrackle/codelima/internal/terminalgraphics"
 	"path/filepath"
 	"time"
 )
@@ -13,9 +14,10 @@ const (
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
 	// whenever a wire shape this protocol carries changes; 6 is the compact
 	// per-cell snapshot encoding (see SnapshotCell).
-	ProtocolVersion = 6
-	SessionVersion  = 2
-	HandoffVersion  = 4
+	ProtocolVersion               = 6
+	SessionVersion                = 2
+	HandoffVersion                = 5
+	PreviousChunkedHandoffVersion = 4
 
 	// PreviousStreamHandoffVersion is accepted by a new importer so a daemon
 	// using the first length-prefixed stream format can update when its inline
@@ -249,35 +251,53 @@ type Session struct {
 //	st strikethrough  iv inverse        in invisible    bl blink
 //	h  hyperlink target
 type SnapshotCell struct {
-	Grapheme      string `json:"g,omitempty"`
-	Width         int    `json:"w,omitempty"`
-	FG            uint32 `json:"f,omitempty"`
-	BG            uint32 `json:"b,omitempty"`
-	FGDefault     bool   `json:"fd,omitempty"`
-	BGDefault     bool   `json:"bd,omitempty"`
-	Bold          bool   `json:"bo,omitempty"`
-	Faint         bool   `json:"fa,omitempty"`
-	Italic        bool   `json:"i,omitempty"`
-	Underline     bool   `json:"u,omitempty"`
-	Strikethrough bool   `json:"st,omitempty"`
-	Inverse       bool   `json:"iv,omitempty"`
-	Invisible     bool   `json:"in,omitempty"`
-	Blink         bool   `json:"bl,omitempty"`
-	Hyperlink     string `json:"h,omitempty"`
+	Grapheme       string `json:"g,omitempty"`
+	Width          int    `json:"w,omitempty"`
+	FG             uint32 `json:"f,omitempty"`
+	BG             uint32 `json:"b,omitempty"`
+	FGDefault      bool   `json:"fd,omitempty"`
+	BGDefault      bool   `json:"bd,omitempty"`
+	Bold           bool   `json:"bo,omitempty"`
+	Faint          bool   `json:"fa,omitempty"`
+	Italic         bool   `json:"i,omitempty"`
+	Underline      bool   `json:"u,omitempty"`
+	Strikethrough  bool   `json:"st,omitempty"`
+	Inverse        bool   `json:"iv,omitempty"`
+	Invisible      bool   `json:"in,omitempty"`
+	Blink          bool   `json:"bl,omitempty"`
+	Hyperlink      string `json:"h,omitempty"`
+	Selected       bool   `json:"se,omitempty"`
+	UnderlineStyle uint8  `json:"us,omitempty"`
+	Overline       bool   `json:"ov,omitempty"`
+}
+
+// TerminalMetadata is terminal-supplied presentation state, not authority to
+// execute commands, open paths, change the host title, or post notifications.
+type TerminalMetadata struct {
+	Title             string `json:"title,omitempty"`
+	WorkingDirectory  string `json:"working_directory,omitempty"`
+	BellCount         uint64 `json:"bell_count,omitempty"`
+	NotificationTitle string `json:"notification_title,omitempty"`
+	NotificationBody  string `json:"notification_body,omitempty"`
+	ProgressState     int    `json:"progress_state,omitempty"`
+	Progress          int    `json:"progress,omitempty"`
+	CursorAtPrompt    bool   `json:"cursor_at_prompt,omitempty"`
 }
 
 type Snapshot struct {
-	Cols             int            `json:"cols"`
-	Rows             int            `json:"rows"`
-	Cells            []SnapshotCell `json:"cells"`
-	CursorX          int            `json:"cursor_x"`
-	CursorY          int            `json:"cursor_y"`
-	CursorVisible    bool           `json:"cursor_visible"`
-	Generation       uint64         `json:"generation"`
-	CapturesMouse    bool           `json:"captures_mouse"`
-	SnapshotSequence uint64         `json:"snapshot_sequence,omitempty"`
-	ProducedAt       time.Time      `json:"produced_at,omitempty"`
-	Stale            bool           `json:"stale,omitempty"`
+	Graphics         terminalgraphics.Frame `json:"graphics,omitempty"`
+	Metadata         TerminalMetadata       `json:"metadata,omitempty"`
+	Cols             int                    `json:"cols"`
+	Rows             int                    `json:"rows"`
+	Cells            []SnapshotCell         `json:"cells"`
+	CursorX          int                    `json:"cursor_x"`
+	CursorY          int                    `json:"cursor_y"`
+	CursorVisible    bool                   `json:"cursor_visible"`
+	Generation       uint64                 `json:"generation"`
+	CapturesMouse    bool                   `json:"captures_mouse"`
+	SnapshotSequence uint64                 `json:"snapshot_sequence,omitempty"`
+	ProducedAt       time.Time              `json:"produced_at,omitempty"`
+	Stale            bool                   `json:"stale,omitempty"`
 }
 
 type HandoffRuntime struct {
@@ -288,6 +308,8 @@ type HandoffRuntime struct {
 	Replay        []byte `json:"replay,omitempty"`
 	ReplaySize    int    `json:"replay_size,omitempty"`
 	ReplayPartial bool   `json:"replay_partial,omitempty"`
+	Recovery      []byte `json:"-"`
+	RecoverySize  int    `json:"recovery_size,omitempty"`
 }
 
 type HandoffManifest struct {

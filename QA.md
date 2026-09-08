@@ -456,6 +456,13 @@ Immediately after starting a node, toggle between tree and terminal focus with
 clean without typing literal `^L` characters or clearing earlier terminal
 history.
 
+With Kitty keyboard event reporting enabled in the outer terminal, tap and
+release each focus shortcut in both directions. Focus must change once on
+press and remain there after release. Hold each shortcut through key repeat:
+focus must stay stable until a fresh press. Two quick separate presses must
+toggle twice without a delay or missed press, and no shortcut text should
+appear in the shell. Repeat with legacy escape-prefixed Option input.
+
 Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
 The cursor must advance with each echoed character without first jumping to an
 older position, jumping backward, or briefly appearing ahead of the echo.
@@ -687,6 +694,95 @@ responsive control plane and terminal actor. On macOS, verify
 on Linux, verify the available `/proc` artifacts were captured instead. Confirm
 the command did not change daemon PID, terminal IDs, input ownership, or shell
 contents, and did not create artifacts outside `"$QA_ROOT"`.
+
+## Flow 10: libghostty-vt adoption regression checks
+
+Run the automated native/package contracts before the interactive checks:
+
+```sh
+make test-installers
+make test-pkgconf
+make test-renderer-boundary
+make test-ghostty-vt-schema
+make test-ghostty-vt-build
+make test-ghostty-vt
+make test-ghostty-bridge
+make test-ghostty-adapter GHOSTTY_TEST_FILTER='Ghostty|CloneColors|ValidateColors|ValidateInteraction'
+make test-vaxis-fork
+make test-package
+make benchmark-ghostty-compression
+```
+
+The package check must initialize and read the real packaged worker with an
+empty `PATH` and an unavailable legacy Ghostty library override. Neither
+archive may require a `.so`/`.dylib` or a wrapper launcher. A filtered native
+unit run is useful for diagnosis but does not replace the full upstream suite.
+Record unavailable hosts and compiler resource failures explicitly.
+
+For the clean-host build prerequisite regression, run `make test-pkgconf` and
+`PKG_CONFIG=/unavailable/host-pkg-config make build`. The installer tests use an
+explicit PATH without pkg-config; Make must provision and select its managed
+resolver. Repeat `make build` on a native macOS host without Homebrew's bin
+directory in PATH, retaining the already-verified Ghostty cache. The cached
+archive must remain reusable, and both executables must build. Do not infer
+that native macOS result from Linux installer fixtures.
+
+2026-09-07 Linux/aarch64 qualification: the four-patch source at
+`82232ecde55405559dec29c5466cb9e39938cb41` passed the ABI schema check (159
+types), native bridge contracts, and the broad adapter filter above both
+normally and with `GOFLAGS=-race`. Its installed static ReleaseSmall build
+identity is `2e205255ce6d39bbfdf6f314824a31f12c8de3bbf32fac535a3d01e13289626c`.
+The final unfiltered `make test-ghostty-vt GHOSTTY_VT_TEST_JOBS=1` retry used
+the same source/features/four patches with Zig 0.16.0 and Debug optimization,
+while the parent Go gates were held. Compilation ended with `process
+terminated with signal KILL`; the build reported 40/45 steps succeeded and two
+failed steps. The approximately 3.8 GiB guest did **not** complete the full
+upstream unit suite. Do not treat the passing narrower checks as that gate;
+rerun on an adequately sized host as tracked in TODO item 41.
+
+In a real host terminal, use the existing isolated QA home and node tabs:
+
+1. Print wrapped text containing ASCII, combining characters, CJK, emoji, an
+   OSC 8 link, and SGR 53 overlined text. Drag a normal mouse selection, then
+   double/triple click and copy. Verify copied text, link hit testing, wrapping,
+   highlights, and overline agree with the cells displayed. Shift-drag remains
+   the outer terminal's selection bypass, including inside a mouse-capturing
+   application. Restore any clipboard contents you need after this check.
+2. Press `F7`, search for a repeated word in visible text and scrollback, and
+   use Enter/Shift+Enter to navigate. Verify the UI stays responsive while the
+   match count catches up; Esc closes search without sending search keystrokes
+   to the shell. Repeat after output, resizing and renderer replacement.
+3. Change between light/dark host themes. Verify default foreground/background
+   and indexed colors update without blocking input. A host that cannot answer
+   color queries must retain usable fallback colors, not invent a black reply.
+4. On a Kitty-graphics-capable host, print this bounded in-band red image:
+
+   ```sh
+   printf '\033_Ga=T,f=24,s=1,v=1,i=42,c=8,r=4;/wAA\033\\'
+   ```
+
+   Verify the image stays clipped to its terminal pane while resizing,
+   scrolling, switching tabs, opening an overlay and reconnecting. Exercise a
+   larger PNG requiring multiple upload frames while typing; text redraws must
+   continue and no partial image, corrupt continuation, stale placement or
+   unbounded encoding-worker growth may appear. Verify positive/negative z,
+   replacement of an image ID, and deletion with
+   `printf '\033_Ga=d,d=I,i=42\033\\'`. Non-graphics hosts must remain usable.
+5. Repeat Flow 5's large-history live update and renderer-stop containment.
+   Both terminal IDs and shell PIDs must survive; the new worker/native build
+   identity must match. A raw fallback must be marked partial when continuity
+   is unavailable. Verify checkpoint-incompatible graphics are not silently
+   reported as a complete restored native snapshot.
+6. With two attached windows, only the geometry-owning seat may receive a
+   terminal-originated clipboard write. Background and CLI clients must not
+   copy it. Verify Kitty acknowledged clipboard requests fail explicitly when
+   the host cannot truthfully acknowledge delivery. Do not use real secrets as
+   clipboard test data.
+
+Keep these interactive results separate from automated bridge/fixture passes.
+Record per-flow results and blockers in the release QA report; do not mark the
+adoption release-qualified until its native Linux/macOS and physical-terminal
+checks have actually run.
 
 ## Cleanup
 

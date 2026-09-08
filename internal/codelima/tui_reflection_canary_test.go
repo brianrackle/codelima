@@ -4,7 +4,7 @@ package codelima
 // (plan §0.8 "Stop reflecting into vaxis internals"):
 //
 //  1. renderedHyperlinkAt (tui_runtime.go) reads
-//     (*vaxis.Vaxis).screenNext.buf[row][col].Style.Hyperlink.
+//     (*vaxis.Vaxis).screenNext.buf[row*cols+col].Style.Hyperlink.
 //  2. vaxisTUITerminal.CapturesMouse (tui_terminal_vaxis.go) reads
 //     (*term.Model).mode.{mouseButtons,mouseDrag,mouseMotion,mouseSGR}
 //     via vaxisTerminalModeField.
@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"git.sr.ht/~rockorager/vaxis"
-	"git.sr.ht/~rockorager/vaxis/widgets/term"
+	"go.rockorager.dev/vaxis"
+	"go.rockorager.dev/vaxis/widgets/term"
 )
 
 const hyperlinkReflectionBrokenMsg = "vaxis internals changed — renderedHyperlinkAt reflection broke; see tui_runtime.go and upstream accessor proposal (plan §0.8)"
@@ -65,6 +65,16 @@ func TestVaxisHyperlinkReflectionStillValid(t *testing.T) {
 	}
 	if _, ok := renderedHyperlinkAt(vx, 3, 200); ok {
 		t.Fatalf("renderedHyperlinkAt out-of-bounds row reported a hyperlink")
+	}
+	// An unchecked flat index would wrap column 80 onto this next-row link.
+	vx.Window().SetCell(0, 3, vaxis.Cell{
+		Character: vaxis.Character{Grapheme: "L", Width: 1},
+		Style:     vaxis.Style{Hyperlink: target},
+	})
+	for _, position := range [][2]int{{80, 2}, {-1, 3}, {0, -1}} {
+		if _, ok := renderedHyperlinkAt(vx, position[0], position[1]); ok {
+			t.Fatalf("renderedHyperlinkAt(%d,%d) wrapped an invalid coordinate into the flat buffer", position[0], position[1])
+		}
 	}
 	if _, ok := renderedHyperlinkAt(nil, 0, 0); ok {
 		t.Fatalf("renderedHyperlinkAt(nil, 0, 0) reported a hyperlink")

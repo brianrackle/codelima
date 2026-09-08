@@ -1,0 +1,2 @@
+# Unified-diff context lines intentionally contain a single marker space.
+scripts/patches/*.patch whitespace=-blank-at-eol

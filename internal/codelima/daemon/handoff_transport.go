@@ -33,6 +33,10 @@ const (
 	MaxHandoffReplayBytesPerTerminal = 1 << 20
 	MaxHandoffReplayChunkBytes       = MaxMessageSize / 2
 	MaxHandoffTotalReplayBytes       = MaxHandoffFDsPerFrame * MaxHandoffReplayBytesPerTerminal
+	// Recovery bundles contain bounded native checkpoints and ordered tails.
+	// They travel separately from legacy raw replay and never inflate a manifest.
+	MaxHandoffRecoveryBytesPerTerminal = 24 << 20
+	MaxHandoffTotalRecoveryBytes       = 64 << 20
 )
 
 type HandoffFraming uint8
@@ -168,22 +172,50 @@ func (c *HandoffConnection) ReadManifest() (HandoffManifest, error) {
 	return manifest, nil
 }
 
+// ValidateHandoffRecoverySizes runs before any recovery chunk is allocated or
+// read. Legacy importers have no recovery lane, and the aggregate cap is
+// independent of the existing bounded raw replay budget.
+func ValidateHandoffRecoverySizes(manifest HandoffManifest) error {
+	total := 0
+	for _, runtime := range manifest.Runtimes {
+		if runtime.RecoverySize < 0 || runtime.RecoverySize > MaxHandoffRecoveryBytesPerTerminal {
+			return errors.New("handoff terminal recovery size is invalid")
+		}
+		if manifest.Version != HandoffVersion && runtime.RecoverySize != 0 {
+			return errors.New("legacy handoff contains recovery payload")
+		}
+		if runtime.RecoverySize > MaxHandoffTotalRecoveryBytes-total {
+			return errors.New("handoff aggregate recovery exceeds size bound")
+		}
+		total += runtime.RecoverySize
+	}
+	return nil
+}
+
 func (c *HandoffConnection) WriteReplay(terminalID string, replay []byte) error {
+	return c.writeHandoffBlob("replay", terminalID, replay, MaxHandoffReplayBytesPerTerminal)
+}
+
+func (c *HandoffConnection) WriteRecovery(terminalID string, recovery []byte) error {
+	return c.writeHandoffBlob("recovery", terminalID, recovery, MaxHandoffRecoveryBytesPerTerminal)
+}
+
+func (c *HandoffConnection) writeHandoffBlob(kind, terminalID string, replay []byte, limit int) error {
 	if terminalID == "" {
 		return errors.New("handoff replay requires a terminal id")
 	}
-	if len(replay) > MaxHandoffReplayBytesPerTerminal {
+	if len(replay) > limit {
 		return fmt.Errorf(
 			"handoff replay for %s is %d bytes, limit is %d",
 			terminalID,
 			len(replay),
-			MaxHandoffReplayBytesPerTerminal,
+			limit,
 		)
 	}
 	for offset := 0; offset < len(replay); offset += MaxHandoffReplayChunkBytes {
 		end := min(offset+MaxHandoffReplayChunkBytes, len(replay))
 		if err := c.WriteJSON(HandoffMessage{
-			Type:       "replay",
+			Type:       kind,
 			TerminalID: terminalID,
 			Offset:     offset,
 			Replay:     replay[offset:end],
@@ -195,15 +227,23 @@ func (c *HandoffConnection) WriteReplay(terminalID string, replay []byte) error 
 }
 
 func (c *HandoffConnection) ReadReplay(terminalID string, size int) ([]byte, error) {
+	return c.readHandoffBlob("replay", terminalID, size, MaxHandoffReplayBytesPerTerminal)
+}
+
+func (c *HandoffConnection) ReadRecovery(terminalID string, size int) ([]byte, error) {
+	return c.readHandoffBlob("recovery", terminalID, size, MaxHandoffRecoveryBytesPerTerminal)
+}
+
+func (c *HandoffConnection) readHandoffBlob(kind, terminalID string, size, limit int) ([]byte, error) {
 	if terminalID == "" {
 		return nil, errors.New("handoff replay requires a terminal id")
 	}
-	if size < 0 || size > MaxHandoffReplayBytesPerTerminal {
+	if size < 0 || size > limit {
 		return nil, fmt.Errorf(
 			"handoff replay size for %s is %d, limit is %d",
 			terminalID,
 			size,
-			MaxHandoffReplayBytesPerTerminal,
+			limit,
 		)
 	}
 	replay := make([]byte, 0, size)
@@ -216,7 +256,7 @@ func (c *HandoffConnection) ReadReplay(terminalID string, size int) ([]byte, err
 			CloseHandoffFDs(fds)
 			return nil, errors.New("handoff replay unexpectedly carried descriptors")
 		}
-		if message.Type != "replay" ||
+		if message.Type != kind ||
 			message.TerminalID != terminalID ||
 			message.Offset != len(replay) ||
 			len(message.Replay) == 0 ||
