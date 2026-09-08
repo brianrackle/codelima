@@ -1,5 +1,9 @@
 # Homebrew Beta Preparation — 2026-09-08
 
+This is the historical beta publication record. The maintainer subsequently
+requested regular promotion: [v0.3.0](regular_release_qa.md) is now published
+through `codelima`, and the separate beta formula has been removed.
+
 ## Published result
 
 Published [v0.3.0-beta.3](https://github.com/brianrackle/codelima/releases/tag/v0.3.0-beta.3)

@@ -4,17 +4,14 @@
 
 ### 44. Complete manual qualification of the published libghostty release
 
-Partially complete: `v0.3.0-beta.3` was published as a GitHub prerelease and
-`brianrackle/codelima/codelima-beta` on Homebrew. All native verification, race,
-integration and package jobs passed on macOS arm64 and Linux amd64/arm64.
-Public downloads matched all manifests and the beta formula; stable Latest and
-the stable formula were unchanged during beta publication. The downloaded Linux arm64 CLI/worker
-also passed the real package smoke test. Evidence and earlier failed candidate
-history are in [the beta QA report](plans/homebrew_beta_qa.md).
-
-The maintainer subsequently requested promoting this same application code as
-`v0.3.0` through regular `codelima` and retiring the beta formula. Publication
-evidence for that promotion is recorded in `plans/regular_release_qa.md`.
+Partially complete: `v0.3.0` is published as the regular GitHub Latest release
+and standard `brianrackle/codelima/codelima` Homebrew formula. The beta formula
+has been removed. This promotes beta.3's application code as explicitly requested
+by the maintainer. All native verification, race, integration and package jobs
+passed on macOS arm64 and Linux amd64/arm64. Public downloads match all manifests
+and the standard formula; the downloaded Linux arm64 CLI/worker passed the real
+package smoke test. Evidence is in [the regular release QA report](plans/regular_release_qa.md).
+Earlier candidate history remains in [the beta QA report](plans/homebrew_beta_qa.md).
 
 Problem: native/manual and interactive QA gates from #41/#43 remain open,
 including the full upstream Ghostty Debug suite and actual Homebrew installation.
