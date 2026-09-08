@@ -784,6 +784,34 @@ Record per-flow results and blockers in the release QA report; do not mark the
 adoption release-qualified until its native Linux/macOS and physical-terminal
 checks have actually run.
 
+## Flow 11: Homebrew beta channel
+
+Run `make test-release` and `make test-package` first. On each supported native
+Homebrew host, first install a locally generated candidate formula from a
+disposable tap using a `file://` URL for its matching archive under the QA root.
+After publication, repeat using the public tap and verify its URL/checksum
+against the release manifest. Confirm GitHub marks it prerelease while Latest
+remains stable.
+Record the current `command -v codelima` and installed formulae before testing.
+
+```sh
+brew install brianrackle/codelima/codelima-beta
+brew test codelima-beta
+"$(brew --prefix codelima-beta)/bin/codelima" --version
+```
+
+Confirm the version matches the beta tag, the installed libexec directory
+contains both executable files, and the existing `codelima` command resolves
+to its original path. Run the beta with an isolated `CODELIMA_HOME` under the
+QA root and repeat Flow 5's host-shell creation/output/read/close and daemon
+stop. For an upgrade qualification, start with the previous beta, run
+`brew update && brew upgrade codelima-beta`, and repeat these checks. The first
+beta has no previous beta upgrade to exercise; record that explicitly.
+
+Uninstall the beta only if this flow installed it solely for verification.
+Remove dependencies/caches downloaded solely for this flow without removing
+pre-existing installations. Stop the isolated daemon and remove its home.
+
 ## Cleanup
 
 Close any terminal sessions, then remove every QA node before deleting the temporary home:

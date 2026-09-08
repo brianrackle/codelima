@@ -190,6 +190,24 @@ brew tap brianrackle/codelima
 brew install codelima
 ```
 
+Beta releases use the separate `codelima-beta` formula. Once a beta is
+published, install and run it explicitly:
+
+```sh
+brew install brianrackle/codelima/codelima-beta
+"$(brew --prefix codelima-beta)/bin/codelima" --version
+"$(brew --prefix codelima-beta)/bin/codelima" daemon update
+"$(brew --prefix codelima-beta)/bin/codelima" .
+```
+
+The beta is keg-only, so installing it leaves your current `codelima` command
+selected. Use the explicit beta path for every beta command, or prepend
+`$(brew --prefix codelima-beta)/bin` to your shell's `PATH`. Upgrade it with
+`brew update && brew upgrade codelima-beta`. Both channels use the same default
+CodeLima home; `daemon update` selects the invoking binary and attempts to
+preserve live terminals. Returning to stable may require a daemon stop/start
+if that older release cannot import the beta's handoff format.
+
 Release archives are available for macOS arm64, Linux amd64, and Linux arm64
 from [GitHub Releases](https://github.com/brianrackle/codelima/releases).
 Keep `codelima` and `codelima-renderer-worker` beside each other when installing

@@ -298,6 +298,17 @@ The generated formula:
 - installs both executables together in `libexec/bin`
 - links `bin/codelima` to the installed CLI; no library cache or launcher is required
 
+Tags `vMAJOR.MINOR.PATCH-beta.N` select `CodelimaBeta` and a keg-only
+`codelima-beta.rb`; stable tags select `Codelima` and `codelima.rb`. The formula
+generator rejects tag/manifest version mismatches. Other prerelease suffixes
+are rejected until their channel policy is defined. Without `FORMULA_OUTPUT`,
+Make chooses the filename from `RELEASE_TAG`.
+
+`make package-formula`, `make release-metadata`, and `make test-release` need
+only the managed Go toolchain; they do not build the native renderer. Inspect
+channel selection with `make --silent release-metadata RELEASE_TAG=v0.3.0-beta.1`.
+The Go metadata parser is shared by formula generation and GitHub Actions.
+
 ## GitHub Actions
 
 ### CI
@@ -319,13 +330,17 @@ on Ubuntu and macOS for pushes to `main` and pull requests.
 
 The release workflow does this:
 
-1. Resolves the tag and version.
-2. Builds release archives on:
+1. Requires an existing stable or numbered beta tag and resolves its version
+   and Homebrew channel. Manual dispatch checks out the requested tag.
+2. Runs `make verify test-race test-integration test-package`, then builds
+   release archives from that exact tag on:
    - `linux-amd64`
    - `linux-arm64`
    - `darwin-arm64`
-3. Uploads the `.tar.gz` archives and `.json` manifests to the GitHub release.
-4. Generates `Formula/codelima.rb`.
+3. Creates the GitHub release with all `.tar.gz` archives and `.json` manifests.
+   Betas are prereleases and explicitly excluded from Latest. Existing releases
+   are not overwritten; if only the tap update failed, rerun that failed job.
+4. Generates `Formula/codelima.rb` or `Formula/codelima-beta.rb` for its channel.
 5. Updates the Homebrew tap if the tap repo settings are configured.
 
 ## Homebrew Tap Automation
@@ -393,6 +408,33 @@ brew update
 brew upgrade codelima
 ```
 
+### Beta From The Libghostty Branch
+
+The same automated and manual qualification gates apply to beta releases.
+The native and interactive checks still open in TODO #41/#43 must be completed
+before publishing this branch; beta channel support does not mark them passed.
+On 2026-09-08 the maintainer explicitly authorized publishing `v0.3.0-beta.1`
+with those remaining checks marked unverified. This exception applies to that
+beta only. Every beta needs a nonempty `.github/release-notes/<tag>.md`; the
+workflow prepends it to the generated release notes. Record qualification
+limitations there before tagging.
+
+After qualifying and committing the candidate on `feat/libghostty-vt-adoption`:
+
+```sh
+make --silent release-metadata RELEASE_TAG=v0.3.0-beta.1
+git tag -a v0.3.0-beta.1 -m 'CodeLima 0.3.0 beta 1: libghostty-vt adoption'
+git push origin feat/libghostty-vt-adoption v0.3.0-beta.1
+```
+
+This publishes a GitHub prerelease and updates only
+`brianrackle/homebrew-codelima/Formula/codelima-beta.rb`. Stable subscribers
+continue following `codelima.rb`. Verify the published tag resolves to the
+candidate commit, the release is marked prerelease and is not Latest, and
+the tap's beta URLs and checksums match all three uploaded manifests. Run
+the Homebrew flow in `QA.md` on the native targets. Workflow artifacts and
+tap scratch checkouts stay under `./tmp/release` in the disposable runner.
+
 ## Manual Release Dry Run
 
 Before the first real release, do a local dry run:
@@ -402,13 +444,13 @@ make verify
 make test-race
 make test-integration
 make test-package
-make package PACKAGE_VERSION=0.0.0-qa DIST_DIR=./tmp/dist
+make package PACKAGE_VERSION=0.0.0-beta.0 DIST_DIR=./tmp/dist
 make package-formula \
-  PACKAGE_VERSION=0.0.0-qa \
-  RELEASE_TAG=v0.0.0-qa \
+  PACKAGE_VERSION=0.0.0-beta.0 \
+  RELEASE_TAG=v0.0.0-beta.0 \
   RELEASE_REPO=brianrackle/codelima \
   DIST_DIR=./tmp/dist \
-  FORMULA_OUTPUT=./tmp/dist/Formula/codelima.rb
+  FORMULA_OUTPUT=./tmp/dist/Formula/codelima-beta.rb
 ```
 
 Check:

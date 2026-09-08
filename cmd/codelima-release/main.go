@@ -22,7 +22,7 @@ func (s *stringSlice) Set(value string) error {
 
 func main() {
 	if len(os.Args) < 2 {
-		fatalf("usage: codelima-release <archive|formula> [flags]")
+		fatalf("usage: codelima-release <archive|formula|metadata> [flags]")
 	}
 
 	switch os.Args[1] {
@@ -30,9 +30,24 @@ func main() {
 		runArchive(os.Args[2:])
 	case "formula":
 		runFormula(os.Args[2:])
+	case "metadata":
+		runMetadata(os.Args[2:])
 	default:
 		fatalf("unknown command %q", os.Args[1])
 	}
+}
+
+func runMetadata(args []string) {
+	fs := flag.NewFlagSet("metadata", flag.ExitOnError)
+	tag := fs.String("tag", "", "stable or numbered beta release tag")
+	if err := fs.Parse(args); err != nil {
+		fatalf("parse metadata flags: %v", err)
+	}
+	meta, err := release.ParseTag(*tag)
+	if err != nil {
+		fatalf("%v", err)
+	}
+	fmt.Printf("tag=%s\nversion=%s\nformula_name=%s\nprerelease=%t\n", meta.Tag, meta.Version, meta.FormulaName, meta.Prerelease)
 }
 
 func runArchive(args []string) {

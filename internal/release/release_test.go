@@ -134,7 +134,7 @@ func TestRenderHomebrewFormulaIncludesAvailableTargets(t *testing.T) {
 			t.Fatalf("formula missing %q:\n%s", snippet, formula)
 		}
 	}
-	for _, obsolete := range []string{"zlib", "CODELIMA_GHOSTTY_VT_LIB", "CACHE_ROOT", "codelima-real", "libghostty-vt.so", "libghostty-vt.dylib"} {
+	for _, obsolete := range []string{"keg_only", "CodelimaBeta", "zlib", "CODELIMA_GHOSTTY_VT_LIB", "CACHE_ROOT", "codelima-real", "libghostty-vt.so", "libghostty-vt.dylib"} {
 		if strings.Contains(formula, obsolete) {
 			t.Fatalf("formula retained obsolete dynamic dependency %q", obsolete)
 		}

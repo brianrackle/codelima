@@ -1,5 +1,15 @@
 # Patterns
 
+## Release channel from a validated tag
+
+Use `internal/release.ParseTag` for both GitHub release metadata and Homebrew
+formula generation. Stable and numbered beta tags choose a formula name and
+prerelease policy together; reject unknown suffixes and mismatched manifest
+versions. Build from the requested tag, publish all native assets together,
+and stage the selected formula before checking the tap diff so a newly added
+beta formula is committed. Beta formulae are keg-only to preserve the user's
+current command selection (ADR 135).
+
 ## Managed native build metadata tools
 
 Bootstrap build-time tools into the platform-scoped `.tooling/<os>-<arch>`

@@ -196,6 +196,10 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	if tag == "" {
 		return "", fmt.Errorf("tag is required")
 	}
+	meta, err := ParseTag(tag)
+	if err != nil {
+		return "", err
+	}
 	if len(spec.Manifests) == 0 {
 		return "", fmt.Errorf("at least one manifest is required")
 	}
@@ -220,10 +224,16 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	if len(versions) != 1 {
 		return "", fmt.Errorf("all manifests must use the same version")
 	}
+	if spec.Manifests[0].Version != meta.Version {
+		return "", fmt.Errorf("manifest version %q does not match release tag %q", spec.Manifests[0].Version, tag)
+	}
 
 	var builder strings.Builder
 	builder.WriteString("class ")
 	builder.WriteString(FormulaClassName)
+	if meta.Prerelease {
+		builder.WriteString("Beta")
+	}
 	builder.WriteString(" < Formula\n")
 	builder.WriteString("  desc ")
 	builder.WriteString(rubyString(FormulaDesc))
@@ -237,6 +247,9 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	builder.WriteString("  version ")
 	builder.WriteString(rubyString(spec.Manifests[0].Version))
 	builder.WriteString("\n\n")
+	if meta.Prerelease {
+		builder.WriteString("  keg_only \"it provides the opt-in beta channel\"\n\n")
+	}
 
 	for _, goos := range []string{"darwin", "linux"} {
 		arches := assetsByTarget[goos]

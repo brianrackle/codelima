@@ -2,6 +2,31 @@
 
 ## Open Work
 
+### 44. Qualify and publish the libghostty Homebrew beta
+
+Problem: beta channel support is prepared on `feat/libghostty-vt-adoption`
+(ADR 135), but `v0.3.0-beta.1` has not been tagged or published. Native and
+interactive QA gates from #41/#43 remain open. This Linux/aarch64 guest lacks
+Homebrew, Lima, usable KVM, and native macOS/two-window terminal access.
+Local automated and candidate-package evidence is recorded in
+[the beta QA report](plans/homebrew_beta_qa.md).
+On 2026-09-08 the maintainer authorized publication with these remaining
+checks explicitly marked unverified in the beta release notes. Publication
+may proceed under that exception; the qualification work remains open.
+
+Suggested solution: finish every QA.md flow on supported native hosts,
+including the full upstream Ghostty suite on a sufficiently large host and
+Flow 11's actual Homebrew installation. Record the candidate's automated and
+manual results, commit the release support, then push the beta tag using
+BUILD.md. Confirm all three native release jobs pass, GitHub marks it
+prerelease rather than Latest, and only `Formula/codelima-beta.rb` changes in
+the tap. Git transport works here; the existing Actions tap settings still
+need confirmation during publication. Clean all disposable verification state.
+
+Advantages: delivers an explicit beta channel without silently enrolling stable
+users, with evidence for the paired native binaries. Disadvantages: requires
+native hosts and interactive work unavailable here; publication remains pending.
+
 ### 43. Qualify the focus-toggle lifecycle fix and audit other shortcut actions
 
 Problem: ADR 134 fixes Option+Backtick/F6 toggling on both press and release.

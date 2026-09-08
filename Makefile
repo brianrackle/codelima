@@ -58,9 +58,10 @@ PACKAGE_VERSION ?= 0.0.0-dev
 RENDERER_LDFLAGS = $(if $(wildcard $(GHOSTTY_VT_CURRENT)/.native-build-id),-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=$(shell cat $(GHOSTTY_VT_CURRENT)/.native-build-id))
 VERSION_LDFLAGS = -X github.com/brianrackle/codelima/internal/codelima.Version=$(PACKAGE_VERSION) $(RENDERER_LDFLAGS)
 RELEASE_TAG ?= v$(PACKAGE_VERSION)
+export RELEASE_TAG
 RELEASE_REPO ?= brianrackle/codelima
 DIST_DIR ?= $(CURDIR)/dist
-FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
+FORMULA_OUTPUT ?= $(DIST_DIR)/codelima$(if $(findstring -beta.,$(RELEASE_TAG)),-beta).rb
 INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
 
@@ -77,8 +78,11 @@ GO_TEST_PARALLEL ?= 4
 GO_RACE_TEST_PARALLEL ?= 1
 DIAG_ARGS ?=
 
-pkg-config:
+.PHONY: go-toolchain release-metadata test-release
+go-toolchain:
 	./scripts/install_go.sh $(GO_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
+
+pkg-config: go-toolchain
 	./scripts/install_zig.sh $(ZIG_VERSION) $(TOOLS_DIR) $(CURDIR)/tmp
 	./scripts/install_pkgconf.sh $(PKGCONF_VERSION) '$(TOOLS_DIR)' '$(CURDIR)/tmp' '$(ZIG)'
 
@@ -199,8 +203,14 @@ diagnose-terminal-freeze:
 package: init
 	/bin/sh ./scripts/package_release.sh $(PACKAGE_VERSION) $(GO) $(TOOLS_DIR) $(DIST_DIR) $(CODELIMA_BIN) $(PLATFORM_TAG) $(CODELIMA_RENDERER_BIN)
 
-package-formula: init
+package-formula: go-toolchain
 	./scripts/render_homebrew_formula.sh $(RELEASE_REPO) $(RELEASE_TAG) $(DIST_DIR) $(FORMULA_OUTPUT) $(GO)
+
+release-metadata: go-toolchain
+	@$(GO) run ./cmd/codelima-release metadata --tag "$$RELEASE_TAG"
+
+test-release: go-toolchain
+	$(GO) test ./internal/release ./cmd/codelima-release
 
 verify: fmt-check lint test test-vaxis-fork build
 
