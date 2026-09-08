@@ -39,7 +39,7 @@ func main() {
 
 func runMetadata(args []string) {
 	fs := flag.NewFlagSet("metadata", flag.ExitOnError)
-	tag := fs.String("tag", "", "stable or numbered beta release tag")
+	tag := fs.String("tag", "", "release tag in vMAJOR.MINOR.PATCH form")
 	if err := fs.Parse(args); err != nil {
 		fatalf("parse metadata flags: %v", err)
 	}
@@ -47,7 +47,7 @@ func runMetadata(args []string) {
 	if err != nil {
 		fatalf("%v", err)
 	}
-	fmt.Printf("tag=%s\nversion=%s\nformula_name=%s\nprerelease=%t\n", meta.Tag, meta.Version, meta.FormulaName, meta.Prerelease)
+	fmt.Printf("tag=%s\nversion=%s\n", meta.Tag, meta.Version)
 }
 
 func runArchive(args []string) {

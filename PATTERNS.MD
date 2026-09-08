@@ -8,15 +8,14 @@ as `sleep` have platform-dependent overhead; a requested sleep duration is not
 the loop's elapsed time. Preserve exact terminal IDs and shell PIDs across
 handoff/rollback, and retain content-continuity assertions after progress occurs.
 
-## Release channel from a validated tag
+## Release version from a validated tag
 
-Use `internal/release.ParseTag` for both GitHub release metadata and Homebrew
-formula generation. Stable and numbered beta tags choose a formula name and
-prerelease policy together; reject unknown suffixes and mismatched manifest
-versions. Build from the requested tag, publish all native assets together,
-and stage the selected formula before checking the tap diff so a newly added
-beta formula is committed. Beta formulae are keg-only to preserve the user's
-current command selection (ADR 135).
+Use `internal/release.ParseTag` for GitHub release metadata and Homebrew
+formula generation. Accept only `vMAJOR.MINOR.PATCH`; reject prerelease suffixes
+and mismatched manifest versions. Build from the requested tag, require versioned
+release notes, and publish all native assets as a regular Latest release. Stage
+the standard formula and any retired formula removal before checking the tap
+diff, so promotion is atomic and repeated updates are no-ops (ADR 137).
 
 Keep renderer dependency checks separate from platform host adapters. Only the
 worker imports `internal/ghostty`; the CLI's macOS cgo source is restricted to

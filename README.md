@@ -190,23 +190,23 @@ brew tap brianrackle/codelima
 brew install codelima
 ```
 
-Beta releases use the separate `codelima-beta` formula. Once a beta is
-published, install and run it explicitly:
+Upgrade an existing installation in place:
 
 ```sh
-brew install brianrackle/codelima/codelima-beta
-"$(brew --prefix codelima-beta)/bin/codelima" --version
-"$(brew --prefix codelima-beta)/bin/codelima" daemon update
-"$(brew --prefix codelima-beta)/bin/codelima" .
+brew update
+brew upgrade codelima
+codelima daemon update
+codelima --version
 ```
 
-The beta is keg-only, so installing it leaves your current `codelima` command
-selected. Use the explicit beta path for every beta command, or prepend
-`$(brew --prefix codelima-beta)/bin` to your shell's `PATH`. Upgrade it with
-`brew update && brew upgrade codelima-beta`. Both channels use the same default
-CodeLima home; `daemon update` selects the invoking binary and attempts to
-preserve live terminals. Returning to stable may require a daemon stop/start
-if that older release cannot import the beta's handoff format.
+Version `0.3.0` promotes the libghostty beta to the regular `codelima` release.
+The separate beta formula is retired. If you installed `codelima-beta`, first
+install or upgrade `codelima` and run
+`"$(brew --prefix codelima)/bin/codelima" daemon update`, then remove the old keg
+with `brew uninstall codelima-beta`. Remove any beta-specific `PATH`
+entry from your shell configuration so `codelima` selects the regular binary.
+The existing CodeLima home and terminal state are reused; `daemon update`
+attempts to preserve live terminals while switching to the invoking binary.
 
 Release archives are available for macOS arm64, Linux amd64, and Linux arm64
 from [GitHub Releases](https://github.com/brianrackle/codelima/releases).

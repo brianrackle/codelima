@@ -784,31 +784,36 @@ Record per-flow results and blockers in the release QA report; do not mark the
 adoption release-qualified until its native Linux/macOS and physical-terminal
 checks have actually run.
 
-## Flow 11: Homebrew beta channel
+## Flow 11: Homebrew installation and regular upgrade
 
 Run `make test-release` and `make test-package` first. On each supported native
-Homebrew host, first install a locally generated candidate formula from a
-disposable tap using a `file://` URL for its matching archive under the QA root.
-After publication, repeat using the public tap and verify its URL/checksum
-against the release manifest. Confirm GitHub marks it prerelease while Latest
-remains stable.
+Homebrew host, install a locally generated candidate formula from a disposable
+tap using a `file://` URL for its matching archive under the QA root. After
+publication, repeat using the public tap and verify its URL/checksum against
+the release manifest. Confirm GitHub marks it regular and Latest, and the tap
+contains `Formula/codelima.rb` with no `Formula/codelima-beta.rb`.
 Record the current `command -v codelima` and installed formulae before testing.
 
 ```sh
-brew install brianrackle/codelima/codelima-beta
-brew test codelima-beta
-"$(brew --prefix codelima-beta)/bin/codelima" --version
+brew install brianrackle/codelima/codelima
+brew test codelima
+codelima --version
 ```
 
-Confirm the version matches the beta tag, the installed libexec directory
-contains both executable files, and the existing `codelima` command resolves
-to its original path. Run the beta with an isolated `CODELIMA_HOME` under the
-QA root and repeat Flow 5's host-shell creation/output/read/close and daemon
-stop. For an upgrade qualification, start with the previous beta, run
-`brew update && brew upgrade codelima-beta`, and repeat these checks. The first
-beta has no previous beta upgrade to exercise; record that explicitly.
+Confirm the version matches the regular tag and libexec contains both executable
+files. Run with an isolated `CODELIMA_HOME` under the QA root and repeat Flow 5's
+host-shell creation/output/read/close and daemon stop. For upgrade qualification,
+start with the previous regular release, create a live host terminal, run
+`brew update && brew upgrade codelima`, then `codelima daemon update`. Confirm
+the CLI/daemon version and terminal continuity, and repeat the package checks.
 
-Uninstall the beta only if this flow installed it solely for verification.
+For the retired beta migration, install or upgrade regular `codelima`, invoke
+`"$(brew --prefix codelima)/bin/codelima" daemon update`, then uninstall
+`codelima-beta`. Remove any beta-specific
+`PATH` entry, confirm regular command selection, and verify the existing home
+and terminal state remain usable.
+
+Uninstall packages only if this flow installed them solely for verification.
 Remove dependencies/caches downloaded solely for this flow without removing
 pre-existing installations. Stop the isolated daemon and remove its home.
 

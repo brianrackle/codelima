@@ -6,26 +6,19 @@ import (
 	"strings"
 )
 
-// Metadata binds the GitHub release channel and Homebrew formula to one tag.
+// Metadata binds a release tag to its packaged version.
 type Metadata struct {
-	Tag         string
-	Version     string
-	FormulaName string
-	Prerelease  bool
+	Tag     string
+	Version string
 }
 
-var releaseTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.(0|[1-9][0-9]*))?$`)
+var releaseTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
 
-// ParseTag accepts stable and numbered beta releases. Reject other suffixes so
-// an unrecognized prerelease can never silently update the stable formula.
+// ParseTag accepts regular releases. Prerelease suffixes are rejected because
+// the Homebrew tap has a single codelima formula.
 func ParseTag(tag string) (Metadata, error) {
 	if !releaseTag.MatchString(tag) {
-		return Metadata{}, fmt.Errorf("release tag must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-beta.N: %q", tag)
+		return Metadata{}, fmt.Errorf("release tag must be vMAJOR.MINOR.PATCH: %q", tag)
 	}
-	meta := Metadata{Tag: tag, Version: strings.TrimPrefix(tag, "v"), FormulaName: "codelima"}
-	if strings.Contains(tag, "-beta.") {
-		meta.Prerelease = true
-		meta.FormulaName = "codelima-beta"
-	}
-	return meta, nil
+	return Metadata{Tag: tag, Version: strings.TrimPrefix(tag, "v")}, nil
 }

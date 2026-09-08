@@ -61,7 +61,7 @@ RELEASE_TAG ?= v$(PACKAGE_VERSION)
 export RELEASE_TAG
 RELEASE_REPO ?= brianrackle/codelima
 DIST_DIR ?= $(CURDIR)/dist
-FORMULA_OUTPUT ?= $(DIST_DIR)/codelima$(if $(findstring -beta.,$(RELEASE_TAG)),-beta).rb
+FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
 INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
 

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag, for example v1.2.3 or v1.3.0-beta.1"
+        description: "Existing release tag, for example v1.2.3"
         required: true
         type: string
 
@@ -27,8 +27,6 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
-      formula_name: ${{ steps.meta.outputs.formula_name }}
-      prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -92,17 +90,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.metadata.outputs.tag }}
-          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
         shell: bash
         run: |
-          flags=(--verify-tag --prerelease="$PRERELEASE")
-          if [ "$PRERELEASE" = true ]; then
-            notes=".github/release-notes/$TAG.md"
-            test -s "$notes"
-            flags+=(--latest=false --notes-file "$notes")
-          fi
+          notes=".github/release-notes/$TAG.md"
+          test -s "$notes"
           gh release create "$TAG" ./tmp/release/dist/*.tar.gz ./tmp/release/dist/*.json \
-            --repo "$GH_REPO" --title "$TAG" --generate-notes "${flags[@]}"
+            --repo "$GH_REPO" --title "$TAG" --generate-notes \
+            --verify-tag --prerelease=false --latest=true --notes-file "$notes"
 
   update-homebrew-tap:
     needs:
@@ -124,18 +118,16 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
           RELEASE_REPO: ${{ github.repository }}
-          FORMULA_NAME: ${{ needs.metadata.outputs.formula_name }}
         run: |
           mkdir -p ./tmp/release/generated/Formula
           make package-formula \
             DIST_DIR="$GITHUB_WORKSPACE/tmp/release/dist" \
-            FORMULA_OUTPUT="$GITHUB_WORKSPACE/tmp/release/generated/Formula/$FORMULA_NAME.rb"
+            FORMULA_OUTPUT="$GITHUB_WORKSPACE/tmp/release/generated/Formula/codelima.rb"
       - name: Update tap repository
         env:
           HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
           HOMEBREW_TAP_BRANCH: ${{ vars.HOMEBREW_TAP_BRANCH }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          FORMULA_NAME: ${{ needs.metadata.outputs.formula_name }}
           TAG: ${{ needs.metadata.outputs.tag }}
         shell: bash
         run: |
@@ -148,13 +140,14 @@ jobs:
           cd "$GITHUB_WORKSPACE/tmp/release/tap"
           git checkout "$TAP_BRANCH"
           mkdir -p Formula
-          cp "$GITHUB_WORKSPACE/tmp/release/generated/Formula/$FORMULA_NAME.rb" "Formula/$FORMULA_NAME.rb"
-          git add "Formula/$FORMULA_NAME.rb"
+          cp "$GITHUB_WORKSPACE/tmp/release/generated/Formula/codelima.rb" "Formula/codelima.rb"
+          git add "Formula/codelima.rb"
+          git rm --ignore-unmatch -- "Formula/codelima-beta.rb"
           if git diff --cached --quiet; then
             echo "Homebrew formula already up to date"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Update $FORMULA_NAME to $TAG"
+          git commit -m "Update codelima to $TAG"
           git push origin "HEAD:${TAP_BRANCH}"

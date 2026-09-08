@@ -231,9 +231,6 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	var builder strings.Builder
 	builder.WriteString("class ")
 	builder.WriteString(FormulaClassName)
-	if meta.Prerelease {
-		builder.WriteString("Beta")
-	}
 	builder.WriteString(" < Formula\n")
 	builder.WriteString("  desc ")
 	builder.WriteString(rubyString(FormulaDesc))
@@ -247,9 +244,6 @@ func RenderHomebrewFormula(spec FormulaSpec) (string, error) {
 	builder.WriteString("  version ")
 	builder.WriteString(rubyString(spec.Manifests[0].Version))
 	builder.WriteString("\n\n")
-	if meta.Prerelease {
-		builder.WriteString("  keg_only \"it provides the opt-in beta channel\"\n\n")
-	}
 
 	for _, goos := range []string{"darwin", "linux"} {
 		arches := assetsByTarget[goos]

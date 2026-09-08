@@ -2,26 +2,31 @@
 
 ## Open Work
 
-### 44. Complete manual qualification of the published libghostty Homebrew beta
+### 44. Complete manual qualification of the published libghostty release
 
-Partially complete: `v0.3.0-beta.3` is published as a GitHub prerelease and
+Partially complete: `v0.3.0-beta.3` was published as a GitHub prerelease and
 `brianrackle/codelima/codelima-beta` on Homebrew. All native verification, race,
 integration and package jobs passed on macOS arm64 and Linux amd64/arm64.
-Public downloads match all manifests and the beta formula; stable Latest and
-the stable formula remain unchanged. The downloaded Linux arm64 CLI/worker
+Public downloads matched all manifests and the beta formula; stable Latest and
+the stable formula were unchanged during beta publication. The downloaded Linux arm64 CLI/worker
 also passed the real package smoke test. Evidence and earlier failed candidate
 history are in [the beta QA report](plans/homebrew_beta_qa.md).
 
+The maintainer subsequently requested promoting this same application code as
+`v0.3.0` through regular `codelima` and retiring the beta formula. Publication
+evidence for that promotion is recorded in `plans/regular_release_qa.md`.
+
 Problem: native/manual and interactive QA gates from #41/#43 remain open,
 including the full upstream Ghostty Debug suite and actual Homebrew installation.
-The maintainer authorized this beta with those checks explicitly marked
-unverified in its release notes. That exception does not complete qualification.
+The maintainer authorized beta publication and its subsequent regular promotion
+with those checks explicitly marked unverified in release notes. These
+publication decisions do not complete qualification.
 
 Suggested solution: finish every remaining QA.md flow on supported native
 hosts, including the unfiltered upstream suite on an adequately sized host,
 Flow 11's Homebrew installation, VZ/KVM/forwarding, and physical keyboard,
 graphics, selection and multi-window checks. Record results and clean all
-disposable verification state before considering stable promotion.
+disposable verification state before closing this qualification item.
 
 Native packaging follow-up: the macOS 14.8.9 runner warns that the native
 build-identity object targets 14.8.9 while cgo links for 14.0. The runner's
@@ -29,9 +34,15 @@ executables passed their tests. Align the Zig and cgo deployment-target
 metadata and qualify the oldest supported macOS version; this makes the
 declared compatibility explicit but requires a native rebuild and qualification.
 
-Advantages: completes platform evidence before stable promotion while beta
-users can opt in now. Disadvantages: requires native hosts and interactive
-work unavailable in this guest; the full upstream suite needs more memory.
+Local tooling observation: one disposable tap test push reported a missing Git
+tree object on the shared development filesystem. Ten focused race repetitions
+and the complete standard rerun passed. If it recurs, preserve the fixture's
+object database and inspect Git/shared-filesystem behavior before changing the
+release workflow; this enables diagnosis but requires retaining failed scratch
+state temporarily and cleaning it after investigation.
+
+Advantages: completes platform evidence for the published release.
+Disadvantages: requires native hosts and interactive work unavailable in this guest; the full upstream suite needs more memory.
 
 ### 43. Qualify the focus-toggle lifecycle fix and audit other shortcut actions
 

@@ -1,5 +1,7 @@
 # Isolate Homebrew Beta Releases
 
+Superseded by [ADR 137](use_one_regular_homebrew_release_channel_137.md).
+
 ## Context and Problem Statement
 
 The libghostty branch needs an opt-in Homebrew beta. The existing release
