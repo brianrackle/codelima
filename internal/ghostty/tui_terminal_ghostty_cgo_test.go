@@ -1027,6 +1027,22 @@ func TestGhosttyKeyEncoderMatchesExistingCommonSequences(t *testing.T) {
 	}
 }
 
+func TestGhosttyKeyEncoderPreservesAltAfterTerminalOptionsRefresh(t *testing.T) {
+	terminal := newCaptureTestTerminal(t, "alt-refresh")
+	defer terminal.Close()
+	key := vaxis.Key{Keycode: 'x', BaseLayoutCode: 'x', Modifiers: vaxis.ModAlt}
+	for range 2 {
+		got := encodeTUITerminalKeyWithGhostty(key, terminal.keyEncoder, terminal.term, false, false)
+		if got != "\x1bx" {
+			t.Fatalf("Alt+x after terminal options refresh = %q, want ESC x", got)
+		}
+	}
+	got := encodeTUITerminalKeyWithGhostty(key, terminal.keyEncoder, nil, false, false)
+	if got != "\x1bx" {
+		t.Fatalf("Alt+x without terminal = %q, want ESC x", got)
+	}
+}
+
 func TestGhosttyKeyEncoderUsesTerminalModifyOtherKeysMode(t *testing.T) {
 	t.Parallel()
 

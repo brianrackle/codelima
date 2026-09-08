@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -94,13 +95,24 @@ func TestPackagedStaticRenderer(t *testing.T) {
 			t.Fatalf("read %s Go build provenance: %v", name, err)
 		}
 		foundID := false
+		cgoEnabled := ""
 		for _, setting := range info.Settings {
+			if setting.Key == "CGO_ENABLED" {
+				cgoEnabled = setting.Value
+			}
 			if setting.Key == "-ldflags" {
 				foundID = strings.Contains(setting.Value, "rendererbuild.identityOverride="+manifest.RendererBuildID) && strings.Contains(setting.Value, "codelima.Version="+manifest.Version)
 			}
 		}
 		if !foundID {
 			t.Fatalf("%s did not embed the release version and native identity", name)
+		}
+		wantCGO := "1"
+		if name == "codelima" && runtime.GOOS != "darwin" {
+			wantCGO = "0"
+		}
+		if cgoEnabled != wantCGO {
+			t.Fatalf("%s CGO_ENABLED = %q, want %q for the platform host capability/renderer boundary", name, cgoEnabled, wantCGO)
 		}
 	}
 	if len(paths) != 2 {

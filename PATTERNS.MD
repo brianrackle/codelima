@@ -10,6 +10,14 @@ and stage the selected formula before checking the tap diff so a newly added
 beta formula is committed. Beta formulae are keg-only to preserve the user's
 current command selection (ADR 135).
 
+Keep renderer dependency checks separate from platform host adapters. Only the
+worker imports `internal/ghostty`; the CLI's macOS cgo source is restricted to
+the Virtualization.framework capability adapter. Check source selection for
+Linux and Darwin even on a Linux test host, and inspect `CGO_ENABLED` in the
+actual packaged executables so packaging cannot silently select a false stub
+on macOS (ADR 136). Apply frontend Option-as-Alt policy after refreshing native
+terminal key options, which resets that host-specific setting upstream.
+
 ## Managed native build metadata tools
 
 Bootstrap build-time tools into the platform-scoped `.tooling/<os>-<arch>`

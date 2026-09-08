@@ -50,7 +50,7 @@ func TestRendererPortablePackagesContainNoCGO(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, releaseGoBinary(t), "list", "-f", "{{.ImportPath}}:{{len .CgoFiles}}", "./internal/codelima", "./internal/terminalio", "./internal/terminalstate", "./internal/rendererbuild")
+	command := exec.CommandContext(ctx, releaseGoBinary(t), "list", "-f", "{{.ImportPath}}:{{len .CgoFiles}}", "./internal/terminalio", "./internal/terminalstate", "./internal/rendererbuild")
 	command.Dir = root
 	command.Env = append(os.Environ(), "CGO_ENABLED=1")
 	output, err := command.CombinedOutput()
@@ -61,5 +61,32 @@ func TestRendererPortablePackagesContainNoCGO(t *testing.T) {
 		if !strings.HasSuffix(line, ":0") {
 			t.Errorf("portable package gained native source: %s", line)
 		}
+	}
+}
+
+func TestRendererApplicationNativeSourcesAreOnlyMacOSHostCapability(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, releaseGoBinary(t), "list", "-f", "{{.CgoFiles}}|{{.CFiles}}|{{.CXXFiles}}|{{.MFiles}}", "./internal/codelima")
+			command.Dir = root
+			command.Env = append(os.Environ(), "CGO_ENABLED=1", "GOOS="+goos, "GOARCH=arm64")
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("inspect host capability boundary: %v, %s", err, output)
+			}
+			want := "[]|[]|[]|[]"
+			if goos == "darwin" {
+				want = "[nested_virtualization_darwin.go]|[]|[]|[nested_virtualization_darwin.m]"
+			}
+			if strings.TrimSpace(string(output)) != want {
+				t.Fatalf("unexpected application native sources: %s, want %s", output, want)
+			}
+		})
 	}
 }

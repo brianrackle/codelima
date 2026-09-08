@@ -47,8 +47,10 @@ managed Zig, not a script that special-cases Ghostty flags. No system
 `pkg-config`, Homebrew package, or host C compiler is needed to provision it.
 Make uses a host `cc` for cgo when present and otherwise uses managed Zig.
 Zig and `pkgconf` are installed before Go-based development tools. The
-CLI/daemon package graph contains no Ghostty cgo; release packaging builds the
-main executable with `CGO_ENABLED=0`.
+CLI/daemon package graph contains no Ghostty cgo. Linux release packaging builds
+the main executable with `CGO_ENABLED=0`; macOS enables cgo only for its existing
+Virtualization.framework host-capability adapter (ADR 136). The renderer worker
+uses cgo on every platform.
 
 `make pkg-config` provisions just Go, Zig, and the metadata resolver;
 `make test-pkgconf` adds its focused installer and resolver tests. Both
@@ -413,18 +415,19 @@ brew upgrade codelima
 The same automated and manual qualification gates apply to beta releases.
 The native and interactive checks still open in TODO #41/#43 must be completed
 before publishing this branch; beta channel support does not mark them passed.
-On 2026-09-08 the maintainer explicitly authorized publishing `v0.3.0-beta.1`
+On 2026-09-08 the maintainer explicitly authorized publishing the libghostty beta
 with those remaining checks marked unverified. This exception applies to that
-beta only. Every beta needs a nonempty `.github/release-notes/<tag>.md`; the
+release only. The first candidate failed native checks; the corrected candidate
+is `v0.3.0-beta.2`. Every beta needs a nonempty `.github/release-notes/<tag>.md`; the
 workflow prepends it to the generated release notes. Record qualification
 limitations there before tagging.
 
 After qualifying and committing the candidate on `feat/libghostty-vt-adoption`:
 
 ```sh
-make --silent release-metadata RELEASE_TAG=v0.3.0-beta.1
-git tag -a v0.3.0-beta.1 -m 'CodeLima 0.3.0 beta 1: libghostty-vt adoption'
-git push origin feat/libghostty-vt-adoption v0.3.0-beta.1
+make --silent release-metadata RELEASE_TAG=v0.3.0-beta.2
+git tag -a v0.3.0-beta.2 -m 'CodeLima 0.3.0 beta 2: libghostty-vt adoption'
+git push origin feat/libghostty-vt-adoption v0.3.0-beta.2
 ```
 
 This publishes a GitHub prerelease and updates only

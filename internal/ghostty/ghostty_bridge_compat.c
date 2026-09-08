@@ -996,6 +996,12 @@ GhosttyResult ghostty_bridge_key_encoder_encode_event(
 	size_t* out_len
 ) {
 
+	/* Vaxis has already interpreted the host's Option key. Preserve its Alt
+	 * modifier as terminal input on every platform. setopt_from_terminal resets
+	 * this host policy, so reapply it immediately before each encoding call. */
+	GhosttyOptionAsAlt option_as_alt = GHOSTTY_OPTION_AS_ALT_TRUE;
+	ghostty_key_encoder_setopt(encoder, GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, &option_as_alt);
+
 	GhosttyKeyEvent event = NULL;
 	GhosttyResult result = ghostty_key_event_new(NULL, &event);
 	if (result != GHOSTTY_SUCCESS || event == NULL) {

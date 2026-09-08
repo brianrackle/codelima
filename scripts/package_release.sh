@@ -64,7 +64,11 @@ export PKG_CONFIG="$TOOLS_DIR/bin/pkg-config"
 export PKG_CONFIG_PATH="$NATIVE_ROOT/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 LDFLAGS="-X github.com/brianrackle/codelima/internal/codelima.Version=$VERSION -X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=$RENDERER_BUILD_ID"
 mkdir -p "$(dirname "$BUILD_BIN")" "$(dirname "$RENDERER_BIN")" "$DIST_DIR"
-CGO_ENABLED=0 "$GO_BIN" build -ldflags "$LDFLAGS" -o "$BUILD_BIN" ./cmd/codelima
+# macOS needs its existing Virtualization.framework host-capability adapter.
+# Ghostty remains outside the CLI dependency graph on every platform.
+CLI_CGO=0
+if [ "$GOOS" = darwin ]; then CLI_CGO=1; fi
+CGO_ENABLED="$CLI_CGO" "$GO_BIN" build -ldflags "$LDFLAGS" -o "$BUILD_BIN" ./cmd/codelima
 CGO_ENABLED=1 "$GO_BIN" build -ldflags "$LDFLAGS" -o "$RENDERER_BIN" ./cmd/codelima-renderer-worker
 "$GO_BIN" run ./cmd/codelima-release archive \
   --version "$VERSION" \

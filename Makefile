@@ -124,7 +124,7 @@ test-installers:
 	$(GO) test ./internal/release -run Installer
 
 test-renderer-boundary:
-	$(GO) test ./internal/release -run 'TestRenderer(NativeDependency|PortablePackages)'
+	$(GO) test ./internal/release -run 'TestRenderer(NativeDependency|PortablePackages|ApplicationNative)'
 
 .PHONY: test-vaxis-fork
 test-vaxis-fork:

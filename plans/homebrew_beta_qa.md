@@ -2,10 +2,18 @@
 
 Candidate: `0.3.0-beta.1` on `feat/libghostty-vt-adoption`, including the local
 release-support changes over `90e22d89f34e757ec977f7cfbdb2aec9d5b100a2`.
-No tag, GitHub release, or public tap update has been created.
+At preparation time no tag, GitHub release, or public tap update existed.
 The maintainer subsequently authorized publishing this beta on 2026-09-08
 with the remaining native checks explicitly marked unverified. The exception
 does not convert any unexecuted QA flow into a passing result.
+
+The first tag `v0.3.0-beta.1` points to
+`35785cb699d61c13ba5779d0b451dad961fe480c`. Its
+[native workflow](https://github.com/brianrackle/codelima/actions/runs/34250335019)
+failed macOS verification: Alt+x encoded to no bytes and the portable cgo guard
+rejected the existing host-capability adapter. No release or tap update was
+published. ADR 136 corrects both issues and preserves the adapter in macOS
+packages. The corrected release candidate is `v0.3.0-beta.2`.
 
 ## Automated verification
 
