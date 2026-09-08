@@ -418,16 +418,16 @@ before publishing this branch; beta channel support does not mark them passed.
 On 2026-09-08 the maintainer explicitly authorized publishing the libghostty beta
 with those remaining checks marked unverified. This exception applies to that
 release only. The first candidate failed native checks; the corrected candidate
-is `v0.3.0-beta.2`. Every beta needs a nonempty `.github/release-notes/<tag>.md`; the
+is `v0.3.0-beta.3`. Every beta needs a nonempty `.github/release-notes/<tag>.md`; the
 workflow prepends it to the generated release notes. Record qualification
 limitations there before tagging.
 
 After qualifying and committing the candidate on `feat/libghostty-vt-adoption`:
 
 ```sh
-make --silent release-metadata RELEASE_TAG=v0.3.0-beta.2
-git tag -a v0.3.0-beta.2 -m 'CodeLima 0.3.0 beta 2: libghostty-vt adoption'
-git push origin feat/libghostty-vt-adoption v0.3.0-beta.2
+make --silent release-metadata RELEASE_TAG=v0.3.0-beta.3
+git tag -a v0.3.0-beta.3 -m 'CodeLima 0.3.0 beta 3: libghostty-vt adoption'
+git push origin feat/libghostty-vt-adoption v0.3.0-beta.3
 ```
 
 This publishes a GitHub prerelease and updates only

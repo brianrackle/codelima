@@ -1,5 +1,13 @@
 # Patterns
 
+## Observe progress in native process tests
+
+Wait for specific output or state with a bounded deadline before triggering
+handoff or asserting recovery. Native shell startup and external commands such
+as `sleep` have platform-dependent overhead; a requested sleep duration is not
+the loop's elapsed time. Preserve exact terminal IDs and shell PIDs across
+handoff/rollback, and retain content-continuity assertions after progress occurs.
+
 ## Release channel from a validated tag
 
 Use `internal/release.ParseTag` for both GitHub release metadata and Homebrew

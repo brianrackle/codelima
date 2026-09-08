@@ -15,6 +15,15 @@ rejected the existing host-capability adapter. No release or tap update was
 published. ADR 136 corrects both issues and preserves the adapter in macOS
 packages. The corrected release candidate is `v0.3.0-beta.2`.
 
+The second candidate `effc43ffd888a3067365174bc03c294b0a254ff5` passed macOS
+verify and race checks and both complete Linux jobs in
+[its workflow](https://github.com/brianrackle/codelima/actions/runs/34251455962).
+macOS integration failed because counter progress had reached only 28 within
+the five-second window and rollback had reached only 5 after the fixed delay.
+Beta.3 replaces fixed readiness delays with bounded waits for exact output,
+retains every counter-continuity assertion, and adds shell PID preservation
+checks. The second candidate also produced no public release or tap update.
+
 ## Automated verification
 
 Passed on Linux/aarch64:

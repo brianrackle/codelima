@@ -189,7 +189,8 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		}
 		command := "i=0; while [ $i -lt 80 ]; do echo COUNT=$i; i=$((i+1)); sleep 0.02; done\r"
 		h.run(true, "terminal", "send", terminal.TerminalID, "--text", command)
-		time.Sleep(200 * time.Millisecond)
+		h.waitForCounter(terminal.TerminalID, "COUNT=5")
+		shellPID := h.shellPID(terminal.TerminalID)
 		var update struct {
 			Updated     bool   `json:"updated"`
 			LiveHandoff bool   `json:"live_handoff"`
@@ -201,27 +202,14 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		if !update.Updated || !update.LiveHandoff || update.Fallback != "" {
 			t.Fatalf("live update = %#v", update)
 		}
-		var read struct {
-			TerminalID string `json:"terminal_id"`
-			Text       string `json:"text"`
-		}
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			if err := json.Unmarshal(h.json("terminal", "read", terminal.TerminalID, "--source", "recent"), &read); err != nil {
-				t.Fatal(err)
-			}
-			if containsCounter(read.Text, "COUNT=29") || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(25 * time.Millisecond)
-		}
-		if read.TerminalID != terminal.TerminalID {
-			t.Fatalf("terminal id changed: %q -> %q", terminal.TerminalID, read.TerminalID)
+		text := h.waitForCounter(terminal.TerminalID, "COUNT=29")
+		if got := h.shellPID(terminal.TerminalID); got != shellPID {
+			t.Fatalf("handoff replaced shell pid %d with %d", shellPID, got)
 		}
 		for i := 0; i < 30; i++ {
 			needle := fmt.Sprintf("COUNT=%d", i)
-			if !containsCounter(read.Text, needle) {
-				t.Fatalf("handoff output lost %s:\n%s", needle, read.Text)
+			if !containsCounter(text, needle) {
+				t.Fatalf("handoff output lost %s:\n%s", needle, text)
 			}
 		}
 		h.run(true, "terminal", "close", terminal.TerminalID)
@@ -242,11 +230,12 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		}
 		_ = json.Unmarshal(h.json("terminal", "open", "node:"+nodeID, "--kind", "node-host-shell"), &terminal)
 		h.run(true, "terminal", "send", terminal.TerminalID, "--text", "i=0; while [ $i -lt 40 ]; do echo ROLLBACK=$i; i=$((i+1)); sleep 0.03; done\r")
-		time.Sleep(200 * time.Millisecond)
+		h.waitForCounter(terminal.TerminalID, "ROLLBACK=5")
+		shellPID := h.shellPID(terminal.TerminalID)
 		if output, code := h.run(false, "daemon", "update", h.bin); code != 6 || !strings.Contains(output, "injected import failure") {
 			t.Fatalf("failed update = %d, %q", code, output)
 		}
-		time.Sleep(300 * time.Millisecond)
+		h.waitForCounter(terminal.TerminalID, "ROLLBACK=10")
 		var after struct {
 			PID int `json:"pid"`
 		}
@@ -254,15 +243,55 @@ func TestDaemonLiveHandoffAndRollback(t *testing.T) {
 		if after.PID != before.PID {
 			t.Fatalf("rollback replaced daemon pid %d with %d", before.PID, after.PID)
 		}
-		var read struct {
-			Text string `json:"text"`
-		}
-		_ = json.Unmarshal(h.json("terminal", "read", terminal.TerminalID, "--source", "recent"), &read)
-		if !containsCounter(read.Text, "ROLLBACK=10") {
-			t.Fatalf("terminal did not continue after rollback:\n%s", read.Text)
+		if got := h.shellPID(terminal.TerminalID); got != shellPID {
+			t.Fatalf("rollback replaced shell pid %d with %d", shellPID, got)
 		}
 		h.run(true, "terminal", "close", terminal.TerminalID)
 	})
+}
+
+// Real shell startup and external sleep invocations vary substantially between
+// native runners. Wait for observed output, retaining a deadline and exact IDs,
+// instead of treating a fixed delay as evidence that the shell progressed.
+func (h *harness) waitForCounter(terminalID, counter string) string {
+	h.t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var read struct {
+			TerminalID string `json:"terminal_id"`
+			Text       string `json:"text"`
+		}
+		if err := json.Unmarshal(h.json("terminal", "read", terminalID, "--source", "recent"), &read); err != nil {
+			h.t.Fatal(err)
+		}
+		if read.TerminalID != terminalID {
+			h.t.Fatalf("terminal id changed: %q -> %q", terminalID, read.TerminalID)
+		}
+		if containsCounter(read.Text, counter) {
+			return read.Text
+		}
+		if time.Now().After(deadline) {
+			h.t.Fatalf("terminal did not reach %s:\n%s", counter, read.Text)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func (h *harness) shellPID(terminalID string) int {
+	h.t.Helper()
+	var snapshot struct {
+		TerminalRuntimes map[string]struct {
+			ShellPID int `json:"shell_pid"`
+		} `json:"terminal_runtimes"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "snapshot"), &snapshot); err != nil {
+		h.t.Fatal(err)
+	}
+	pid := snapshot.TerminalRuntimes[terminalID].ShellPID
+	if pid <= 0 {
+		h.t.Fatalf("missing shell pid for terminal %q", terminalID)
+	}
+	return pid
 }
 
 func TestDaemonLiveHandoffWithFullRendererJournal(t *testing.T) {

@@ -6,8 +6,11 @@
 
 Problem: beta channel support is prepared on `feat/libghostty-vt-adoption`
 (ADR 135). `v0.3.0-beta.1` was tagged but failed native macOS verification;
-no release was published. The corrected `v0.3.0-beta.2` candidate addresses
-Alt encoding and the host-adapter/package cgo boundary (ADR 136). Native and
+no release was published. The `v0.3.0-beta.2` candidate fixes Alt encoding and
+the host-adapter/package cgo boundary (ADR 136); its macOS verify and race suites
+passed, but the integration counter timing assumptions failed. Beta.3 waits for
+observed counter progress and asserts the shell PID across handoff/rollback.
+Neither earlier candidate produced a public release. Native and
 interactive QA gates from #41/#43 remain open. This Linux/aarch64 guest lacks
 Homebrew, Lima, usable KVM, and native macOS/two-window terminal access.
 Local automated and candidate-package evidence is recorded in
