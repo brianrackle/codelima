@@ -2,35 +2,36 @@
 
 ## Open Work
 
-### 44. Qualify and publish the libghostty Homebrew beta
+### 44. Complete manual qualification of the published libghostty Homebrew beta
 
-Problem: beta channel support is prepared on `feat/libghostty-vt-adoption`
-(ADR 135). `v0.3.0-beta.1` was tagged but failed native macOS verification;
-no release was published. The `v0.3.0-beta.2` candidate fixes Alt encoding and
-the host-adapter/package cgo boundary (ADR 136); its macOS verify and race suites
-passed, but the integration counter timing assumptions failed. Beta.3 waits for
-observed counter progress and asserts the shell PID across handoff/rollback.
-Neither earlier candidate produced a public release. Native and
-interactive QA gates from #41/#43 remain open. This Linux/aarch64 guest lacks
-Homebrew, Lima, usable KVM, and native macOS/two-window terminal access.
-Local automated and candidate-package evidence is recorded in
-[the beta QA report](plans/homebrew_beta_qa.md).
-On 2026-09-08 the maintainer authorized publication with these remaining
-checks explicitly marked unverified in the beta release notes. Publication
-may proceed under that exception; the qualification work remains open.
+Partially complete: `v0.3.0-beta.3` is published as a GitHub prerelease and
+`brianrackle/codelima/codelima-beta` on Homebrew. All native verification, race,
+integration and package jobs passed on macOS arm64 and Linux amd64/arm64.
+Public downloads match all manifests and the beta formula; stable Latest and
+the stable formula remain unchanged. The downloaded Linux arm64 CLI/worker
+also passed the real package smoke test. Evidence and earlier failed candidate
+history are in [the beta QA report](plans/homebrew_beta_qa.md).
 
-Suggested solution: finish every QA.md flow on supported native hosts,
-including the full upstream Ghostty suite on a sufficiently large host and
-Flow 11's actual Homebrew installation. Record the candidate's automated and
-manual results, commit the release support, then push the beta tag using
-BUILD.md. Confirm all three native release jobs pass, GitHub marks it
-prerelease rather than Latest, and only `Formula/codelima-beta.rb` changes in
-the tap. Git transport works here; the existing Actions tap settings still
-need confirmation during publication. Clean all disposable verification state.
+Problem: native/manual and interactive QA gates from #41/#43 remain open,
+including the full upstream Ghostty Debug suite and actual Homebrew installation.
+The maintainer authorized this beta with those checks explicitly marked
+unverified in its release notes. That exception does not complete qualification.
 
-Advantages: delivers an explicit beta channel without silently enrolling stable
-users, with evidence for the paired native binaries. Disadvantages: requires
-native hosts and interactive work unavailable here; publication remains pending.
+Suggested solution: finish every remaining QA.md flow on supported native
+hosts, including the unfiltered upstream suite on an adequately sized host,
+Flow 11's Homebrew installation, VZ/KVM/forwarding, and physical keyboard,
+graphics, selection and multi-window checks. Record results and clean all
+disposable verification state before considering stable promotion.
+
+Native packaging follow-up: the macOS 14.8.9 runner warns that the native
+build-identity object targets 14.8.9 while cgo links for 14.0. The runner's
+executables passed their tests. Align the Zig and cgo deployment-target
+metadata and qualify the oldest supported macOS version; this makes the
+declared compatibility explicit but requires a native rebuild and qualification.
+
+Advantages: completes platform evidence before stable promotion while beta
+users can opt in now. Disadvantages: requires native hosts and interactive
+work unavailable in this guest; the full upstream suite needs more memory.
 
 ### 43. Qualify the focus-toggle lifecycle fix and audit other shortcut actions
 

@@ -134,12 +134,18 @@ test-ghostty-adapter: ghostty-vt
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/ghostty ./internal/codelima ./internal/terminalstate -run '$(GHOSTTY_TEST_FILTER)' -count=1
 
 # Exercise the actual release pair without replacing development executables.
+PACKAGE_SMOKE_TEST = $(GO) test -ldflags "$(RENDERER_LDFLAGS)" -tags=packageintegration ./internal/codelima -run '^TestPackagedStaticRenderer$$' -count=1
+
 test-package: init
 	@set -eu; mkdir -p '$(CURDIR)/tmp'; \
 	package_test_tmp=$$(mktemp -d '$(CURDIR)/tmp/package-test.XXXXXX'); \
 	trap 'rm -rf "$$package_test_tmp"' EXIT; \
 	PKG_CONFIG="$$package_test_tmp/unavailable-pkg-config" /bin/sh ./scripts/package_release.sh 0.0.0-package-test '$(GO)' '$(TOOLS_DIR)' "$$package_test_tmp/dist" "$$package_test_tmp/build/codelima" '$(PLATFORM_TAG)' "$$package_test_tmp/build/codelima-renderer-worker"; \
-	CODELIMA_PACKAGE_TEST_DIST="$$package_test_tmp/dist" $(GO) test -ldflags "$(RENDERER_LDFLAGS)" -tags=packageintegration ./internal/codelima -run '^TestPackagedStaticRenderer$$' -count=1
+	CODELIMA_PACKAGE_TEST_DIST="$$package_test_tmp/dist" $(PACKAGE_SMOKE_TEST)
+
+.PHONY: test-package-artifact
+test-package-artifact: init
+	CODELIMA_PACKAGE_TEST_DIST='$(DIST_DIR)' $(PACKAGE_SMOKE_TEST)
 
 gopls: init
 	$(GOPLS) $(GOPLS_ARGS)

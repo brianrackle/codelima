@@ -279,6 +279,12 @@ legacy shared-library paths. Packaging is deliberately passed an invalid
 inherited `PKG_CONFIG` to verify that direct packaging selects the managed
 resolver itself. Run it on every release platform.
 
+To verify an already downloaded native archive without rebuilding that archive,
+place it and its single matching manifest in a directory and run
+`make test-package-artifact DIST_DIR=./tmp/downloaded-native-release`. This uses
+the same checksum, build-provenance, executable and real renderer smoke checks.
+Remove downloaded verification artifacts afterward.
+
 ## Homebrew Formula Generation
 
 The Homebrew formula is generated from the release manifests rather than maintained by hand.

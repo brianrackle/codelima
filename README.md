@@ -220,6 +220,11 @@ implementation (`pkgconf`), and the static Ghostty dependency under
 `.tooling/<os>-<arch>`. No Homebrew or system `pkg-config` installation is needed
 for source builds; the first bootstrap requires network access.
 
+Run `make verify` for formatting, lint, tests and a build. To check a downloaded
+archive for the current platform, place it and its matching manifest together
+under `./tmp/` and run `make test-package-artifact DIST_DIR=./tmp/release-check`.
+Remove those downloaded verification files afterward.
+
 Requirements:
 
 - macOS arm64, Linux amd64, or Linux arm64

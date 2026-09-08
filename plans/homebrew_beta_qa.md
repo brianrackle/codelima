@@ -1,5 +1,41 @@
 # Homebrew Beta Preparation — 2026-09-08
 
+## Published result
+
+Published [v0.3.0-beta.3](https://github.com/brianrackle/codelima/releases/tag/v0.3.0-beta.3)
+from `1c146b71e0a43a29b84d7426caa02f210ed6428c` on the libghostty branch.
+[Release workflow 34252513885](https://github.com/brianrackle/codelima/actions/runs/34252513885)
+passed every job, including verify, race, integration and package smoke tests
+on macOS arm64 and Linux amd64/arm64. The macOS fixes and output-based handoff
+checks passed on the actual native runner.
+
+Homebrew published `Formula/codelima-beta.rb` in tap commit
+`a8ecf2967f073eba233d4e4561f7a78866e4f8db`. All three formula URLs and checksums were compared
+with the downloaded release manifests and archives. Each archive contains
+exactly the executable CLI and renderer worker. The release is a published
+prerelease, contains the explicit qualification limitations, and Latest still
+points to `v0.2.3`. The stable formula remains byte-for-byte unchanged (SHA-256
+`1e6f8bf759e853d9a7d3a9a9fee99789f192c150af79aeb2713596fbe610d3ad`).
+
+`make test-package-artifact` passed against the actual downloaded Linux arm64
+archive: build provenance, version, modes, empty-PATH CLI help/version, native
+worker initialization and output/read. The shared `make test-package` recipe
+also passed after extracting that reusable artifact-check command.
+
+| Published archive | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `codelima_0.3.0-beta.3_darwin_arm64.tar.gz` | 12,872,590 | `fdf4f118762fc1575388a577c3bf1394cc50c929001d84390426e09b263b256a` |
+| `codelima_0.3.0-beta.3_linux_amd64.tar.gz` | 13,192,098 | `f89d144c81115a2e1d8c7e386c392990d4c0e21449895ad9eef83d747c9ea025` |
+| `codelima_0.3.0-beta.3_linux_arm64.tar.gz` | 12,396,729 | `4b41d7065b6bcd0b86b8acbf5bb98c13ba6721d1217cbe33ff4f13f76ebebf5b` |
+
+Manual Homebrew installation, native VM/forwarding and physical/interactive QA,
+and the full upstream Ghostty Debug suite remain unverified as disclosed.
+Publication is complete; remaining qualification stays in TODO #44.
+All downloaded archives, manifests and temporary verification metadata were
+removed after validation, and package tests cleaned their renderer processes.
+
+## Initial preparation history
+
 Candidate: `0.3.0-beta.1` on `feat/libghostty-vt-adoption`, including the local
 release-support changes over `90e22d89f34e757ec977f7cfbdb2aec9d5b100a2`.
 At preparation time no tag, GitHub release, or public tap update existed.
