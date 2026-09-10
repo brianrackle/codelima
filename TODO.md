@@ -2,6 +2,32 @@
 
 ## Open Work
 
+### 49. Make VirtioFS ticker cancellation coverage deterministic
+
+Problem: the first macOS `v0.3.2` release job failed under `-race` with
+`panic: close of closed channel` in
+`TestVirtioFSReclaimTickerCloseCancelsActiveReclaim` at
+`virtiofs_reclaim_test.go:102`. This unchanged test closes its notification
+channel on every callback. If a tick and cancellation are both ready, the
+ticker's select can invoke the callback again with a canceled context. The
+separate macOS CI race job passed on the same commit. This failure is separate
+from the resize/input changes; its evidence is in release run 34535427384,
+job 103065882505. A local Linux arm64 run of 500 race-enabled repetitions
+also passed. The complete macOS release job passed on its one retry, without
+changing the tag or skipping checks; that does not eliminate the scheduling
+edge.
+
+Suggested solution: check cancellation before starting a reclaim (including
+after acquiring the run lock), make the test notification safe for repeated
+calls, and add deterministic coverage for a pending tick during cancellation.
+Keep active-reclaim cancellation and bounded Close assertions.
+
+Advantages: removes scheduler-dependent test panics and avoids unnecessary
+reclaim attempts after cancellation.
+Disadvantages: requires defining ticker shutdown semantics and checking
+repeated Start/Close behavior; a notification-only change could hide the
+underlying scheduling edge. Deferred from the terminal patch release.
+
 ### 48. [resolved] Fix idle daemon handoff after resizing
 
 Problem: September 10 resize QA's disposable Linux/aarch64 daemon stalled in
@@ -58,6 +84,13 @@ The maintainer subsequently requested merging and releasing these fixes as
 the remaining manual checks complete. A previously blocked old daemon can
 still require stop/start recovery, which closes its terminals.
 
+Published as `v0.3.2` at `da3d4985893112f8f91a23e18cd16d6d08e79892`.
+Native automated verification, race, integration and package checks passed
+on all three release targets. Public archives/manifests, Latest status and
+the standard Homebrew formula were verified, and the downloaded Linux arm64
+package passed its real renderer smoke test. The initial macOS test flake and
+successful retry are documented in #49 and the release report.
+
 Local manual evidence used the built TUI, real host PTY/Ghostty worker and an
 isolated tmux server on Linux/aarch64. One stopped-node metadata/list fixture
 enabled host tabs; no VM was created:
@@ -85,8 +118,9 @@ enabled host tabs; no VM was created:
   access denied. No macOS process sample was possible.
 - Flow 10: full Go normal/race tests, integration, local static package smoke,
   focused native encoder/resize checks and Ghostty resize/dirty-frame regressions
-  passed. Full upstream/native-library, other-platform packages, physical
-  graphics/theme/clipboard and multi-window qualification remains in #41/#44.
+  passed. Published packages passed native automated qualification on all
+  three targets. Full upstream/native-library, physical graphics/theme/clipboard
+  and multi-window qualification remains in #41/#44.
 - Flow 11: Homebrew installation/upgrade requires a supported native host.
 
 Suggested solution: run every remaining QA.md flow on supported native hosts,

@@ -48,7 +48,41 @@ recovery closes its terminals. The release notes disclose this upgrade limit.
 
 ## Publication
 
-The release workflow must pass verification, race, integration and package
-checks on macOS arm64 and Linux amd64/arm64 before publishing `v0.3.2` and
-updating the standard Homebrew formula. Results will be recorded here after
-the workflow and published artifacts have been verified.
+The first macOS release attempt failed under the race detector in the
+unchanged VirtioFS cancellation test: its callback closed a notification
+channel twice when cancellation and another tick were both ready. The
+independent macOS CI race job and 500 local Linux arm64 race-enabled
+repetitions passed on the same commit. TODO #49 records the investigation and
+proposed deterministic follow-up. The failed macOS job passed on retry without
+changing the tag or bypassing checks; successful Linux jobs were retained.
+
+- The fixes were fast-forward merged into `main` as
+  `da3d4985893112f8f91a23e18cd16d6d08e79892`. Annotated tag `v0.3.2` resolves
+  to that same commit.
+- [Main CI](https://github.com/brianrackle/codelima/actions/runs/34535427107)
+  passed Linux/macOS verification and race tests, plus daemon integration.
+- [Release workflow, attempt 2](https://github.com/brianrackle/codelima/actions/runs/34535427384/attempts/2)
+  passed all jobs. `make verify test-race test-integration test-package`
+  passed on macOS arm64 and Linux amd64/arm64 before publication.
+- [v0.3.2](https://github.com/brianrackle/codelima/releases/tag/v0.3.2) is a
+  regular release and GitHub Latest, with all three archives and manifests.
+  Its published notes contain the reviewed fixes and qualification limits.
+- Tap commit `01523879dc748b797c5b064f25ec689ccb916c0a` updates the standard
+  `Formula/codelima.rb` to 0.3.2. It exactly matches the formula generated from
+  the downloaded manifests; the retired beta formula remains absent.
+- Every public asset's size and SHA-256 match GitHub's metadata. Archive
+  checksums match the manifests and formula. Each archive contains exactly
+  the executable CLI and renderer worker; renderer fingerprints match v0.3.1
+  on all targets.
+- `make test-package-artifact` passed against the downloaded Linux arm64
+  package, including version/provenance and real renderer output/read with an
+  empty runtime PATH. The published executable pair was not rebuilt for this
+  check.
+- Verification downloads, scratch tap checkout and test artifacts were removed.
+  Normal ignored development builds and toolchain caches remain.
+
+| Target | Archive bytes | Archive SHA-256 |
+| --- | ---: | --- |
+| darwin/arm64 | 12880648 | `40ea0d1a6bbade26ff9aa6086c62103a91428c12d07cce551ead40e56aee6b50` |
+| linux/amd64 | 13210223 | `b2595c74d53204688dbf95e7ac8de0f603cef8066eafcb1e2054aca98e787b94` |
+| linux/arm64 | 12403046 | `733a2042ccb025766b5535db416a91125c93fb61a5b83890dc91d63de7eb9e84` |
