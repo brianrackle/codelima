@@ -10,6 +10,13 @@ Decoded regressions fail on the previous implementation and pass with the
 fixes; whole-tree `make verify`, `GOFLAGS=-race make test-tui-input`, and gopls
 checks pass. Native macOS keyboard and complete QA.md qualification remain pending.
 
+Published in `v0.3.1` at the maintainer's request after these limitations were
+reported. Native automated verification, race, integration and package tests
+passed on all three release targets; public artifacts and the standard
+Homebrew formula were verified. The downloaded Linux arm64 package passed its
+real CLI/renderer smoke test. See [the release report](plans/shortcut_release_qa.md).
+Publication does not complete the outstanding manual qualification below.
+
 Local verification on Linux/aarch64 used the built TUI, real host PTYs and
 Ghostty workers in an isolated tmux session. A disposable Lima-list fixture
 reported one stopped node; no VM was created. From tree and terminal focus,

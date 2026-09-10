@@ -35,10 +35,35 @@ Linux guest lacks `limactl` and accessible `/dev/kvm`; local host checks do not
 complete the full QA.md matrix. Publication authorization does not mark these
 checks complete.
 
-## Publication gates
+## Published result
 
-The release workflow must pass `make verify test-race test-integration
-test-package` on macOS arm64 and Linux amd64/arm64 before publishing the
-regular release and updating `Formula/codelima.rb`. Public archives and
-manifests, the tap formula, and the downloaded native artifact will be checked
-after publication; results will be recorded here.
+- The fix was fast-forward merged into `main` as
+  `608580b4a7feeedeac2f7cde4655affab5fdc745`. Annotated tag `v0.3.1` resolves
+  to that same commit.
+- [Main CI](https://github.com/brianrackle/codelima/actions/runs/34529111917)
+  passed Linux/macOS verification and race tests, plus daemon integration.
+- [Release workflow](https://github.com/brianrackle/codelima/actions/runs/34529111583)
+  passed every job. `make verify test-race test-integration test-package`
+  passed on macOS arm64 and Linux amd64/arm64 before publication.
+- [v0.3.1](https://github.com/brianrackle/codelima/releases/tag/v0.3.1) is a
+  regular release and GitHub Latest, with all three archives and manifests.
+- Tap commit `b7298922eaf5a3913015f646e1de07c794b18211` updates the standard
+  `Formula/codelima.rb` to 0.3.1. It exactly matches the formula generated from
+  the downloaded manifests; the retired beta formula remains absent.
+- Every public asset's size and SHA-256 match GitHub's metadata. Archive
+  checksums match the manifests and formula; each archive contains exactly
+  the executable CLI and renderer worker. Renderer fingerprints match v0.3.0
+  on all targets.
+- `make test-package-artifact` passed against the downloaded Linux arm64
+  package, including CLI version/provenance and real renderer output/read
+  with an empty runtime PATH. This verifies the published artifact without
+  rebuilding it.
+- Downloads, tap scratch checkout, test fixtures and logs were removed.
+  No verification services remain. Normal ignored development builds and
+  toolchain caches are retained.
+
+| Target | Archive bytes | Archive SHA-256 |
+| --- | ---: | --- |
+| darwin/arm64 | 12876499 | `78f07e9a4ee658dcd122872efb7b8d8e495632490842486c416505492463a731` |
+| linux/amd64 | 13200454 | `72cfa2b49c89e3c25463a60ff812ba426df7d320e649d7dacac8ef548aba5c86` |
+| linux/arm64 | 12400453 | `4cc4755aab9a5b50466cd8d9a4459a15a78c1084780c1c28f8f7356cd78f3f1c` |
