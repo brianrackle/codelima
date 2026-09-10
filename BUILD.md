@@ -29,6 +29,11 @@ What each target does:
   - runs `fmt-check`, `lint`, `test`, `test-vaxis-fork`, and `build`
 - `make test-race`
   - runs every Go package with the race detector serially by default
+- `make test-tui-input`
+  - runs decoded tab, focus, search, dialog and selector shortcut regressions,
+    including followups across overlays and terminal payload preservation;
+    use `GOFLAGS=-race` for the race detector or
+    `TUI_INPUT_TEST_FILTER='^TestTUIShortcut'` for the application shortcut set
 - `make test-integration`
   - builds the real CLI and exercises daemon lifecycle, isolated renderer spawning, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
   - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path

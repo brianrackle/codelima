@@ -64,6 +64,7 @@ DIST_DIR ?= $(CURDIR)/dist
 FORMULA_OUTPUT ?= $(DIST_DIR)/codelima.rb
 INTEGRATION_TMP ?= $(CURDIR)/tmp/i
 GOPLS_ARGS ?= version
+TUI_INPUT_TEST_FILTER ?= ^TestTUI(FocusToggle|Tab|TerminalTabKey|HandleKeyOptionShiftT|Shortcut|Search|Dialog|HandleEvent)
 
 # This was pinned to 1 because ./internal/codelima could not survive a parallel
 # run: daemon.Server bracketed its socket bind with a process-global
@@ -171,6 +172,10 @@ lint: init
 
 test: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) ./...
+
+.PHONY: test-tui-input
+test-tui-input: init
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '$(TUI_INPUT_TEST_FILTER)' -count=1
 
 test-race: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -race -p $(GO_RACE_TEST_PARALLEL) -parallel $(GO_RACE_TEST_PARALLEL) ./...

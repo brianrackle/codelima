@@ -2,6 +2,51 @@
 
 ## Open Work
 
+### 45. Complete native QA for shortcut key lifecycles
+
+Problem: ADRs 138–139 make one-shot app actions run only on key press, retain
+navigation repeats, and consume shortcut followups across input-context changes.
+Decoded regressions fail on the previous implementation and pass with the
+fixes; whole-tree `make verify`, `GOFLAGS=-race make test-tui-input`, and gopls
+checks pass. Native macOS keyboard and complete QA.md qualification remain pending.
+
+Local verification on Linux/aarch64 used the built TUI, real host PTYs and
+Ghostty workers in an isolated tmux session. A disposable Lima-list fixture
+reported one stopped node; no VM was created. From tree and terminal focus,
+press/repeat/release opened one host tab, rapid separate presses opened two,
+and close followups preserved the adjacent tab. The last-tab release produced
+no error. Fresh shell input, legacy Option sequences and macOS Option glyphs
+worked; shell title updates added username/path text without adding terminal
+IDs. All host tabs were closed before cleanup.
+The expanded shortcut run also passed held F7/Info/menu actions, search paste,
+form-field and selector navigation, and selector Enter/Esc/Ctrl+[ returning
+only to the parent form. Held Space toggled one selection, Ctrl+u cleared it,
+and held Ctrl+s created one disposable configuration. Releasing Ctrl before
+the submit letter did not activate the replacement menu; opening-menu repeats
+did not type into forms. Fresh shell input still worked after these transitions.
+The TUI, daemon and isolated tmux server exited; the fixture, home, captures
+and scratch logs were removed after verification.
+
+QA Flow 1's help, schema/seed, presets and non-mutating schema-v3 rejection
+checks passed, as did Flow 8's Linux unsupported assertion. Flows 2–4 and 6
+need real Lima VMs; doctor confirms `limactl` is absent and `/dev/kvm` is
+inaccessible. Flows 5/5b/7 still need the complete guest, two-window,
+physical-keyboard and native visual checks beyond the host-shell subset above.
+Flow 9's capture and Flow 10's complete native/interactive matrix were not
+rerun for this input-only change; their outstanding native qualification stays
+in #0/#41/#44. Flow 11 requires a supported Homebrew host. These partial local
+checks do not complete the full QA.md matrix.
+
+Suggested solution: run the added Flow 7 shortcut-lifecycle checks on native macOS
+with Kitty event reporting and legacy Option input, including guest tabs, and
+finish every remaining QA.md flow on suitable native hosts. Confirm exactly
+one terminal ID per open press and only the requested ID removed per close.
+Remove all verification homes, processes and VM state after the run.
+
+Advantages: validates physical keyboard delivery and real VM shells on the
+reported platform. Disadvantages: requires native terminal, Lima and Homebrew
+access unavailable in this guest.
+
 ### 44. Complete manual qualification of the published libghostty release
 
 Partially complete: `v0.3.0` is published as the regular GitHub Latest release
@@ -41,7 +86,7 @@ state temporarily and cleaning it after investigation.
 Advantages: completes platform evidence for the published release.
 Disadvantages: requires native hosts and interactive work unavailable in this guest; the full upstream suite needs more memory.
 
-### 43. Qualify the focus-toggle lifecycle fix and audit other shortcut actions
+### 43. Complete native qualification of the focus-toggle and shortcut fixes
 
 Problem: ADR 134 fixes Option+Backtick/F6 toggling on both press and release.
 Decoded-input regressions first reproduced the return to tree focus on release;
@@ -55,20 +100,50 @@ The disposable host shell executed a marker command, exited normally, and
 left an empty terminal list. Its renderer and daemon exited; the temporary
 home, fixture helper, captures and isolated tmux server were removed.
 This does not complete QA Flow 7 or the full QA.md native/VM matrix tracked in
-#0/#41. Other TUI actions also match key identity without an activation policy;
-in particular F7 search handles both press and release as open/close actions.
+#0/#41. The subsequent shortcut audit and implementation are complete locally;
+native qualification remains open alongside #45.
+
+Follow-up audit (2026-09-10): eight temporary handler probes reproduced F7
+opening then closing search on release; `i` toggling the pane back on release;
+selector `Enter` restoring a parent dialog on press then submitting it on
+release; selector `Esc` dismissing both selector and parent; `Tab` advancing
+two form fields per tap; tab navigation switching twice; search `Enter`
+advancing twice; and repeated selector `Space` undoing its own selection.
+The probes used decoded terminal input except the explicit Space press/repeat
+pair, passed by asserting those current faults, and were removed after the
+audit. Permanent regression tests now reproduce those failures before the fix
+and pass with ADR 139's shared lifecycle handling.
+
+Delivered fixes:
+
+- Search open/close (`F7`, `Esc`), Info (`i`), dialog submit/activate
+  (`Enter`, `Ctrl+s`, selector-field `Right`), selector confirm/cancel
+  (`Enter`, `Esc`, `Ctrl+[`), and multi-select toggles (`Space`, `Ctrl+u`)
+  are explicit press-only actions. Followups are consumed across overlay
+  transitions so a selector's release cannot submit or cancel its restored parent.
+- Tree/menu actions (`n`, `a`, `g`, `s`, `d`, `c`, `m`) and UI quit
+  (`q`, overlay `Ctrl+c`) require a press. Letter actions also match keycode-only
+  events. Holding a menu-opening letter no longer types its repeats into the
+  newly opened form.
+- Tab switching/reordering, tree arrows, form/selector navigation, search match
+  navigation and message scrolling ignore release and retain deliberate repeats.
+  Text widgets preserve typing repeats/paste, and ordinary shell input preserves
+  press/repeat/release/paste. Shared routing consumes claimed shortcut followups
+  even when a modifier is released first; a fresh press starts a new gesture.
+
+Whole-tree `make verify`, focused race tests and gopls checks pass. The rebuilt
+TUI passed isolated host-PTY checks for the expanded actions and parent-overlay
+transitions; #45 records their scope and the remaining platform limitations.
 
 Suggested solution: run the added Flow 7 tap/release, hold/repeat and rapid
 separate-press checks on macOS in both Kitty-reporting and legacy terminals,
-alongside every remaining QA.md flow. Audit tab actions, search, tree actions
-and overlays separately: consume releases while choosing deliberately which
-navigation actions repeat, and preserve guest repeat/release/paste input.
-Add failing lifecycle tests before widening the current focus-only fix.
+alongside every remaining QA.md flow. Include physical-key transitions between
+selectors, parent forms and real guest shells, and confirm that intentional
+navigation holds still repeat.
 
 Advantages: proves the physical-key behavior in the reporting environment
-and prevents the same event-type mistake in other controls. Disadvantages:
-requires native terminal/VM access; changing repeat policies for other actions
-needs additional behavior decisions and coverage.
+and validates the shared event policy across real guest input. Disadvantages:
+requires native terminal/VM access unavailable in this guest.
 
 ### 42. Upstream the narrow native/frontend contracts and extend unsupported graphics modes
 

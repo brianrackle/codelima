@@ -33,6 +33,9 @@ type vaxisTUIApp struct {
 	openLink          func(string) error
 	screenHyperlinkAt func(int, int) (string, bool)
 	state             *tuiState
+	// shortcutKeys consumes followups of one-shot shortcuts and keys that
+	// changed input context. It belongs to the UI event loop.
+	shortcutKeys      map[rune]struct{}
 	sessions          *tuiSessionStore
 	operations        map[string]*tuiOperationState
 	operationOrder    []string
@@ -513,52 +516,34 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	}
 
-	if key, ok := event.(vaxis.Key); ok && isQuitKey(key) && a.overlay != nil {
-		return true, nil
+	if key, ok := event.(vaxis.Key); ok {
+		payload := a.overlay == nil && a.search == nil && a.state != nil &&
+			a.state.focus == tuiFocusTerminal && isTUITerminalPayloadKey(key)
+		quit := a.handleKey(key)
+		if !payload {
+			a.draw()
+		}
+		return quit, nil
 	}
 
 	if a.overlay != nil {
-		overlay := a.overlay
-		done, err := overlay.Update(event)
-		if err != nil {
-			// Overlay Update errors are non-fatal: they surface in the footer
-			// status and dismiss the overlay. (Previously dialog errors aborted
-			// the whole TUI while selector/menu errors went to status; status
-			// is now the one policy.)
-			a.setStatus(slog.LevelError, err.Error())
-		}
-		// An overlay handler may have opened a replacement overlay (menus open
-		// selectors, selectors open confirmation dialogs); only dismiss when
-		// the dispatched overlay is still the active one.
-		if (done || err != nil) && a.overlay == overlay {
-			a.overlay = overlayParent(overlay)
-		}
+		a.updateOverlay(event)
 		a.draw()
 		return false, nil
 	}
 
 	switch event := event.(type) {
-	case vaxis.Key:
-		if a.search != nil {
-			a.handleSearchKey(event)
-			a.draw()
-			return false, nil
-		}
-		if a.state != nil && a.state.focus == tuiFocusTerminal && isTUITerminalPayloadKey(event) {
-			a.forwardTerminalEvent(event)
-			return false, nil
-		}
-		quit := a.handleKey(event)
-		a.draw()
-		return quit, nil
 	case vaxis.Mouse:
 		a.handleMouse(event)
 		a.draw()
 		return false, nil
-	case vaxis.PasteStartEvent:
-		a.forwardTerminalEvent(event)
-	case vaxis.PasteEndEvent:
-		a.forwardTerminalEvent(event)
+	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
+		if a.search != nil {
+			a.updateSearchInput(event)
+			a.draw()
+		} else {
+			a.forwardTerminalEvent(event)
+		}
 	case vaxis.ColorThemeUpdate:
 		a.startHostColorQuery(event.Mode)
 		a.draw()

@@ -112,11 +112,11 @@ func newTUIMessagesView(messages []tuiMessage) *tuiMessagesView {
 // Update processes one event and reports whether the view should close.
 func (v *tuiMessagesView) Update(event vaxis.Event) (done bool, err error) {
 	key, ok := event.(vaxis.Key)
-	if !ok {
+	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
 	if isOverlayCancelKey(key) {
-		return true, nil
+		return tuiKeyActivates(key, true), nil
 	}
 	switch {
 	case key.MatchString("Up"), key.MatchString("k"):

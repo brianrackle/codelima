@@ -381,11 +381,19 @@ The daemon lock, not the presence of socket or identity pathnames, is the author
 ## TUI data flow
 
 Keep shortcut identity separate from event activation. Vaxis key matching
-ignores press/repeat/release; focus toggles run only on `EventPress`, but their
-repeats and releases remain recognized as shortcuts and are consumed after
-focus changes. Filtering event types out of the matcher would leak the
-remaining events to the newly focused terminal. Preserve ordinary terminal
-repeat/release events and handle pasted input before shortcut dispatch (ADR 134).
+ignores press/repeat/release. One-shot actions use `tuiKeyActivates(key, true)`;
+navigation uses `tuiKeyActivates(key, false)` to admit press and repeat only.
+Global shortcuts declare `pressOnly` in the binding table so the payload
+predicate still recognizes their releases. Dispatch every key through
+`handleKey`, including overlays and search. Claim one-shot global shortcuts
+and keys that change overlay/search/focus, consuming their repeats/releases
+before the newly exposed surface can interpret them. Track the key identity
+without modifiers because the modifier can be lifted first. A fresh press
+clears the old claim immediately; avoid timing-based debounce. Ordinary typing
+and navigation do not accumulate claims in legacy protocols without releases.
+Handle paste as text before action matching, deliver both paste boundaries to
+the active input, and preserve ordinary shell repeat/release events and its
+deferred redraw policy (ADRs 134, 138 and 139).
 
 The production TUI loads the daemon's flat node list once per second, then optionally scopes it by canonical directory containment. Render each node as one fixed-height selectable block: the slug identifies the block, and indented property lines show its configuration, relative directory within the active scope, live status, CPU, memory, and guest root-disk usage. Derive viewport capacity from content rows divided by block height, and map mouse rows back through the same height so scrolling, highlighting, and property-line clicks keep one item identity. Configuration and environment menus are global; node actions use only the selected node.
 

@@ -260,12 +260,21 @@ func (a *vaxisTUIApp) searchTick() {
 }
 
 func (a *vaxisTUIApp) handleSearchKey(key vaxis.Key) {
+	if key.EventType == vaxis.EventPaste {
+		a.updateSearchInput(key)
+		return
+	}
+	if !tuiKeyActivates(key, false) {
+		return
+	}
 	if a.search.closing {
 		a.closeTerminalSearch()
 		return
 	}
 	if key.Keycode == vaxis.KeyEsc || key.Keycode == vaxis.KeyF07 {
-		a.closeTerminalSearch()
+		if tuiKeyActivates(key, true) {
+			a.closeTerminalSearch()
+		}
 		return
 	}
 	request := TerminalInteractionRequest{}
@@ -276,19 +285,28 @@ func (a *vaxisTUIApp) handleSearchKey(key vaxis.Key) {
 			request.Action = "previous"
 		}
 	default:
-		previous := a.search.input.String()
-		a.search.input.Update(key)
-		if len(a.search.input.String()) > 4096 {
-			a.search.input.SetContent(previous)
-			return
-		}
-		if previous == a.search.input.String() {
-			return
-		}
-		a.searchVersion++
-		a.search.version = a.searchVersion
-		request.Action, request.Query = "search", a.search.input.String()
+		a.updateSearchInput(key)
+		return
 	}
+	a.requestTerminalSearch(request)
+}
+
+func (a *vaxisTUIApp) updateSearchInput(event vaxis.Event) {
+	previous := a.search.input.String()
+	a.search.input.Update(event)
+	if len(a.search.input.String()) > 4096 {
+		a.search.input.SetContent(previous)
+		return
+	}
+	if previous == a.search.input.String() {
+		return
+	}
+	a.searchVersion++
+	a.search.version = a.searchVersion
+	a.requestTerminalSearch(TerminalInteractionRequest{Action: "search", Query: a.search.input.String()})
+}
+
+func (a *vaxisTUIApp) requestTerminalSearch(request TerminalInteractionRequest) {
 	a.search.pending = true
 	if err := a.queueTerminalInteraction(a.search.target, request, false, a.search.version); err != nil {
 		a.search.pending = false

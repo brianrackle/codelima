@@ -28,8 +28,9 @@ type tuiTerminalClick struct {
 
 // tuiKeyBinding pairs a key matcher with the app action it triggers.
 type tuiKeyBinding struct {
-	match func(vaxis.Key) bool
-	run   func(a *vaxisTUIApp) error
+	match     func(vaxis.Key) bool
+	run       func(a *vaxisTUIApp) error
+	pressOnly bool
 }
 
 // tuiKeyBindings is THE table of terminal-scope shortcuts: handleKey
@@ -37,15 +38,15 @@ type tuiKeyBinding struct {
 // the same entries, so the shortcut set and the payload predicate can never
 // drift apart.
 var tuiKeyBindings = []tuiKeyBinding{
-	{match: func(key vaxis.Key) bool { return key.Matches(vaxis.KeyF07) }, run: (*vaxisTUIApp).openTerminalSearch},
-	{match: isHostTerminalTabOpenKey, run: (*vaxisTUIApp).openHostTerminalTab},
-	{match: isTerminalTabOpenKey, run: (*vaxisTUIApp).openTerminalTab},
+	{match: func(key vaxis.Key) bool { return key.Matches(vaxis.KeyF07) }, run: (*vaxisTUIApp).openTerminalSearch, pressOnly: true},
+	{match: isHostTerminalTabOpenKey, run: (*vaxisTUIApp).openHostTerminalTab, pressOnly: true},
+	{match: isTerminalTabOpenKey, run: (*vaxisTUIApp).openTerminalTab, pressOnly: true},
 	{match: isTerminalTabMoveNextKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(1) }},
 	{match: isTerminalTabMovePreviousKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(-1) }},
 	{match: isTerminalTabNextKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(1) }},
 	{match: isTerminalTabPreviousKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(-1) }},
-	{match: isTerminalTabCloseKey, run: (*vaxisTUIApp).closeTerminalTab},
-	{match: isTerminalViewToggleKey, run: func(a *vaxisTUIApp) error { return a.state.toggleFocus() }},
+	{match: isTerminalTabCloseKey, run: (*vaxisTUIApp).closeTerminalTab, pressOnly: true},
+	{match: isTerminalViewToggleKey, run: func(a *vaxisTUIApp) error { return a.state.toggleFocus() }, pressOnly: true},
 }
 
 // isTUITerminalPayloadKey reports whether a key is terminal input rather than
@@ -65,7 +66,14 @@ func isTUITerminalPayloadKey(key vaxis.Key) bool {
 	return true
 }
 
-func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
+	if a.overlay != nil {
+		if key.EventType != vaxis.EventPaste && isQuitKey(key) {
+			return tuiKeyActivates(key, true)
+		}
+		a.updateOverlay(key)
+		return false
+	}
 	if a.search != nil {
 		a.handleSearchKey(key)
 		return false
@@ -78,16 +86,18 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 		}
 		return false
 	}
-	// Vaxis matches key identity independently of press/repeat/release.
-	// Consume the toggle's followup events so one press changes focus once,
-	// even after that press moves input routing into the terminal.
-	if key.EventType != vaxis.EventPress && isTerminalViewToggleKey(key) {
-		return false
-	}
-
 	for _, binding := range tuiKeyBindings {
 		if !binding.match(key) {
 			continue
+		}
+		// Vaxis matches identity independently of press/repeat/release.
+		// Consume the whole shortcut lifecycle even when its action runs
+		// only on press, including after the action changes tabs or focus.
+		if !tuiKeyActivates(key, binding.pressOnly) {
+			return false
+		}
+		if binding.pressOnly {
+			a.claimShortcutKey(key)
 		}
 		if err := binding.run(a); err != nil {
 			a.setStatus(slog.LevelError, err.Error())
@@ -100,14 +110,16 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 
 	// The info toggle is tree-scoped (in terminal focus a bare "i" is shell
 	// payload), so it stays outside the terminal-scope binding table.
-	if a.state.focus == tuiFocusTree && key.MatchString("i") {
+	if a.state.focus == tuiFocusTree && key.MatchString("i") && tuiKeyActivates(key, true) {
+		a.claimShortcutKey(key)
 		a.state.toggleTreePaneMode()
 		a.clearStatus()
 		a.syncSessionFocus()
 		return false
 	}
 
-	if a.state.focus == tuiFocusTree && key.MatchString("m") {
+	if a.state.focus == tuiFocusTree && key.MatchString("m") && tuiKeyActivates(key, true) {
+		a.claimShortcutKey(key)
 		a.openMessagesView()
 		return false
 	}
@@ -116,8 +128,12 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 		a.forwardTerminalEvent(key)
 		return false
 	}
+	if !tuiKeyActivates(key, false) {
+		return false
+	}
 
 	if action, ok := a.matchAction(key); ok {
+		a.claimShortcutKey(key)
 		if err := a.performAction(action); err != nil {
 			a.setStatus(slog.LevelError, err.Error())
 			return false
@@ -128,7 +144,7 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 	var err error
 	switch {
 	case key.MatchString("q"), isQuitKey(key):
-		return true
+		return tuiKeyActivates(key, true)
 	case key.MatchString("Up"):
 		err = a.state.moveSelection(-1)
 	case key.MatchString("Down"):
@@ -150,17 +166,12 @@ func (a *vaxisTUIApp) handleKey(key vaxis.Key) bool {
 }
 
 func (a *vaxisTUIApp) matchAction(key vaxis.Key) (tuiActionSpec, bool) {
-	if normalizedKeyModifiers(key.Modifiers) != 0 {
-		return tuiActionSpec{}, false
-	}
-
-	pressed := []rune(strings.ToLower(key.Text))
-	if len(pressed) == 0 {
+	if !tuiKeyActivates(key, true) || normalizedKeyModifiers(key.Modifiers) != 0 {
 		return tuiActionSpec{}, false
 	}
 
 	for _, action := range availableTUIActions(a.state.selectedEntry()) {
-		if action.Hotkey == pressed[0] {
+		if key.Matches(action.Hotkey) || strings.EqualFold(key.Text, string(action.Hotkey)) {
 			return action, true
 		}
 	}

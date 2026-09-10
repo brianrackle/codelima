@@ -463,6 +463,41 @@ focus must stay stable until a fresh press. Two quick separate presses must
 toggle twice without a delay or missed press, and no shortcut text should
 appear in the shell. Repeat with legacy escape-prefixed Option input.
 
+From both tree and terminal focus, tap `Option+t` and `Option+Shift+t`,
+including releasing each key: each tap must add exactly one tab of the requested
+kind. Hold each shortcut through reported repeats; the count must stay fixed
+after its first press. Two rapid separate presses must add two tabs. Tap and
+hold `Option+w`: only the active tab closes, the adjacent tab remains usable,
+and the release must not close it. Close the final tab and verify its release
+does not produce an error after focus returns to the tree. Repeat with legacy
+Option input and the macOS Option glyph fallbacks. Legacy protocols cannot
+distinguish hold repeats from fresh presses. Check `terminal list` alongside
+the tab bar: shell title updates may add username/path text to an existing
+label, but must not create another terminal ID.
+
+Verify the remaining shortcut lifecycles with press/repeat/release reporting:
+
+- Tap and hold `F7`: search stays open after its opening press. A fresh `F7`
+  or `Esc` closes it once without sending followups to the shell. `i` toggles
+  Info once per press from tree focus.
+- Open a form with a node/menu shortcut and hold the opening letter: it must
+  not type into the form. After release, a fresh press of that same letter
+  types normally. Repeat with a menu action that opens another form.
+- Open a selector within a form. Tap/hold `Enter`: the value is chosen and the
+  parent form stays open, without submitting. Tap/hold `Esc` or `Ctrl+[` in
+  the selector: only the selector closes. A fresh submit/cancel press then
+  acts on the parent. `Ctrl+s` and selector-field `Right` also act once.
+- Hold multi-select `Space`: the choice toggles once. `Ctrl+u` clears only on
+  press. Confirm/cancel followups must not affect a newly exposed screen.
+- Hold arrows, `Tab`, tab-switch/move shortcuts, message scroll keys and
+  search `Enter`/`Shift+Enter`: they repeat while held and stop on release,
+  with no extra step on release. Text editing also retains repeats.
+- Close a dialog over terminal focus, lifting its modifier before releasing
+  the key. No followup may reach the shell; a fresh press of the same key
+  works. Paste into a form and search without submitting or closing them,
+  and verify ordinary shell `Ctrl+c`, repeat/release events and bracketed
+  paste still work. Repeat the relevant taps with legacy terminal input.
+
 Type `printf 'typing-responsive\\n'` quickly into the same shell without pasting. Verify input keeps pace with typing, characters remain ordered, the TUI chrome remains responsive, and the command runs exactly once only after Enter is pressed.
 The cursor must advance with each echoed character without first jumping to an
 older position, jumping backward, or briefly appearing ahead of the echo.

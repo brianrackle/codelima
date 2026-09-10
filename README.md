@@ -220,8 +220,9 @@ implementation (`pkgconf`), and the static Ghostty dependency under
 `.tooling/<os>-<arch>`. No Homebrew or system `pkg-config` installation is needed
 for source builds; the first bootstrap requires network access.
 
-Run `make verify` for formatting, lint, tests and a build. To check a downloaded
-archive for the current platform, place it and its matching manifest together
+Run `make verify` for formatting, lint, tests and a build. Run
+`make test-tui-input` for focused shortcut and input-lifecycle regressions. To
+check a downloaded archive for the current platform, place it and its matching manifest together
 under `./tmp/` and run `make test-package-artifact DIST_DIR=./tmp/release-check`.
 Remove those downloaded verification files afterward.
 
@@ -298,9 +299,18 @@ On macOS, configure the terminal with `macos-option-as-alt = true` when
 available. codelima also recognizes the standard US-layout Option glyphs for
 its core shortcuts.
 
-When the terminal reports key repeats and releases, the focus shortcut toggles
-once per press. Holding or releasing `Option+Backtick` or `F6` keeps the new
-focus until the next press.
+When the terminal reports key repeats and releases, tab opening/closing,
+focus toggles, `F7` search, `i` Info, node/menu actions, form submit/cancel,
+and selector toggles act once per press. Separate presses act immediately.
+Releasing `Enter` after choosing a selector value does not submit the parent
+form; releasing `Esc` does not dismiss that form too. Holding a shortcut that
+opens a form does not type the shortcut letter into it.
+
+Navigation and text editing repeat while held: this includes tab movement,
+arrows, field navigation, message scrolling, and search-match navigation.
+Releasing the key does not move again. Shell input and pasted text retain their
+normal behavior. Legacy terminals that report repeats as ordinary presses
+cannot distinguish holding a key from separate presses.
 
 Host and guest terminals are tabs on the same node. A red top bar identifies a
 host tab. Host tabs stay useful while the VM is stopped because they run on the

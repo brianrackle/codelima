@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 
 	"go.rockorager.dev/vaxis"
@@ -19,6 +20,20 @@ type tuiOverlay interface {
 	Update(event vaxis.Event) (done bool, err error)
 	Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle vaxis.Style)
 	FooterHint() string
+}
+
+func (a *vaxisTUIApp) updateOverlay(event vaxis.Event) {
+	overlay := a.overlay
+	done, err := overlay.Update(event)
+	if err != nil {
+		// Overlay errors are non-fatal and use the shared footer policy.
+		a.setStatus(slog.LevelError, err.Error())
+	}
+	// A handler can replace the overlay. Only dismiss the dispatched instance,
+	// restoring its parent when this was a dialog's field picker.
+	if (done || err != nil) && a.overlay == overlay {
+		a.overlay = overlayParent(overlay)
+	}
 }
 
 type tuiDialogField struct {
@@ -130,17 +145,24 @@ func (f *tuiDialogField) renderedValue() string {
 func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 	switch event := event.(type) {
 	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
-		if len(d.Fields) == 0 {
-			return false, nil
-		}
-		d.Fields[d.FieldIndex].Input.Update(event)
+		d.updateInput(event)
 		return false, nil
 	case vaxis.Key:
+		if event.EventType == vaxis.EventPaste {
+			d.updateInput(event)
+			return false, nil
+		}
+		if !tuiKeyActivates(event, false) {
+			return false, nil
+		}
 		switch {
 		case isOverlayCancelKey(event):
-			return true, nil
+			return tuiKeyActivates(event, true), nil
 		case event.Matches('s', vaxis.ModCtrl):
-			return d.submit()
+			if tuiKeyActivates(event, true) {
+				return d.submit()
+			}
+			return false, nil
 		case event.MatchString("Tab"), event.MatchString("Down"):
 			if len(d.Fields) > 0 {
 				d.FieldIndex = (d.FieldIndex + 1) % len(d.Fields)
@@ -155,12 +177,18 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 			}
 			return false, nil
 		case event.MatchString("Right") && len(d.Fields) > 0 && d.Fields[d.FieldIndex].Activate != nil:
+			if !tuiKeyActivates(event, true) {
+				return false, nil
+			}
 			d.Error = ""
 			if err := d.Fields[d.FieldIndex].Activate(); err != nil {
 				d.Error = err.Error()
 			}
 			return false, nil
 		case event.MatchString("Enter"):
+			if !tuiKeyActivates(event, true) {
+				return false, nil
+			}
 			if len(d.Fields) > 0 && d.Fields[d.FieldIndex].Activate != nil && d.Fields[d.FieldIndex].Input == nil {
 				d.Error = ""
 				if err := d.Fields[d.FieldIndex].Activate(); err != nil {
@@ -170,19 +198,20 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 			}
 			return d.submit()
 		default:
-			if len(d.Fields) == 0 {
-				return false, nil
-			}
-			if d.Fields[d.FieldIndex].Input == nil {
-				return false, nil
-			}
-			d.Error = ""
-			d.Fields[d.FieldIndex].Input.Update(event)
+			d.updateInput(event)
 			return false, nil
 		}
 	default:
 		return false, nil
 	}
+}
+
+func (d *tuiDialog) updateInput(event vaxis.Event) {
+	if len(d.Fields) == 0 || d.Fields[d.FieldIndex].Input == nil {
+		return
+	}
+	d.Error = ""
+	d.Fields[d.FieldIndex].Input.Update(event)
 }
 
 func (d *tuiDialog) submit() (done bool, err error) {
@@ -286,19 +315,15 @@ type tuiMenu struct {
 
 func (m *tuiMenu) Update(event vaxis.Event) (done bool, err error) {
 	key, ok := event.(vaxis.Key)
-	if !ok {
+	if !ok || !tuiKeyActivates(key, true) {
 		return false, nil
 	}
 	if isOverlayCancelKey(key) {
 		return true, nil
 	}
 
-	pressed := []rune(strings.ToLower(key.Text))
-	if len(pressed) == 0 {
-		return false, nil
-	}
 	for _, entry := range m.Entries {
-		if entry.Key != pressed[0] {
+		if !key.Matches(entry.Key) && !strings.EqualFold(key.Text, string(entry.Key)) {
 			continue
 		}
 		if entry.Action != nil {
@@ -384,11 +409,11 @@ func newTUISelector(title string, description []string, options []tuiSelectorOpt
 
 func (s *tuiSelector) Update(event vaxis.Event) (done bool, err error) {
 	key, ok := event.(vaxis.Key)
-	if !ok {
+	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
 	if isOverlayCancelKey(key) {
-		return true, nil
+		return tuiKeyActivates(key, true), nil
 	}
 
 	switch {
@@ -399,12 +424,19 @@ func (s *tuiSelector) Update(event vaxis.Event) (done bool, err error) {
 		s.move(-1)
 		return false, nil
 	case s.Multi && key.Matches('u', vaxis.ModCtrl):
-		s.Selected = map[string]bool{}
+		if tuiKeyActivates(key, true) {
+			s.Selected = map[string]bool{}
+		}
 		return false, nil
-	case s.Multi && key.Text == " ":
-		s.toggleCurrent()
+	case s.Multi && key.MatchString(" "):
+		if tuiKeyActivates(key, true) {
+			s.toggleCurrent()
+		}
 		return false, nil
 	case key.MatchString("Enter"):
+		if !tuiKeyActivates(key, true) {
+			return false, nil
+		}
 		values := s.selectedValues()
 		if !s.Multi && len(values) == 0 && len(s.Options) > 0 {
 			values = []string{s.Options[s.Index].Value}
