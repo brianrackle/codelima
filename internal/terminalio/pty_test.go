@@ -9,7 +9,47 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
+
+func TestResizePreservesPTYFlagsAndReportsClosedDescriptor(t *testing.T) {
+	master, slave, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = master.Close(); _ = slave.Close() })
+	fd, err := Descriptor(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unix.SetNonblock(fd, true); err != nil {
+		t.Fatal(err)
+	}
+	before, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := unix.Winsize{Col: 110, Row: 24, Xpixel: 1100, Ypixel: 480}
+	if err := Resize(master, &size); err != nil {
+		t.Fatal(err)
+	}
+	after, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
+	if err != nil || before != after {
+		t.Fatalf("resize changed flags: before=%#x after=%#x err=%v", before, after, err)
+	}
+	got, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
+	if err != nil || *got != size {
+		t.Fatalf("resize did not apply geometry: got=%v err=%v", got, err)
+	}
+	if err := master.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Resize(master, &size); err == nil {
+		t.Fatalf("resize closed PTY: %v", err)
+	}
+}
 
 type blockedWriteTarget struct {
 	started   chan struct{}

@@ -177,6 +177,10 @@ test: init
 test-tui-input: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '$(TUI_INPUT_TEST_FILTER)' -count=1
 
+.PHONY: test-tui-resize
+test-tui-resize: init
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUI(Resize|HandleResize)|Daemon.*Resize|IsolatedTerminalResize)' -count=1
+
 test-race: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -race -p $(GO_RACE_TEST_PARALLEL) -parallel $(GO_RACE_TEST_PARALLEL) ./...
 

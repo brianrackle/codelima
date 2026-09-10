@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/brianrackle/codelima/internal/terminalio"
 	"github.com/creack/pty"
 	"go.rockorager.dev/vaxis"
 	"golang.org/x/sys/unix"
@@ -258,7 +259,7 @@ func (t *isolatedDaemonTerminal) resizePixels(cols, rows, cellWidth, cellHeight 
 
 	event := t.journal.AppendResizePixels(cols, rows, cellWidth, cellHeight)
 	if ptyFile != nil {
-		if err := pty.Setsize(ptyFile, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows), X: uint16(min(cols*cellWidth, 65535)), Y: uint16(min(rows*cellHeight, 65535))}); err != nil {
+		if err := terminalio.Resize(ptyFile, &unix.Winsize{Col: uint16(cols), Row: uint16(rows), Xpixel: uint16(min(cols*cellWidth, 65535)), Ypixel: uint16(min(rows*cellHeight, 65535))}); err != nil {
 			return err
 		}
 		if cols != oldCols && childPID > 0 {

@@ -7,12 +7,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"slices"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 type WriteTarget interface {
@@ -60,6 +61,26 @@ func Descriptor(file *os.File) (int, error) {
 		return -1, os.ErrInvalid
 	}
 	return fd, nil
+}
+
+// Resize changes terminal geometry without File.Fd switching a pollable PTY
+// back to blocking mode. Control keeps the descriptor alive through the ioctl,
+// so a concurrent close cannot make this operation touch a reused descriptor.
+func Resize(file *os.File, size *unix.Winsize) error {
+	if file == nil || size == nil {
+		return os.ErrInvalid
+	}
+	raw, err := file.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var resizeErr error
+	if err := raw.Control(func(fd uintptr) {
+		resizeErr = unix.IoctlSetWinsize(int(fd), unix.TIOCSWINSZ, size)
+	}); err != nil {
+		return err
+	}
+	return resizeErr
 }
 
 // Read preserves os.File.Read's EOF contract while using a raw read

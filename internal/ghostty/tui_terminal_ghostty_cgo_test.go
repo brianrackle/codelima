@@ -173,6 +173,16 @@ func TestActorResizeIsOrderedBeforeInput(t *testing.T) {
 	// Shrink from the default 80x24 to 40 cols x 10 rows, then ask the child for
 	// its window size. stty prints "rows cols".
 	ghostty.Resize(40, 10)
+	ghostty.mu.Lock()
+	fd, err := ghosttyPTYFileDescriptor(ghostty.pty)
+	ghostty.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
+	if err != nil || flags&unix.O_NONBLOCK == 0 {
+		t.Fatalf("resize changed actor PTY to blocking: flags=%#x err=%v", flags, err)
+	}
 	ghostty.SendInput([]byte("stty size\n"))
 
 	waitForCondition(t, 5*time.Second, func() bool {

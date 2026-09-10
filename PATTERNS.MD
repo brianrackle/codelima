@@ -203,6 +203,18 @@ An incomplete node directory without `node.yaml` remains discoverable through `d
 
 ## Terminal identity and actors
 
+Keep running PTYs nonblocking across every operation, including geometry
+changes. `os.File.Fd` can restore blocking mode; a wrapper that calls it is
+unsafe even if it only issues an ioctl. Use `terminalio.Resize`, which holds
+the descriptor through `SyscallConn.Control`, and `terminalio.Descriptor` for
+descriptor observation. Test idle handoff after real PTY resizes: output-only
+handoff tests miss readers that stop observing cancellation after a resize.
+
+Printable host input need not have a physical keyboard identity. Preserve its
+observed UTF-8/codepoint/modifiers/action and let Ghostty encode an unidentified
+key when no mapping exists. Test decoded legacy text as well as synthetic
+physical-key events; never guess US-layout positions to recover Unicode text.
+
 The `internal/codelima/terminal` package owns typed `TargetKey`, `TerminalID`, and terminal kinds. Schema-v4 front ends create node targets only. Guest and host tabs share `node:<id>` while their kinds distinguish `node-shell` from `node-host-shell`.
 
 Every managed terminal starts from `Service.TerminalLaunchSpec`. Guest shells re-enter `codelima shell <node>`; host shells start in the node's canonical directory. Terminal creation resolves this durable node metadata without live runtime reconciliation: host shells do not depend on Lima availability, and guest-shell child commands perform their own runtime checks. Front ends never assemble launch commands independently.
@@ -379,6 +391,14 @@ not receive the supplemental redraw signal.
 The daemon lock, not the presence of socket or identity pathnames, is the authoritative shutdown/startup gate. Persist terminal restoration intent before slow cleanup, close terminal runtimes concurrently, and size legacy shutdown grace for the reported terminal count. After the bounded grace, signal only a process whose persisted token and PID still match and whose daemon lock remains held. Startup uses the same lifecycle-only recovery for a compatible daemon that has closed its socket but not yet released the lock.
 
 ## TUI data flow
+
+Apply outer resize events to Vaxis before deriving terminal pane dimensions
+or drawing. Geometry is global state: process it before overlay input routing
+and even when no terminal session exists. Otherwise the next draw computes
+the old pane size and sends it back to the daemon. Resize regressions must
+exercise `handleEvent` through drawing with real Vaxis buffers, including
+overlays, shrink/grow cycles, minimum-size recovery and pixel-only changes;
+checking only a fake terminal's immediate resize call misses this reversal.
 
 Keep shortcut identity separate from event activation. Vaxis key matching
 ignores press/repeat/release. One-shot actions use `tuiKeyActivates(key, true)`;

@@ -240,8 +240,16 @@ NODE_ID="$(./bin/codelima --json node show qa-v3-root | sed -n 's/.*"id": *"\([^
 ./bin/codelima daemon status
 HOST_TERMINAL_ID="$(perl -MJSON::PP -0777 -ne '$j=decode_json($_); print $j->{data}{terminal_id}' "$QA_ROOT/host-terminal.json")"
 export HOST_TERMINAL_ID
+```
+
+Before the large-history update, attach the TUI to this home, select the host
+tab and resize the outer window several times. Leave the shell idle after
+output completes; handoff must stop its reader without requiring another key.
+This covers the descriptor-mode regression in ADR 142.
+
+```sh
 ./bin/codelima terminal send "$HOST_TERMINAL_ID" --text \
-  $'head -c 1100000 /dev/zero | tr \'\\0\' x; printf \'\\nlarge-handoff-ready\\n\'; sleep 30\r'
+  $'head -c 1100000 /dev/zero | tr \'\\0\' x; printf \'\\nlarge-handoff-%s\\n\' ready\r'
 attempt=0
 while :; do
   ./bin/codelima terminal read "$HOST_TERMINAL_ID" --source recent > "$QA_ROOT/large-handoff-read.txt"
@@ -444,6 +452,13 @@ printf 'paste-two\n'
 
 Verify both lines appear promptly as one paste and neither command runs: the terminal must not print `paste-one` or `paste-two`. Press `Ctrl+c` to clear the pasted input.
 
+Type punctuation and international text directly (not via `terminal send`),
+including `>`, `%`, `:`, `$`, accented letters, CJK and emoji. Verify each
+character appears intact, then clear the input. Type and execute
+`printf '%s\n' 'punctuation: > % $'`; verify the exact output. Repeat in a
+legacy host/tmux and a host with Kitty keyboard reporting, including holding
+and releasing a printable key. No printable-key encoding warning should appear.
+
 In the active guest shell, type `abcd`, use Left twice, type `X`, then use
 `Ctrl+a` and `Ctrl+e`. Verify the cursor edits and moves normally and no literal
 `^[[D`, `^[[C`, `^A`, or `^E` text appears. Run `sleep 60`, press `Ctrl+c`, and
@@ -455,6 +470,16 @@ Immediately after starting a node, toggle between tree and terminal focus with
 `Option+Backtick` or `F6` several times. Verify width growth keeps the prompt
 clean without typing literal `^L` characters or clearing earlier terminal
 history.
+
+Resize the outer window repeatedly in both directions, in tree and terminal
+focus and with a menu/dialog open. The borders and footer must follow the new
+window size immediately. Shrink below 60x14, verify the size notice, then grow
+again and confirm the UI recovers. In a host and guest shell, print a long
+wrapped line and run `stty size` after each resize; the reported rows/columns
+must match the visible terminal body and remain stable after further redraws.
+Open/close search and change the host font size as well. Verify text reflows,
+the prompt remains visible, and earlier output remains readable in scrollback.
+Run `make test-tui-resize` for the automated event/draw regressions.
 
 With Kitty keyboard event reporting enabled in the outer terminal, tap and
 release each focus shortcut in both directions. Focus must change once on

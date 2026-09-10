@@ -2,6 +2,105 @@
 
 ## Open Work
 
+### 48. [resolved] Fix idle daemon handoff after resizing
+
+Problem: September 10 resize QA's disposable Linux/aarch64 daemon stalled in
+`daemon update` after one attached host shell produced 1.1 MB of output. The
+journal reported 1,047,124 bytes. Capture at 2026-09-10T21:34:48Z showed daemon
+PID 33661, shell PID 33694, renderer PID 33687/generation 1, renderer state
+`ready`, no pending renderer request, and successful status/list/snapshot/read
+probes. No successor socket or import log appeared.
+
+Resolution: the real-PTY reproducer confirmed that `pty.Setsize` called
+`File.Fd`, clearing `O_NONBLOCK`. An idle raw reader then could not observe
+handoff cancellation. ADR 142 replaces live resize ioctls in both terminal
+owners with `terminalio.Resize` through `SyscallConn.Control`, preserving
+descriptor flags and lifetime. Regression coverage verifies flags, cell/pixel
+geometry, idle handoff/rollback and large-history CLI handoff after resizing.
+The integration test waits for an emitted marker rather than command echo.
+
+The live Linux/aarch64 TUI reproduction now passes: repeated outer resizes,
+1.1 MB output, idle shell, then no-argument daemon update completed in 0.17 s.
+The journal held 1,047,123 bytes. The daemon PID changed, shell PID 59319 and
+retained output survived, and the TUI reconnected and accepted input. A second
+explicit-path update after resizing preserved 110x24 geometry. Stopping one disposable
+renderer afterward caused automatic replacement and reaping while retaining
+its shell and leaving a second terminal usable. Native QA remains in #46.
+
+### 47. [resolved] Preserve printable legacy input without an unshifted physical key
+
+Problem: September 10 resize QA using `tmux send-keys -l` dropped `>` and `%`
+before the shell received them. Logs reported `Ghostty could not encode terminal
+key keycode=62` and `keycode=37`. Exact-byte `terminal send` worked.
+`ghosttyKeyForVaxis` maps unshifted physical keys but rejects these characters
+when the decoded legacy event supplies no base-layout code. This is distinct
+from the reproduced outer-window resize reversal.
+
+Resolution: ADR 141 uses Ghostty's unidentified physical-key contract while
+retaining the observed text, codepoint, modifiers and action. Decoded printable
+ASCII, accented letters, CJK and emoji tests now pass for native press/repeat
+and legacy release suppression; modified and Kitty event-reporting cases pass
+as well. Live `tmux send-keys -l` typing through the built TUI executed
+`printf '%s\n' 'punctuation: > % $ é 中 🙂'` with exact output. Physical native
+keyboard/font/Kitty-host qualification remains part of #46.
+
+### 46. Complete native qualification of the outer-window resize fix
+
+Problem: ADR 140 fixes the Vaxis drawing-buffer resize omission and overlay
+event interception. Regression tests failed before the fix and pass after it.
+`make verify`, `make test-race`, `make test-integration`, `make test-package`,
+focused native encoder/resize regressions, and gopls diagnostics pass with
+ADRs 140–142 applied. Full QA.md qualification remains partial.
+
+The maintainer subsequently requested merging and releasing these fixes as
+`v0.3.2` with those limits disclosed. Publication evidence is tracked in
+[the release report](plans/resize_release_qa.md); authorization does not mark
+the remaining manual checks complete. A previously blocked old daemon can
+still require stop/start recovery, which closes its terminals.
+
+Local manual evidence used the built TUI, real host PTY/Ghostty worker and an
+isolated tmux server on Linux/aarch64. One stopped-node metadata/list fixture
+enabled host tabs; no VM was created:
+
+- Flow 1: help, settings, schema 4/seed 7, ordered resource presets and
+  non-mutating schema-v3 rejection checked. Doctor reports missing `limactl`
+  and `/dev/kvm` permission denied.
+- Flows 2–4 and 6: real VM create/clone/lifecycle/bootstrap/forwarding blocked
+  by those runtime prerequisites; metadata fixtures are not substitutes.
+- Flow 5: version-1 session quarantine and a live host terminal checked. The
+  initial large-history update failure is resolved in #48. Repeated live
+  updates after resizing and renderer containment now pass with real host
+  shells. Guest and physical two-window Flow 5b remain pending.
+- Flow 7: outer sizes 140x40, 80x20, 120x30 and 100x30 produced matching
+  shell/renderer sizes 140x36, 80x16, 120x26 and 100x26, confirmed with `stty
+  size`; 40x10 displayed the notice and recovered. Shell/renderer PIDs stayed
+  fixed through resize cycles. Wrapped output remained readable. Configuration
+  menu/messages overlay resizing, tree/terminal focus and search resizing
+  passed. Direct TUI typing preserves punctuation and international text after
+  #47. Guest apps, physical keyboard/font changes and remaining visual flows
+  require native QA.
+- Flow 8: Linux reports `virtiofs_reclaim.supported: false`; macOS unavailable.
+- Flow 9: diagnostic capture passed all probes and preserved daemon PID,
+  terminal IDs and input owner. Available `/proc` data captured; kernel stack
+  access denied. No macOS process sample was possible.
+- Flow 10: full Go normal/race tests, integration, local static package smoke,
+  focused native encoder/resize checks and Ghostty resize/dirty-frame regressions
+  passed. Full upstream/native-library, other-platform packages, physical
+  graphics/theme/clipboard and multi-window qualification remains in #41/#44.
+- Flow 11: Homebrew installation/upgrade requires a supported native host.
+
+Suggested solution: run every remaining QA.md flow on supported native hosts,
+especially repeated outer-window and font changes with guest apps, dialogs and
+search. Items 47/48 are fixed locally. Remove all disposable test state.
+
+Advantages: verifies physical-terminal behavior and real VM apps.
+Disadvantages: requires native Lima, Homebrew and terminal features unavailable
+in this guest; local success does not complete release qualification.
+
+Cleanup: verification TUI, daemon, renderer, shells and isolated tmux server
+were stopped; transient shell inputrc files, metadata fixture, QA home, logs
+and captures were removed. Normal ignored development builds/caches remain.
+
 ### 45. Complete native QA for shortcut key lifecycles
 
 Problem: ADRs 138–139 make one-shot app actions run only on key press, retain

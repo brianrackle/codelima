@@ -360,7 +360,16 @@ func (a *vaxisTUIApp) handleResize(event vaxis.Resize) {
 	if (width <= 0 || height <= 0) && a.vx != nil {
 		width, height = a.vx.Window().Size()
 	}
-	if width <= 0 || height <= 0 || a.sessions == nil || a.state == nil {
+	if width <= 0 || height <= 0 {
+		return
+	}
+	if a.vx != nil {
+		// Vaxis requires the application to resize its drawing buffers. Do
+		// this before layout or Draw can reassert the old pane geometry.
+		event.Cols, event.Rows = width, height
+		a.vx.Resize(event)
+	}
+	if a.sessions == nil || a.state == nil {
 		return
 	}
 

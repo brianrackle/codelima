@@ -199,6 +199,10 @@ codelima daemon update
 codelima --version
 ```
 
+Version `0.3.2` fixes outer-window resize corruption, dropped punctuation and
+international text, and idle daemon handoff after resizing. Reopen attached
+TUIs after upgrading to use the corrected drawing and input handling.
+
 Version `0.3.0` promotes the libghostty beta to the regular `codelima` release.
 The separate beta formula is retired. If you installed `codelima-beta`, first
 install or upgrade `codelima` and run
@@ -221,7 +225,8 @@ implementation (`pkgconf`), and the static Ghostty dependency under
 for source builds; the first bootstrap requires network access.
 
 Run `make verify` for formatting, lint, tests and a build. Run
-`make test-tui-input` for focused shortcut and input-lifecycle regressions. To
+`make test-tui-input` for focused shortcut and input-lifecycle regressions, and
+`make test-tui-resize` for window resizing and terminal geometry regressions. To
 check a downloaded archive for the current platform, place it and its matching manifest together
 under `./tmp/` and run `make test-package-artifact DIST_DIR=./tmp/release-check`.
 Remove those downloaded verification files afterward.

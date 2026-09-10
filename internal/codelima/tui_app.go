@@ -377,6 +377,11 @@ func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) (
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case vaxis.Resize:
+		// Geometry is global even while an overlay owns interactive input.
+		a.handleResize(event)
+		a.draw()
+		return false, nil
 	case tuiGraphicsResult:
 		a.applyGraphicsResult(event)
 		a.draw()
@@ -546,9 +551,6 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		}
 	case vaxis.ColorThemeUpdate:
 		a.startHostColorQuery(event.Mode)
-		a.draw()
-	case vaxis.Resize:
-		a.handleResize(event)
 		a.draw()
 	case vaxis.Redraw:
 		a.propagateHostColors()

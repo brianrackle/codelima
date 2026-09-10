@@ -304,17 +304,33 @@ func TestDaemonLiveHandoffWithFullRendererJournal(t *testing.T) {
 	if err := json.Unmarshal(h.json("terminal", "open", "node:"+nodeID, "--kind", "node-host-shell"), &terminal); err != nil {
 		t.Fatal(err)
 	}
+	client, err := daemonclient.Dial(context.Background(), daemonclient.Options{Home: h.home, Version: codelima.Version, WantInput: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	// A real TUI resizes its PTY. The old pty.Setsize helper restored blocking
+	// mode through File.Fd, so idle read-pump shutdown hung only after resizing.
+	if err := client.Call(context.Background(), "terminal.resize", map[string]any{
+		"terminal_id": terminal.TerminalID, "cols": 110, "rows": 24, "cell_width": 10, "cell_height": 20,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
 	h.run(
 		true,
 		"terminal",
 		"send",
 		terminal.TerminalID,
 		"--text",
-		"head -c 1100000 /dev/zero | tr '\\0' x; printf '\\nLARGE_HANDOFF_DONE\\n'; sleep 30\r",
+		"stty -echo; head -c 1100000 /dev/zero | tr '\\0' x; printf '\\nLARGE_HANDOFF_%s\\n' DONE\r",
 	)
 
 	type rendererStatus struct {
 		JournalBytes int `json:"journal_bytes"`
+		ShellPID     int `json:"shell_pid"`
+		Cols         int `json:"cols"`
+		Rows         int `json:"rows"`
 	}
 	var before struct {
 		TerminalRuntimes map[string]rendererStatus `json:"terminal_runtimes"`
@@ -325,7 +341,15 @@ func TestDaemonLiveHandoffWithFullRendererJournal(t *testing.T) {
 			t.Fatal(err)
 		}
 		if before.TerminalRuntimes[terminal.TerminalID].JournalBytes >= 900_000 {
-			break
+			var output struct {
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(h.json("terminal", "read", terminal.TerminalID, "--source", "recent"), &output); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(output.Text, "LARGE_HANDOFF_DONE") {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("renderer journal did not fill: %#v", before.TerminalRuntimes[terminal.TerminalID])
@@ -342,6 +366,16 @@ func TestDaemonLiveHandoffWithFullRendererJournal(t *testing.T) {
 	}
 	if !update.Updated || !update.LiveHandoff {
 		t.Fatalf("large-journal live update = %#v", update)
+	}
+	var after struct {
+		TerminalRuntimes map[string]rendererStatus `json:"terminal_runtimes"`
+	}
+	if err := json.Unmarshal(h.json("daemon", "snapshot"), &after); err != nil {
+		t.Fatal(err)
+	}
+	old, current := before.TerminalRuntimes[terminal.TerminalID], after.TerminalRuntimes[terminal.TerminalID]
+	if old.ShellPID <= 0 || current.ShellPID != old.ShellPID || current.Cols != 110 || current.Rows != 24 {
+		t.Fatalf("handoff lost shell or resized geometry: before=%+v after=%+v", old, current)
 	}
 
 	var read struct {

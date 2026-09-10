@@ -37,6 +37,10 @@ What each target does:
 - `make test-integration`
   - builds the real CLI and exercises daemon lifecycle, isolated renderer spawning, stale recovery, PTY continuity across framed-stream live update, rollback after an injected import failure, delayed legacy-macOS restart fallback, and startup recovery while the previous daemon still owns its shutdown lock
   - uses the deliberately short `./tmp/i` root so derived Unix handoff socket paths remain within platform limits; override it with `INTEGRATION_TMP` only with an equally short path
+- `make test-tui-resize`
+  - exercises window growth/shrinkage, minimum-size recovery, pixel-only changes,
+    overlays, daemon geometry propagation and idle PTY handoff after resizing;
+    use `GOFLAGS=-race` to check races
 - `make diagnose-terminal-freeze`
   - runs the repository `diagnose-codelima-terminal-freezes` skill's read-only capture script without rebuilding or restarting CodeLima
   - writes incident evidence under `./tmp/terminal-freeze-*`; pass `DIAG_ARGS='--home PATH --binary PATH --terminal-id ID'` to override discovery
@@ -70,6 +74,11 @@ changes in this reviewed copy, never in the Go module cache. The added API
 uploads already-encoded PNGs synchronously within a wire-byte budget, keeps
 multipart Kitty transfers serialized, and exposes exact-pixel/z-order placement
 without asynchronous resizing workers.
+
+Vaxis resize events require an explicit `Vaxis.Resize` call on the UI event
+loop before drawing or calculating pane geometry. Handle them before overlay
+input routing so dialogs cannot leave the screen buffers at their old size
+(ADR 140).
 
 `make build` produces both `codelima` and the private
 `codelima-renderer-worker` helper beside it. Release archives package both
@@ -421,6 +430,13 @@ End users upgrade with:
 brew update
 brew upgrade codelima
 ```
+
+The maintainer authorized `v0.3.2` after the resize/input fixes and remaining
+native/manual qualification gaps were reported. Its release notes retain
+those limits; publication still requires the three-platform automated release
+matrix. Local and published evidence belongs in
+[the resize release report](plans/resize_release_qa.md), with outstanding
+manual work in TODO #41/#44/#46.
 
 ### Libghostty Promotion To The Regular Release
 

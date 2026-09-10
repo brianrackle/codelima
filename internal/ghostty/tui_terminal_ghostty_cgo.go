@@ -29,6 +29,7 @@ import (
 	"unsafe"
 
 	"github.com/brianrackle/codelima/internal/rendererbuild"
+	"github.com/brianrackle/codelima/internal/terminalio"
 	"github.com/brianrackle/codelima/internal/terminalstate"
 
 	"github.com/creack/pty"
@@ -905,6 +906,12 @@ func ghosttyKeyForVaxis(key vaxis.Key) (C.GhosttyKey, bool) {
 	case '/':
 		return C.GHOSTTY_KEY_SLASH, true
 	default:
+		// Legacy input supplies text without a physical/base-layout key.
+		// Preserve that text and codepoint through Ghostty's native encoder
+		// instead of guessing a US keyboard position or dropping the event.
+		if unicode.IsPrint(key.Keycode) {
+			return C.GHOSTTY_KEY_UNIDENTIFIED, true
+		}
 		return 0, false
 	}
 }
@@ -1845,7 +1852,7 @@ func (t *ghosttyTUITerminal) resizeLocked(width, height int) {
 		t.mouseEncoder.Reset()
 	}
 	if t.pty != nil {
-		_ = pty.Setsize(t.pty, &pty.Winsize{Cols: uint16(width), Rows: uint16(height)})
+		_ = terminalio.Resize(t.pty, &unix.Winsize{Col: uint16(width), Row: uint16(height)})
 		if t.shouldRequestPrimaryScreenRedrawLocked(oldWidth, width) {
 			// Bash/readline prompt redraws can leave stale wrapped fragments after
 			// width growth. Request another window-change redraw from the terminal
