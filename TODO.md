@@ -22,6 +22,12 @@ input survived. An explicit-path live update also passed. Publication evidence
 belongs in [the release report](plans/tab_status_release_qa.md); authorization
 does not complete the remaining manual checks.
 
+Published as `v0.3.3` at `b862207942c8aeb5e29915f1a05d5dc2061db95b`.
+Main CI and all three native release jobs passed on their first attempt.
+The regular Latest release, all public asset checksums, the standard Homebrew
+formula, and the downloaded Linux arm64 renderer smoke test were verified.
+The remaining native/manual flows below are still open.
+
 - Flow 1: help, schema 4/seed 7, ordered presets and non-mutating schema-v3
   rejection passed. Doctor reports missing `limactl` and inaccessible `/dev/kvm`.
 - Flow 2: environment/configuration creation passed; node creation fails with

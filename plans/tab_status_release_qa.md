@@ -56,5 +56,33 @@ mandatory before publication.
 
 ## Publication
 
-Pending the local release checks, merge, tag, three-platform release workflow,
-published-asset verification and Homebrew tap update.
+- The changes were fast-forward merged into `main` as
+  `b862207942c8aeb5e29915f1a05d5dc2061db95b`. Annotated tag `v0.3.3` resolves
+  to the same commit.
+- [Main CI](https://github.com/brianrackle/codelima/actions/runs/34560934341)
+  passed Linux/macOS verification and race tests, plus daemon integration.
+- [Release workflow](https://github.com/brianrackle/codelima/actions/runs/34560934605)
+  passed all jobs on the first attempt. Verification, race, integration and
+  package checks passed on macOS arm64 and Linux amd64/arm64 before publication.
+- [v0.3.3](https://github.com/brianrackle/codelima/releases/tag/v0.3.3) is a
+  regular release and GitHub Latest, with all three archives and manifests.
+  Its notes include the upgrade instructions and remaining QA limits.
+- Homebrew tap commit `43cbe51f71a3602f4d9f7b2f76d87f03423665cb` updates
+  `Formula/codelima.rb` to 0.3.3. It exactly matches the formula generated
+  from the downloaded manifests; the retired beta formula remains absent.
+- Every downloaded asset's size and SHA-256 match GitHub's metadata. Archive
+  checksums also match the manifests and formula. Each archive contains the
+  two executable files, and renderer fingerprints match v0.3.2 on all targets.
+- `make test-package-artifact` passed against the downloaded Linux arm64
+  package, including version/provenance and real renderer output/read with an
+  empty runtime PATH. The published executable pair was not rebuilt for this
+  check.
+- Disposable previous-release/candidate binaries, upgrade homes, release
+  downloads, scratch tap checkout and test artifacts were removed. Normal
+  ignored development builds and toolchain caches remain.
+
+| Target | Archive bytes | Archive SHA-256 |
+| --- | ---: | --- |
+| darwin/arm64 | 12882900 | `0165f4d901546ed2ce1811f39b7fd9faef01fcf992ec26122cd3a0aeb9b6d96b` |
+| linux/amd64 | 13204678 | `4f31fb499cff66acc071e6189ac2f1f1effb32e4bd93ab045c2ecccf22317d5f` |
+| linux/arm64 | 12410212 | `68056302307bbd9288afbefa91df4d7d1a05715b31f7db3e299d845633ea24dd` |
