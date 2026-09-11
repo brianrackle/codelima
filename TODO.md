@@ -2,6 +2,25 @@
 
 ## Open Work
 
+### 56. Investigate executable fixture startup on shared filesystems
+
+Problem: a local Linux arm64 release-verification run at `948ccea` failed in
+`TestLimaClientLifecycleWithFakeLimactl` (`lima_test.go:838`) while executing
+the newly written `tmp/tests/lima-*/limactl-fake`: `text file busy`. The checkout
+is a VirtioFS mount. This observation does not establish the filesystem as
+the cause; the fake executable's write/close/execute lifecycle needs checking.
+The failure is separate from the release runner's Go dependency download error.
+The unchanged complete local verification, race, integration, package,
+clipboard and native-agent suites passed on their one retry.
+
+Suggested solution: reproduce fixture creation and immediate execution under
+parallel load on VirtioFS and a native filesystem, inspect descriptor lifetime,
+and add a regression for any confirmed race before changing the fixture helper.
+Advantages: makes local release checks more reliable and distinguishes a test
+fixture race from a filesystem limitation. Disadvantages: needs a shared-host
+reproducer; retrying can hide an unresolved cause. Deferred from publishing the
+already-tagged clipboard fixes; retry evidence belongs in the release report.
+
 ### 55. Qualify the clipboard connection-routing fix on physical hosts
 
 Problem: Codex `/copy` intermittently stopped reaching the host clipboard after
@@ -28,6 +47,15 @@ The maintainer subsequently reported "fixed" and requested merge/release as
 v0.3.5. Their reported symptom is resolved; the broader clipboard QA cases
 below still need qualification. Release evidence is in
 `plans/clipboard_native_agents_release_qa.md`.
+
+Published as regular Latest `v0.3.5` from `main` commit `948ccea`. Main CI,
+the three-platform release matrix and the Homebrew update passed. Linux arm64
+needed one release retry after a Go module download failed before tests ran.
+All public archive/manifest checksums and the generated tap formula were
+verified; the downloaded Linux arm64 package passed its native renderer smoke
+test. Both forms of live daemon update preserved a real host shell and a
+1,045,529-byte journal. The remaining physical-host qualification below stays
+open.
 
 Suggested solution: build/install the corrected pair on the host, update the
 running daemon, and repeat the guest probe and Codex `/copy`. Run QA.md's

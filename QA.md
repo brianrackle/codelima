@@ -42,7 +42,7 @@ Verify:
 
 - help lists `settings`, `environment`, `configuration`, and `node`, with no project command
 - schema version is `4`
-- seed version is `7`
+- seed version is `9`
 - the home contains `configurations`, `environments`, and `nodes`, with no `projects` directory
 - `small` is the implicit default and exists with 2 CPUs, 4096 MiB memory, 25600 MiB disk, image `template:ubuntu`, `codex-cli`, and ordered environments `codex` then `claude-code`
 - the configuration list contains only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order; they respectively report 1/1024/10240, 2/4096/25600, 4/8192/51200, 6/16384/76800, and 8/32768/102400 for vCPUs/memory MiB/disk MiB, while sharing the initial image, agent profile, and environments

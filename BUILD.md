@@ -470,6 +470,12 @@ Evidence belongs in [the clipboard and native agents release report](plans/clipb
 Remaining manual qualification is tracked in TODO #41/#44/#54/#55, and
 publication requires the normal three-platform automated release matrix.
 
+`v0.3.5` was published as regular Latest on 2026-09-11 from `948ccea` after
+all three native release jobs passed. Linux arm64 required one retry after a
+Go module download failure during setup. The public archives/manifests,
+Homebrew formula and downloaded Linux arm64 renderer smoke test were verified;
+the release report records the evidence and remaining manual qualification.
+
 ### Libghostty Promotion To The Regular Release
 
 On 2026-09-08 the maintainer explicitly requested promoting the published
