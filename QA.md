@@ -153,15 +153,17 @@ cat "$QA_ROOT/doctor.txt"
 grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ./bin/codelima shell qa-v3-root -- sh -lc 'test -f .qa-tools-installed && printf bootstrap-ok'
 ./bin/codelima shell qa-v3-root -- sh -lc '
-  test "$(node -p '\''process.versions.node.split(".")[0]'\'')" -ge 22
+  set -eu
+  bwrap --version
   guest_user="$(id -un)"
   test "$guest_user" != root
   guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"
   test -n "$guest_home"
   test "$HOME" = "$guest_home"
-  test "$(npm config get prefix)" = "$guest_home/.local"
-  test "$(stat -c %U "$guest_home/.local/lib/node_modules/@openai/codex")" = "$guest_user"
-  test "$(stat -c %U "$guest_home/.local/lib/node_modules/@anthropic-ai/claude-code")" = "$guest_user"
+  test "$(stat -Lc %U "$guest_home/.local/bin/codex")" = "$guest_user"
+  test "$(stat -Lc %U "$guest_home/.local/bin/claude")" = "$guest_user"
+  readlink -f "$guest_home/.local/bin/codex" | grep -F "$guest_home/.codex/packages/standalone/"
+  readlink -f "$guest_home/.local/bin/claude" | grep -F "$guest_home/.local/share/claude/"
   test "$(readlink /usr/local/bin/codex)" = "$guest_home/.local/bin/codex"
   test "$(readlink /usr/local/bin/claude)" = "$guest_home/.local/bin/claude"
   test "$(command -v codex)" = "$guest_home/.local/bin/codex"
@@ -175,13 +177,14 @@ grep -h '^nestedVirtualization:' "$CODELIMA_HOME"/nodes/*/instance.lima.yaml
 ./bin/codelima node status qa-v3-root
 ```
 
-Verify bootstrap prints `bootstrap-ok`; Node reports major version 22 or newer;
+Verify bootstrap prints `bootstrap-ok` and `bwrap --version` succeeds as the
+login user;
 `codelima shell` runs as the Lima login user rather than root, with that user's
 `$HOME`; both agent version commands succeed with no privilege wrapper; both
 resolve out of `~/.local/bin`, which the Ubuntu `~/.profile` prepends to `PATH`
-ahead of the `/usr/local/bin` links that target the same binaries; both npm
-package trees are owned by that user; the npm prefix is that user's `~/.local`;
-the two `/usr/local/bin` links target that prefix; passwordless `sudo` still
+ahead of the `/usr/local/bin` links that target the same binaries; both native
+binaries are owned by that user and resolve inside the native installer layouts;
+the two `/usr/local/bin` links target that user's `~/.local/bin`; passwordless `sudo` still
 reports `root`, so a user who wants root has it on request; the first status is
 running; and the final status is stopped. Review runtime diagnostics to confirm
 the VM uses the node's frozen 3 CPU / 5120 MiB / 24576 MiB values; CodeLima must
@@ -895,9 +898,25 @@ In a real host terminal, use the existing isolated QA home and node tabs:
    reported as a complete restored native snapshot.
 6. With two attached windows, only the geometry-owning seat may receive a
    terminal-originated clipboard write. Background and CLI clients must not
-   copy it. Verify Kitty acknowledged clipboard requests fail explicitly when
+   copy it. Switch focus and repeat with distinct probe text, then disconnect
+   and reconnect the owning frontend and repeat; stale connections must not
+   receive or replay a copy. Verify Kitty acknowledged clipboard requests fail explicitly when
    the host cannot truthfully acknowledge delivery. Do not use real secrets as
    clipboard test data.
+7. In a local macOS frontend, run Codex `/copy` repeatedly for distinct short
+   responses and a response near (but below) 64 KiB. Paste into a host editor
+   and confirm each full response replaces the previous clipboard contents.
+   Repeat with a Unicode response, a tmux-hosted frontend, and a frontend over
+   SSH. Both local and remote TUIs must forward through the outer terminal,
+   without invoking native desktop clipboard commands. Verify the outer
+   terminal permits OSC 52. Also print this from a guest
+   shell and paste on the host: `printf '\033]52;c;%s\007' "$(printf 'clipboard smoke' | base64 | tr -d '\n')"`.
+   Requests above 64 KiB remain outside the supported clipboard limit. Restore
+   any clipboard contents you need afterward.
+8. Click once in an embedded terminal without dragging, including after a
+   previous selection. Confirm the old selection clears, Messages shows no
+   `copy terminal selection: native result -4`, and the host clipboard is
+   unchanged. Then select a word or drag a range and verify copying still works.
 
 Keep these interactive results separate from automated bridge/fixture passes.
 Record per-flow results and blockers in the release QA report; do not mark the

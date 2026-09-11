@@ -200,19 +200,25 @@ clean cache so template resolution/download failures are visible. The gated
 `make test-lima-native` recipe resolves the Ubuntu template and validates the
 CodeLima-rendered YAML with the installed `limactl`.
 
-The built-in `codex` and `claude-code` environments share one Node.js 22
-prerequisite and user-owned npm-prefix pattern. Noninteractive Lima commands
-still cross the single root boundary in `LimaClient.Shell`; the agent installers
-then resolve `SUDO_USER`, run npm as that login user, and expose only stable
-links in `/usr/local/bin`. Installation and profile validation must execute each
-agent's `--version` command as that same login user; root-side path lookup is
-not sufficient. Keep the two npm package commands independently usable because
-either environment may be selected without the other. A new installer or
-validator definition requires a seed-revision bump plus exact legacy specs so
-untouched environment records and profiles upgrade while customized and deleted
-records do not. Node bootstrap snapshots remain frozen except that `NodeStart`
-may replace exact known defective former built-in command sequences and rerun
-the repaired snapshot (ADR 118).
+The built-in `codex` and `claude-code` environments use the official native
+installers. Noninteractive Lima commands still cross the root boundary in
+`LimaClient.Shell` for system prerequisites. The shared installer wrapper resolves
+`SUDO_USER`, rejects UID 0, and drops to that login user before downloading or
+executing the vendor script. A failed download must never execute a partial
+script; temporary scripts are removed on exit. Only the compatibility links in
+`/usr/local/bin` are published by root after installation succeeds. Agent
+execution and update state belong to the login user.
+
+Run `make test-native-agents` for executable installer failure/identity checks
+and exact legacy migration coverage. Run `make verify test-race test-integration
+test-package` for release checks. Keep both environments independently usable.
+Installer definition changes require a seed-revision bump plus exact legacy
+specs: revision 9 also migrates the revision-8 native Codex definition to
+install the system `bubblewrap` package and check `bwrap --version` before
+agent installation. Older npm definitions migrate to native installers while
+preserving customized and deleted records. `NodeStart` repairs exact legacy
+bootstrap sequences and reruns installation. It does not remove old npm package
+files or credentials (ADRs 146–147).
 
 macOS release qualification must exercise nested virtualization on an Apple
 silicon host where Virtualization.framework reports it supported and an
@@ -455,6 +461,15 @@ upgrading. Release evidence belongs in
 manual work in TODO #41/#44/#51. Publication requires the normal three-platform
 automated release matrix.
 
+The maintainer authorized `v0.3.5` after reporting the clipboard issue fixed.
+It also includes the authorized native agent installers and Codex bubblewrap
+provisioning. Update the daemon and reopen attached TUIs after upgrading;
+untouched built-in agent environments migrate on their next node start.
+Daemon protocol 7, renderer protocol 3 and the native dependency are unchanged.
+Evidence belongs in [the clipboard and native agents release report](plans/clipboard_native_agents_release_qa.md).
+Remaining manual qualification is tracked in TODO #41/#44/#54/#55, and
+publication requires the normal three-platform automated release matrix.
+
 ### Libghostty Promotion To The Regular Release
 
 On 2026-09-08 the maintainer explicitly requested promoting the published
@@ -566,3 +581,18 @@ Check:
 ### Homebrew formula changes are not pushed
 
 The workflow skips the tap commit when the generated `Formula/codelima.rb` is identical to the existing file.
+
+Clipboard changes should run `make test-clipboard` and the regular release
+checks. The TUI delegates host clipboard handling to the outer terminal through
+OSC 52, even when a native desktop utility is available. Tests must not modify
+the developer's clipboard. Bridge tests cover fragmented responses through the
+existing 64 KiB limit. The socket regression test uses the TUI's separate request
+and event connections and checks clipboard delivery before and after event
+reconnect; daemon tests cover seat takeover and superseded subscriptions.
+`make test-integration` also sends OSC 52 from a real shell through the built
+renderer and daemon to the owning frontend's event connection, then reconnects
+and repeats with distinct Unicode text.
+Native interaction tests also check that releasing without a selection is a
+quiet no-op and that word-selection copying still works.
+Real macOS and SSH clipboard qualification remains in
+QA.md; offline tests do not establish outer-terminal permission behavior.

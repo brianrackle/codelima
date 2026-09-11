@@ -1264,18 +1264,9 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 		t.Fatalf("EnvironmentConfigList() error = %v", err)
 	}
 
-	assertEnvironmentConfigCommands(t, configs, "codex",
-		`apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`,
-		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`,
-		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g @openai/codex && ln -sfn "$guest_home/.local/bin/codex" /usr/local/bin/codex`,
-		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" codex --version >/dev/null`,
-	)
-	assertEnvironmentConfigCommands(t, configs, "claude-code",
-		`apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`,
-		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`,
-		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" npm install -g @anthropic-ai/claude-code && ln -sfn "$guest_home/.local/bin/claude" /usr/local/bin/claude`,
-		`guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" claude --version >/dev/null`,
-	)
+	for _, spec := range builtInEnvironmentConfigs() {
+		assertEnvironmentConfigCommands(t, configs, spec.Slug, spec.BootstrapCommands...)
+	}
 	for profileName, executable := range map[string]string{"codex-cli": "codex", "claude-code": "claude"} {
 		profile, err := service.store.LoadAgentProfile(profileName)
 		if err != nil {
@@ -1291,20 +1282,20 @@ func TestBuiltInEnvironmentConfigsSeedOnReadyWithoutOverwritingEdits(t *testing.
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(codex) error = %v", err)
 	}
-	if !containsSubstring(config.BootstrapCommands, "npm install -g @openai/codex") ||
-		containsSubstring(config.BootstrapCommands, "chatgpt.com/codex/install.sh") ||
+	if containsSubstring(config.BootstrapCommands, "npm install") ||
+		!containsSubstring(config.BootstrapCommands, "chatgpt.com/codex/install.sh") ||
 		containsSubstring(config.BootstrapCommands, "sudo npm") {
-		t.Fatalf("expected codex bootstrap to use a user-owned npm installation, got %q", strings.Join(config.BootstrapCommands, "|"))
+		t.Fatalf("expected codex bootstrap to use a user-owned native installation, got %q", strings.Join(config.BootstrapCommands, "|"))
 	}
 
 	config, err = service.EnvironmentConfigShow(context.Background(), "claude-code")
 	if err != nil {
 		t.Fatalf("EnvironmentConfigShow(claude-code) error = %v", err)
 	}
-	if !containsSubstring(config.BootstrapCommands, "npm install -g @anthropic-ai/claude-code") ||
-		containsSubstring(config.BootstrapCommands, "claude.ai/install.sh") ||
+	if containsSubstring(config.BootstrapCommands, "npm install") ||
+		!containsSubstring(config.BootstrapCommands, "claude.ai/install.sh") ||
 		containsSubstring(config.BootstrapCommands, "sudo npm") {
-		t.Fatalf("expected claude-code bootstrap to use a user-owned npm installation, got %q", strings.Join(config.BootstrapCommands, "|"))
+		t.Fatalf("expected claude-code bootstrap to use a user-owned native installation, got %q", strings.Join(config.BootstrapCommands, "|"))
 	}
 
 	if _, err := service.EnvironmentConfigUpdate(context.Background(), "codex", EnvironmentConfigUpdateInput{
@@ -1369,7 +1360,7 @@ func TestAgentEnvironmentBootstrapCannotCompleteWithoutExecutable(t *testing.T) 
 	}
 }
 
-func TestUntouchedNativeAgentInstallersMigrateToUserOwnedNPM(t *testing.T) {
+func TestUntouchedRootAgentInstallersMigrateToUserOwnedNative(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -1399,16 +1390,16 @@ func TestUntouchedNativeAgentInstallersMigrateToUserOwnedNPM(t *testing.T) {
 		t.Fatalf("EnsureReady(true, migrate) error = %v", err)
 	}
 
-	for slug, packageName := range map[string]string{
-		"codex":       "@openai/codex",
-		"claude-code": "@anthropic-ai/claude-code",
+	for slug, installerURL := range map[string]string{
+		"codex":       "chatgpt.com/codex/install.sh",
+		"claude-code": "claude.ai/install.sh",
 	} {
 		config, err := service.EnvironmentConfigShow(ctx, slug)
 		if err != nil {
 			t.Fatalf("EnvironmentConfigShow(%s) error = %v", slug, err)
 		}
-		if !containsSubstring(config.BootstrapCommands, "npm install -g "+packageName) {
-			t.Fatalf("expected %s native installer to migrate to npm, got %q", slug, strings.Join(config.BootstrapCommands, "|"))
+		if !containsSubstring(config.BootstrapCommands, installerURL) {
+			t.Fatalf("expected %s root installer to migrate to native user installation, got %q", slug, strings.Join(config.BootstrapCommands, "|"))
 		}
 	}
 }
@@ -1424,7 +1415,7 @@ func TestUntouchedVersion5AgentDefinitionsMigrateToLoginUserValidation(t *testin
 
 	for slug, specs := range legacyBuiltInEnvironmentConfigs() {
 		if _, err := service.EnvironmentConfigUpdate(ctx, slug, EnvironmentConfigUpdateInput{
-			BootstrapCommands: specs[0].BootstrapCommands,
+			BootstrapCommands: specs[1].BootstrapCommands,
 		}); err != nil {
 			t.Fatalf("EnvironmentConfigUpdate(%s) error = %v", slug, err)
 		}
@@ -1497,13 +1488,22 @@ func TestNodeStartRepairsCompletedLegacyBuiltInAgentBootstrap(t *testing.T) {
 	t.Parallel()
 
 	legacyConfigs := legacyBuiltInEnvironmentConfigs()
-	version5Commands := append([]string{}, legacyConfigs["codex"][0].BootstrapCommands...)
-	version5Commands = append(version5Commands, legacyConfigs["claude-code"][0].BootstrapCommands...)
+	version5Commands := append([]string{}, legacyConfigs["codex"][1].BootstrapCommands...)
+	version5Commands = append(version5Commands, legacyConfigs["claude-code"][1].BootstrapCommands...)
 	tests := []struct {
 		name     string
 		commands []string
 	}{
 		{name: "version-5-npm", commands: version5Commands},
+		{name: "version-8-native", commands: []string{
+			legacyCodexPrerequisitesCommand,
+			nativeAgentInstallCommand("https://chatgpt.com/codex/install.sh", "sh", "codex"),
+			defaultCodexValidationCommand,
+			legacyCodexPrerequisitesCommand,
+			nativeAgentInstallCommand("https://claude.ai/install.sh", "bash", "claude"),
+			defaultClaudeCodeValidationCommand,
+		}},
+		{name: "version-7-npm", commands: append(append([]string{}, legacyConfigs["codex"][0].BootstrapCommands...), legacyConfigs["claude-code"][0].BootstrapCommands...)},
 		{name: "native-installers", commands: []string{
 			legacyCodexPrerequisitesCommand,
 			legacyCodexStandaloneInstallCommand,
@@ -1545,8 +1545,8 @@ func TestNodeStartRepairsCompletedLegacyBuiltInAgentBootstrap(t *testing.T) {
 				t.Fatalf("NodeStart() error = %v", err)
 			}
 			calls := append([]string(nil), fake.calls[callStart:]...)
-			for _, packageName := range []string{"@openai/codex", "@anthropic-ai/claude-code"} {
-				if !containsSubstring(calls, "npm install -g "+packageName) {
+			for _, packageName := range []string{"chatgpt.com/codex/install.sh", "claude.ai/install.sh"} {
+				if !containsSubstring(calls, packageName) {
 					t.Fatalf("legacy bootstrap did not install %s as the login user, calls = %v", packageName, calls)
 				}
 			}
@@ -1556,8 +1556,11 @@ func TestNodeStartRepairsCompletedLegacyBuiltInAgentBootstrap(t *testing.T) {
 				}
 			}
 			if containsSubstring(calls, "command -v codex") || containsSubstring(calls, "command -v claude") ||
-				containsSubstring(calls, "chatgpt.com/codex/install.sh") || containsSubstring(calls, "claude.ai/install.sh") {
+				containsSubstring(calls, "npm install") {
 				t.Fatalf("defective legacy commands were rerun, calls = %v", calls)
+			}
+			if !containsSubstring(calls, "bwrap --version") {
+				t.Fatalf("migrated node did not validate bubblewrap: %v", calls)
 			}
 			if !started.BootstrapCompleted {
 				t.Fatalf("repaired node bootstrap is incomplete: %#v", started)
@@ -1566,8 +1569,8 @@ func TestNodeStartRepairsCompletedLegacyBuiltInAgentBootstrap(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadBootstrapState(repaired) error = %v", err)
 			}
-			if !repaired.Completed || !containsSubstring(repaired.BootstrapCommands, "npm install -g @openai/codex") ||
-				!containsSubstring(repaired.BootstrapCommands, "npm install -g @anthropic-ai/claude-code") {
+			if !repaired.Completed || !containsSubstring(repaired.BootstrapCommands, "chatgpt.com/codex/install.sh") ||
+				!containsSubstring(repaired.BootstrapCommands, "claude.ai/install.sh") {
 				t.Fatalf("repaired bootstrap state = %#v", repaired)
 			}
 		})

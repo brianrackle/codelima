@@ -202,7 +202,7 @@ func assertAuthImportPrecedesBootstrap(t *testing.T, fake *fakeSandbox) {
 		if strings.Contains(call, "codelima-auth-") {
 			lastAuth = index
 		}
-		if firstBootstrap < 0 && strings.Contains(call, "npm install -g") {
+		if firstBootstrap < 0 && (strings.Contains(call, "chatgpt.com/codex/install.sh") || strings.Contains(call, "claude.ai/install.sh")) {
 			firstBootstrap = index
 		}
 	}

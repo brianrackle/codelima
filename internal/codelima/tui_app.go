@@ -441,7 +441,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		if err := a.copyToHostClipboard(event.Text); err != nil {
 			a.setStatus(slog.LevelError, err.Error())
 		} else {
-			a.setStatus(slog.LevelInfo, "synced VM clipboard to host clipboard")
+			a.setStatus(slog.LevelInfo, "sent clipboard copy request to host")
 		}
 		a.draw()
 		return false, nil

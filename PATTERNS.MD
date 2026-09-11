@@ -71,18 +71,17 @@ Node creation resolves a configuration and copies every effective value into nod
 
 The `small` configuration is the editable but non-renamable and non-deletable implicit default. It references the built-in `codex` and `claude-code` environments on a fresh home, so nodes created without an explicit configuration install both coding agents. Seed/repair preserves existing `small` values except for explicit, revision-gated migrations that match the complete former stock preset; seed revision 4 moves untouched 1/1/10 records to the new 2/4/25 default while customized records remain unchanged. New configurations are deep copies of its current value rather than children that inherit future changes.
 
-Built-in coding-agent environments share a user-owned npm installation pattern:
-install their system Node.js prerequisite at the root bootstrap boundary,
-resolve Lima's login user from `SUDO_USER`, configure that user's npm prefix
-under `~/.local`, run npm after dropping privileges, and publish a stable
-`/usr/local/bin` link. Validate by executing the public command's `--version`
-operation as the login user before bootstrap completes; a root-side lookup can
-accept a target beneath an inaccessible `/root`. Keep each environment
-independently installable. Seed revision 6 migrates only environment and agent
-profile records that exactly match a known prior built-in; customized and
-deleted records remain authoritative. Already-created nodes keep frozen custom
-bootstrap snapshots, while `NodeStart` replaces and reruns only exact known
-defective built-in command sequences (ADR 118).
+Built-in coding-agent environments share a native installer wrapper. Install
+system prerequisites at the root bootstrap boundary, resolve Lima's login user
+from `SUDO_USER`, reject UID 0, then download and execute each vendor installer
+after dropping privileges. Download to a temporary file with exit cleanup;
+never pipe a potentially failed download into a shell. Publish a stable
+`/usr/local/bin` link only after success. Validate `--version` as the login user.
+Keep each environment independently installable. Codex installs and validates system bubblewrap before running its native
+installer. Seed revision 9 migrates only
+exact known prior built-in definitions; customized and deleted records remain
+authoritative. `NodeStart` replaces and reruns exact legacy bootstrap sequences
+without changing custom commands or deleting old package files (ADRs 146–147).
 
 Built-in sizes are persisted configurations, not synthetic UI rows. Seed them through the store so CLI and TUI consumers agree, order them by size instead of alphabetically, and treat any existing record—including a soft-deleted tombstone—as user-owned. A seed-revision bump may add a genuinely missing size to an older home, but repair must never overwrite a customized configuration or resurrect a deleted optional size. If a formerly optional record becomes a required protected default, restore its tombstone in place so custom values and identity survive. Retire the former `default` configuration with a tombstone rather than removing its record: it disappears from live lists while existing nodes can still hydrate their historical configuration ID and slug.
 
@@ -304,7 +303,7 @@ in addition to per-terminal limits. Do not checkpoint while native image state
 exists: absence of a visible placement is not absence of image state.
 
 Effects need an owner, delivery policy and replay policy. Clipboard writes go
-only to the subscribed physical seat holder, never every observer, never during
+only to the seat holder's current event connection, never every observer, never during
 replay, and never with a false host-completion acknowledgement. Guest metadata
 is sanitized presentation text, not authority to navigate, notify the desktop
 or execute commands. Local host-color discovery is cancellable, bounded and
@@ -445,3 +444,22 @@ default as a muted prompt only while content is empty, return it as the field's
 submitted value, and remove the prompt as soon as the operator types. This
 preserves first-keystroke replacement semantics without duplicating defaults in
 validation or submission callbacks.
+
+## Host clipboard delivery
+
+Deliver private clipboard effects only in the owning frontend. The TUI passes
+OSC 52 to the outer terminal for both local and remote sessions; availability
+of a native clipboard command must not override this abstraction. Do not claim
+confirmed delivery for an unacknowledged terminal clipboard request.
+
+The TUI's input lease belongs to its request connection; its event subscription
+uses a separate connection with the same frontend instance ID. Register the
+newest successfully synchronized event connection for each instance and fence
+clipboard queue admission against both that recipient and the physical input
+lease. Retain the recipient ID until the last connection for the instance
+closes, so a disconnected successor cannot reactivate a stale event stream.
+Reconnect snapshots never replay clipboard effects. See ADR 148.
+
+A mouse release without a native selection is an empty successful interaction;
+skip clipboard delivery for empty selection results. Normalize only the native
+no-value result for this expected gesture and preserve other errors (ADR 149).

@@ -40,7 +40,7 @@ func (h reconnectTestHandler) Snapshot(context.Context) (any, error) {
 func (reconnectTestHandler) TerminalCount() int { return 1 }
 func (reconnectTestHandler) Close() error       { return nil }
 
-func TestTUISessionReconnectsAndRetainsDaemonTerminal(t *testing.T) {
+func TestTUISessionReconnectsAndRetainsDaemonTerminalAndClipboard(t *testing.T) {
 	home := testutil.TempDir(t, "tui-reconnect-")
 	state := daemon.TerminalState{
 		TerminalID: "term-1",
@@ -104,6 +104,24 @@ func TestTUISessionReconnectsAndRetainsDaemonTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstSync.complete(nil)
+	assertClipboard := func(text string) {
+		t.Helper()
+		if !server.EmitInputOwner(daemon.EventTerminalClipboard, daemon.TerminalClipboardEvent{
+			TerminalID: state.TerminalID, TabID: state.TabID, Text: text,
+		}) {
+			t.Fatal("clipboard was dropped between the input connection and the TUI event connection")
+		}
+		select {
+		case event := <-events:
+			clip, ok := event.(tuiClipboardEvent)
+			if !ok || clip.TargetKey != state.TabID || clip.Text != text {
+				t.Fatalf("clipboard delivery = %#v, want %q for %q", event, text, state.TabID)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for clipboard on the TUI event connection")
+		}
+	}
+	assertClipboard("before reconnect")
 	before, ok := store.Session(state.TabID)
 	if !ok || before.terminalID != "term-1" {
 		t.Fatalf("session before disconnect = %#v, %v", before, ok)
@@ -112,6 +130,9 @@ func TestTUISessionReconnectsAndRetainsDaemonTerminal(t *testing.T) {
 	store.eventMu.Lock()
 	connectionID := store.events.HelloSnapshot().ConnectionID
 	store.eventMu.Unlock()
+	if connectionID == requestClient.HelloSnapshot().ConnectionID {
+		t.Fatal("test requires separate request and event connections")
+	}
 	if !server.DisconnectClient(connectionID, daemon.CloseAdministrative) {
 		t.Fatalf("event connection %d was not registered", connectionID)
 	}
@@ -143,6 +164,7 @@ func TestTUISessionReconnectsAndRetainsDaemonTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	secondSync.complete(nil)
+	assertClipboard("after reconnect")
 	after, ok := store.Session(state.TabID)
 	if !ok || after.terminalID != before.terminalID {
 		t.Fatalf("session after reconnect = %#v, want terminal ID %q", after, before.terminalID)

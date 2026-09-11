@@ -3712,7 +3712,7 @@ func TestTUIHandleClipboardEventPushesHostClipboard(t *testing.T) {
 	if copied != "vm clipboard" {
 		t.Fatalf("expected VM clipboard payload to be pushed to host clipboard, got %q", copied)
 	}
-	if app.status != "synced VM clipboard to host clipboard" {
+	if app.status != "sent clipboard copy request to host" {
 		t.Fatalf("expected clipboard sync status, got %q", app.status)
 	}
 }

@@ -4,6 +4,37 @@ package ghostty
 
 import "testing"
 
+func TestGhosttyClipboardReleaseWithoutSelectionIsNoOp(t *testing.T) {
+	terminal, err := New("empty-selection", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(terminal.Close)
+	terminal.Resize(20, 4)
+	terminal.Output(1, []byte("alpha beta"))
+	for _, priorSelection := range []bool{false, true} {
+		if priorSelection {
+			if _, err := terminal.Interact(TerminalInteractionRequest{Action: "press", Kind: "word", Col: 1}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := terminal.Interact(TerminalInteractionRequest{Action: "press", Col: 1}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := terminal.Interact(TerminalInteractionRequest{Action: "release", Col: 1})
+		if err != nil || result.Text != "" {
+			t.Fatalf("click without drag (prior selection=%v): text=%q err=%v", priorSelection, result.Text, err)
+		}
+	}
+	if _, err := terminal.Interact(TerminalInteractionRequest{Action: "press", Kind: "word", Col: 1}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := terminal.Interact(TerminalInteractionRequest{Action: "release", Col: 1})
+	if err != nil || result.Text != "alpha" {
+		t.Fatalf("word selection release: text=%q err=%v", result.Text, err)
+	}
+}
+
 func TestGhosttyInteractionRejectsNarrowingCoordinatesWithoutMutation(t *testing.T) {
 	terminal, err := New("interaction-bounds", nil, nil)
 	if err != nil {

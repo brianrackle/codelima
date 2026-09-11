@@ -181,6 +181,10 @@ test-tui-input: init
 test-tui-resize: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUI(Resize|HandleResize)|Daemon.*Resize|IsolatedTerminalResize)' -count=1
 
+.PHONY: test-native-agents
+test-native-agents: init
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run 'Test(CodexBubblewrapProvisioning|NativeAgentInstallerExecution|EveryLegacyAgentEnvironmentMigratesToNative|Untouched|BuiltInEnvironmentConfigsSeed|NodeStartRepairsCompletedLegacyBuiltInAgentBootstrap|AgentEnvironmentBootstrapCannotComplete)' -count=1
+
 test-race: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -race -p $(GO_RACE_TEST_PARALLEL) -parallel $(GO_RACE_TEST_PARALLEL) ./...
 
@@ -234,3 +238,7 @@ clean:
 
 clean-all:
 	rm -rf $(BIN_ROOT) $(DIST_DIR)
+
+.PHONY: test-clipboard
+test-clipboard: init
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/ghostty ./internal/codelima ./internal/codelima/daemon -run Clipboard -count=1

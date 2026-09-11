@@ -82,8 +82,12 @@ type Server struct {
 	publication sync.RWMutex
 	clients     map[string]*clientConn
 	input       inputLease
-	revision    uint64
-	nextConn    atomic.Uint64
+	// clipboardRecipients records the newest subscribed event connection for
+	// each frontend. Keep its ID while any connection for that frontend lives,
+	// so disconnecting it cannot reactivate an older event stream.
+	clipboardRecipients map[string]uint64
+	revision            uint64
+	nextConn            atomic.Uint64
 	// baseCtx is derived from Run's context and cancelled when the server
 	// stops; every connection derives its handler context from it so in-flight
 	// handlers observe shutdown instead of running on a detached Background.
@@ -922,6 +926,7 @@ func (s *Server) enqueueSyncLocked(client *clientConn, requestID uint64, state a
 		return
 	}
 	client.subscribed.Store(true)
+	s.registerClipboardRecipientLocked(client)
 }
 
 func (s *Server) writeImmediate(conn net.Conn, response Response) {
@@ -1164,6 +1169,9 @@ func (s *Server) removeClient(id string) {
 	delete(s.clients, id)
 	if client != nil && s.input.connectionID == client.connectionID {
 		s.input = inputLease{}
+	}
+	if client != nil {
+		s.forgetClipboardRecipientIfDisconnectedLocked(client.clientInstanceID)
 	}
 	s.mu.Unlock()
 	if client != nil {

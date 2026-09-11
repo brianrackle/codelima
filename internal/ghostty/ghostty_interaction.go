@@ -95,6 +95,11 @@ func (t *ghosttyTUITerminal) applyInteraction(request TerminalInteractionRequest
 		if data != nil {
 			defer C.ghostty_bridge_free(unsafe.Pointer(data))
 		}
+		// A plain click clears selection and releases without a drag range.
+		// This is a normal gesture, not a failed clipboard write.
+		if request.Action == "release" && result == C.GHOSTTY_NO_VALUE {
+			result = C.GHOSTTY_SUCCESS
+		}
 		if result != C.GHOSTTY_SUCCESS {
 			return output, fmt.Errorf("copy terminal selection: native result %d", int(result))
 		}

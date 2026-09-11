@@ -2,6 +2,77 @@
 
 ## Open Work
 
+### 55. Qualify the clipboard connection-routing fix on physical hosts
+
+Problem: Codex `/copy` intermittently stopped reaching the host clipboard after
+the libghostty-vt overhaul. The user confirmed that a short OSC 52 probe passes
+directly in host Ghostty but fails inside CodeLima. A real-socket TUI regression
+test reproduced a daemon routing defect: clipboard delivery required the
+physical input connection to subscribe, but the TUI subscribes on its separate
+event connection. ADR 148 routes to the owning frontend's current subscribed
+event connection while preserving the physical input lease and no replay.
+The user's additional `copy terminal selection: native result -4` message was
+separately reproduced by a plain mouse press/release without a selection.
+ADR 149 makes that normal no-value result a quiet no-op, preserving explicit
+copy errors and real word-selection copying.
+The regression now passes before and after reconnect; daemon tests cover seat
+takeover, stale subscriptions and disconnect cleanup. The TUI still delegates
+to the outer terminal using OSC 52. No clipboard limit increase was implemented.
+`make test-clipboard`, `make verify`, `make test-race`, `make test-integration`,
+`make test-package`, gopls diagnostics and running the rebuilt CLI passed on
+Linux ARM64. The integration test sends a real shell's OSC 52 output through the
+built renderer and daemon and repeats after reconnect. Physical-host clipboard
+completion and the remaining QA.md manual flows cannot be established in this
+Linux guest.
+The maintainer subsequently reported "fixed" and requested merge/release as
+v0.3.5. Their reported symptom is resolved; the broader clipboard QA cases
+below still need qualification. Release evidence is in
+`plans/clipboard_native_agents_release_qa.md`.
+
+Suggested solution: build/install the corrected pair on the host, update the
+running daemon, and repeat the guest probe and Codex `/copy`. Run QA.md's
+clipboard checks with multiple windows, reconnects, Unicode and near-limit
+responses, plus the remaining manual flows on supported hosts; clean disposable
+state. If failures remain, trace renderer callbacks, daemon admission, the TUI
+event queue and the final OSC 52 write without recording clipboard contents.
+Keep larger clipboard limits as a planning item until separately authorized.
+
+Advantages: confirms that the reproduced routing fix restores the user's
+clipboard without bypassing the outer terminal. Disadvantages: requires the
+user's physical host/terminal setup; socket tests cannot prove host clipboard
+completion or all intermittent failure modes.
+
+### 54. Qualify native agent provisioning on real Lima hosts
+
+Problem: native agent provisioning (ADRs 146–147, seed revision 9) has executable
+shell and migration tests, but this development environment has no `limactl`.
+Direct native installer smoke checks passed as UID 502 for Codex 0.154.0 and
+Claude Code 2.1.268; disposable installations were removed. The rebuilt CLI
+also seeded both native environments in a disposable metadata home.
+For bubblewrap, Ubuntu's ARM64 package was downloaded and extracted in a
+disposable project directory; `bwrap --version` reported 0.11.1 successfully.
+The rebuilt CLI also confirmed bubblewrap appears in Codex's prerequisites
+and not in the Claude-only environment. All disposable artifacts were removed.
+`make verify test-race test-integration test-package`, `make test-native-agents`,
+and gopls diagnostics passed on Linux ARM64.
+The full `QA.md` manual flows, including fresh-node native installation,
+existing-node npm migration, interactive Claude permission bypass, macOS VZ,
+and Homebrew upgrade qualification, remain unverified for this change.
+
+Suggested solution: run every QA flow on supported macOS and Linux Lima hosts;
+for Flow 4 verify `bwrap --version`, native binary ownership and paths, then
+launch Claude as the
+login user with `--dangerously-skip-permissions`. Also restart a node containing
+untouched revision-7 npm or revision-8 native bootstrap metadata and confirm
+bubblewrap and both native commands
+work while credentials and customized definitions survive. Remove all QA
+nodes, metadata homes and verification artifacts afterward.
+
+Advantages: validates real privilege dropping, vendor installers, native updates,
+and migration through Lima end to end. Disadvantages: requires VM-capable hosts,
+network downloads, and interactive agent authentication; it cannot be replaced
+by the offline installer fixtures.
+
 ### 53. Investigate timed Escape decoding in shortcut lifecycle tests
 
 Problem: the first macOS `v0.3.4` release job failed under `-race` in

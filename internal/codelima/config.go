@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	defaultCodexPrerequisitesCommand     = "apt-get update && apt-get install -y ca-certificates curl git bubblewrap && bwrap --version >/dev/null"
 	defaultAgentValidationCommand        = "command -v sh >/dev/null 2>&1"
 	defaultNodeJSPrerequisitesCommand    = `apt-get update && apt-get install -y ca-certificates curl git && node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')" && if [ "$node_major" -lt 22 ] || ! command -v npm >/dev/null 2>&1; then nodesource_script="$(mktemp)" && trap 'rm -f "$nodesource_script"' 0 && curl -fsSL https://deb.nodesource.com/setup_22.x -o "$nodesource_script" && bash "$nodesource_script" && apt-get install -y nodejs; fi`
 	defaultNPMUserPrefixCommand          = `guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && sudo -u "$guest_user" -H env HOME="$guest_home" sh -c 'mkdir -p "$HOME/.local/bin" && npm config set prefix "$HOME/.local"'`
@@ -218,25 +219,31 @@ type builtInEnvironmentConfigSpec struct {
 
 func builtInEnvironmentConfigs() []builtInEnvironmentConfigSpec {
 	return []builtInEnvironmentConfigSpec{
-		{
-			Slug: "codex",
-			BootstrapCommands: []string{
-				defaultNodeJSPrerequisitesCommand,
-				defaultNPMUserPrefixCommand,
-				defaultNPMInstallCommand("@openai/codex", "codex"),
-				defaultCodexValidationCommand,
-			},
-		},
-		{
-			Slug: "claude-code",
-			BootstrapCommands: []string{
-				defaultNodeJSPrerequisitesCommand,
-				defaultNPMUserPrefixCommand,
-				defaultNPMInstallCommand("@anthropic-ai/claude-code", "claude"),
-				defaultClaudeCodeValidationCommand,
-			},
-		},
+		{Slug: "codex", BootstrapCommands: []string{
+			defaultCodexPrerequisitesCommand,
+			nativeAgentInstallCommand("https://chatgpt.com/codex/install.sh", "sh", "codex"),
+			defaultCodexValidationCommand,
+		}},
+		{Slug: "claude-code", BootstrapCommands: []string{
+			legacyCodexPrerequisitesCommand,
+			nativeAgentInstallCommand("https://claude.ai/install.sh", "bash", "claude"),
+			defaultClaudeCodeValidationCommand,
+		}},
 	}
+}
+
+// Bootstrap enters through the root system-setup boundary. Download and execute
+// vendor installers only after dropping to the resolved, non-root login user.
+func nativeAgentInstallCommand(url, interpreter, executable string) string {
+	script := `set -eu
+[ "$(id -u)" -ne 0 ] || { echo "Agent installation requires a non-root login user" >&2; exit 1; }
+mkdir -p "$HOME/.local/bin" "$HOME/.cache/codelima"
+installer="$(mktemp "$HOME/.cache/codelima/agent-install.XXXXXX")"
+trap 'rm -f "$installer"' 0
+curl -fsSL ` + shellQuote(url) + ` -o "$installer"
+` + interpreter + ` "$installer"
+test -x "$HOME/.local/bin/` + executable + `"`
+	return `guest_user="${SUDO_USER:-$(id -un)}"; guest_home="$(getent passwd "$guest_user" | cut -d: -f6)"; test -n "$guest_home" && test "$(id -u "$guest_user")" -ne 0 && sudo -u "$guest_user" -H env HOME="$guest_home" PATH="$guest_home/.local/bin:$PATH" CODEX_NON_INTERACTIVE=1 sh -c ` + shellQuote(script) + ` && ln -sfn "$guest_home/.local/bin/` + executable + `" /usr/local/bin/` + executable
 }
 
 func defaultNPMInstallCommand(packageName, executable string) string {
@@ -251,13 +258,16 @@ func defaultNPMInstallCommand(packageName, executable string) string {
 func legacyBuiltInEnvironmentConfigs() map[string][]builtInEnvironmentConfigSpec {
 	return map[string][]builtInEnvironmentConfigSpec{
 		"codex": {
+			{Slug: "codex", BootstrapCommands: []string{defaultNodeJSPrerequisitesCommand, defaultNPMUserPrefixCommand, defaultNPMInstallCommand("@openai/codex", "codex"), defaultCodexValidationCommand}},
 			{Slug: "codex", BootstrapCommands: []string{defaultNodeJSPrerequisitesCommand, defaultNPMUserPrefixCommand, defaultNPMInstallCommand("@openai/codex", "codex"), legacyCodexLookupValidationCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexPrerequisitesCommand, legacyCodexStandaloneInstallCommand, legacyCodexLookupValidationCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexGlobalNPMInstallCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexSnapNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
 			{Slug: "codex", BootstrapCommands: []string{legacyCodexAptNodeInstallCommand, legacyCodexNPMBinCommand, legacyCodexNPMPrefixCommand, legacyCodexPathCommand, legacyCodexUserNPMInstallCommand}},
+			{Slug: "codex", BootstrapCommands: []string{legacyCodexPrerequisitesCommand, nativeAgentInstallCommand("https://chatgpt.com/codex/install.sh", "sh", "codex"), defaultCodexValidationCommand}},
 		},
 		"claude-code": {
+			{Slug: "claude-code", BootstrapCommands: []string{defaultNodeJSPrerequisitesCommand, defaultNPMUserPrefixCommand, defaultNPMInstallCommand("@anthropic-ai/claude-code", "claude"), defaultClaudeCodeValidationCommand}},
 			{Slug: "claude-code", BootstrapCommands: []string{defaultNodeJSPrerequisitesCommand, defaultNPMUserPrefixCommand, defaultNPMInstallCommand("@anthropic-ai/claude-code", "claude"), legacyClaudeLookupValidationCommand}},
 			{Slug: "claude-code", BootstrapCommands: []string{legacyClaudeCodeNativeInstallCommand}},
 		},

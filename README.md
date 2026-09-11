@@ -199,6 +199,12 @@ codelima daemon update
 codelima --version
 ```
 
+Version `0.3.5` restores guest OSC 52 clipboard delivery, including Codex
+`/copy`, and removes the copy error from clicking without a selection. It
+installs Codex and Claude Code natively as the guest login user and includes
+bubblewrap with Codex. Run `codelima daemon update` and reopen attached TUIs;
+untouched built-in agent environments migrate when their nodes next start.
+
 Version `0.3.4` gives ordinary terminal tabs short, unnumbered `shell` and `host`
 names, including common username/path shell titles. Application titles and
 status indicators remain visible. Reopen the TUI after upgrading to use the
@@ -257,13 +263,15 @@ codelima doctor --repair
 The first start may take longer while Lima downloads the Ubuntu image and
 codelima installs the built-in Codex and Claude Code environments.
 
-Both built-in agents use their supported npm packages. CodeLima installs
-Node.js 22, configures npm's global prefix as `~/.local` for Lima's
-unprivileged login user, and installs `@openai/codex` plus
-`@anthropic-ai/claude-code` without root-owned npm state. Stable links under
-`/usr/local/bin` keep `codex` and `claude` available in ordinary guest shells.
+Both built-in agents use their official native installers, running as Lima's
+unprivileged login user. Their binaries and update state live in that user's
+home directory; no Node.js or npm installation is required. System setup
+installs prerequisites such as curl, certificates, and Git. The Codex environment
+also installs Ubuntu's `bubblewrap` package and verifies `bwrap --version`. Stable links
+under `/usr/local/bin` expose the user-owned commands in guest shells.
 Bootstrap completes only after that login user successfully executes each
-agent's `--version` command.
+agent's `--version` command. Run agents directly, without `sudo`, including
+`claude --dangerously-skip-permissions` or `codex --yolo` inside the sandbox.
 
 After upgrading an existing CodeLima installation, run:
 
@@ -273,12 +281,15 @@ codelima environment show codex
 codelima environment show claude-code
 ```
 
-Seed revision 6 replaces untouched older built-in installer and validator
+Seed revision 9 adds bubblewrap to untouched Codex environments and replaces
+untouched older built-in installer and validator
 definitions. Customized or deleted environments and customized agent profiles
 remain user-controlled. Node bootstrap remains frozen at creation except for
 exact known defective built-in command sequences: the next `node start`
 replaces those sequences, records `node.bootstrap.migrated`, and reruns the
-user-owned installation without requiring node recreation.
+native user-owned installation without requiring node recreation. Existing npm
+package files are left in place, but the public commands point to the native
+installations. Agent credentials and unrelated npm packages are preserved.
 
 ## Guide
 
@@ -562,12 +573,26 @@ tabs cancels the old query. Drag to select and copy text. Repeated clicks select
 a word, line, then command output (the last requires shell-integration marks).
 Hold Shift to select locally when the guest application captures the mouse.
 Selection and search follow the seat because the native viewport is shared.
+A plain click without dragging clears the selection without copying.
 
 Paste is admitted as one operation, with a **64 KiB UTF-8 limit**. Oversize,
 unsafe or queue-full pastes fail without sending a prefix. Guest clipboard
-writes are limited to bounded text and go only to the current seat's attached
-frontend; clipboard reads and Kitty acknowledged writes are unsupported.
-Outer-terminal clipboard permissions still apply.
+writes accept up to **64 KiB of UTF-8 text** and go only to the current seat's
+attached frontend; clipboard reads and Kitty acknowledged writes are unsupported.
+The TUI forwards OSC 52 to the outer terminal, which owns clipboard handling
+for both local and remote sessions. Its clipboard permissions still apply.
+The status message reports a copy request because OSC 52 delivery cannot
+confirm that the outer terminal accepted it.
+
+To check guest-to-host copying, run this in a guest shell, then paste into a
+host editor:
+
+```sh
+printf '\033]52;c;%s\007' "$(printf 'guest clipboard probe' | base64 | tr -d '\n')"
+```
+
+With multiple CodeLima windows, focus the window whose host clipboard should
+receive the copy. Restore your previous clipboard contents after testing.
 
 Tabs use the title reported by the running program, such as a Codex session
 title, without an added node name or tab number. For example,

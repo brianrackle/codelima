@@ -363,7 +363,7 @@ func (s *Store) ensureDirectories() error {
 // Revision 7 retires virtiofs_reclaim_threshold_percent: the refresh rule that
 // strips it only runs on homes whose stamp is behind, so the key would survive
 // forever in every home already stamped 6.
-const seedRevision = "7"
+const seedRevision = "9"
 
 func (s *Store) seedVersionPath() string {
 	return filepath.Join(s.cfg.MetadataRoot, "_config", "seed.version")
