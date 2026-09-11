@@ -497,8 +497,58 @@ and the release must not close it. Close the final tab and verify its release
 does not produce an error after focus returns to the tree. Repeat with legacy
 Option input and the macOS Option glyph fallbacks. Legacy protocols cannot
 distinguish hold repeats from fresh presses. Check `terminal list` alongside
-the tab bar: shell title updates may add username/path text to an existing
-label, but must not create another terminal ID.
+the tab bar: shell title updates replace the node/number fallback with the
+reported title, but must not create another terminal ID.
+
+With two tabs open, run these commands in one tab. Clearing `PROMPT_COMMAND`
+and using a plain `PS1` in this disposable shell prevents the prompt from
+immediately replacing the test title:
+
+```sh
+unset PROMPT_COMMAND
+PS1='$ '
+printf '\033]2;Test this | codelima\033\\'
+```
+
+Verify its label is `Test this | codelima` with no added node name or tab
+number (`host:Test this | codelima` for a host tab). Update it with
+`printf '\033]2;Renamed task\033\\'` and verify the same tab changes in place.
+Run `sleep 3; printf '\007'` and switch to the other tab before it completes.
+Verify the background tab shows `Renamed task 🔔` (with `host:` for a host
+tab), with no `·` before the emoji. Visit that tab and verify the emoji clears.
+Switch away again without another bell; the emoji must stay cleared. Repeat
+the delayed bell and verify a new emoji appears and clears on the next visit.
+Run `printf '\007'` while viewing the tab and verify no indicator remains.
+Clear the title with `printf '\033]2;\033\\'` and verify the node and positional
+number return with the host marker retained. Repeat in the other tab and
+verify titles and alerts belong to the correct tab. In a host that reports
+window focus, repeat while CodeLima is unfocused: returning to the visible
+tab acknowledges its bell. Info panes and overlays must not acknowledge bells
+for terminals they hide. Each attached TUI window acknowledges its own visits.
+
+Verify all tab metadata keeps updating while another tab is selected. In the
+same disposable shell with a plain prompt, run this sequence, then switch away
+during its initial delay:
+
+```sh
+(
+  sleep 3
+  printf '\033]2;⠋ Working\033\\\033]9;4;1;10\033\\'
+  sleep 3
+  printf '\033]2;⠧ Working\033\\'
+  sleep 3
+  printf '\033]2;⠧ Renamed\033\\\033]9;4;1;60\033\\'
+  sleep 3
+  printf '\033]2;Done\033\\\033]9;4;0;0\033\\\007'
+)
+```
+
+Verify the background tab changes spinner frame and title, progresses from
+`10%` to `60%`, retains its working state between updates, then shows `Done 🔔`
+when the program reports completion. Repeat while remaining on that tab:
+title/spinner/progress updates must match, with the bell acknowledged because
+the tab is being viewed. Repeat in an unfocused host window when focus
+reporting is available. Returning to a tab must show its latest reported state.
 
 Verify the remaining shortcut lifecycles with press/repeat/release reporting:
 

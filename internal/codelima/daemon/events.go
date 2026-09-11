@@ -41,13 +41,14 @@ const (
 // there -- keep publishing it, so there is still exactly one definition per event.
 
 // TerminalDirtyEvent announces that a terminal published a new screen. It
-// carries the sequence rather than the screen: a subscriber pulls the snapshot
-// it wants through terminal.snapshot, which is served from the daemon's
-// encode-once body cache.
+// carries metadata for background tab titles and alerts, plus the sequence
+// rather than the screen: a subscriber pulls the snapshot it wants through
+// terminal.snapshot, which is served from the daemon's encode-once body cache.
 type TerminalDirtyEvent struct {
-	SnapshotSequence uint64 `json:"snapshot_sequence"`
-	Stale            bool   `json:"stale"`
-	TerminalID       string `json:"terminal_id"`
+	Metadata         TerminalMetadata `json:"metadata"`
+	SnapshotSequence uint64           `json:"snapshot_sequence"`
+	Stale            bool             `json:"stale"`
+	TerminalID       string           `json:"terminal_id"`
 }
 
 // TerminalErrorEvent reports a terminal-local failure that did not close the

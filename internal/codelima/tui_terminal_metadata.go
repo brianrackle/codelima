@@ -25,12 +25,6 @@ func terminalMetadataText(text string, limit int) string {
 
 func terminalMetadataBadge(metadata TerminalMetadata) string {
 	var labels []string
-	if title := terminalMetadataText(metadata.Title, 40); title != "" {
-		labels = append(labels, title)
-	}
-	if metadata.BellCount > 0 {
-		labels = append(labels, "bell")
-	}
 	if metadata.ProgressState != 0 {
 		labels = append(labels, fmt.Sprintf("%d%%", max(0, min(100, metadata.Progress))))
 	}
@@ -40,16 +34,16 @@ func terminalMetadataBadge(metadata TerminalMetadata) string {
 	return strings.Join(labels, " · ")
 }
 
-func (a *vaxisTUIApp) terminalMetadataLabel(target string) string {
+func (a *vaxisTUIApp) terminalMetadata(target string) TerminalMetadata {
 	term, ok := a.sessions.SessionTerminal(target)
 	if !ok {
-		return ""
+		return TerminalMetadata{}
 	}
 	receiver, ok := term.(interface{ Metadata() TerminalMetadata })
 	if !ok {
-		return ""
+		return TerminalMetadata{}
 	}
-	return terminalMetadataBadge(receiver.Metadata())
+	return receiver.Metadata()
 }
 
 func (a *vaxisTUIApp) recordTerminalNotices() {

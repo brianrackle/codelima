@@ -197,6 +197,7 @@ func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
 		}
 		entry.cache.Store(cache)
 		h.broadcast(daemon.EventTerminalDirty, daemon.TerminalDirtyEvent{
+			Metadata:         published.Metadata,
 			SnapshotSequence: published.SnapshotSequence,
 			Stale:            published.Stale,
 			TerminalID:       entry.state.TerminalID,

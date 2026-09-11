@@ -2,6 +2,65 @@
 
 ## Open Work
 
+### 50. Complete native QA for terminal title labels and bell acknowledgement
+
+Problem: ADRs 143–144 make reported titles replace the node/number fallback
+and show `🔔` for background bells until the tab is visited. Protocol 7 pushes
+metadata so hidden tabs update without full-grid reads. Regression tests
+reproduce the old behavior and pass afterward. `make verify`,
+`make test-integration`, and focused race tests for metadata, bell visits and
+publication pass. Gopls reports only existing modernization suggestions
+outside the changed lines. Full QA.md manual
+qualification remains partial in this Linux/aarch64 guest:
+
+The maintainer subsequently requested merging and releasing these changes as
+`v0.3.3` after those limits were disclosed. Full local `make test-race` and
+`make test-package` also pass. A published `v0.3.2` protocol-6 daemon upgraded
+to the versioned `0.3.3` protocol-7 candidate with two live host terminals and
+a 1,045,752-byte renderer journal; IDs, shell PIDs, retained output and new
+input survived. An explicit-path live update also passed. Publication evidence
+belongs in [the release report](plans/tab_status_release_qa.md); authorization
+does not complete the remaining manual checks.
+
+- Flow 1: help, schema 4/seed 7, ordered presets and non-mutating schema-v3
+  rejection passed. Doctor reports missing `limactl` and inaccessible `/dev/kvm`.
+- Flow 2: environment/configuration creation passed; node creation fails with
+  `DependencyUnavailable` for `limactl`. Remaining Flow 2 and Flows 3–4/6 need
+  working Lima; no real VM was created.
+- Flow 5: session-v1 quarantine, two real host terminals and a live daemon
+  handoff passed using an isolated stopped-node metadata/list fixture. Guest,
+  large-history handoff/containment and
+  physical two-window Flow 5b checks remain pending for this change.
+- Flow 7: built TUI in an isolated tmux server displayed both sample titles
+  without node/number prefixes, retained `host:`, renamed the active tab in
+  place and restored its fallback when cleared. The bell follow-up showed
+  `Background task 🔔` before visiting that tab, cleared the emoji on visit,
+  kept it cleared after leaving, showed a subsequent background bell, and
+  acknowledged active-tab bells immediately. Live daemon update/reconnect
+  retained acknowledgement and both terminal IDs. Other physical-terminal and
+  guest-app checks remain pending.
+  Explicit focus-independence coverage now exercises spinner-only changes,
+  renaming, progress and completion in active/background/unfocused-window
+  modes. A live two-host-tab TUI check also passed matching active/background
+  spinner frames, title changes, 10%/60% progress, retained working state and
+  completion/bell behavior. Its disposable processes and files were removed.
+- Flow 8: Linux snapshot correctly reports reclaim unsupported; macOS pending.
+- Flow 9: capture status/list/read probes passed and daemon PID/terminal IDs
+  remained fixed. Kernel stack reads were denied; macOS sampling pending.
+- Flow 10: Go tests, native Go adapter tests, Vaxis tests, lint and build passed
+  through `make verify`. Full upstream/package and interactive qualification
+  remain pending (see #41/#44).
+- Flow 11: native Homebrew install/upgrade qualification remains pending.
+
+Suggested solution: run remaining QA.md flows on native Lima-capable hosts,
+including the title/rename/clear/bell steps with actual guest agents. Remove
+all verification artifacts afterward. This run's isolated TUI, tmux server,
+daemon, terminals, shell files, fixture, capture and QA home were removed.
+
+Advantages: confirms real guest titles and host terminal behavior across the
+supported platforms. Disadvantages: requires native VM, physical terminal and
+Homebrew capabilities unavailable in this workspace.
+
 ### 49. Make VirtioFS ticker cancellation coverage deterministic
 
 Problem: the first macOS `v0.3.2` release job failed under `-race` with

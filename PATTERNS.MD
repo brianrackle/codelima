@@ -319,6 +319,20 @@ an unbounded redraw path.
 
 Terminal tabs are independent terminal instances attached to one node target. Per-target state keeps ordered tab IDs, a monotonic counter, active selection, and the last open error. Selecting a running node ensures a terminal tab, reusing any existing node tab and opening a guest tab only when none exists. `Option+t` adds another guest tab and `Option+Shift+t` adds a host tab; all use the same switch, move, close, refresh, and active-tab paths. Moving swaps the active identity with one adjacent same-target tab without wrapping or changing activation. Never open a guest tab for a stopped node.
 
+Use a sanitized, bounded terminal-reported title as the tab's display name.
+Only untitled tabs fall back to the node label and positional number. Keep the
+host-shell marker and status badges separate from title selection. Titles may
+change or coincide; they never replace durable terminal IDs or determine tab
+ordering, selection, or lifetime (ADR 143).
+
+Push terminal metadata with sequenced dirty events so hidden-tab titles and
+bells update without full-grid snapshot requests. Keep a separate metadata
+sequence in the client so delayed screen replies cannot roll labels backward;
+authoritative synchronization resets that sequence. Track acknowledged bell
+counts on the TUI's session record, preserving them across reorder/reconnect
+and discarding them on close. Only the visible terminal in the focused window
+acknowledges bells; never reset the daemon's cumulative count (ADR 144).
+
 A path-scoped TUI node list is a projection, not an authoritative deletion set. Before refresh reconciliation closes a daemon-owned tab that is absent from the projection, confirm the node is missing or deleted in the global metadata store. Retain tabs on ambiguous metadata failures; explicit stop/delete operations remain the immediate close path. Apply the same rule whenever a scoped client can otherwise destruct shared daemon state.
 
 Runtime maps are never an ordering source. Keep a daemon-owned ordered terminal-ID slice beside the runtime map and use it at every state boundary—list response, snapshot, session persistence, respawn, or live handoff. Persist order in the existing ordered session array, restore in that array order, and use durable creation time plus an identity tie-breaker only to normalize legacy or partially constructed state that has no explicit order.

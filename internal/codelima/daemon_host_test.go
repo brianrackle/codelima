@@ -309,6 +309,7 @@ type restartRecordingDaemonTerminal struct {
 
 	mu          sync.Mutex
 	visibleText string
+	metadata    TerminalMetadata
 	restarts    int
 	restartErr  error
 	snapshots   int
@@ -354,7 +355,7 @@ func (t *restartRecordingDaemonTerminal) Snapshot() SnapshotResult {
 	for _, grapheme := range t.visibleText {
 		cells = append(cells, SnapshotCell{Grapheme: string(grapheme), Width: 1})
 	}
-	return SnapshotResult{Snapshot: TerminalSnapshot{Cols: len(cells), Rows: 1, Cells: cells, Generation: 7}}
+	return SnapshotResult{Snapshot: TerminalSnapshot{Cols: len(cells), Rows: 1, Cells: cells, Generation: 7, Metadata: t.metadata}}
 }
 
 func (*restartRecordingDaemonTerminal) Scroll(int)       {}
@@ -528,6 +529,31 @@ func TestDaemonRestartRendererWaitsForALiveUpdateAndIsRetryableAfterIt(t *testin
 	}
 	if got := term.restartCount(); got != 0 {
 		t.Fatalf("renderer restarts after a committed update = %d, want 0", got)
+	}
+}
+
+func TestDaemonSnapshotPublicationIncludesTerminalMetadata(t *testing.T) {
+	t.Parallel()
+	term := newRestartRecordingDaemonTerminal("published")
+	term.metadata = TerminalMetadata{Title: "Background task", BellCount: 2}
+	events := make(chan daemon.TerminalDirtyEvent, 1)
+	host := &daemonHost{broadcast: func(name string, payload any) {
+		if name == daemon.EventTerminalDirty {
+			events <- payload.(daemon.TerminalDirtyEvent)
+		}
+	}}
+	entry := host.newTerminalEntry(daemon.TerminalState{TerminalID: "term-1"}, term)
+	t.Cleanup(entry.stopSnapshotPublisher)
+	select {
+	case event := <-events:
+		if event.Metadata != term.metadata || event.TerminalID != "term-1" || event.SnapshotSequence == 0 {
+			t.Fatalf("dirty event = %#v", event)
+		}
+		if snapshot := entry.cache.Load().snapshot; snapshot.Metadata != event.Metadata || snapshot.SnapshotSequence != event.SnapshotSequence {
+			t.Fatal("event metadata did not come from its published snapshot")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal metadata was not published")
 	}
 }
 

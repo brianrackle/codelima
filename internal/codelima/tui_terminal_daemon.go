@@ -64,6 +64,8 @@ type daemonTUITerminal struct {
 	resizeCellWidth     int
 	resizeCellHeight    int
 	snapshot            daemon.Snapshot
+	metadata            TerminalMetadata
+	metadataSequence    uint64
 	text                string
 	focused             bool
 	focusVersion        uint64
@@ -75,6 +77,7 @@ type daemonTUITerminal struct {
 	snapshotWake        chan struct{}
 	snapshotVersion     uint64
 	snapshotReadVersion uint64
+	snapshotEpoch       uint64
 }
 
 type daemonTerminalInputRequest struct {
@@ -507,6 +510,9 @@ func (t *daemonTUITerminal) installSnapshot(snapshot daemon.Snapshot) {
 		return
 	}
 	t.snapshot = snapshot
+	// An authoritative reconnect may start a new daemon sequence epoch.
+	t.metadata, t.metadataSequence = TerminalMetadata{}, 0
+	t.snapshotEpoch++
 	t.generation = snapshot.Generation
 	t.text = daemonSnapshotText(snapshot)
 	t.snapshotReadVersion = t.snapshotVersion
@@ -548,6 +554,7 @@ func (t *daemonTUITerminal) snapshotLoop() {
 		t.mu.RLock()
 		dirty := !t.closed && t.snapshotVersion != t.snapshotReadVersion
 		requestedVersion := t.snapshotVersion
+		requestedEpoch := t.snapshotEpoch
 		t.mu.RUnlock()
 		if !dirty {
 			continue
@@ -562,6 +569,10 @@ func (t *daemonTUITerminal) snapshotLoop() {
 			continue
 		}
 		t.mu.Lock()
+		if t.closed || requestedEpoch != t.snapshotEpoch {
+			t.mu.Unlock()
+			continue
+		}
 		changed := snapshot.SnapshotSequence != t.snapshot.SnapshotSequence ||
 			snapshot.Generation != t.generation ||
 			snapshot.Cols != t.snapshot.Cols ||

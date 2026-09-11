@@ -438,6 +438,15 @@ matrix. Local and published evidence belongs in
 [the resize release report](plans/resize_release_qa.md), with outstanding
 manual work in TODO #41/#44/#46.
 
+The maintainer authorized `v0.3.3` after the tab status and bell fixes and the
+remaining native/manual qualification gaps were reported. Daemon protocol 7
+adds metadata to dirty events; upgrade verification must cover a protocol-6
+daemon from `v0.3.2`, preserving live terminals through the candidate's
+update-only compatibility handshake. The frontend must be reopened to use the
+new labels and acknowledgement behavior. Release evidence belongs in
+[the tab status release report](plans/tab_status_release_qa.md), with remaining
+manual work in TODO #41/#44/#50.
+
 ### Libghostty Promotion To The Regular Release
 
 On 2026-09-08 the maintainer explicitly requested promoting the published

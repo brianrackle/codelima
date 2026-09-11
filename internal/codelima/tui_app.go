@@ -408,7 +408,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.drawHeaderLogo()
 		return false, nil
 	case tuiDaemonTerminalDirtyEvent:
+		metadataChanged := a.sessions.applyDaemonTerminalMetadata(event)
 		a.sessions.markDaemonTerminalDirty(event.TerminalID, a.state.activeSessionKey())
+		if metadataChanged {
+			a.draw()
+		}
 		a.searchTick()
 		return false, nil
 	case tuiRefreshTickEvent:

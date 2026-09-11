@@ -48,9 +48,7 @@ func (e tuiDaemonSynchronizedEvent) complete(err error) {
 
 // tuiDaemonTerminalDirtyEvent crosses from the daemon event-reader goroutine
 // to the single-owner TUI event loop before it touches the terminal registry.
-type tuiDaemonTerminalDirtyEvent struct {
-	TerminalID string
-}
+type tuiDaemonTerminalDirtyEvent daemon.TerminalDirtyEvent
 
 // tuiDaemonTerminalOpenedEvent carries the daemon's terminal.open reply back to
 // the event loop. The RPC runs off the loop, but the session map it produces is

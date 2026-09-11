@@ -199,6 +199,11 @@ codelima daemon update
 codelima --version
 ```
 
+Version `0.3.3` uses program-reported tab titles, keeps background titles and
+working/progress indicators current, and shows `🔔` until you visit the tab.
+Run `codelima daemon update` and reopen attached TUIs after upgrading so both
+the daemon and frontend use the new tab metadata updates.
+
 Version `0.3.2` fixes outer-window resize corruption, dropped punctuation and
 international text, and idle daemon handoff after resizing. Reopen attached
 TUIs after upgrading to use the corrected drawing and input handling.
@@ -551,9 +556,23 @@ Paste is admitted as one operation, with a **64 KiB UTF-8 limit**. Oversize,
 unsafe or queue-full pastes fail without sending a prefix. Guest clipboard
 writes are limited to bounded text and go only to the current seat's attached
 frontend; clipboard reads and Kitty acknowledged writes are unsupported.
-Outer-terminal clipboard permissions still apply. Titles, bell/progress and
-notification badges appear in tabs; notification text is retained in the local
-messages view, not sent as unsolicited desktop notifications.
+Outer-terminal clipboard permissions still apply.
+
+Tabs use the title reported by the running program, such as a Codex session
+title, without an added node name or tab number. For example,
+`codelima 1 · Test this | codelima` becomes `Test this | codelima`. Tabs without
+a title show the node name and, when several tabs are open, their position.
+Host tabs retain the `host:` prefix. Titles are bounded to 40 characters.
+Titles, application-provided working spinners, progress and bell indicators
+continue updating whether or not their tab or CodeLima window is focused.
+Switching tabs does not change a session's working status.
+The `🔔` suffix means a terminal bell arrived while you were away from the tab.
+Visiting the tab in the focused window clears it; a later bell can show it
+again. Bells received while you are viewing the tab are already acknowledged.
+Acknowledgement is local to each TUI window. It does not identify an agent's
+current state.
+Progress and notification badges also appear in tabs; notification text is
+retained in the local messages view, not sent as unsolicited desktop notifications.
 
 Host default foreground/background, palette and light/dark changes are queried
 with a bounded deadline and propagated to hidden tabs too. An unanswered color

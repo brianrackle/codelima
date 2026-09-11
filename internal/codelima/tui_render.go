@@ -477,10 +477,17 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 		if len(segments) > 0 {
 			segments = append(segments, vaxis.Segment{Text: " ", Style: inactiveStyle})
 		}
-		label := terminalTabLabel(session, index, len(keys))
-		if metadata := a.terminalMetadataLabel(key); metadata != "" {
-			label += " · " + metadata
+		metadata := a.terminalMetadata(key)
+		if metadata.BellCount < session.acknowledgedBells {
+			session.acknowledgedBells = 0
 		}
+		if key == activeKey && a.sessions.windowFocused.Load() && !a.rightPaneShowsInfo() && !a.rightPaneOverrideActive() {
+			session.acknowledgedBells = metadata.BellCount
+		}
+		if metadata.BellCount <= session.acknowledgedBells {
+			metadata.BellCount = 0
+		}
+		label := terminalTabLabel(session, index, len(keys), metadata)
 		if key == activeKey {
 			segments = append(segments, vaxis.Segment{Text: "[" + label + "]", Style: activeStyle})
 			continue
@@ -490,19 +497,28 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 	return segments
 }
 
-func terminalTabLabel(session *tuiSession, index, total int) string {
+func terminalTabLabel(session *tuiSession, index, total int, metadata TerminalMetadata) string {
 	if session == nil {
 		return ""
 	}
-	label := strings.TrimSpace(session.label)
+	label := terminalMetadataText(metadata.Title, 40)
 	if label == "" {
-		label = strings.TrimSpace(session.key)
+		label = strings.TrimSpace(session.label)
+		if label == "" {
+			label = strings.TrimSpace(session.key)
+		}
+		if total > 1 {
+			label = fmt.Sprintf("%s %d", label, index+1)
+		}
 	}
 	if session.shellKind == terminal.NodeHostShell && label != "" {
 		label = "host:" + label
 	}
-	if total > 1 {
-		label = fmt.Sprintf("%s %d", label, index+1)
+	if badge := terminalMetadataBadge(metadata); badge != "" {
+		label += " · " + badge
+	}
+	if metadata.BellCount > 0 {
+		label += " 🔔"
 	}
 	return label
 }

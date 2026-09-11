@@ -27,6 +27,8 @@ type tuiSession struct {
 	label      string
 	node       Node
 	terminalID terminal.TerminalID
+	// acknowledgedBells is local to this TUI and survives tab reorder/resync.
+	acknowledgedBells uint64
 }
 
 // tuiDaemonEventReadTimeout is the read deadline on the daemon event stream.
@@ -363,7 +365,7 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 	switch event.Event {
 	case daemon.EventTerminalDirty:
 		if dirty, ok := daemon.DecodeEventData[daemon.TerminalDirtyEvent](event.Data); ok && dirty.TerminalID != "" {
-			s.postEvent(tuiDaemonTerminalDirtyEvent{TerminalID: dirty.TerminalID})
+			s.postEvent(tuiDaemonTerminalDirtyEvent(dirty))
 		}
 	case daemon.EventTerminalResized:
 		// A resize publishes the whole terminal record; only the identity is
@@ -945,6 +947,15 @@ func (s *tuiSessionStore) SessionTerminal(sessionKey string) (tuiTerminal, bool)
 type daemonSnapshotView interface {
 	markSnapshotDirty()
 	requestSnapshot()
+}
+
+func (s *tuiSessionStore) applyDaemonTerminalMetadata(event tuiDaemonTerminalDirtyEvent) bool {
+	runtime, ok := s.registry.Lookup(terminal.TerminalID(event.TerminalID))
+	if !ok {
+		return false
+	}
+	view, ok := runtime.Backend.(*daemonTUITerminal)
+	return ok && view.updateMetadata(event.SnapshotSequence, event.Metadata)
 }
 
 // markDaemonTerminalDirty runs on the TUI event loop. Hidden tabs retain only

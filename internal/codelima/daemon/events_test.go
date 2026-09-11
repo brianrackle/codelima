@@ -26,8 +26,8 @@ func TestEventPayloadWireShapes(t *testing.T) {
 	}{
 		{
 			name:    EventTerminalDirty,
-			payload: TerminalDirtyEvent{SnapshotSequence: 42, Stale: true, TerminalID: "term-1"},
-			want:    `{"snapshot_sequence":42,"stale":true,"terminal_id":"term-1"}`,
+			payload: TerminalDirtyEvent{Metadata: TerminalMetadata{Title: "Task", BellCount: 2}, SnapshotSequence: 42, Stale: true, TerminalID: "term-1"},
+			want:    `{"metadata":{"title":"Task","bell_count":2},"snapshot_sequence":42,"stale":true,"terminal_id":"term-1"}`,
 		},
 		{
 			// Every key is present even when empty: the map literals had no
@@ -35,7 +35,7 @@ func TestEventPayloadWireShapes(t *testing.T) {
 			// keep seeing the field rather than infer it from absence.
 			name:    EventTerminalDirty + " zero",
 			payload: TerminalDirtyEvent{},
-			want:    `{"snapshot_sequence":0,"stale":false,"terminal_id":""}`,
+			want:    `{"metadata":{},"snapshot_sequence":0,"stale":false,"terminal_id":""}`,
 		},
 		{
 			name:    EventTerminalError,

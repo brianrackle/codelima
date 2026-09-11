@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 6 is the compact
-	// per-cell snapshot encoding (see SnapshotCell).
-	ProtocolVersion               = 6
+	// whenever a wire shape this protocol carries changes; 7 adds metadata
+	// to terminal dirty events for background tab labels and bell alerts.
+	ProtocolVersion               = 7
 	SessionVersion                = 2
 	HandoffVersion                = 5
 	PreviousChunkedHandoffVersion = 4
