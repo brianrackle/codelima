@@ -2,6 +2,26 @@
 
 ## Open Work
 
+### 53. Investigate timed Escape decoding in shortcut lifecycle tests
+
+Problem: the first macOS `v0.3.4` release job failed under `-race` in
+`TestTUITabOpenCloseKeyLifecycle/alt_guest/terminal/handleKey` at
+`tui_tab_input_test.go:127`: a release sequence decoded as bare Escape
+(`Keycode:27`, press) instead of a release event. Evidence: run 34564404178,
+job 103153492648, commit `50de45e`. The same commit's macOS main-CI race job
+passed. The complete macOS release job passed on its one retry without changing
+the tag or checks.
+
+Suggested solution: investigate the input parser's 10 ms Escape timer under
+scheduler delays, including when the remainder of a sequence is already
+buffered. Add a deterministic delayed-parser regression and make lifecycle
+fixtures independent of wall-clock timing while retaining parser integration
+coverage. Advantages: separates key-routing regressions from scheduling noise
+and may prevent real Escape misclassification under load. Disadvantages:
+requires care to preserve prompt handling of a genuine standalone Escape;
+the timer explanation is a hypothesis, not a confirmed root cause. Deferred
+from the tab-label release; retry results are in the release report.
+
 ### 52. Clean managed-shell INPUTRC files after terminal termination
 
 Problem: tab-name QA found that closing a managed host tab can leave its
@@ -22,11 +42,17 @@ and accounting for live handoff. Deferred from tab-label presentation.
 The maintainer subsequently requested merging and publishing `v0.3.4` after
 these limits were disclosed. Full local `make test-race`, `make test-package`
 and release-tooling tests also pass. A published `v0.3.3` daemon upgraded to
-the versioned `0.3.4` candidate with two live shells and a 922,671-byte journal;
+the versioned `0.3.4` candidate with two live shells and a 1,044,738-byte journal;
 both no-argument and explicit-path handoffs preserved IDs, shell PIDs, output
 and input. Release evidence belongs in
 [the compact tab report](plans/compact_tab_release_qa.md). Publication does not
 complete the remaining native/manual checks.
+
+Published as regular Latest `v0.3.4` at `50de45e`; the Homebrew formula and all
+three native archives/manifests were verified. Main CI and the release matrix
+passed after one macOS retry each (see #49/#53). The downloaded Linux arm64
+package passed its renderer smoke test. Native/manual qualification below
+remains open.
 
 Problem: ADR 145 replaces empty/common shell titles with `shell` or `host`,
 preserving application titles and badges. Regression tests first reproduced
@@ -150,6 +176,11 @@ job 103065882505. A local Linux arm64 run of 500 race-enabled repetitions
 also passed. The complete macOS release job passed on its one retry, without
 changing the tag or skipping checks; that does not eliminate the scheduling
 edge.
+
+The initial macOS main-CI verification for `v0.3.4` reproduced the same panic
+without `-race` (run 34564389208, job 103153404170, commit `50de45e`). The
+job passed on its one retry after all other main-CI jobs passed. Details are in
+[the compact tab release report](plans/compact_tab_release_qa.md).
 
 Suggested solution: check cancellation before starting a reclaim (including
 after acquiring the run lock), make the test notification safe for repeated
