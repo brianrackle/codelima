@@ -447,6 +447,14 @@ new labels and acknowledgement behavior. Release evidence belongs in
 [the tab status release report](plans/tab_status_release_qa.md), with remaining
 manual work in TODO #41/#44/#50.
 
+The maintainer authorized `v0.3.4` after the compact tab defaults and remaining
+native/manual QA gaps were reported. This frontend presentation change keeps
+daemon protocol 7 and the renderer dependency unchanged. Reopen the TUI after
+upgrading. Release evidence belongs in
+[the compact tab release report](plans/compact_tab_release_qa.md), with remaining
+manual work in TODO #41/#44/#51. Publication requires the normal three-platform
+automated release matrix.
+
 ### Libghostty Promotion To The Regular Release
 
 On 2026-09-08 the maintainer explicitly requested promoting the published

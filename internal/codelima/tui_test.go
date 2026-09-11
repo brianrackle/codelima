@@ -1013,21 +1013,15 @@ func TestCurrentPaneTabSegmentsShowOpenTerminalTabs(t *testing.T) {
 	inactiveStyle := tuiMutedStyle()
 	got := app.currentPaneTabSegments(app.state.selectedEntry(), activeStyle, inactiveStyle)
 	text := segmentsText(got)
-	if !strings.Contains(text, "child-node 1") || !strings.Contains(text, "[child-node 2]") {
+	if !strings.HasSuffix(text, "  shell [shell]") || strings.Count(text, "shell") != 2 {
 		t.Fatalf("expected the focused node's tabs in pane border, got %q", text)
-	}
-	if strings.Contains(text, "root-node") {
-		t.Fatalf("expected other nodes' tabs to stay hidden, got %q", text)
 	}
 
 	selectTUIEntry(t, app, nodeTargetKey("node-root"))
 	got = app.currentPaneTabSegments(app.state.selectedEntry(), activeStyle, inactiveStyle)
 	text = segmentsText(got)
-	if !strings.Contains(text, "[root-node]") {
+	if !strings.HasSuffix(text, "  [shell]") || strings.Count(text, "shell") != 1 {
 		t.Fatalf("expected the root node tab when the root node is focused, got %q", text)
-	}
-	if strings.Contains(text, "child-node") {
-		t.Fatalf("expected child tabs to stay hidden while root is focused, got %q", text)
 	}
 }
 

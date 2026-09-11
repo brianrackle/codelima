@@ -23,6 +23,37 @@ func terminalMetadataText(text string, limit int) string {
 	return strings.TrimSpace(string(clean))
 }
 
+// isDefaultShellTitle recognizes common shell names and user[@host]: /path
+// prompt titles. OSC titles have no source tag, so keep unfamiliar formats
+// and titles with task separators rather than guessing a program's intent.
+func isDefaultShellTitle(title string) bool {
+	switch strings.TrimPrefix(title, "-") {
+	case "", "shell", "sh", "bash", "dash", "zsh", "fish", "ksh", "ash", "csh", "tcsh":
+		return true
+	}
+	identity, directory, ok := strings.Cut(title, ":")
+	if !ok || identity == "" || strings.ContainsAny(title, "|·") {
+		return false
+	}
+	for part := range strings.SplitSeq(identity, "@") {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-' && r != '.' {
+				return false
+			}
+		}
+	}
+	if strings.Count(identity, "@") > 1 {
+		return false
+	}
+	directory = strings.TrimSpace(directory)
+	// A URI is an application title, not the shell's user/path convention.
+	return (strings.HasPrefix(directory, "/") && !strings.HasPrefix(directory, "//")) ||
+		directory == "~" || strings.HasPrefix(directory, "~/")
+}
+
 func terminalMetadataBadge(metadata TerminalMetadata) string {
 	var labels []string
 	if metadata.ProgressState != 0 {

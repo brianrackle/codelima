@@ -18,7 +18,7 @@ type metadataTestTerminal struct {
 
 func (t *metadataTestTerminal) Metadata() TerminalMetadata { return t.metadata }
 
-func TestTerminalTabSegmentsPreferReportedTitle(t *testing.T) {
+func TestTerminalTabSegmentsUseCompactDefaults(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	sessions := newTUISessionStore(ctx, service, func(vaxis.Event) {})
@@ -41,14 +41,17 @@ func TestTerminalTabSegmentsPreferReportedTitle(t *testing.T) {
 		host   bool
 		want   string
 	}{
-		{name: "untitled fallback", want: "[codelima 1] codelima 2"},
+		{name: "untitled fallback", want: "[shell] shell"},
 		{name: "reported examples", first: TerminalMetadata{Title: "Test this | codelima"}, second: TerminalMetadata{Title: "⠇ Test | codelima", BellCount: 1}, want: "[Test this | codelima] ⠇ Test | codelima 🔔"},
 		{name: "title changes", first: TerminalMetadata{Title: "New session"}, second: TerminalMetadata{Title: "Done", ProgressState: 1, Progress: 100, NotificationBody: "finished"}, want: "[New session] Done · 100% · notice"},
-		{name: "titles cleared", first: TerminalMetadata{BellCount: 1}, want: "[codelima 1] codelima 2"},
-		{name: "inert titles", first: TerminalMetadata{Title: "\x1b\a\r\n\u202e"}, second: TerminalMetadata{Title: "\x1b\a\r\n\u202e title "}, want: "[codelima 1] title"},
-		{name: "bounded unicode", first: TerminalMetadata{Title: strings.Repeat("界", 41)}, want: "[" + strings.Repeat("界", 40) + "…] codelima 2"},
-		{name: "host retains marker", second: TerminalMetadata{Title: "Host task"}, host: true, want: "[codelima 1] host:Host task"},
-		{name: "host fallback", host: true, want: "[codelima 1] host:codelima 2"},
+		{name: "titles cleared", first: TerminalMetadata{BellCount: 1}, want: "[shell] shell"},
+		{name: "inert titles", first: TerminalMetadata{Title: "\x1b\a\r\n\u202e"}, second: TerminalMetadata{Title: "\x1b\a\r\n\u202e title "}, want: "[shell] title"},
+		{name: "bounded unicode", first: TerminalMetadata{Title: strings.Repeat("界", 41)}, want: "[" + strings.Repeat("界", 40) + "…] shell"},
+		{name: "host retains marker", second: TerminalMetadata{Title: "Host task"}, host: true, want: "[shell] host:Host task"},
+		{name: "host fallback", host: true, want: "[shell] host"},
+		{name: "shell prompt titles", first: TerminalMetadata{Title: "brian@lima-codelima: /Users/brian/projects/codelima"}, second: TerminalMetadata{Title: "brian: ~/projects/codelima"}, want: "[shell] shell"},
+		{name: "host prompt title", first: TerminalMetadata{Title: "bash"}, second: TerminalMetadata{Title: "brian@mac: /Users/brian/projects/codelima"}, host: true, want: "[shell] host"},
+		{name: "return to shell", first: TerminalMetadata{Title: "brian: /workspace"}, second: TerminalMetadata{Title: "brian: /workspace", BellCount: 1, ProgressState: 1, Progress: 60}, want: "[shell] shell · 60% 🔔"},
 		{name: "duplicate titles", first: TerminalMetadata{Title: "Task"}, second: TerminalMetadata{Title: "Task"}, want: "[Task] Task"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,6 +65,55 @@ func TestTerminalTabSegmentsPreferReportedTitle(t *testing.T) {
 			}
 			if state.activeSessionKey() != firstKey || len(sessions.TargetSessionKeys(target)) != 2 {
 				t.Fatal("metadata changed tab identity or selection")
+			}
+		})
+	}
+}
+
+func TestTerminalTabLabelRecognizesDefaultShellTitles(t *testing.T) {
+	for _, tt := range []struct {
+		title string
+		want  string
+	}{
+		{"", "shell"},
+		{"bash", "shell"},
+		{"-zsh", "shell"},
+		{"fish", "shell"},
+		{"brian: /Users/brian/projects/codelima", "shell"},
+		{"brian@lima-codelima:/workspace", "shell"},
+		{"brian.rackle_guest@mac.local: ~/My Projects/codelima", "shell"},
+		{"brian: ~", "shell"},
+		{"brian: /", "shell"},
+		{"\u202ebrian: /workspace\a", "shell"},
+		{strings.Repeat("user", 20) + "@host: /workspace", "shell"},
+		{"Fix login bug", "Fix login bug"},
+		{"Review: parser", "Review: parser"},
+		{"Fix login bug: /workspace", "Fix login bug: /workspace"},
+		{"https://example.com/task", "https://example.com/task"},
+		{"brian: /workspace | Review", "brian: /workspace | Review"},
+		{"brian: /" + strings.Repeat("x", 40) + " | Review", "brian: /" + strings.Repeat("x", 32) + "…"},
+		{"brian: /workspace · Review", "brian: /workspace · Review"},
+		{"brian@@host: /workspace", "brian@@host: /workspace"},
+		{"@host: /workspace", "@host: /workspace"},
+		{"brian@host@other: /workspace", "brian@host@other: /workspace"},
+		{"brian: project", "brian: project"},
+		{"⠋ Working | codelima", "⠋ Working | codelima"},
+		{"bash - running tests", "bash - running tests"},
+	} {
+		t.Run(tt.title, func(t *testing.T) {
+			for _, kind := range []terminal.TerminalKind{terminal.NodeShell, terminal.NodeHostShell} {
+				want := tt.want
+				if kind == terminal.NodeHostShell {
+					if want == "shell" {
+						want = "host"
+					} else {
+						want = "host:" + want
+					}
+				}
+				session := &tuiSession{key: "node:private-id#17", label: "long-repeated-node", shellKind: kind}
+				if got := terminalTabLabel(session, TerminalMetadata{Title: tt.title}); got != want {
+					t.Fatalf("%s title %q: got %q, want %q", kind, tt.title, got, want)
+				}
 			}
 		})
 	}
@@ -87,32 +139,32 @@ func TestTerminalBellClearsOnVisitAndReturnsForNewBell(t *testing.T) {
 			t.Fatalf("tab bar = %q, want %q", got, want)
 		}
 	}
-	check("[one 1] Task 🔔")
+	check("[shell] Task 🔔")
 	state.setActiveTab(target, secondKey)
 	state.treePaneMode = tuiTreePaneModeInfo
-	check("one 1 [Task 🔔]") // An info pane is not a visit to its terminal.
+	check("shell [Task 🔔]") // An info pane is not a visit to its terminal.
 	state.treePaneMode = tuiTreePaneModeTerminal
 	sessions.setWindowFocused(false)
-	check("one 1 [Task 🔔]")
+	check("shell [Task 🔔]")
 	sessions.setWindowFocused(true)
 	app.overlay = newTUIDialog("test", "close", nil, nil, nil)
-	check("one 1 [Task 🔔]")
+	check("shell [Task 🔔]")
 	app.overlay = nil
-	check("one 1 [Task]")
+	check("shell [Task]")
 	state.setActiveTab(target, firstKey)
-	check("[one 1] Task") // The same cumulative count stays acknowledged.
+	check("[shell] Task") // The same cumulative count stays acknowledged.
 	second.metadata.BellCount++
-	check("[one 1] Task 🔔")
+	check("[shell] Task 🔔")
 	state.setActiveTab(target, secondKey)
-	check("one 1 [Task]")
+	check("shell [Task]")
 	second.metadata.BellCount++
-	check("one 1 [Task]") // Bells while viewing this tab are already seen.
+	check("shell [Task]") // Bells while viewing this tab are already seen.
 	state.setActiveTab(target, firstKey)
-	check("[one 1] Task")
+	check("[shell] Task")
 	second.metadata.BellCount = 0 // A restarted renderer may reset its counter.
-	check("[one 1] Task")
+	check("[shell] Task")
 	second.metadata.BellCount = 1
-	check("[one 1] Task 🔔")
+	check("[shell] Task 🔔")
 }
 
 func TestHiddenTerminalBellMetadataArrivesWithoutSnapshotPull(t *testing.T) {
@@ -138,7 +190,7 @@ func TestHiddenTerminalBellMetadataArrivesWithoutSnapshotPull(t *testing.T) {
 	if _, err := app.handleEvent(<-events); err != nil {
 		t.Fatal(err)
 	}
-	if got := segmentsText(app.terminalTabSegments(tuiSelectedStyle(), tuiMutedStyle())); got != "[one 1] Background task 🔔" {
+	if got := segmentsText(app.terminalTabSegments(tuiSelectedStyle(), tuiMutedStyle())); got != "[shell] Background task 🔔" {
 		t.Fatalf("hidden tab bar = %q", got)
 	}
 	if len(hidden.snapshotWake) != 0 {
@@ -194,9 +246,9 @@ func TestTerminalTabMetadataUpdatesRegardlessOfFocus(t *testing.T) {
 					want += " 🔔"
 				}
 				if mode == "background" {
-					want = "[other 1] " + want
+					want = "[shell] " + want
 				} else {
-					want = "other 1 [" + want + "]"
+					want = "shell [" + want + "]"
 				}
 				for range 2 {
 					if got := segmentsText(app.terminalTabSegments(tuiSelectedStyle(), tuiMutedStyle())); got != want {

@@ -497,8 +497,10 @@ and the release must not close it. Close the final tab and verify its release
 does not produce an error after focus returns to the tree. Repeat with legacy
 Option input and the macOS Option glyph fallbacks. Legacy protocols cannot
 distinguish hold repeats from fresh presses. Check `terminal list` alongside
-the tab bar: shell title updates replace the node/number fallback with the
-reported title, but must not create another terminal ID.
+the tab bar: ordinary guest tabs display `shell` and host tabs `host`, without
+node names or numbers, even when several tabs have identical names. Shell
+username/path title updates must keep these defaults and must not create
+another terminal ID.
 
 With two tabs open, run these commands in one tab. Clearing `PROMPT_COMMAND`
 and using a plain `PS1` in this disposable shell prevents the prompt from
@@ -519,12 +521,20 @@ tab), with no `·` before the emoji. Visit that tab and verify the emoji clears.
 Switch away again without another bell; the emoji must stay cleared. Repeat
 the delayed bell and verify a new emoji appears and clears on the next visit.
 Run `printf '\007'` while viewing the tab and verify no indicator remains.
-Clear the title with `printf '\033]2;\033\\'` and verify the node and positional
-number return with the host marker retained. Repeat in the other tab and
-verify titles and alerts belong to the correct tab. In a host that reports
+Clear the title with `printf '\033]2;\033\\'` and verify `shell` or `host`
+returns without a number. Repeat in the other tab and verify titles and alerts
+belong to the correct tab. In a host that reports
 window focus, repeat while CodeLima is unfocused: returning to the visible
 tab acknowledges its bell. Info panes and overlays must not acknowledge bells
 for terminals they hide. Each attached TUI window acknowledges its own visits.
+
+After an application title, emit ordinary shell titles in the same disposable
+shell with `printf '\033]2;user@node: /a/long/project/path\033\\'`,
+`printf '\033]2;user: ~/project\033\\'`, and
+`printf '\033]2;bash\033\\'`. Each must restore `shell` (or `host`).
+Repeat with two same-kind tabs, move one, and close one: names must stay
+unnumbered, selection must follow the same terminal ID, and the remaining tab
+must still accept input. Restore a task title to confirm it still appears.
 
 Verify all tab metadata keeps updating while another tab is selected. In the
 same disposable shell with a plain prompt, run this sequence, then switch away

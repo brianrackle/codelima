@@ -199,6 +199,11 @@ codelima daemon update
 codelima --version
 ```
 
+Version `0.3.4` gives ordinary terminal tabs short, unnumbered `shell` and `host`
+names, including common username/path shell titles. Application titles and
+status indicators remain visible. Reopen the TUI after upgrading to use the
+new names; application-provided suffixes such as ` | codelima` are preserved.
+
 Version `0.3.3` uses program-reported tab titles, keeps background titles and
 working/progress indicators current, and shows `🔔` until you visit the tab.
 Run `codelima daemon update` and reopen attached TUIs after upgrading so both
@@ -322,9 +327,15 @@ Releasing the key does not move again. Shell input and pasted text retain their
 normal behavior. Legacy terminals that report repeats as ordinary presses
 cannot distinguish holding a key from separate presses.
 
-Host and guest terminals are tabs on the same node. A red top bar identifies a
-host tab. Host tabs stay useful while the VM is stopped because they run on the
-host in the node's project directory.
+Host and guest terminals are tabs on the same node. Ordinary guest tabs are
+named `shell` and host tabs `host`, without numbers. Common shell titles such
+as `bash` or `user@host: /path` use those compact defaults. Application task
+titles still appear (prefixed with `host:` on host tabs), with progress and
+bell indicators beside them. When the shell reports its ordinary title again,
+the compact default returns. Duplicate names are allowed; position and the
+active highlight distinguish tabs. A red top bar identifies a host tab. Host
+tabs stay useful while the VM is stopped because they run on the host in the
+node's project directory.
 
 A guest tab — and `codelima shell` — logs you in as the VM's ordinary user, the
 same one that owns your workspace and the installed agents, with passwordless
@@ -560,9 +571,10 @@ Outer-terminal clipboard permissions still apply.
 
 Tabs use the title reported by the running program, such as a Codex session
 title, without an added node name or tab number. For example,
-`codelima 1 · Test this | codelima` becomes `Test this | codelima`. Tabs without
-a title show the node name and, when several tabs are open, their position.
-Host tabs retain the `host:` prefix. Titles are bounded to 40 characters.
+`codelima 1 · Test this | codelima` becomes `Test this | codelima`. Empty titles
+and common shell username/path titles display `shell` or `host`, without
+numbers. Host application titles retain the `host:` prefix. Application titles
+are bounded to 40 characters.
 Titles, application-provided working spinners, progress and bell indicators
 continue updating whether or not their tab or CodeLima window is focused.
 Switching tabs does not change a session's working status.

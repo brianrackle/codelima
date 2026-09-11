@@ -2,6 +2,75 @@
 
 ## Open Work
 
+### 52. Clean managed-shell INPUTRC files after terminal termination
+
+Problem: tab-name QA found that closing a managed host tab can leave its
+`~/.codelima-inputrc.*` file behind. The launch wrapper removes it after a
+normal shell exit, but process-group termination can bypass that cleanup.
+The two manual fixture paths were identified by creation time and the live
+shell's `INPUTRC`; this run's leftovers were removed during cleanup.
+
+Suggested solution: give the terminal supervisor ownership of temporary
+readline files, including cleanup on close and failed launch; root verification
+files under the project's temporary directory. Cover forced close with a real
+shell test. Advantages: avoids accumulating scratch files and makes test
+cleanup reliable. Disadvantages: requires changing the shared launch contract
+and accounting for live handoff. Deferred from tab-label presentation.
+
+### 51. Complete native QA for compact unnumbered shell tab defaults
+
+The maintainer subsequently requested merging and publishing `v0.3.4` after
+these limits were disclosed. Full local `make test-race`, `make test-package`
+and release-tooling tests also pass. A published `v0.3.3` daemon upgraded to
+the versioned `0.3.4` candidate with two live shells and a 922,671-byte journal;
+both no-argument and explicit-path handoffs preserved IDs, shell PIDs, output
+and input. Release evidence belongs in
+[the compact tab report](plans/compact_tab_release_qa.md). Publication does not
+complete the remaining native/manual checks.
+
+Problem: ADR 145 replaces empty/common shell titles with `shell` or `host`,
+preserving application titles and badges. Regression tests first reproduced
+the old long/numbered labels. `make verify`, `make test-integration`, and
+race-enabled tab/metadata/bell/scoping tests pass on Linux/aarch64. Gopls is
+clean for the new classifier and its tests. Full QA.md qualification remains
+partial because this workspace has no `limactl`, accessible `/dev/kvm`, native
+macOS terminal or Homebrew:
+
+- Flow 1: help, schema 4/seed 7, ordered preset values, repair and non-mutating
+  schema-v3 rejection passed; doctor reports the missing Lima/KVM capabilities.
+- Flow 2: environment/configuration creation, resource updates and default
+  delete/rename protection passed. Node creation returned
+  `DependencyUnavailable`; remaining Flow 2 and Flows 3–4/6 require Lima.
+- Flow 5: session-v1 quarantine and real host shells passed using a disposable
+  stopped-node metadata/list fixture. Live daemon update preserved the surviving
+  terminal ID, shell PID and fresh input. Guest, large-history/containment and
+  physical two-window Flow 5b checks remain pending for this change.
+- Flow 7: the built TUI under isolated tmux displayed `[host] host`, retained
+  `host:Fix login bug` and `host:⠋ Working | codelima`, and restored `host` for
+  username/path, home-relative, `bash` and empty titles. Background 60% progress
+  and a bell appeared beside `host`; visiting cleared the bell. Reordering
+  retained the selected terminal ID; closing left one unnumbered, usable host
+  tab. The live update retained the default label. Guest and physical-terminal
+  checks remain pending; automated tests cover guest labels.
+- Flow 8: Linux snapshot reported reclaim unsupported; macOS remains pending.
+- Flow 9: diagnostic status/list/read probes passed with the terminal ID and
+  daemon PID retained. Kernel stack reads were denied; macOS sampling pending.
+- Flow 10: Go/native adapter/Vaxis tests, lint and build passed through
+  `make verify`. Full upstream, package and native interactive qualification
+  was not repeated for this presentation change; see #41/#44.
+- Flow 11: native Homebrew installation/upgrade remains pending.
+
+The final built frontend was reopened against the surviving shell and retained
+`host` and the terminal ID. The disposable TUI, tmux server, daemon, shells,
+fixture home, diagnostics, scripts and orphaned verification INPUTRC files were
+removed. No VM or package installation was created.
+
+Suggested solution: run the remaining QA.md flows on native Lima-capable
+hosts, especially ordinary guest prompts and real agent titles returning to
+the shell. Remove all verification artifacts afterward. Advantages: verifies
+actual shell conventions across platforms. Disadvantages: requires native VM,
+physical-terminal and Homebrew capabilities absent here.
+
 ### 50. Complete native QA for terminal title labels and bell acknowledgement
 
 Problem: ADRs 143–144 make reported titles replace the node/number fallback

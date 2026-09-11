@@ -469,7 +469,7 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 
 	activeKey := a.state.activeSessionKey()
 	segments := make([]vaxis.Segment, 0, len(keys)*2)
-	for index, key := range keys {
+	for _, key := range keys {
 		session, ok := a.sessions.Session(key)
 		if !ok {
 			continue
@@ -487,7 +487,7 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 		if metadata.BellCount <= session.acknowledgedBells {
 			metadata.BellCount = 0
 		}
-		label := terminalTabLabel(session, index, len(keys), metadata)
+		label := terminalTabLabel(session, metadata)
 		if key == activeKey {
 			segments = append(segments, vaxis.Segment{Text: "[" + label + "]", Style: activeStyle})
 			continue
@@ -497,22 +497,22 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 	return segments
 }
 
-func terminalTabLabel(session *tuiSession, index, total int, metadata TerminalMetadata) string {
+func terminalTabLabel(session *tuiSession, metadata TerminalMetadata) string {
 	if session == nil {
 		return ""
 	}
-	label := terminalMetadataText(metadata.Title, 40)
-	if label == "" {
-		label = strings.TrimSpace(session.label)
-		if label == "" {
-			label = strings.TrimSpace(session.key)
-		}
-		if total > 1 {
-			label = fmt.Sprintf("%s %d", label, index+1)
-		}
+	// Classify before truncating so a long username or a trailing task title
+	// cannot change whether this is recognized as an ordinary shell title.
+	title := terminalMetadataText(metadata.Title, len(metadata.Title))
+	label := "shell"
+	if session.shellKind == terminal.NodeHostShell {
+		label = "host"
 	}
-	if session.shellKind == terminal.NodeHostShell && label != "" {
-		label = "host:" + label
+	if !isDefaultShellTitle(title) {
+		label = terminalMetadataText(title, 40)
+		if session.shellKind == terminal.NodeHostShell {
+			label = "host:" + label
+		}
 	}
 	if badge := terminalMetadataBadge(metadata); badge != "" {
 		label += " · " + badge
