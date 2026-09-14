@@ -186,9 +186,22 @@ Homebrew installs codelima, Lima, Git, and the private renderer worker. Ghostty
 is statically linked into that worker; no separate Ghostty library is needed:
 
 ```sh
-brew tap brianrackle/codelima
-brew install codelima
+brew install brianrackle/codelima/codelima
 ```
+
+Use the fully qualified formula name: Homebrew adds the tap and trusts only
+the CodeLima formula. A separate `brew tap` can fail its validation with
+`Refusing to load formula ... from untrusted tap`, followed by the misleading
+`invalid syntax in tap` error. If you already hit that error, run the install
+command above. To use the separate tap step, grant formula-specific trust first:
+
+```sh
+brew trust --formula brianrackle/codelima/codelima
+brew tap brianrackle/codelima
+brew install brianrackle/codelima/codelima
+```
+
+See Homebrew's [tap trust documentation](https://docs.brew.sh/Tap-Trust).
 
 Upgrade an existing installation in place:
 

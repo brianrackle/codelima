@@ -393,6 +393,12 @@ For a fine-grained PAT, grant:
 
 The token does not need write access to `brianrackle/codelima`.
 
+Use `brew install brianrackle/codelima/codelima` in installation instructions,
+including the tap repository's README. Homebrew automatically adds the tap and
+trusts the named formula. A separate `brew tap` validates formulae before
+formula-specific trust has been granted and can fail on a fresh installation.
+Qualify that fresh-install path as well as upgrades in QA Flow 11.
+
 ## Releasing
 
 Standard release flow:
@@ -583,6 +589,16 @@ Check:
 - `HOMEBREW_TAP_REPO` is set
 - `HOMEBREW_TAP_BRANCH` matches the tap default branch
 - `HOMEBREW_TAP_TOKEN` exists and can push to the tap repo
+
+### Homebrew reports an untrusted formula and invalid tap syntax
+
+When `brew tap brianrackle/codelima` prints `Refusing to load formula ... from
+untrusted tap`, the final `invalid syntax in tap` message reports failed tap
+validation. Install with `brew install brianrackle/codelima/codelima` instead.
+For workflows that require a separate tap step, run
+`brew trust --formula brianrackle/codelima/codelima` before `brew tap` so
+validation can load that formula. Whole-tap trust is unnecessary. See
+Homebrew's [tap trust documentation](https://docs.brew.sh/Tap-Trust).
 
 ### Homebrew formula changes are not pushed
 

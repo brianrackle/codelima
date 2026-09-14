@@ -2,6 +2,52 @@
 
 ## Open Work
 
+### 58. Investigate the pkgconf installer fixture deadline under load
+
+Problem: the first macOS arm64 `make verify` run during the Homebrew install
+fix timed out in
+`TestPkgconfInstallerFailedReplacementPreservesPreviousPublishedTool` at
+`pkgconf_installer_test.go:269` (`signal: killed`, 32.02 seconds). The fixture
+shares a 30-second context across initial installation and failed replacement.
+`make test-release` passed separately, and an unchanged `make verify` retry
+passed, including formatting, lint, all tests and both builds.
+
+Suggested solution: reproduce under concurrent compilation load and profile
+the fixture's two installer executions before adjusting its deadline or build
+reuse. Advantages: reduces flaky verification while preserving the failed
+replacement regression. Disadvantages: a longer deadline alone could conceal
+a slow or stuck installer; the cause is not established by this single failure.
+
+### 57. Finish Homebrew installation documentation and qualification
+
+Problem: the source README and the separate public tap README instructed users
+to run `brew tap` before installing. Homebrew 7.0.1 rejects the untrusted formula
+during that tap validation, reporting misleading syntax errors. The source
+README, BUILD.md and QA Flow 11 now use the fully qualified install command and
+document formula-specific trust before an optional separate tap step.
+On macOS 26.2 arm64, a fresh `brew install brianrackle/codelima/codelima`
+successfully added the tap, trusted only that formula and installed 0.3.5.
+`brew test brianrackle/codelima/codelima` and `codelima --version` passed, and
+both packaged executables were present. The requested installation is retained.
+`make test-release` and `make verify` passed; the latter needed the retry
+recorded in #58. Homebrew developer mode was restored to disabled, its vendored
+runtime files were restored after cleanup, and verification-only Ruby additions
+and the disposable project test directory were removed. Homebrew and the
+installed CLI were checked again successfully after cleanup.
+
+Suggested solution: publish the same installation instructions in
+`brianrackle/homebrew-codelima/README.md`, which still has the old tap-first
+sequence. Complete the separate trust-then-tap check on a fresh Homebrew host
+and the remaining QA.md flows, including Linux Homebrew installation, upgrade
+with a live terminal, Lima and physical-terminal qualification tracked in
+#41/#44/#54/#55. Those broader manual checks were not performed for this
+installation documentation fix.
+
+Advantages: keeps both public entry points consistent and verifies clean trust
+state as well as an already-installed formula. Disadvantages: the tap README
+is in a separate repository; full qualification requires additional native
+hosts and interactive sessions.
+
 ### 56. Investigate executable fixture startup on shared filesystems
 
 Problem: a local Linux arm64 release-verification run at `948ccea` failed in

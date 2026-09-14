@@ -932,6 +932,11 @@ publication, repeat using the public tap and verify its URL/checksum against
 the release manifest. Confirm GitHub marks it regular and Latest, and the tap
 contains `Formula/codelima.rb` with no `Formula/codelima-beta.rb`.
 Record the current `command -v codelima` and installed formulae before testing.
+Use a fresh Homebrew host with neither the CodeLima tap nor a CodeLima trust
+entry for the initial install. Run the fully qualified install directly; verify
+it adds the tap and grants formula-specific trust without `invalid syntax in
+tap` or an untrusted-formula error. Do not pre-trust the entire tap. On another
+fresh host, also verify the README's explicit formula-trust-then-tap sequence.
 
 ```sh
 brew install brianrackle/codelima/codelima
