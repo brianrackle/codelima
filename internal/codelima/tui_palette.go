@@ -127,6 +127,7 @@ func (a *vaxisTUIApp) openCommandPalette() {
 		commands = append(commands, tuiPaletteCommand{label: label, hint: string(rune('1' + i)), run: func() error { a.switchView(view); return nil }})
 	}
 	commands = append(commands,
+		tuiPaletteCommand{label: "Edit settings", hint: "System · shell, colors, confirmations", run: func() error { a.switchView(tuiViewSystem); a.systemPanel = 1; return nil }},
 		tuiPaletteCommand{label: "Create node", hint: "n", run: a.openCreateNodeDialog},
 		tuiPaletteCommand{label: "Open shell chooser", hint: "X", run: func() error { a.openShellChooser(); return nil }},
 		tuiPaletteCommand{label: "Show keybindings", hint: "?", run: func() error { a.openKeyHelp(); return nil }},

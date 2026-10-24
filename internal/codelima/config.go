@@ -42,10 +42,13 @@ type Config struct {
 	// credentials into new nodes". It is a DEFAULT, not a live switch: node
 	// creation freezes the resolved answer onto the node record, so flipping it
 	// here affects future nodes only. Absent from settings.yaml means true —
-	// the key is never written by the settings writer, so an operator turns the
-	// import off by adding `import_host_auth: false` by hand.
-	ImportHostAuth bool `json:"import_host_auth" yaml:"import_host_auth"`
-	Daemon         struct {
+	// changing this setting never changes an existing node's frozen answer.
+	ImportHostAuth   bool          `json:"import_host_auth" yaml:"import_host_auth"`
+	Shell            ShellSettings `json:"shell" yaml:"shell"`
+	ConfirmStop      string        `json:"confirm_stop" yaml:"confirm_stop"`
+	GroupByDirectory bool          `json:"group_by_directory" yaml:"group_by_directory"`
+	Color            string        `json:"color" yaml:"color"`
+	Daemon           struct {
 		Autostart       bool   `json:"autostart" yaml:"autostart"`
 		Restore         string `json:"restore" yaml:"restore"`
 		VirtioFSReclaim bool   `json:"virtiofs_reclaim" yaml:"virtiofs_reclaim"`
@@ -60,6 +63,10 @@ func DefaultConfig(home string) Config {
 		DefaultPorts:        []string{},
 		RuntimeCommands:     defaultRuntimeCommandTemplates(),
 		ImportHostAuth:      true,
+		Shell:               ShellSettings{Mode: "attach", Window: "ghostty -e {cmd}", DetachKey: "ctrl+]"},
+		ConfirmStop:         "busy",
+		GroupByDirectory:    true,
+		Color:               "auto",
 	}
 	cfg.AgentProfilesDir = filepath.Join(home, "_config", "agent-profiles")
 	cfg.Daemon.Autostart = true
@@ -115,8 +122,12 @@ func LoadConfig(homeOverride string) (Config, error) {
 
 func (c Config) Summary() map[string]any {
 	return map[string]any{
-		"metadata_root":    c.MetadataRoot,
-		"import_host_auth": c.ImportHostAuth,
+		"metadata_root":      c.MetadataRoot,
+		"import_host_auth":   c.ImportHostAuth,
+		"shell":              c.Shell,
+		"confirm_stop":       c.ConfirmStop,
+		"group_by_directory": c.GroupByDirectory,
+		"color":              c.Color,
 		"daemon": map[string]any{
 			"autostart":        c.Daemon.Autostart,
 			"restore":          c.Daemon.Restore,

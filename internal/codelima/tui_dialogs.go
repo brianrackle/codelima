@@ -364,7 +364,7 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 			newTUIDefaultInputField("directory", "Directory", cwd, false),
 			newTUIValueSelectorField("configuration", "Configuration", DefaultConfigurationSlug, func(value string) string { return value }, nil),
 			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, workspaceModeDisplay, nil),
-			newTUIValueSelectorField("import_host_auth", "Host Credentials", hostAuthImportChoice(a.service.cfg.ImportHostAuth), hostAuthImportDisplay, nil),
+			newTUIValueSelectorField("import_host_auth", "Host Credentials", hostAuthImportChoice(a.managerSettings().ImportHostAuth), hostAuthImportDisplay, nil),
 		},
 		func(values map[string]string) error {
 			return a.startOperation(tuiOperationRequest{

@@ -320,11 +320,31 @@ show `—`. Metric sorts place unavailable readings last and temporarily flatten
 directory groups. Batch actions include marked nodes hidden by the filter and
 show one confirmation; deleting a batch requires its node count.
 
-`x` attaches the node's daemon session directly to your terminal and suspends
+By default, `x` attaches the node's daemon session directly to your terminal and suspends
 the manager. `Ctrl+]` detaches; `exit` ends the session. `codelima shell NODE`
 uses the same managed shell, and `codelima terminal attach TERMINAL_ID` resumes
 a specific session from `codelima terminal list`. Supplying a command after
 `codelima shell NODE` runs that command through the existing execution path.
+
+`X` opens a scrollable chooser: Enter attaches, `w` opens a new terminal window,
+`t` opens a tmux window when running inside tmux, and `h` opens a host shell.
+Existing sessions are selectable with arrows/Enter or `1`–`9`. Shift with a
+mode choice saves it as `x`'s default. Open **System**, press Tab for Settings,
+then Enter to edit shell mode, the window command, host credential import,
+stop confirmations, directory grouping or color. Edits preserve YAML comments
+and unknown keys. These preferences can also be changed from the CLI:
+
+```sh
+codelima settings set shell.mode tmux
+codelima settings set shell.window 'ghostty -e {cmd}'
+codelima settings set color ansi
+```
+
+The window command is a quoted argument list; `{cmd}` must be a standalone
+argument and expands to the managed session's attach command. Use an executable
+wrapper for shell expressions. Stop confirmation defaults to sessions that
+are busy or do not report an idle prompt; `confirm_stop` accepts `busy`,
+`always` and `never`. The detach key is fixed at Ctrl+].
 
 Choose `X` then `e` to opt into the embedded Shell tab. It reserves **F6 only** while the shell has focus. All
 other keys, including Option/Alt arrows, reach the shell. Press F6 to return
@@ -340,7 +360,7 @@ muted defaults disappear when an explicit value is typed.
 
 The major-version implementation is still in progress. The
 [delivery ledger](plans/tui-vnext/README.md) records incomplete design surfaces
-and runtime contracts, including shell window/tmux launch and durable activity.
+and runtime contracts, including durable activity and metric history.
 
 Host and guest terminals are tabs on the same node. Ordinary guest tabs are
 named `shell` and host tabs `host`, without numbers. Common shell titles such

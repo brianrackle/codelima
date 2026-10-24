@@ -55,13 +55,20 @@ Raw attachment is integrated (ADR 151). Native export and real-PTY
 regressions pass for current screen/modes, split sequences, Ctrl+] detach,
 session survival, reconnect, final output drainage and host-only query replies.
 The TUI `x`, CLI interactive shell and `terminal attach` entry points are wired.
-Full verify and race gates passed; a final rerun covers output cancellation and
-session event adoption. Live host-shell verification covered unchanged PID and
+Full verify, race and integration gates passed, including output cancellation
+and session event adoption (`f078c45`). Live host-shell verification covered unchanged PID and
 variables across detach/reattach, 150×38 to 80×24 resize, `vi` suspension/resume,
 existing-session selection, session exit/count updates and manager restoration.
 The disposable daemon, tmux session, files and home were stopped and removed.
-The chooser lists existing sessions; keyboard scrolling for long lists remains.
-Complete shell window/tmux choices and settings next.
+The chooser now lists existing sessions with scrolling and Enter/mouse selection.
+Window/tmux choices and comment-preserving settings edits are wired (ADR 152).
+Focused settings/menu tests, full verify, race and integration checks pass.
+Live 120×34 and 80×24 settings checks covered editing, restart persistence,
+ANSI/auto color, invalid-value rejection and retained comments/unknown keys.
+The disposable TUI, daemon and home were cleaned. External window/tmux launch
+and guest-session qualification remain open; use real supported terminals and
+the disposable VM fixture to finish them. This validates actual window/session
+handoff but requires a working VM and desktop terminal for the window branch.
 Also qualify initial retained graphics, scrolling regions/origin/wrap modes,
 clipboard handling, resize, disconnect/update and outer-terminal restoration.
 These are required follow-ups, not completed design scope. The suggested
@@ -71,7 +78,7 @@ it avoids historical side effects but requires explicit mode and lease tests.
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
 and progress/retry/cancel; one-hour metrics and on-demand processes; dynamic
-forwarding route presentation/pinning; settings/key mappings; comprehensive
+forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean
 all disposable state. Real VM lifecycle QA remains unqualified in this guest:

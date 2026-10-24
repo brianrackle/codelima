@@ -1,5 +1,16 @@
 # Patterns
 
+## Editable preferences and external shell launch
+
+Patch only the selected YAML leaf under the settings lock, retaining comments,
+key order and unknown mappings. Reject malformed documents before writing;
+return a new configuration snapshot instead of mutating shared services.
+Read defaults at the operation that freezes them into durable state. Expand
+window command placeholders as argument splices and run executables directly;
+keep session identity and CODELIMA_HOME explicit across process boundaries.
+Menus scroll their selected row into view and offer Enter/mouse activation
+even when entries have no shortcut (ADR 152).
+
 ## Physical terminal attachment
 
 Capture present terminal state at a contiguous output watermark, then stream
@@ -462,9 +473,18 @@ The production TUI loads the daemon's flat node list once per second, then optio
 
 Bounded presentation animations stay inside the UI event loop. Derive their frame from monotonic elapsed time so delayed events cannot rewind visible state, keep changing text cell-width stable, and stop their ticker as soon as the terminal state is reached. When only a small fixed region changes, update that region and use the normal Vaxis diff render instead of clearing and rebuilding terminal, tree, and overlay surfaces. Keep pure elapsed-time-to-frame behavior separate from the event producer so progression tests do not sleep.
 
-Resolve node-pane defaults whenever selection changes or the selected VM crosses the running boundary. A running selected node uses terminal mode and opens or reconnects one guest tab; a non-running selected node uses info mode and opens no guest shell. Preserve an explicit `i` choice while the operator remains on the same node at the same runtime readiness, but restore the status-derived default after selecting another node.
+Browsing nodes uses manager mode and never creates a shell. Raw attachment
+suspends the manager; embedded terminal mode is explicit. Preserve selection
+by node identity across refresh and detach. A VM becoming ready updates its
+available actions without changing focus or creating a terminal.
 
-Dialogs, selectors, menus, and messages occupy the right pane. Dialog key routing follows the active field's semantics: `Tab`/`Up`/`Down` move between fields, text inputs receive `Left` and `Right` for cursor movement, and `Right` is consumed as `choose` only when the field exposes a selector activation callback. Selector option labels may carry decision context, but option values remain stable domain identifiers; configuration rows append formatted vCPU, RAM, and disk while still submitting the slug. Long runtime mutations execute as background operations with resource keys that reject conflicting work while navigation, refresh, and unrelated terminal tabs remain responsive.
+Dialogs, selectors and menus occupy centered overlays and scroll the focused
+control into view. `Tab`/`Up`/`Down` move between dialog fields, text inputs
+receive `Left` and `Right` for cursor movement, and `Right` chooses only when
+the field exposes an activation callback. Selector labels may carry decision
+context while values remain stable identifiers. Long mutations run outside
+the event loop with resource keys that reject conflicting work while
+navigation, refresh and other terminal sessions remain responsive.
 
 Keep an input's implicit default separate from its editable content. Render the
 default as a muted prompt only while content is empty, return it as the field's

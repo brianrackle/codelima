@@ -96,6 +96,19 @@ var cliCommands = []*cliCommand{
 			return service.ConfigSummary(), nil
 		},
 	},
+	{
+		Group: "settings", Name: "set", Summary: "update one application setting, preserving comments and unknown keys",
+		Run: func(ctx context.Context, service *Service, _ string, _ *flag.FlagSet, args []string) (any, error) {
+			if len(args) != 2 {
+				return nil, invalidArgument("usage: settings set KEY VALUE", nil)
+			}
+			cfg, err := service.SettingsUpdate(ctx, args[0], args[1])
+			if err != nil {
+				return nil, err
+			}
+			return cfg.Summary(), nil
+		},
+	},
 
 	{
 		Group:   "environment",

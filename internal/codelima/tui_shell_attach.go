@@ -16,6 +16,7 @@ import (
 type tuiRawShellReadyEvent struct {
 	State daemon.TerminalState
 	Err   error
+	Mode  string
 }
 
 func (s *Service) attachNodeShell(ctx context.Context, value string) error {
@@ -70,6 +71,13 @@ func resolveRawShell(ctx context.Context, client *daemonclient.Client, node Node
 }
 
 func (a *vaxisTUIApp) startRawShell(host, fresh bool, sessionID string) error {
+	return a.startShellMode("attach", host, fresh, sessionID)
+}
+
+func (a *vaxisTUIApp) startShellMode(mode string, host, fresh bool, sessionID string) error {
+	if mode == "embedded" {
+		return a.openEmbeddedShell(host)
+	}
 	entry := a.state.selectedEntry()
 	if !entry.valid() {
 		return errors.New("select a node first")
@@ -83,12 +91,19 @@ func (a *vaxisTUIApp) startRawShell(host, fresh bool, sessionID string) error {
 	if a.service == nil || a.service.daemonClient == nil {
 		return errors.New("shell attachment requires the daemon")
 	}
+	cfg := a.managerSettings()
+	if err := checkShellLaunch(cfg, mode); err != nil {
+		return err
+	}
 	a.rawShellPending = true
 	client, node, ctx := a.service.daemonClient, entry.node, a.ctx
 	a.setStatus(slog.LevelInfo, "Opening shell · "+node.Slug)
 	go func() {
 		state, err := resolveRawShell(ctx, client, node, host, fresh, sessionID)
-		a.postCompletion(tuiRawShellReadyEvent{State: state, Err: err})
+		if err == nil && mode != "attach" {
+			err = launchManagedShell(ctx, cfg, mode, state.TerminalID, node.DirectoryPath, node.Slug)
+		}
+		a.postCompletion(tuiRawShellReadyEvent{State: state, Err: err, Mode: mode})
 	}()
 	return nil
 }
@@ -101,6 +116,10 @@ func (a *vaxisTUIApp) finishRawShell(event tuiRawShellReadyEvent) {
 	}
 	if err := a.installCreatedDaemonTab(tuiDaemonTerminalCreatedEvent(event.State)); err != nil {
 		a.setStatus(slog.LevelError, err.Error())
+		return
+	}
+	if event.Mode == "window" || event.Mode == "tmux" {
+		a.setStatus(slog.LevelInfo, "Opened "+event.State.Label+" in "+event.Mode+" · session belongs to the daemon")
 		return
 	}
 	if a.vx == nil {

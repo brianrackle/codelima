@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"unicode"
 
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
@@ -355,61 +356,131 @@ func (d *tuiDialog) Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle v
 }
 
 type tuiMenuEntry struct {
-	Key    rune
-	Label  string
-	Action func() error
+	Key         rune
+	Label       string
+	Action      func() error
+	ShiftAction func() error
 }
 
 type tuiMenu struct {
 	Title       string
 	Description []string
 	Entries     []tuiMenuEntry
+	Index       int
+	Scroll      int
+	viewport    tuiRect
 }
 
 func (m *tuiMenu) Update(event vaxis.Event) (done bool, err error) {
+	if mouse, ok := event.(vaxis.Mouse); ok && mouse.EventType == vaxis.EventPress {
+		switch mouse.Button {
+		case vaxis.MouseWheelUp:
+			m.Index = max(0, m.Index-1)
+		case vaxis.MouseWheelDown:
+			m.Index = min(len(m.Entries)-1, m.Index+1)
+		case vaxis.MouseLeftButton:
+			if m.viewport.contains(mouse.Col, mouse.Row) {
+				m.Index = m.Scroll + mouse.Row - m.viewport.row
+				return m.choose(false)
+			}
+		}
+		return false, nil
+	}
 	key, ok := event.(vaxis.Key)
-	if !ok || !tuiKeyActivates(key, true) {
+	if !ok || !tuiKeyActivates(key, false) {
+		return false, nil
+	}
+	if key.MatchString("Down") || key.MatchString("Up") {
+		delta := 1
+		if key.MatchString("Up") {
+			delta = -1
+		}
+		m.Index = max(0, min(len(m.Entries)-1, m.Index+delta))
+		return false, nil
+	}
+	if !tuiKeyActivates(key, true) {
 		return false, nil
 	}
 	if isOverlayCancelKey(key) {
 		return true, nil
 	}
+	shifted := key.Modifiers&vaxis.ModShift != 0 || unicode.IsUpper(key.Keycode)
+	if key.Matches(vaxis.KeyEnter) {
+		return m.choose(shifted)
+	}
 
-	for _, entry := range m.Entries {
+	for i, entry := range m.Entries {
+		if entry.Key == 0 || key.Modifiers & ^vaxis.ModShift != 0 {
+			continue
+		}
 		if !key.Matches(entry.Key) && !strings.EqualFold(key.Text, string(entry.Key)) {
 			continue
 		}
-		if entry.Action != nil {
-			if err := entry.Action(); err != nil {
-				return false, err
-			}
-		}
-		return true, nil
+		m.Index = i
+		return m.choose(shifted)
 	}
 
 	return false, nil
 }
 
+func (m *tuiMenu) choose(shifted bool) (bool, error) {
+	if m.Index < 0 || m.Index >= len(m.Entries) {
+		return false, nil
+	}
+	entry := m.Entries[m.Index]
+	action := entry.Action
+	if shifted && entry.ShiftAction != nil {
+		action = entry.ShiftAction
+	}
+	if action != nil {
+		if err := action(); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
 func (m *tuiMenu) FooterHint() string {
-	return "Press a key to choose   Esc cancel   Ctrl+c quit"
+	return "↑↓ select   Enter choose   Esc cancel"
 }
 
 func (m *tuiMenu) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style) {
 	body := border.All(win, mutedStyle)
-	body.Println(0, vaxis.Segment{Text: m.Title, Style: headerStyle})
+	width, height := body.Size()
+	tuiLine(body, 0, m.Title, headerStyle)
 
 	row := 1
 	for _, line := range m.Description {
-		body.Println(row, vaxis.Segment{Text: line, Style: mutedStyle})
+		if row >= height-3 {
+			break
+		}
+		tuiLine(body, row, line, mutedStyle)
 		row++
 	}
-
-	for _, entry := range m.Entries {
-		body.Println(row, vaxis.Segment{Text: "[" + string(entry.Key) + "] " + entry.Label})
-		row++
+	visible := max(0, height-row-2)
+	m.Scroll = max(0, min(m.Scroll, len(m.Entries)-visible))
+	if m.Index < m.Scroll {
+		m.Scroll = m.Index
 	}
-
-	body.Println(row+1, vaxis.Segment{Text: "Press a key to choose or Esc to cancel. Ctrl+c quits.", Style: mutedStyle})
+	if m.Index >= m.Scroll+visible {
+		m.Scroll = max(0, m.Index-visible+1)
+	}
+	col, originRow := body.Origin()
+	m.viewport = tuiRect{col: col, row: originRow + row, width: width, height: min(visible, len(m.Entries)-m.Scroll)}
+	for i := m.Scroll; i < len(m.Entries) && i < m.Scroll+visible; i++ {
+		entry := m.Entries[i]
+		shortcut := "   "
+		if entry.Key != 0 {
+			shortcut = "[" + string(entry.Key) + "]"
+		}
+		style := mutedStyle
+		if i == m.Index {
+			style = headerStyle
+			style.Attribute |= vaxis.AttrReverse
+		}
+		tuiLine(body, row+i-m.Scroll, shortcut+" "+entry.Label, style)
+	}
+	tuiLine(body, height-1, m.FooterHint(), mutedStyle)
 }
 
 type tuiSelectorOption struct {

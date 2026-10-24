@@ -626,3 +626,10 @@ VT boundary state, and older envelopes use journal recovery. Native Ghostty
 remains pinned to the existing revision. Rebuild both binaries with `make build`
 before manual attachment checks. The new TUI and runtime scope remains tracked
 in `plans/tui-vnext/README.md` and TODO #57.
+
+`make test-manager-settings` covers comment-preserving edits, concurrent
+writers, rejected values, new-node defaults, launcher arguments, long menu
+navigation and TUI settings. Preferences remain in the schema-v4 settings file;
+no metadata migration or new runtime dependency is required. External window
+mode uses the configured terminal executable, and tmux mode uses an installed
+tmux. Qualify both on the intended host before release.

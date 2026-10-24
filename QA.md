@@ -441,6 +441,23 @@ Raw shell attachment checks (ADR 151):
    claiming the ended session is running. Interrupt the client or stop/update
    the daemon and confirm the host terminal is usable afterward.
 
+Settings and shell choices (ADR 152):
+
+1. Open System, Tab to Settings, and change shell mode with Enter. Quit and
+   reopen; confirm the saved choice remains. Edit a file comment and unknown
+   setting, change another preference, and confirm both remain in YAML.
+2. At 80×24 and a wide size, visit every setting. Change color to ANSI and back
+   to auto; toggle grouping and check the all-node and scoped views.
+3. Configure `shell.window` for the installed terminal, choose `X` then `w`,
+   and verify the new window attaches the daemon session in the same home.
+   From tmux, repeat with `t`. Shift+w or Shift+t should also set `x`'s default.
+4. Open more sessions than fit in the chooser. Use arrows/Enter and the mouse
+   to reach sessions beyond the nine numeric shortcuts. Escape cancels.
+5. With stop confirmation set to busy, compare an idle integrated shell with
+   a running command; unknown prompt state also asks. Verify always and never.
+6. Try an invalid setting and a window command without `{cmd}`. Both must fail
+   without changing the previous value. Restore preferences before cleanup.
+
 
 
 The major-version frontend uses the reference in

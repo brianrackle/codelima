@@ -34,6 +34,7 @@ const (
 func (a *vaxisTUIApp) refreshFleet() {
 	if a.fleet == nil {
 		a.fleet = newTUIFleet(a.treeWorkspaceRoot)
+		a.fleet.groupByDir = a.treeWorkspaceRoot == "" && a.managerSettings().GroupByDirectory
 		a.fleet.selectedID = a.state.selectedEntry().node.ID
 	}
 	records := make([]tuiFleetRecord, 0, len(a.state.nodes))
@@ -96,7 +97,14 @@ func (a *vaxisTUIApp) selectFleetNode() {
 
 func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	width, height := window.Size()
-	theme := newTUITheme(a.vx.CanRGB())
+	rgb := a.vx.CanRGB()
+	switch a.managerSettings().Color {
+	case "ansi":
+		rgb = false
+	case "truecolor":
+		rgb = true
+	}
+	theme := newTUITheme(rgb)
 	tuiFill(window, theme.text)
 	if a.sessions != nil {
 		cols, rows := a.activeTerminalSize(width, height, a.state.focus)

@@ -392,7 +392,7 @@ func (s *Service) seedAndRepair(ctx context.Context, force bool) error {
 		return nil
 	}
 
-	globalLocks, err := acquireLockSet(ctx, s.cfg.MetadataRoot, s.log(), []lockKey{lockEnvironments, lockConfigurations, lockNodes}, nil)
+	globalLocks, err := acquireLockSet(ctx, s.cfg.MetadataRoot, s.log(), []lockKey{lockEnvironments, lockConfigurations, lockNodes, lockSettings}, nil)
 	if err != nil {
 		return err
 	}
@@ -901,7 +901,11 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	// Freeze the credential-import answer here, beside the other frozen fields:
 	// the settings value is only a default, and the node keeps whatever was
 	// true at creation for the rest of its life.
-	importHostAuth := s.cfg.ImportHostAuth
+	preferences, err := s.SettingsRead()
+	if err != nil {
+		return Node{}, err
+	}
+	importHostAuth := preferences.ImportHostAuth
 	if input.ImportHostAuth != nil {
 		importHostAuth = *input.ImportHostAuth
 	}

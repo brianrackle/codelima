@@ -183,24 +183,11 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 			},
 		})
 	case tuiActionNodeStop:
-		return a.startOperation(tuiOperationRequest{
-			Title:         "Stopping " + entry.node.Slug,
-			DisplayStatus: "stopping",
-			ResourceKeys:  []string{terminal.NodeTarget(entry.node.ID).String()},
-			EntryKeys:     []string{terminal.NodeTarget(entry.node.ID).String()},
-			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-				node, err := service.NodeStop(ctx, entry.node.ID)
-				if err != nil {
-					return tuiOperationResult{}, err
-				}
-				return tuiOperationResult{
-					Status:       "stopped node " + node.Slug,
-					PreferredKey: terminal.NodeTarget(node.ID).String(),
-					CloseNodeID:  node.ID,
-					ReloadData:   true,
-				}, nil
-			},
-		})
+		if a.confirmNodeStop(entry.node) {
+			a.overlay = newTUIDialog("Stop "+entry.node.Slug, "Stop", []string{"Sessions may have running commands. Stopping ends their guest processes."}, nil, func(map[string]string) error { return a.stopNode(entry.node) })
+			return nil
+		}
+		return a.stopNode(entry.node)
 	case tuiActionNodeDelete:
 		a.openDeleteNodeDialog(entry.node)
 	case tuiActionNodeClone:
@@ -210,7 +197,42 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 	return nil
 }
 
+func (a *vaxisTUIApp) stopNode(node Node) error {
+	return a.startOperation(tuiOperationRequest{
+		Title: "Stopping " + node.Slug, DisplayStatus: "stopping",
+		ResourceKeys: []string{terminal.NodeTarget(node.ID).String()}, EntryKeys: []string{terminal.NodeTarget(node.ID).String()},
+		Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			stopped, err := service.NodeStop(ctx, node.ID)
+			return tuiOperationResult{Status: "stopped node " + stopped.Slug, PreferredKey: terminal.NodeTarget(stopped.ID).String(), CloseNodeID: stopped.ID, ReloadData: true}, err
+		},
+	})
+}
+
+func (a *vaxisTUIApp) confirmNodeStop(node Node) bool {
+	switch a.managerSettings().ConfirmStop {
+	case "never":
+		return false
+	case "always":
+		return true
+	}
+	if a.sessions == nil {
+		return false
+	}
+	for _, key := range a.sessions.TargetSessionKeys(terminal.NodeTarget(node.ID).String()) {
+		// Prompt state comes from shell integration. If a shell does not report
+		// it, treat its activity as unknown and ask before ending its process.
+		if !a.terminalMetadata(key).CursorAtPrompt {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
+	if a.overlay != nil {
+		a.updateOverlay(mouse)
+		return
+	}
 	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
 		if target, ok := a.linkTargetAt(mouse.Col, mouse.Row); ok {
 			if err := a.openHyperlink(target); err != nil {
@@ -222,9 +244,6 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 		}
 	}
 
-	if a.overlay != nil {
-		return
-	}
 	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
 		for i, rect := range a.viewRegions {
 			if rect.contains(mouse.Col, mouse.Row) {

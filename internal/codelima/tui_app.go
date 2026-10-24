@@ -29,27 +29,31 @@ type vaxisTUIApp struct {
 	// silently drops events once its queue is full — exactly when the loop is
 	// busy — and every dropped completion latches a state that never clears.
 	// nil falls back to postEvent (tests that never fill the queue).
-	postEventBlocking func(vaxis.Event)
-	treeWorkspaceRoot string
-	openLink          func(string) error
-	screenHyperlinkAt func(int, int) (string, bool)
-	state             *tuiState
-	fleet             *tuiFleet
-	view              tuiView
-	nodeDetail        bool
-	detailTab         tuiDetailTab
-	filterInput       *textinput.Model
-	filterBefore      string
-	fleetMouseRows    []tuiFleetRow
-	viewRegions       []tuiRect
-	managerData       tuiManagerData
-	managerGeneration uint64
-	templateIndex     int
-	environmentIndex  int
-	environmentsView  bool
-	detailScroll      int
-	launchScope       string
-	rawShellPending   bool
+	postEventBlocking  func(vaxis.Event)
+	treeWorkspaceRoot  string
+	openLink           func(string) error
+	screenHyperlinkAt  func(int, int) (string, bool)
+	state              *tuiState
+	fleet              *tuiFleet
+	view               tuiView
+	nodeDetail         bool
+	detailTab          tuiDetailTab
+	filterInput        *textinput.Model
+	filterBefore       string
+	fleetMouseRows     []tuiFleetRow
+	viewRegions        []tuiRect
+	managerData        tuiManagerData
+	managerGeneration  uint64
+	templateIndex      int
+	environmentIndex   int
+	environmentsView   bool
+	detailScroll       int
+	launchScope        string
+	rawShellPending    bool
+	preferences        *Config
+	preferenceRevision uint64
+	systemPanel        int
+	settingIndex       int
 	// shortcutKeys consumes followups of one-shot shortcuts and keys that
 	// changed input context. It belongs to the UI event loop.
 	shortcutKeys      map[rune]struct{}
@@ -248,6 +252,11 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		messages:          newTUIMessageLog(tuiMessageLogDefaultCap),
 		logoAnimation:     newTUILogoAnimation(),
 	}
+	preferences, err := service.SettingsRead()
+	if err != nil {
+		return err
+	}
+	app.preferences = &preferences
 	// The state decides terminal availability and the app owns the operation
 	// overlays the tree renders, so the two are joined here — the one place both
 	// exist.

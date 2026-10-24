@@ -83,6 +83,12 @@ variables across detach/reattach; resize, `vi` suspension, existing-session
 selection, exit counts and manager restoration were exercised visually. The
 verification home, daemon, sessions and files were cleaned. Guest lifecycle,
 remaining terminal modes and full shell choices still need qualification.
+Settings now support shell mode/window, credential defaults, stop confirmation,
+grouping and color through comment-preserving edits. The chooser adds window
+and tmux launch, shifted default choices, scrolling, Enter and mouse activation
+(ADR 152). Live settings at 120×34 and 80×24 verified persistence and ANSI/auto
+color, with the disposable daemon/home cleaned. Verify, race and integration
+checks pass; external-window and guest-session qualification remain open.
 Current limitations include published-port-only Ports,
 window-local Activity, current-sample-only Metrics, basic event Logs,
 and existing forms inside the new modal geometry. These are implementation

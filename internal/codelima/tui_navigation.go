@@ -120,6 +120,8 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			}
 			a.treeWorkspaceRoot = a.launchScope
 		}
+		a.fleet.groupByDir = a.treeWorkspaceRoot == "" && a.managerSettings().GroupByDirectory
+		a.fleet.rebuild()
 		a.startDataRefresh("")
 	case key.MatchString("a"):
 		a.environmentsView = false
@@ -134,9 +136,12 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	case key.MatchString("?"):
 		a.openKeyHelp()
 	case key.MatchString("Tab"), key.Matches(vaxis.KeyTab, vaxis.ModShift):
-		if a.view == tuiViewTemplates {
+		switch {
+		case a.view == tuiViewSystem:
+			a.systemPanel = (a.systemPanel + 1) % 2
+		case a.view == tuiViewTemplates:
 			a.environmentsView = !a.environmentsView
-		} else if a.nodeDetail {
+		case a.nodeDetail:
 			delta, count := 1, 4
 			if len(a.state.sessions.TargetSessionKeys(a.state.selectedEntry().key())) > 0 {
 				count = 5
@@ -156,6 +161,8 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		err = a.handleTemplateAction(key)
 	case a.view == tuiViewSystem && (key.MatchString("C") || key.MatchString("R")):
 		a.loadManagerData(key.MatchString("R"))
+	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == 1:
+		err = a.editManagerSetting()
 	case a.view != tuiViewNodes:
 		return false
 	case key.MatchString("/") && !a.nodeDetail:
@@ -200,7 +207,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	case key.MatchString("X"):
 		a.openShellChooser()
 	case key.MatchString("x"):
-		err = a.startRawShell(false, false, "")
+		err = a.startShellMode(a.managerSettings().Shell.Mode, false, false, "")
 	case a.nodeDetail && a.detailTab == tuiDetailShell:
 		switch {
 		case key.MatchString("t"):
@@ -226,6 +233,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 	switch {
+	case a.view == tuiViewSystem:
+		if a.systemPanel == 1 {
+			a.settingIndex = max(0, min(len(a.managerSettingRows())-1, a.settingIndex+delta))
+		}
 	case a.view == tuiViewTemplates:
 		if a.environmentsView {
 			a.environmentIndex = max(0, min(len(a.managerData.environments)-1, a.environmentIndex+delta))
@@ -300,12 +311,15 @@ func (a *vaxisTUIApp) openEmbeddedShell(host bool) error {
 
 func (a *vaxisTUIApp) openShellChooser() {
 	menu := &tuiMenu{Title: "Open shell · " + a.state.selectedEntry().node.Slug,
-		Description: []string{"Ctrl+] detaches from an attached shell; the session keeps running.", "F6 returns from an embedded shell to the manager."},
+		Description: []string{"Ctrl+] detaches · F6 returns from embedded · x uses " + a.managerSettings().Shell.Mode,
+			"Shift+choice saves it as x's default."},
 		Entries: []tuiMenuEntry{
-			{Key: 'a', Label: "Attach here", Action: func() error { return a.startRawShell(false, false, "") }},
+			{Key: 'a', Label: "Attach here", Action: func() error { return a.startRawShell(false, false, "") }, ShiftAction: a.defaultShellChoice("attach")},
+			{Key: 'w', Label: "New window", Action: func() error { return a.startShellMode("window", false, false, "") }, ShiftAction: a.defaultShellChoice("window")},
+			{Key: 't', Label: "tmux window", Action: func() error { return a.startShellMode("tmux", false, false, "") }, ShiftAction: a.defaultShellChoice("tmux")},
 			{Key: 'n', Label: "New guest shell · attach here", Action: func() error { return a.startRawShell(false, true, "") }},
 			{Key: 'h', Label: "Host shell in node directory", Action: func() error { return a.startRawShell(true, false, "") }},
-			{Key: 'e', Label: "Embedded guest shell", Action: func() error { return a.openEmbeddedShell(false) }},
+			{Key: 'e', Label: "Embedded guest shell", Action: func() error { return a.openEmbeddedShell(false) }, ShiftAction: a.defaultShellChoice("embedded")},
 		},
 	}
 	if a.sessions != nil {
@@ -325,6 +339,12 @@ func (a *vaxisTUIApp) openShellChooser() {
 		}
 	}
 	a.overlay = menu
+}
+
+func (a *vaxisTUIApp) defaultShellChoice(mode string) func() error {
+	return func() error {
+		return a.saveManagerSetting("shell.mode", mode, func(app *vaxisTUIApp) error { return app.startShellMode(mode, false, false, "") })
+	}
 }
 
 func (a *vaxisTUIApp) openCloneEnvironmentDialog(environment EnvironmentConfig) {

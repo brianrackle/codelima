@@ -19,12 +19,14 @@ type tuiManagerData struct {
 	doctor         DoctorReport
 	loading        bool
 	err            error
+	preferences    *Config
 }
 
 type tuiManagerDataEvent struct {
-	generation uint64
-	view       tuiView
-	data       tuiManagerData
+	generation         uint64
+	preferenceRevision uint64
+	view               tuiView
+	data               tuiManagerData
 }
 
 // All filesystem/runtime work runs outside the event loop. A generation ties
@@ -36,6 +38,7 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	}
 	a.managerGeneration++
 	generation, view := a.managerGeneration, a.view
+	preferenceRevision := a.preferenceRevision
 	nodeID := a.state.selectedEntry().node.ID
 	detail, tab := a.nodeDetail, a.detailTab
 	a.managerData.loading, a.managerData.err = true, nil
@@ -52,14 +55,19 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 				data.environments, data.err = a.service.EnvironmentConfigList(ctx, false)
 			}
 		case tuiViewSystem:
-			data.doctor, data.err = a.service.Doctor(ctx, repair)
+			var cfg Config
+			cfg, data.err = a.service.SettingsRead()
+			if data.err == nil {
+				data.preferences = &cfg
+				data.doctor, data.err = a.service.Doctor(ctx, repair)
+			}
 		case tuiViewNodes:
 			if detail && nodeID != "" && (tab == tuiDetailLogs || tab == tuiDetailOverview) {
 				data.logNodeID = nodeID
 				data.logs, data.err = a.service.NodeLogs(ctx, nodeID)
 			}
 		}
-		return tuiManagerDataEvent{generation: generation, view: view, data: data}
+		return tuiManagerDataEvent{generation: generation, preferenceRevision: preferenceRevision, view: view, data: data}
 	}
 	if a.postEvent == nil {
 		a.applyManagerData(load())
@@ -73,6 +81,9 @@ func (a *vaxisTUIApp) applyManagerData(event tuiManagerDataEvent) {
 		return
 	}
 	a.managerData = event.data
+	if event.data.preferences != nil && event.preferenceRevision == a.preferenceRevision {
+		a.preferences = event.data.preferences
+	}
 	if event.data.err != nil {
 		a.setStatus(slog.LevelError, event.data.err.Error())
 	}
@@ -261,8 +272,25 @@ func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
 
 func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
 	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "System · C check · R repair", theme.mint)
-	inner := border.All(win.New(1, 4, width-2, height-7), theme.border)
+	tuiLine(win.New(2, 2, width-4, 1), 0, "System · C check · R repair · Tab doctor/settings · Enter edit", theme.mint)
+	doctorRect := tuiRect{col: 1, row: 4, width: width - 2, height: height - 7}
+	settingsRect := doctorRect
+	if width >= 100 {
+		doctorRect.width = (width - 3) / 2
+		settingsRect.col = doctorRect.col + doctorRect.width + 1
+		settingsRect.width = width - settingsRect.col - 1
+	}
+	if width >= 100 || a.systemPanel == 1 {
+		a.drawManagerSettings(win.New(settingsRect.col, settingsRect.row, settingsRect.width, settingsRect.height), theme)
+	}
+	if width < 100 && a.systemPanel == 1 {
+		return
+	}
+	style := theme.border
+	if a.systemPanel == 0 {
+		style = theme.mint
+	}
+	inner := border.All(win.New(doctorRect.col, doctorRect.row, doctorRect.width, doctorRect.height), style)
 	tuiLine(inner, 0, "Doctor", theme.muted)
 	if a.managerData.loading {
 		tuiLine(inner, 2, "Checking system…", theme.dim)

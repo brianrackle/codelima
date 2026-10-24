@@ -30,6 +30,7 @@ const (
 	lockNodes          lockKey = "nodes"
 	lockConfigurations lockKey = "configurations"
 	lockEnvironments   lockKey = "environments"
+	lockSettings       lockKey = "settings"
 )
 
 // Lock contract
