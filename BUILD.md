@@ -28,6 +28,11 @@ failure preservation, search/paste ownership, follow, stale replies, wrapping,
 mouse selection, clipboard and pager argument parsing (ADR 157). Run the
 Logs procedure in QA.md in a terminal as well as these automated checks.
 
+`make test-node-spec` covers frozen/current recipe drift, environment and
+profile edits, deleted templates, bounded YAML inspection, special files,
+responsive panels, navigation fencing and Spec actions (ADR 159). Run the
+Spec terminal procedure in QA.md before qualifying this surface.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool

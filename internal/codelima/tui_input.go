@@ -234,6 +234,7 @@ func (a *vaxisTUIApp) confirmNodeStop(node Node) bool {
 func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 	defer a.cancelHiddenMetricsLoad()
 	defer a.cancelHiddenLogsLoad()
+	defer a.cancelHiddenSpecLoad()
 	if a.overlay != nil {
 		a.updateOverlay(mouse)
 		return
@@ -257,7 +258,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 			}
 		}
 	}
-	if a.handleLogsMouse(mouse) {
+	if a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) {
 		return
 	}
 	if a.view == tuiViewSystem && mouse.EventType == vaxis.EventPress {

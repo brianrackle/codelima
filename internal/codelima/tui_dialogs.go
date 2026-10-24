@@ -351,18 +351,25 @@ func (a *vaxisTUIApp) openDeleteConfigurationDialog(configuration Configuration)
 }
 
 func (a *vaxisTUIApp) openCreateNodeDialog() error {
-	cwd, err := canonicalPath(".")
-	if err != nil {
-		return err
+	return a.openCreateNodeDialogWithDefaults("", DefaultConfigurationSlug)
+}
+
+func (a *vaxisTUIApp) openCreateNodeDialogWithDefaults(directory, configuration string) error {
+	if directory == "" {
+		var err error
+		directory, err = canonicalPath(".")
+		if err != nil {
+			return err
+		}
 	}
 	dialog := newTUIDialog(
 		"Create Node",
 		"Create",
 		[]string{"Create a directory-bound node from a reusable configuration."},
 		[]tuiDialogField{
-			newTUIDefaultInputField("slug", "Node Slug", slugify(filepath.Base(cwd)), true),
-			newTUIDefaultInputField("directory", "Directory", cwd, false),
-			newTUIValueSelectorField("configuration", "Configuration", DefaultConfigurationSlug, func(value string) string { return value }, nil),
+			newTUIDefaultInputField("slug", "Node Slug", slugify(filepath.Base(directory)), true),
+			newTUIDefaultInputField("directory", "Directory", directory, false),
+			newTUIValueSelectorField("configuration", "Configuration", configuration, func(value string) string { return value }, nil),
 			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, workspaceModeDisplay, nil),
 			newTUIValueSelectorField("import_host_auth", "Host Credentials", hostAuthImportChoice(a.managerSettings().ImportHostAuth), hostAuthImportDisplay, nil),
 		},

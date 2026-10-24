@@ -161,6 +161,8 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "p / y", hint: "Metrics: sort processes by CPU or memory / copy selected PID"},
 		{label: "[ ] / f / w / L", hint: "Logs: source / follow / wrap / severity"},
 		{label: "/ / n N / g G / y / o", hint: "Logs: search / matches / top-end / copy line / PAGER"},
+		{label: "N / e / v / y", hint: "Spec: new from current template / edit template / YAML pager / copy YAML path"},
+		{label: "← → / Ctrl-↑↓ / Enter", hint: "Spec: focus panel / focus panel / open selected bootstrap command output"},
 		{label: "F6", hint: "Embedded shell focus; every other key reaches the shell while focused"},
 		{label: "[ ] / t / T / w", hint: "Shell tabs / new guest / new host / close (TUI focus only)"},
 		{label: "F7", hint: "Search embedded terminal (TUI focus only)"},

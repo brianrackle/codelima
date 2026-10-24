@@ -555,6 +555,27 @@ For Logs, use an isolated node with events and bootstrap output:
   restart it. Automated tests cover the retention cap and rotation failures.
 - Clean all disposable nodes, metadata, daemons, terminal sessions and files.
 
+For Spec, use an isolated node and editable template:
+
+- At 150×38, inspect frozen values, drift and the stored Lima fields. Resize to
+  80×24 and switch panels with Left/Right, Ctrl-Up/Down and mouse clicks. Scroll
+  every panel, including a multiline command taller than the viewport.
+- Change template memory and an assigned environment's command after node
+  creation. Confirm drift refreshes within a second on every detail tab, while
+  the node's stored values remain unchanged. Restore the recipe and confirm
+  the amber Spec dot disappears. Missing dependencies must show an explicit
+  incomplete comparison without hiding the frozen node.
+- Press `N`: verify the form uses today's template and the node's directory.
+  Cancel, use `e` to inspect/edit today's values, and `c` to open the frozen
+  clone action. Cancel unwanted creations without leaving verification state.
+- Select a bootstrap command and press Enter. Verify Logs opens Bootstrap,
+  searches for that command and stays paused. Inspect retained output; absent
+  output from older versions or rotated files must not be presented as success.
+- With `PAGER='less -S'`, press `v`, inspect the original YAML, quit and confirm
+  the TUI resumes. Press `y` and verify the complete YAML path reaches the host
+  clipboard. A missing/malformed YAML file must leave frozen values readable.
+- Stop and remove the disposable TUI, daemon, node, VM and all fixture files.
+
 Run in a real terminal:
 
 ```sh

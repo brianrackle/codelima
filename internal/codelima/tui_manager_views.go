@@ -37,10 +37,13 @@ type tuiManagerDataEvent struct {
 func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	a.cancelHiddenMetricsLoad()
 	a.cancelHiddenLogsLoad()
+	a.cancelHiddenSpecLoad()
 	if a.service == nil {
 		return
 	}
 	a.managerGeneration++
+	a.cancelSpecLoad()
+	a.startSpecLoad()
 	if a.logsVisible() {
 		a.cancelLogsLoad()
 		a.startLogsLoad(true)
@@ -130,8 +133,14 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 		if a.detailTab == tuiDetailTab(i) {
 			style = theme.selected
 		}
-		tuiLine(win.New(col, 3, len(name)+4, 1), 0, " "+name+" ", style)
-		col += len(name) + 4
+		cells := len(name) + 4
+		if tuiDetailTab(i) == tuiDetailSpec && a.spec.nodeID == record.Node.ID && a.spec.err == nil && len(a.spec.snapshot.Differences) > 0 {
+			win.New(col, 3, cells+2, 1).PrintTruncate(0, vaxis.Segment{Text: " " + name + " ", Style: style}, vaxis.Segment{Text: "•", Style: theme.amber})
+			cells += 2
+		} else {
+			tuiLine(win.New(col, 3, cells, 1), 0, " "+name+" ", style)
+		}
+		col += cells
 	}
 	body := win.New(1, 5, width-2, height-8)
 	switch a.detailTab {
@@ -161,17 +170,7 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 	case tuiDetailLogs:
 		a.drawNodeLogs(body, theme)
 	case tuiDetailSpec:
-		inner := border.All(body, theme.border)
-		node := record.Node
-		lines := []string{"Frozen specification · edits to templates affect future nodes", "", "Configuration: " + node.ConfigurationSlug,
-			"Image: " + node.Image, fmt.Sprintf("Resources: %d vCPU · %s memory · %s disk", node.VCPUs, formatTUIResourceSize(node.MemoryMiB), formatTUIResourceSize(node.DiskMiB)),
-			"Environments: " + strings.Join(node.Environments, " → "), "", "Resolved bootstrap commands"}
-		for i, command := range node.BootstrapCommands {
-			lines = append(lines, fmt.Sprintf("%d. %s", i+1, command))
-		}
-		for i, line := range lines[min(a.detailScroll, len(lines)):] {
-			tuiLine(inner, i, line, theme.text)
-		}
+		a.drawNodeSpec(body, theme)
 	case tuiDetailShell:
 		body.PrintTruncate(0, a.terminalTabSegments(theme.selected, theme.muted)...)
 		surface := body.New(0, 1, width-2, max(0, height-9))

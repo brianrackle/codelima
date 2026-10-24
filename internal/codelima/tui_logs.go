@@ -406,17 +406,31 @@ func (a *vaxisTUIApp) openLogPager() error {
 	if l.snapshot.Path == "" || l.snapshot.Missing {
 		return errors.New("this log file does not exist yet")
 	}
-	args, err := nodeLogPagerArgs(os.Getenv("PAGER"), l.snapshot.Path)
+	a.pauseLogs()
+	return a.openFilePager(l.snapshot.Path)
+}
+
+func (a *vaxisTUIApp) openFilePager(path string) error {
+	if path == "" {
+		return errors.New("file path is not available yet")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("pager input must be a regular file")
+	}
+	args, err := nodeLogPagerArgs(os.Getenv("PAGER"), path)
 	if err != nil {
 		return err
 	}
 	if _, err = exec.LookPath(args[0]); err != nil {
-		return fmt.Errorf("log pager: %w; set PAGER to an installed pager", err)
+		return fmt.Errorf("file pager: %w; set PAGER to an installed pager", err)
 	}
 	if a.vx == nil {
 		return errors.New("interactive terminal is unavailable")
 	}
-	a.pauseLogs()
 	if err = a.vx.Suspend(); err != nil {
 		return err
 	}

@@ -1,5 +1,20 @@
 # Patterns
 
+## Frozen recipe inspection
+
+Compare stored node/bootstrap values with the current recipe resolved through
+its durable template ID. Include ordered environment commands and agent
+settings; show missing dependencies explicitly and never infer historical
+provenance from today's recipe. Read rendered instance YAML without runtime
+preparation, with regular-file and size checks. Keep incomplete sections usable
+alongside their errors. Fence asynchronous local reads by node identity,
+request serial and navigation generation (ADR 159).
+
+Pass contextual form defaults into construction so the initial-value snapshot
+contains them. Applying a preset afterwards looks like a user edit and causes
+false discard confirmations; retain empty inputs with default placeholders so
+the first typed value still replaces the proposed default.
+
 ## Capacity observations and global allocation
 
 Sample native host data outside the UI loop, preserving nil for unavailable

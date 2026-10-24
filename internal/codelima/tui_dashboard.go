@@ -495,6 +495,9 @@ func (a *vaxisTUIApp) managerFooter() string {
 		}
 		return "[] source · f follow · / search · w wrap · L level · Tab view · Esc nodes"
 	}
+	if a.specVisible() {
+		return "N new from template · e edit · v YAML · y path · c clone · Tab view · Esc nodes"
+	}
 	if a.nodeDetail {
 		return "Tab/Shift-Tab view · x shell · s start/stop · l logs · Esc nodes · : commands · ? help"
 	}

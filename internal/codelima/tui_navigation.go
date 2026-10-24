@@ -39,6 +39,7 @@ func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
 func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	defer a.cancelHiddenMetricsLoad()
 	defer a.cancelHiddenLogsLoad()
+	defer a.cancelHiddenSpecLoad()
 	a.refreshFleet()
 	if a.handleLogsSearchKey(key) {
 		return false
@@ -95,7 +96,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		return false
 	}
 	a.claimShortcutKey(key)
-	if a.handleMetricsKey(key) || a.handleLogsKey(key) {
+	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) {
 		return false
 	}
 	var err error
@@ -244,6 +245,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 }
 
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
+	if a.specVisible() {
+		a.moveSpecSelection(delta)
+		return
+	}
 	if a.logsVisible() {
 		a.moveLogSelection(delta)
 		return
@@ -306,12 +311,7 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 	case key.MatchString("d"):
 		a.openDeleteConfigurationDialog(configuration)
 	case key.MatchString("N"):
-		if err := a.openCreateNodeDialog(); err != nil {
-			return err
-		}
-		if dialog := a.activeDialog(); dialog != nil {
-			dialog.SetFieldValue("configuration", configuration.Slug)
-		}
+		return a.openCreateNodeDialogWithDefaults("", configuration.Slug)
 	}
 	return nil
 }

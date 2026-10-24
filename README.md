@@ -368,6 +368,18 @@ The Bootstrap source fills on the next bootstrap or validation run; output
 from earlier versions cannot be reconstructed. Missing files are shown
 explicitly. Reading logs does not start a guest.
 
+The Spec tab shows frozen values, current template drift, and the actual
+`instance.lima.yaml`. The amber dot appears when a compared value differs,
+including changes inside assigned environments. `←`/`→` or `Ctrl+↑`/`Ctrl+↓`
+select a panel; arrows, Page Up/Down and the mouse wheel scroll it. Compact
+terminals show the selected panel. Enter on a bootstrap command opens its
+captured output in Logs with follow paused. Older output may have rotated out.
+
+In Spec, `N` opens a new node form with the current template and node directory;
+`c` clones the frozen node; `e` edits the current template. `v` opens the stored
+Lima YAML in `$PAGER`, and `y` copies its path. Missing templates or YAML do not
+hide the frozen recipe. Per-step bootstrap source and timing are not yet stored.
+
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even
 when the fleet is scoped or filtered. A failed node still counts while its VM

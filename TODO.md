@@ -153,6 +153,31 @@ through its parent directory descriptor succeeded. No host-side action is
 needed. Unlink live QA sockets before server shutdown or use a project-rooted
 tmpfs socket directory to avoid this shared-filesystem behavior.
 
+Spec now compares frozen resources, image, agent, ordered environments and
+resolved commands with today's template/profile, reads bounded actual Lima
+YAML without runtime preparation, and supports responsive scrollable panels,
+live drift indicators, new/clone/edit, command-output navigation, pager and
+path copy (ADR 159). Automated coverage includes dependency failures,
+malformed/special/oversized YAML, stale replies, long commands, mouse controls
+and correctly initialized Create defaults. Full verify and race checks pass.
+CLI integration also passes. An isolated stopped-node fixture exercised
+150×38/80×24 rendering, live drift appearance/removal, missing environment and
+malformed YAML errors, a 101-line command, N/e/c forms, command-output opening,
+pager restoration, clipboard delivery, panel mouse actions and Ctrl-arrow
+navigation. The default-value cancellation regression found in that run is
+fixed and was verified in the rebuilt TUI. This fixture did not boot a guest
+or qualify per-step execution history. Both TUI runs exited normally; the
+disposable daemon, tmux server/socket, metadata, Lima fixture, screenshots and
+scripts were removed from `tmp/specqa`.
+
+Spec remains partial because bootstrap.json does not record per-step source,
+status or duration. Required follow-up: freeze provenance at node creation,
+record execution attempts and timings durably, then populate Spec and the
+Starting/Failed views from those records. Preserve explicit unknown state for
+older nodes. This also enables failed-step retry and clear progress, but needs
+a storage contract, migration rules and real guest failure/retry qualification.
+Final native/artboard qualification remains part of the full design scope.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
 and progress/retry/cancel; final fleet/preview and Metrics qualification; dynamic

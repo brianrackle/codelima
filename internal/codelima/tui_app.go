@@ -56,6 +56,7 @@ type vaxisTUIApp struct {
 	settingIndex       int
 	metrics            tuiMetricsState
 	logs               tuiLogsState
+	spec               tuiSpecState
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
 	systemScroll       [tuiSystemPanelCount]int
@@ -299,6 +300,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.cancelLogsLoad()
+	defer a.cancelSpecLoad()
 	defer a.cancelMetricsLoad()
 	defer a.sessions.Close()
 	defer func() { a.graphics.close() }()
@@ -432,9 +434,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyLogsData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiSpecDataEvent:
+		a.applySpecData(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiMetricsTickEvent:
 		a.startMetricsLoad()
 		a.startLogsLoad(false)
+		a.startSpecLoad()
 		if a.metricsVisible() && !a.metrics.paused {
 			a.requestRedraw()
 		}
