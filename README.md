@@ -330,6 +330,18 @@ show `—`. Metric sorts place unavailable readings last and temporarily flatten
 directory groups. Batch actions include marked nodes hidden by the filter and
 show one confirmation; deleting a batch requires its node count.
 
+Open a node with Enter and Tab to Metrics. `+`/`-` select 1m, 5m, 15m or 1h;
+Space pauses/resumes. CPU and memory charts use observed samples, with gaps
+when unavailable. The daemon retains up to one hour, lost on restart. Disk is
+the guest root filesystem; host workspace mounts are excluded. Wide views
+also show per-core CPU, memory cache, available memory and swap.
+
+The process table samples only while Metrics is open and unpaused. `p` switches
+CPU/memory order, arrows select a process, and `y` sends its PID to the host
+clipboard. Process CPU uses one core as 100%, so a multithreaded process may
+exceed 100%. The first sample shows `—` until a second reading is available.
+Only the top 64 processes are returned; while paused, sorting uses those rows.
+
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even
 when the fleet is scoped or filtered. A failed node still counts while its VM
@@ -380,7 +392,7 @@ muted defaults disappear when an explicit value is typed.
 
 The major-version implementation is still in progress. The
 [delivery ledger](plans/tui-vnext/README.md) records incomplete design surfaces
-and runtime contracts, including durable activity and metric history.
+and runtime contracts, including durable activity and complete forms.
 
 Host and guest terminals are tabs on the same node. Ordinary guest tabs are
 named `shell` and host tabs `host`, without numbers. Common shell titles such

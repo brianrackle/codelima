@@ -229,6 +229,7 @@ func (a *vaxisTUIApp) confirmNodeStop(node Node) bool {
 }
 
 func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
+	defer a.cancelHiddenMetricsLoad()
 	if a.overlay != nil {
 		a.updateOverlay(mouse)
 		return
@@ -276,6 +277,25 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 				}
 			}
 			return
+		}
+	}
+	if a.metricsVisible() && mouse.EventType == vaxis.EventPress {
+		switch mouse.Button {
+		case vaxis.MouseWheelUp:
+			a.moveMetricProcess(-1)
+			return
+		case vaxis.MouseWheelDown:
+			a.moveMetricProcess(1)
+			return
+		case vaxis.MouseLeftButton:
+			m := &a.metrics
+			if m.processes != nil && m.processRect.contains(mouse.Col, mouse.Row) {
+				index := m.processOffset + mouse.Row - m.processRect.row
+				if index < len(m.processes.Rows) {
+					m.processPID = m.processes.Rows[index].PID
+				}
+				return
+			}
 		}
 	}
 	if a.treeContentRect.contains(mouse.Col, mouse.Row) {

@@ -54,6 +54,7 @@ type vaxisTUIApp struct {
 	preferenceRevision uint64
 	systemPanel        int
 	settingIndex       int
+	metrics            tuiMetricsState
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
 	systemScroll       [tuiSystemPanelCount]int
@@ -277,6 +278,8 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	defer stopLogoAnimation()
 	stopRefresh := startTUIAutoRefresh(ctx, vx.PostEvent, tuiAutoRefreshInterval(service))
 	defer stopRefresh()
+	stopMetrics := startTUIAutoRefresh(ctx, func(vaxis.Event) { vx.PostEvent(tuiMetricsTickEvent{}) }, time.Second)
+	defer stopMetrics()
 
 	return app.serve(vx.Events())
 }
@@ -417,6 +420,16 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	case tuiManagerDataEvent:
 		a.applyManagerData(event)
 		a.draw()
+		return false, nil
+	case tuiMetricsDataEvent:
+		a.applyMetricsData(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiMetricsTickEvent:
+		a.startMetricsLoad()
+		if a.metricsVisible() && !a.metrics.paused {
+			a.requestRedraw()
+		}
 		return false, nil
 	case vaxis.Resize:
 		// Geometry is global even while an overlay owns interactive input.

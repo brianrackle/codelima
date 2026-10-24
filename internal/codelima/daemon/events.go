@@ -98,13 +98,14 @@ type InputRevokedEvent struct {
 // "no reading", not "unchanged": the daemon publishes the whole sample every
 // time, so a cleared reading clears the display.
 type NodeUsageEvent struct {
-	NodeID           string    `json:"node_id"`
-	SampledAt        time.Time `json:"sampled_at"`
-	CPUUsagePercent  *float64  `json:"cpu_usage_percent,omitempty"`
-	MemoryUsedBytes  *uint64   `json:"memory_used_bytes,omitempty"`
-	MemoryTotalBytes *uint64   `json:"memory_total_bytes,omitempty"`
-	DiskUsedBytes    *uint64   `json:"disk_used_bytes,omitempty"`
-	DiskTotalBytes   *uint64   `json:"disk_total_bytes,omitempty"`
+	NodeID           string            `json:"node_id"`
+	SampledAt        time.Time         `json:"sampled_at"`
+	CPUUsagePercent  *float64          `json:"cpu_usage_percent,omitempty"`
+	MemoryUsedBytes  *uint64           `json:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes *uint64           `json:"memory_total_bytes,omitempty"`
+	DiskUsedBytes    *uint64           `json:"disk_used_bytes,omitempty"`
+	DiskTotalBytes   *uint64           `json:"disk_total_bytes,omitempty"`
+	Details          *NodeUsageDetails `json:"details,omitempty"`
 }
 
 // DecodeEventData is the single decode seam for broadcast payloads. Event.Data

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -120,11 +122,12 @@ type RuntimeObservation struct {
 	// Memory and disk usage are transient guest observations. Memory uses
 	// MemTotal - MemAvailable; disk is the guest root filesystem reported by
 	// df, excluding the separately mounted host workspace.
-	MemoryUsedBytes        *uint64    `json:"memory_used_bytes,omitempty" yaml:"memory_used_bytes,omitempty"`
-	MemoryTotalBytes       *uint64    `json:"memory_total_bytes,omitempty" yaml:"memory_total_bytes,omitempty"`
-	DiskUsedBytes          *uint64    `json:"disk_used_bytes,omitempty" yaml:"disk_used_bytes,omitempty"`
-	DiskTotalBytes         *uint64    `json:"disk_total_bytes,omitempty" yaml:"disk_total_bytes,omitempty"`
-	ResourceUsageSampledAt *time.Time `json:"resource_usage_sampled_at,omitempty" yaml:"resource_usage_sampled_at,omitempty"`
+	MemoryUsedBytes        *uint64                  `json:"memory_used_bytes,omitempty" yaml:"memory_used_bytes,omitempty"`
+	MemoryTotalBytes       *uint64                  `json:"memory_total_bytes,omitempty" yaml:"memory_total_bytes,omitempty"`
+	DiskUsedBytes          *uint64                  `json:"disk_used_bytes,omitempty" yaml:"disk_used_bytes,omitempty"`
+	DiskTotalBytes         *uint64                  `json:"disk_total_bytes,omitempty" yaml:"disk_total_bytes,omitempty"`
+	ResourceUsageSampledAt *time.Time               `json:"resource_usage_sampled_at,omitempty" yaml:"resource_usage_sampled_at,omitempty"`
+	UsageDetails           *daemon.NodeUsageDetails `json:"usage_details,omitempty" yaml:"usage_details,omitempty"`
 }
 
 type Node struct {

@@ -33,7 +33,7 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
 
 ## Related Draft Plans
 
-- Major-version fleet manager [partially complete]: fleet/navigation, managed raw shell attachment, persistent preferences, native host capacity/global allocations and responsive System panels are implemented (ADRs 150–153). Runtime history, operation ownership, forms and full visual/native qualification remain in the [design and delivery ledger](plans/tui-vnext/README.md) and TODO #57.
+- Major-version fleet manager [partially complete]: fleet/navigation, managed raw shell attachment, persistent preferences, native host capacity/global allocations, responsive System panels and bounded Metrics history/processes are implemented (ADRs 150–155). Fleet/preview history, durable operation ownership, forms and full visual/native qualification remain in the [design and delivery ledger](plans/tui-vnext/README.md) and TODO #57.
 
 - September 7 architectural and current libghostty-vt review [review complete;
   adoption implemented, qualification partial]: [plans/sep_7_plan.md](plans/sep_7_plan.md).

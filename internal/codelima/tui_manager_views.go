@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"go.rockorager.dev/vaxis"
@@ -36,10 +35,15 @@ type tuiManagerDataEvent struct {
 // the response to the navigation that requested it, so late replies cannot
 // replace another node's logs or clear a newer loading/error state.
 func (a *vaxisTUIApp) loadManagerData(repair bool) {
+	a.cancelHiddenMetricsLoad()
 	if a.service == nil {
 		return
 	}
 	a.managerGeneration++
+	if a.metricsVisible() {
+		a.startMetricsLoad()
+		return
+	}
 	generation, view := a.managerGeneration, a.view
 	preferenceRevision := a.preferenceRevision
 	nodeID := a.state.selectedEntry().node.ID
@@ -147,15 +151,7 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 			}
 		}
 	case tuiDetailMetrics:
-		inner := border.All(body, theme.border)
-		tuiLine(inner, 0, "Guest resource observations", theme.muted)
-		for i, field := range []tuiFleetSort{tuiFleetSortCPU, tuiFleetSortMemory, tuiFleetSortDisk} {
-			text, style := a.fleetCell(record, field, false, width-15, theme)
-			tuiLine(inner, i*3+2, fmt.Sprintf("%-8s %s", field, text), style)
-		}
-		if observation := record.Node.LastRuntimeObservation; observation != nil && observation.ResourceUsageSampledAt != nil {
-			tuiLine(inner, 12, "Last sample "+observation.ResourceUsageSampledAt.Format(time.RFC3339), theme.dim)
-		}
+		a.drawNodeMetrics(body, theme)
 	case tuiDetailLogs:
 		inner := border.All(body, theme.border)
 		tuiLine(inner, 0, "Events", theme.muted)

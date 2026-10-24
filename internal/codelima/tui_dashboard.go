@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
@@ -40,6 +41,9 @@ func (a *vaxisTUIApp) refreshFleet() {
 	records := make([]tuiFleetRecord, 0, len(a.state.nodes))
 	for _, node := range a.state.nodes {
 		record := tuiFleetRecord{Node: node, Status: a.fleetStatus(node)}
+		if observation := node.LastRuntimeObservation; observation != nil && observation.UsageDetails != nil && observation.UsageDetails.UptimeSeconds != nil && observation.ResourceUsageSampledAt != nil {
+			record.StartedAt = observation.ResourceUsageSampledAt.Add(-time.Duration(*observation.UsageDetails.UptimeSeconds * float64(time.Second)))
+		}
 		record.Sessions = len(a.state.sessions.TargetSessionKeys(tuiTreeEntry{node: node}.key()))
 		for _, mapping := range node.Ports {
 			parts := strings.Split(mapping, ":")
@@ -395,6 +399,9 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 		}
 		return strings.Join(ports, " "), theme.muted
 	case tuiFleetSortUptime:
+		if !record.StartedAt.IsZero() {
+			return max(time.Duration(0), time.Since(record.StartedAt)).Truncate(time.Second).String(), theme.muted
+		}
 		return "—", theme.dim
 	default:
 		value, ok := tuiFleetMetric(record, field)
@@ -467,6 +474,9 @@ func (a *vaxisTUIApp) managerFooter() string {
 	}
 	if a.nodeDetail && a.detailTab == tuiDetailShell {
 		return "F6 focus shell · [ ] tabs · t new guest · T new host · w close · F7 search · Esc overview"
+	}
+	if a.metricsVisible() {
+		return "+ − window · p sort · Space pause · y PID · Tab view · x shell · Esc nodes"
 	}
 	if a.nodeDetail {
 		return "Tab/Shift-Tab view · x shell · s start/stop · l logs · Esc nodes · : commands · ? help"

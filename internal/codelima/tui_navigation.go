@@ -37,6 +37,7 @@ func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
 }
 
 func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
+	defer a.cancelHiddenMetricsLoad()
 	a.refreshFleet()
 	if a.filterInput != nil {
 		switch {
@@ -90,6 +91,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		return false
 	}
 	a.claimShortcutKey(key)
+	if a.handleMetricsKey(key) {
+		return false
+	}
 	var err error
 	switch {
 	case key.MatchString("q"), isQuitKey(key):
@@ -236,6 +240,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 }
 
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
+	if a.metricsVisible() {
+		a.moveMetricProcess(delta)
+		return
+	}
 	switch {
 	case a.view == tuiViewSystem:
 		if a.systemPanel == tuiSystemSettings {

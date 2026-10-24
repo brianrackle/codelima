@@ -69,8 +69,10 @@ const (
 // the routing path.
 const (
 	guestPortScanCommand  = "cat /proc/net/tcp /proc/net/tcp6"
-	guestTelemetryCommand = `head -n 1 /proc/stat
+	guestTelemetryCommand = `awk '/^cpu[0-9]* / { print }' /proc/stat
 awk '/^MemTotal:/ { total=$2 } /^MemAvailable:/ { available=$2 } END { if (total != "" && available != "") printf "codelima-memory %s %s\n", total, available }' /proc/meminfo
+awk '/^MemAvailable:/ { a=$2 } /^Cached:/ { c=$2 } /^SwapTotal:/ { t=$2 } /^SwapFree:/ { f=$2 } END { if (a != "" && c != "" && t != "" && f != "") printf "codelima-memory-detail %s %s %s %s\n", a, c, t, f }' /proc/meminfo
+awk '{ printf "codelima-uptime %s\n", $1 }' /proc/uptime
 df -Pk / | awk 'NR == 2 { printf "codelima-disk %s %s\n", $2, $3 }'`
 )
 
@@ -85,10 +87,12 @@ type guestResourceUsage struct {
 }
 
 type forwardingGuestObservation struct {
-	Ports  []int
-	CPU    guestCPUCounters
-	Memory guestResourceUsage
-	Disk   guestResourceUsage
+	Ports    []int
+	CPU      guestCPUCounters
+	Memory   guestResourceUsage
+	Disk     guestResourceUsage
+	CPUCores map[int]guestCPUCounters
+	Details  daemon.NodeUsageDetails
 }
 
 type nodeCPUUsageSample struct {
@@ -368,6 +372,26 @@ func parseForwardingGuestObservation(data []byte) forwardingGuestObservation {
 			if usage, ok := parseGuestResourceUsage(fields, false); ok {
 				observation.Disk = usage
 			}
+		case "codelima-memory-detail":
+			parseGuestMemoryDetails(fields, &observation.Details)
+		case "codelima-uptime":
+			if len(fields) == 2 {
+				if value, err := strconv.ParseFloat(fields[1], 64); err == nil && !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 100*365*24*60*60 {
+					observation.Details.UptimeSeconds = &value
+				}
+			}
+		default:
+			if strings.HasPrefix(fields[0], "cpu") {
+				index, err := strconv.Atoi(strings.TrimPrefix(fields[0], "cpu"))
+				if err == nil && index >= 0 && index < 256 {
+					if counters, ok := parseGuestCPUCounters(fields); ok {
+						if observation.CPUCores == nil {
+							observation.CPUCores = map[int]guestCPUCounters{}
+						}
+						observation.CPUCores[index] = counters
+					}
+				}
+			}
 		}
 	}
 	return observation
@@ -608,9 +632,10 @@ type dynamicPortServer struct {
 //	            bound but answer 502 while the peer is rebuilt.
 //	retired   - a confirmed stop or delete; only here are routes removed.
 type forwardingNodeState struct {
-	node    Node
-	peer    forwardingPeer
-	monitor *peerHealthMonitor
+	node      Node
+	peer      forwardingPeer
+	monitor   *peerHealthMonitor
+	processes *processProbe
 
 	lastHealthyAt   time.Time
 	failures        int
@@ -685,20 +710,24 @@ type dynamicForwarder struct {
 	mu sync.RWMutex
 	// broadcast publishes daemon events. It is nil until the host wires it (and
 	// in every forwarder built without a daemon), so every publish is guarded.
-	broadcast  func(string, any)
-	wg         sync.WaitGroup
-	cancel     context.CancelFunc
-	prepared   bool
-	nodes      map[string]*forwardingNodeState
-	routes     map[dynamicRouteKey]*dynamicForwardingRoute
-	discovered map[dynamicRouteKey]routeDiscoveryMemory
-	known      map[string]bool
-	servers    map[int]*dynamicPortServer
-	cpu        map[string]nodeCPUUsageSample
-	resources  map[string]nodeResourceUsageSample
-	counters   map[string]guestCPUCounters
-	lastErr    string
-	lastErrAt  time.Time
+	broadcast      func(string, any)
+	wg             sync.WaitGroup
+	cancel         context.CancelFunc
+	prepared       bool
+	nodes          map[string]*forwardingNodeState
+	routes         map[dynamicRouteKey]*dynamicForwardingRoute
+	discovered     map[dynamicRouteKey]routeDiscoveryMemory
+	known          map[string]bool
+	servers        map[int]*dynamicPortServer
+	cpu            map[string]nodeCPUUsageSample
+	resources      map[string]nodeResourceUsageSample
+	counters       map[string]guestCPUCounters
+	metricsHistory map[string]*nodeMetricsHistory
+	metricsEpoch   string
+	coreCounters   map[string]map[int]guestCPUCounters
+	usageDetails   map[string]nodeUsageDetailsSample
+	lastErr        string
+	lastErrAt      time.Time
 	// inventoryErr is the persistent NodeList failure. It is reported
 	// separately from lastErr because it degrades every node at once.
 	inventoryErr      string
@@ -902,6 +931,7 @@ func (f *dynamicForwarder) syncMembership(nodes []Node, now time.Time) []Node {
 		f.known[strings.ToLower(state.node.SandboxName)] = true
 	}
 	f.pruneDiscoveryMemoryLocked(now)
+	f.pruneMetricsHistoryLocked(now)
 	f.mu.Unlock()
 
 	for _, peer := range retired {
@@ -1022,6 +1052,7 @@ func (f *dynamicForwarder) adoptPeer(ctx context.Context, node Node, peer forwar
 		replaced = retiredPeer{peer: state.peer, monitor: state.monitor, node: node.SandboxName, reason: "replaced"}
 	}
 	state.peer = peer
+	state.processes = nil
 	state.monitor = monitor
 	for _, route := range f.routes {
 		if route.nodeID == node.ID {
@@ -1158,7 +1189,9 @@ func (f *dynamicForwarder) recordNodeUsage(nodeID string, observation forwarding
 		f.resources[nodeID] = sample
 	}
 
+	f.recordUsageDetailsLocked(nodeID, observation, sampledAt)
 	broadcast, event := f.broadcast, f.nodeUsageEventLocked(nodeID, sampledAt)
+	f.recordMetricsHistoryLocked(event)
 	f.mu.Unlock()
 	publishNodeUsage(broadcast, event)
 }
@@ -1172,7 +1205,12 @@ func (f *dynamicForwarder) clearNodeUsage(nodeID string) {
 	delete(f.cpu, nodeID)
 	delete(f.resources, nodeID)
 	delete(f.counters, nodeID)
+	delete(f.coreCounters, nodeID)
+	delete(f.usageDetails, nodeID)
 	broadcast, event := f.broadcast, f.nodeUsageEventLocked(nodeID, f.nowUTC())
+	if f.metricsHistory[nodeID] != nil {
+		f.recordMetricsHistoryLocked(event)
+	}
 	f.mu.Unlock()
 	publishNodeUsage(broadcast, event)
 }
@@ -1182,6 +1220,9 @@ func (f *dynamicForwarder) clearNodeUsage(nodeID string) {
 // describe the same thing and are comparable by SampledAt. Callers hold f.mu.
 func (f *dynamicForwarder) nodeUsageEventLocked(nodeID string, sampledAt time.Time) nodeUsageEvent {
 	event := nodeUsageEvent{NodeID: nodeID, SampledAt: sampledAt}
+	if sample, ok := f.usageDetails[nodeID]; ok {
+		event.Details = cloneNodeUsageDetails(&sample.Details)
+	}
 	if sample, ok := f.cpu[nodeID]; ok {
 		percent := sample.Percent
 		event.CPUUsagePercent = &percent
@@ -1235,6 +1276,11 @@ func (f *dynamicForwarder) addNodeUsage(nodes []Node) {
 			continue
 		}
 		enriched := *observation
+		if sample, ok := f.usageDetails[nodes[index].ID]; ok {
+			enriched.UsageDetails = cloneNodeUsageDetails(&sample.Details)
+			at := sample.SampledAt
+			enriched.ResourceUsageSampledAt = &at
+		}
 		if sample, ok := f.cpu[nodes[index].ID]; ok {
 			percent := sample.Percent
 			sampledAt := sample.SampledAt
@@ -1365,7 +1411,12 @@ func (f *dynamicForwarder) retireNodeLocked(nodeID, reason string, now time.Time
 	delete(f.cpu, nodeID)
 	delete(f.resources, nodeID)
 	delete(f.counters, nodeID)
+	delete(f.coreCounters, nodeID)
+	delete(f.usageDetails, nodeID)
 	f.removeNodeRoutesLocked(nodeID, now)
+	if f.metricsHistory[nodeID] != nil {
+		f.recordMetricsHistoryLocked(nodeUsageEvent{NodeID: nodeID, SampledAt: now})
+	}
 	if state == nil {
 		return retiredPeer{}
 	}

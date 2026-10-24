@@ -112,6 +112,7 @@ func applyNodeUsageSample(u nodeUsageEvent, observation *RuntimeObservation) {
 	observation.MemoryTotalBytes = u.MemoryTotalBytes
 	observation.DiskUsedBytes = u.DiskUsedBytes
 	observation.DiskTotalBytes = u.DiskTotalBytes
+	observation.UsageDetails = cloneNodeUsageDetails(u.Details)
 	if u.SampledAt.IsZero() {
 		observation.CPUUsageSampledAt = nil
 		observation.ResourceUsageSampledAt = nil
@@ -135,6 +136,7 @@ func nodeUsageFromNode(node Node) nodeUsageEvent {
 	usage.MemoryTotalBytes = observation.MemoryTotalBytes
 	usage.DiskUsedBytes = observation.DiskUsedBytes
 	usage.DiskTotalBytes = observation.DiskTotalBytes
+	usage.Details = cloneNodeUsageDetails(observation.UsageDetails)
 	switch {
 	case observation.ResourceUsageSampledAt != nil:
 		usage.SampledAt = *observation.ResourceUsageSampledAt

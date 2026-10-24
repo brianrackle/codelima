@@ -192,7 +192,10 @@ test-tui-input: init
 test-terminal-attach: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima ./internal/ghostty ./internal/terminalstate -run 'Test(Raw|GhosttyAttach|VTBoundary)' -count=1 -timeout=60s
 
-.PHONY: test-host-capacity test-manager-settings
+.PHONY: test-host-capacity test-manager-settings test-metrics
+test-metrics: init
+	$(GO) test ./internal/codelima ./internal/codelima/daemon -run 'Test(NodeMetrics|ForwarderMetrics|TUI.*Metrics)' -count=1
+
 test-host-capacity: init
 	$(GO) test ./internal/hostinfo ./internal/codelima -run 'Test(ReadVolume|ReadMissingVolume|LinuxMemory|LinuxCPU|LinuxVolume|TUIHost|TUIManagerSettings)' -count=1
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build ./internal/hostinfo

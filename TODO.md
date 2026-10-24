@@ -92,9 +92,37 @@ stopping it returned allocation to zero. Native macOS readings and sustained
 multi-VM qualification still require a host with enough memory.
 Daemon controls and richer status remain open alongside other System work.
 
+Metrics now has daemon-owned one-hour aggregate history, incremental epoch
+reads, per-core CPU/cache/swap/uptime, root-disk growth, and on-demand process
+CPU/RSS over the existing SSH peer (ADR 155). The wide chart/process layout and
+80×24 sparklines support window changes, pause, CPU/memory sorting, PID-stable
+selection, mouse navigation and clipboard requests. Focused, full verify,
+race and integration checks pass, including stalled SSH channel opening and
+bounded output. gopls reports no diagnostics in the new process/rendering files.
+Live Ubuntu qualification compared memory/disk/procfs readings, observed PID
+3601 at about 52% CPU, verified an unchanged paused screen, and delivered
+selected PID 2246 to tmux's clipboard buffer. New client connections retained
+history (88→90 samples); daemon replacement reset its epoch and history.
+Unavailable guest connections preserved history and displayed explicit errors.
+The TCG guest completed cloud-init but Lima's guest-agent socket forwarding
+was degraded on VirtioFS; retrying start completed the shell bootstrap.
+The host agent later received SIGINT and powered down, so this run does not
+qualify ordinary VM shutdown. The node, daemon, four frontend sessions, SSH
+master, workload, socket mount, VM disks, screenshots and helper files were
+deleted/stopped/unmounted and cleaned.
+
+Metrics follow-ups: connect the fleet's eight-second CPU sparkline and preview's
+60-second history to bounded daemon data, and finish exact artboard/native
+qualification. Reuse the new history rings and merge live pushes; this preserves
+history across frontend reconnects but adds bounded data to fleet/preview
+reads. Paused process sorting currently reorders the retained top 64 rows.
+Retaining the union of CPU and memory leaders would preserve both global top
+sets during pause, at the cost of a larger bounded response and additional
+selection/size tests. These remain part of the full redesign work.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
-and progress/retry/cancel; one-hour metrics and on-demand processes; dynamic
+and progress/retry/cancel; fleet/preview history and final Metrics qualification; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean

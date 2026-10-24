@@ -14,6 +14,12 @@ sampling, global allocation across directory scopes, stale-response rejection,
 responsive System panels and settings navigation. It also cross-compiles the
 sampler for macOS arm64 and amd64; native macOS readings require manual QA.
 
+`make test-metrics` covers bounded history, incremental reads, telemetry parsing,
+process CPU deltas/PID reuse, shared probe caching and cancellation, protocol
+frame size, navigation fencing, pause/sort/copy controls and responsive plots.
+Protocol 9 is required for the Metrics RPC (ADR 155). Live guest qualification
+must compare procfs readings and exercise the new Metrics flow in QA.md.
+
 The exact reference sources are retained in `plans/tui-vnext/reference/` with
 provenance and hashes in `SOURCE.md`; they are implementation references and
 are not runtime assets or inputs to the native release package.

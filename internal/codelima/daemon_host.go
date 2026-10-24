@@ -254,6 +254,31 @@ func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, me
 			h.forwarder.addNodeUsage(nodes)
 		}
 		return nodes, nil
+	case "node.metrics":
+		var params daemon.NodeMetricsParams
+		if err := json.Unmarshal(raw, &params); err != nil || strings.TrimSpace(params.Node) == "" {
+			return nil, daemon.Error("InvalidArgument", "node is required", ExitInvalidArgument, nil)
+		}
+		node, err := h.service.store.NodeByIDOrSlug(params.Node)
+		if err != nil {
+			return nil, toDaemonError(err)
+		}
+		if h.forwarder == nil {
+			return nil, daemon.Error("Unavailable", "guest telemetry is unavailable", ExitDependencyUnavailable, nil)
+		}
+		if params.ProcessSort != "" && params.ProcessSort != "cpu" && params.ProcessSort != "memory" {
+			return nil, daemon.Error("InvalidArgument", "process_sort must be cpu or memory", ExitInvalidArgument, nil)
+		}
+		result := h.forwarder.metricsSnapshot(node.ID, params.Epoch, params.After)
+		if params.Processes {
+			processes, err := h.forwarder.sampleProcesses(ctx, node.ID, params.ProcessSort)
+			if err != nil {
+				result.ProcessError = err.Error()
+			} else {
+				result.Processes = &processes
+			}
+		}
+		return result, nil
 	case "node.start", "node.stop":
 		var params struct {
 			Node string `json:"node"`

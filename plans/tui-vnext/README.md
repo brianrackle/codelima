@@ -16,7 +16,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -90,7 +90,7 @@ and tmux launch, shifted default choices, scrolling, Enter and mouse activation
 color, with the disposable daemon/home cleaned. Verify, race and integration
 checks pass; external-window and guest-session qualification remain open.
 Current limitations include published-port-only Ports,
-window-local Activity, current-sample-only Metrics, basic event Logs,
+window-local Activity, incomplete fleet/preview history, basic event Logs,
 and existing forms inside the new modal geometry. These are implementation
 stages, not reductions of the accepted scope. See TODO #57.
 
@@ -112,3 +112,17 @@ Two-VM overcommit was visible before host memory exhaustion killed one fixture.
 Both nodes, daemons, tmux/SSH processes, socket mount and verification files
 were stopped/deleted/unmounted and cleaned; sustained multi-VM and native KVM
 qualification remain open.
+
+Metrics now implements one-hour aggregate rings and optional process snapshots
+over the existing daemon SSH peer (ADR 155, protocol 9). Real time plots,
+per-core CPU, cache/swap, uptime, root-disk growth, four windows, pause, sorting,
+process selection/copy and responsive layouts have focused coverage. Full
+verify, race and integration pass; new process/rendering files have clean gopls
+checks. Live 150×38 and 80×24 screens were inspected. Procfs/disk comparisons,
+a CPU workload, unchanged paused screen, CPU/memory ordering and clipboard PID
+delivery passed. History survived new client connections and reset on daemon
+replacement; unavailable connections retained history with explicit errors.
+The fixture was fully cleaned. Nested Lima guest-agent socket degradation and
+a later host-agent SIGINT limit lifecycle conclusions from that run.
+Fleet/preview sparklines, both global top process sets during pause, and final
+artboard/native qualification remain in TODO #57.

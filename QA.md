@@ -504,6 +504,24 @@ manual qualification.
   press/repeat/release lifecycles in both the decoded and legacy protocols.
 - `make test-tui-manager` exercises these model, input and rendering contracts.
 
+For Metrics, use a disposable running Linux guest:
+
+- Open Enter → Metrics at 150×38, then resize to 80×24. Confirm CPU/memory
+  plots, root disk and a selectable process table remain visible. Compare
+  current memory, cache, swap, uptime and load with guest procfs and `ps`.
+- Run a temporary CPU workload in the guest. Confirm its PID appears, CPU
+  rises after a second sample, `p` changes CPU/memory order, arrows and mouse
+  select processes, and `y` requests the selected PID on the host clipboard.
+- Exercise all four windows with `+`/`-`, pause with Space, and confirm both
+  plots and process values freeze. Resume, switch tabs, return and open a
+  second frontend. Selection must remain valid and history must survive a
+  frontend reconnect. A daemon restart starts a new history epoch.
+- Exit the workload and stop the guest. Process errors and unavailable
+  readings must be explicit while retained history stays inspectable. Clean
+  the workload, nodes, shells, daemon, files and any verification socket mount.
+- Run `make test-metrics`; caching, bounded payloads, canceled waits, PID reuse
+  and rejection of stale responses are automated checks.
+
 Run in a real terminal:
 
 ```sh

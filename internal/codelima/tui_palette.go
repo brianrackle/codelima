@@ -157,6 +157,8 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "s", hint: "Start or stop selected/marked nodes"},
 		{label: "x / X", hint: "Open shell / shell chooser"},
 		{label: "Tab / Shift-Tab", hint: "Cycle detail tabs or templates/environments"},
+		{label: "+ − / Space", hint: "Metrics: 1m / 5m / 15m / 1h window; pause samples"},
+		{label: "p / y", hint: "Metrics: sort processes by CPU or memory / copy selected PID"},
 		{label: "F6", hint: "Embedded shell focus; every other key reaches the shell while focused"},
 		{label: "[ ] / t / T / w", hint: "Shell tabs / new guest / new host / close (TUI focus only)"},
 		{label: "F7", hint: "Search embedded terminal (TUI focus only)"},
