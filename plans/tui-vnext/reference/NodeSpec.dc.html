@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node detail spec</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">api-redesign</span>
+<span><span class="mint">●</span> running <span class="dim">· up 2h14m ·</span> <span class="violet">medium</span> <span class="dim">·</span> ~/src/acme-api</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeOverview.dc.html" style="padding:0 1ch;color:#9aabb9">Overview</a>
+<a href="NodeMetrics.dc.html" style="padding:0 1ch;color:#9aabb9">Metrics</a>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;color:#9aabb9">Logs</a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Spec <span class="amber">•</span></a>
+<span style="flex:1"></span>
+<span class="dim">read-only · a node is a frozen copy of its template</span>
+</nav>
+
+<main style="flex:1;display:grid;grid-template-columns:82ch minmax(0,1fr);column-gap:2ch;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Frozen values" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;min-height:0">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Frozen at creation</span> <span class="dim">Oct 21 09:42 · from medium</span></div>
+<div style="display:grid;grid-template-columns:15ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">image</span><span>template:ubuntu <span class="dim">→ ubuntu 24.04 LTS · arm64</span></span>
+<span class="dim">vCPUs</span><span>4</span>
+<span class="dim">memory</span><span>8 GiB</span>
+<span class="dim">disk</span><span>50 GiB</span>
+<span class="dim">agent profile</span><span>codex-cli</span>
+<span class="dim">environments</span><span>1 codex <span class="dim">·</span> 2 claude-code</span>
+<span class="dim">workspace</span><span>mounted <span class="dim">· /Users/brian/src/acme-api ↔ same path</span></span>
+<span class="dim">ports</span><span>none published <span class="dim">· HTTP is forwarded dynamically</span></span>
+<span class="dim">host auth</span><span>import <span class="dim">· done Oct 21, never repeats</span></span>
+</div>
+<div style="height:20px"></div>
+<div class="mut b">RESOLVED BOOTSTRAP <span class="dim" style="font-weight:400">6 steps · ran once as root (sudo -H) · Oct 21</span></div>
+<div style="display:grid;grid-template-columns:3ch 12ch minmax(0,1fr) 3ch 4ch;column-gap:1ch;white-space:nowrap">
+<span class="dim">1</span><span class="violet">codex</span><span>prerequisites: curl ca-certificates git bubblewrap</span><span class="mint">✓</span><span class="dim">41s</span>
+<span class="dim">2</span><span class="violet">codex</span><span>native install · chatgpt.com/codex/install.sh</span><span class="mint">✓</span><span class="dim">22s</span>
+<span class="dim">3</span><span class="violet">codex</span><span>validate · codex --version <span class="dim">as login user</span></span><span class="mint">✓</span><span class="dim">1s</span>
+<span class="dim">4</span><span class="violet">claude-code</span><span>prerequisites: curl ca-certificates git</span><span class="mint">✓</span><span class="dim">3s</span>
+<span class="dim">5</span><span class="violet">claude-code</span><span>native install · claude.ai/install.sh</span><span class="mint">✓</span><span class="dim">48s</span>
+<span class="dim">6</span><span class="violet">claude-code</span><span>validate · claude --version <span class="dim">as login user</span></span><span class="mint">✓</span><span class="dim">1s</span>
+</div>
+<div style="height:20px"></div>
+<div class="dim">⏎ on a step shows its full command and captured output (Logs › bootstrap)</div>
+</section>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="Template drift" style="position:relative;border:1px solid #f0c674;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="amber b">• Template drift</span></div>
+<div style="white-space:nowrap"><span class="violet">medium</span> was edited Oct 22, after this node</div>
+<div style="white-space:nowrap">was created. The node keeps its values.</div>
+<div style="height:20px"></div>
+<div style="display:grid;grid-template-columns:13ch 14ch minmax(0,1fr);white-space:nowrap">
+<span class="dim"></span><span class="dim">this node</span><span class="dim">medium now</span>
+<span class="dim">memory</span><span>8 GiB</span><span class="amber">12 GiB</span>
+<span class="dim">environments</span><span>codex</span><span>codex</span>
+<span></span><span>claude-code</span><span>claude-code</span>
+<span></span><span class="dim">—</span><span class="amber">+ docker</span>
+</div>
+<div style="height:20px"></div>
+<a href="CreateNode.dc.html" style="display:block;white-space:nowrap"><span class="mint">N</span> <span class="mut">new node from medium as it is now</span></a>
+<a href="Dialogs.dc.html" style="display:block;white-space:nowrap"><span class="mint">c</span> <span class="mut">clone this node, frozen values and all</span></a>
+</section>
+
+<section aria-label="Lima instance" style="position:relative;flex:1;min-height:0;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Lima instance</span> <span class="dim">instance.lima.yaml</span></div>
+<div style="display:grid;grid-template-columns:22ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">name</span><span>codelima-api-redesign</span>
+<span class="dim">vmType</span><span>vz</span>
+<span class="dim">mountType</span><span>virtiofs</span>
+<span class="dim">nestedVirtualization</span><span>true</span>
+<span class="dim">mounts</span><span>~/src/acme-api <span class="dim">writable</span></span>
+<span class="dim">portForwards</span><span>ignore all <span class="dim">· daemon forwards</span></span>
+<span class="dim">containerd</span><span>off</span>
+</div>
+<div style="height:20px"></div>
+<div style="display:flex;gap:2ch;white-space:nowrap">
+<span><span class="mint">v</span> <span class="mut">view full yaml</span></span>
+<span><span class="mint">y</span> <span class="mut">copy path</span></span>
+</div>
+</section>
+</div>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">the amber dot on the Spec tab appears only when the template has drifted</span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">back</span></a>
+<a href="NodeOverview.dc.html"><span class="mint">tab</span> <span class="mut">next tab</span></a>
+<a href="CreateNode.dc.html"><span class="mint">N</span> <span class="mut">new from template</span></a>
+<a href="TemplateEdit.dc.html"><span class="mint">e</span> <span class="mut">edit template</span></a>
+<span><span class="mint">v</span> <span class="mut">lima yaml</span></span>
+<a href="Dialogs.dc.html"><span class="mint">c</span> <span class="mut">clone</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

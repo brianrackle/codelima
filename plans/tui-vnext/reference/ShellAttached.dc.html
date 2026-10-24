@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Attached shell</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">codelima</span>
+<span class="dim">▸</span>
+<span class="hi">api-redesign</span>
+<span class="dim">· session 2 · shell · attached in this terminal</span>
+<span style="flex:1"></span>
+<a href="Main.dc.html"><span class="mint">ctrl+]</span> <span class="mut">detach, keep running</span></a>
+<span><span class="mint">exit</span> <span class="mut">ends the session</span></span>
+</div>
+
+<div style="flex:1;padding:6px 1ch;min-height:0;overflow:hidden">
+<div class="pre"><span class="mint">brian@lima-codelima-api-redesign</span>:<span class="blue">/Users/brian/src/acme-api</span>$ git status -sb</div>
+<div class="pre">## <span class="mint">feat/auth-routes</span>...<span class="coral">origin/feat/auth-routes</span> [ahead 2]</div>
+<div class="pre"> <span class="coral">M</span> src/routes/auth.ts</div>
+<div class="pre"> <span class="coral">M</span> src/routes/session.ts</div>
+<div class="pre"><span class="coral">??</span> src/routes/__tests__/auth.test.ts</div>
+<div class="pre"><span class="mint">brian@lima-codelima-api-redesign</span>:<span class="blue">/Users/brian/src/acme-api</span>$ npm test -- auth</div>
+<div class="pre"> </div>
+<div class="pre">&gt; acme-api@0.9.0 test</div>
+<div class="pre">&gt; vitest run auth</div>
+<div class="pre"> </div>
+<div class="pre"> <span class="mint">✓</span> src/routes/__tests__/auth.test.ts <span class="dim">(12 tests)</span> 412ms</div>
+<div class="pre"> </div>
+<div class="pre"> Test Files  <span class="mint">1 passed</span> (1)</div>
+<div class="pre">      Tests  <span class="mint">12 passed</span> (12)</div>
+<div class="pre">   Duration  1.31s</div>
+<div class="pre"> </div>
+<div class="pre"><span class="mint">brian@lima-codelima-api-redesign</span>:<span class="blue">/Users/brian/src/acme-api</span>$ uname -sm &amp;&amp; nproc &amp;&amp; free -h | head -2</div>
+<div class="pre">Linux aarch64</div>
+<div class="pre">4</div>
+<div class="pre">               total        used        free      shared  buff/cache   available</div>
+<div class="pre">Mem:           7.7Gi       3.1Gi       0.9Gi        12Mi       2.2Gi       4.6Gi</div>
+<div class="pre"><span class="mint">brian@lima-codelima-api-redesign</span>:<span class="blue">/Users/brian/src/acme-api</span>$ <span style="background:#d9e2ec;color:#0c1015"> </span></div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

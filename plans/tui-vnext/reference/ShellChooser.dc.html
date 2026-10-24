@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Shell menu</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="position:relative;width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div aria-hidden="true" style="flex:1;padding:10px 2ch;opacity:.22;display:flex;flex-direction:column;gap:20px">
+<div style="height:20px;white-space:nowrap">7 nodes  ● 3 running  ◐ 1 starting  ○ 1 stopped  ◌ 1 created  ✕ 1 failed</div>
+<div style="border:1px solid #263442;border-radius:6px;height:260px;padding:10px 1ch;white-space:nowrap">
+<div class="dim">   NAME ▲             STATUS        TEMPLATE   CPU</div>
+<div>▾ ~/src/acme-api</div>
+<div style="background:#1b2a36">▸ api-redesign       ● running     medium     ▃▄▆▇▅▄▅▄  42%</div>
+</div>
+<div style="border:1px solid #263442;border-radius:6px;flex:1"></div>
+</div>
+
+<section role="dialog" aria-label="Open a shell" aria-modal="true" style="position:absolute;left:170px;top:110px;width:860px;box-sizing:border-box;background:#121a22;border:1px solid #91e6c0;border-radius:8px;padding:18px 2ch 12px;box-shadow:0 24px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap"><span class="hi b">Open a shell</span> <span class="dim">· api-redesign</span></div>
+
+<div class="dim b" style="font-size:12px;letter-spacing:.06em">NEW SESSION</div>
+<a href="ShellAttached.dc.html" style="display:grid;grid-template-columns:2ch 4ch 20ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span><span class="mint b">⏎</span><span class="hi b">Attach here</span><span>suspends this TUI <span class="dim">·</span> ctrl+] comes back <span class="dim">·</span> session keeps running</span>
+</a>
+<div style="display:grid;grid-template-columns:2ch 4ch 20ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span></span><span class="mint b">w</span><span>New window</span><span class="mut">ghostty -e codelima shell api-redesign</span>
+<span></span><span class="mint b">t</span><span>tmux window</span><span class="mut">new-window in session "work" <span class="dim">· $TMUX detected</span></span>
+<span></span><span class="mint b">h</span><span>Host shell here</span><span class="mut">~/src/acme-api on this Mac, not in the VM</span>
+<span></span><span class="dim">e</span><span class="dim">Embedded tab</span><span class="dim">off · turn on in Settings › shell.mode</span>
+</div>
+
+<div style="height:12px"></div>
+<div class="dim b" style="font-size:12px;letter-spacing:.06em">ATTACH TO A RUNNING SESSION</div>
+<div style="display:grid;grid-template-columns:2ch 4ch 6ch minmax(0,1fr) 18ch;column-gap:1ch;white-space:nowrap">
+<span></span><span class="mint b">1</span><span>codex</span><span class="hi">Refactor auth routes</span><span><span class="amber">⠹</span> working <span class="dim">1h02m</span></span>
+<span></span><span class="mint b">2</span><span>shell</span><span>~/src/acme-api</span><span class="dim">idle 4m</span>
+<span></span><span class="mint b">3</span><span class="coral">host</span><span>git log --oneline</span><span><span class="amber">!</span> <span class="dim">bell</span></span>
+</div>
+
+<div style="height:1px;background:#263442;margin:10px -2ch"></div>
+<div style="display:flex;gap:3ch;white-space:nowrap">
+<span class="dim">x does</span><span>attach here</span><span class="dim">· hold shift with a choice (⇧w, ⇧t) to make it x's default</span>
+<span style="flex:1"></span>
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">close</span></a>
+</div>
+</section>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">a session belongs to the daemon whichever way it opens; any window can attach to it later</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="ShellAttached.dc.html"><span class="mint">⏎</span> <span class="mut">attach here</span></a>
+<span><span class="mint">w</span> <span class="mut">window</span></span>
+<span><span class="mint">t</span> <span class="mut">tmux</span></span>
+<span><span class="mint">h</span> <span class="mut">host</span></span>
+<span><span class="mint">1–9</span> <span class="mut">existing session</span></span>
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">close</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nodes filtered with marks</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="dim">scope</span> all nodes</span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<main style="flex:1;display:flex;flex-direction:column;gap:20px;padding:10px 1ch 10px;min-height:0">
+
+<section aria-label="Nodes" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;flex-shrink:0">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Nodes</span> <span class="dim">3 of 7 · flat · sort cpu ▼</span></div>
+<div style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="mint">2 marked</span></div>
+
+<div style="display:flex;align-items:center;gap:1ch;height:20px;white-space:nowrap">
+<label for="nf-q" class="mint b">/</label>
+<input id="nf-q" value="status:running" style="font:inherit;color:#f0f5f8;background:#0f151c;border:1px solid #91e6c0;border-radius:3px;padding:0 1ch;height:20px;box-sizing:border-box;width:40ch">
+<span class="dim">tokens</span> <span class="mut">status: template: dir: port:</span> <span class="dim">· free text matches name and directory · ⏎ keep · esc clear</span>
+</div>
+<div style="height:20px"></div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 17ch 7ch;column-gap:2ch;height:20px;white-space:nowrap" class="dim">
+<span></span><span>NAME</span><span>STATUS</span><span>TEMPLATE</span><span class="mint">CPU ▼</span><span>MEMORY</span><span>DISK</span><span>SES</span><span>DIRECTORY</span><span>UPTIME</span>
+</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 17ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span class="mint b">✓</span>
+<span class="hi">codelima-dev</span>
+<span><span class="mint">●</span> running</span>
+<span class="violet">large</span>
+<span class="pre"><span class="amber">▅▆▇▆▇█▇▆</span>  <span class="amber">71%</span></span>
+<span><span class="amber">████████▎</span><span class="trk">░</span> <span class="amber">12.9/15.6G</span></span>
+<span><span class="mint">█████▋</span><span class="trk">░░░░</span> 41/73G</span>
+<span>3</span>
+<span class="mut">~/src/codelima</span>
+<span>1d3h</span>
+</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 17ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>api-redesign</span>
+<span><span class="mint">●</span> running</span>
+<span class="violet">medium</span>
+<span class="pre"><span class="mint">▃▄▆▇▅▄▅▄</span>  42%</span>
+<span><span class="mint">████</span><span class="trk">░░░░░░</span> 3.1/7.7G</span>
+<span><span class="mint">██▌</span><span class="trk">░░░░░░░</span> 12/48G</span>
+<span>2</span>
+<span class="mut">~/src/acme-api</span>
+<span>2h14m</span>
+</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 17ch 7ch;column-gap:2ch;height:20px;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint b">▸✓</span>
+<span class="hi b">test-hardening</span>
+<span><span class="mint">●</span> running</span>
+<span class="violet">small</span>
+<span class="pre"><span class="mint">▁▁▂▁▁▁▂▁</span>   4%</span>
+<span><span class="mint">███▎</span><span class="trk">░░░░░░</span> 1.2/3.8G</span>
+<span><span class="mint">██▋</span><span class="trk">░░░░░░░</span> 6.3/24G</span>
+<span>1</span>
+<span class="mut">~/src/acme-api</span>
+<span>47m</span>
+</div>
+
+<div style="height:20px"></div>
+<div style="height:20px;white-space:nowrap" class="dim">4 hidden by filter: docs-agent ◐ · kvm-nested ✕ · perf-lab ○ · api-redesign-2 ◌</div>
+</section>
+
+<section aria-label="Marked nodes" style="position:relative;flex:1;min-height:0;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Marked</span> <span class="dim">2 nodes · actions apply to all</span></div>
+
+<div style="display:grid;grid-template-columns:18ch 9ch 9ch 9ch minmax(0,1fr);column-gap:2ch;white-space:nowrap">
+<span class="hi">codelima-dev</span><span class="violet">large</span><span>6 vCPU</span><span>16 GiB</span><span>3 sessions <span class="dim">·</span> <span class="amber">⠼</span> 1 working <span class="dim">(codex · Fix renderer backpressure)</span></span>
+<span class="hi">test-hardening</span><span class="violet">small</span><span>2 vCPU</span><span>4 GiB</span><span>1 session <span class="dim">· idle 12m</span></span>
+</div>
+<div style="height:20px"></div>
+<div style="white-space:nowrap"><span class="dim">stopping both frees</span> 8 vCPU <span class="dim">and</span> 20 GiB <span class="dim">· allocation would drop to</span> 12/16 vCPU <span class="dim">·</span> 28/64 GiB</div>
+<div style="white-space:nowrap"><span class="amber">⚠</span> 4 sessions end on stop, 1 is busy <span class="dim">· you'll be asked once for the whole batch</span></div>
+<div style="height:20px"></div>
+<div style="display:flex;gap:3ch;white-space:nowrap">
+<a href="Dialogs.dc.html"><span class="mint">s</span> stop 2</a>
+<span><span class="mint">r</span> restart 2</span>
+<a href="Dialogs.dc.html"><span class="mint">d</span> delete 2</a>
+<span><span class="mint">space</span> <span class="mut">toggle mark</span></span>
+<span><span class="mint">*</span> <span class="mut">mark all shown</span></span>
+<span><span class="mint">esc</span> <span class="mut">clear marks</span></span>
+</div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span><span class="dim">filter</span> status:running <span class="dim">· 3 of 7 · sort</span> cpu ▼ <span class="dim">· grouping off while sorting by a metric</span></span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s · 14:32:41</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">space</span> <span class="mut">mark</span></span>
+<a href="Dialogs.dc.html"><span class="mint">s</span> <span class="mut">stop marked</span></a>
+<span><span class="mint">r</span> <span class="mut">restart marked</span></span>
+<a href="Dialogs.dc.html"><span class="mint">d</span> <span class="mut">delete marked</span></a>
+<span><span class="mint">&lt; &gt;</span> <span class="mut">sort column</span></span>
+<span><span class="mint">=</span> <span class="mut">reverse</span></span>
+<span><span class="mint">G</span> <span class="mut">group</span></span>
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">clear</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

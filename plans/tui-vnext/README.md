@@ -1,0 +1,82 @@
+# Fleet-manager TUI implementation
+
+Source: [Claude design](https://claude.ai/artifact/Pu9wB7f3KH3LaCF6rDm7ps), version `1792822420-f77f`.
+
+The exact 26 artboards and canvas interaction notes are retained in `reference/`.
+All example identities, metrics and timestamps in those files are reference data; the application must render real observations or explicit unavailable states.
+
+## Delivery ledger
+
+| Surface | Required behavior | Status |
+|---|---|---|
+| [Nodes · dashboard (home)](reference/Main.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
+| [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Create node · validation](reference/CreateNode.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Create node · template picker](reference/TemplatePicker.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Templates · configurations](reference/Templates.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Pending |
+| [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Shell · where to open](reference/ShellChooser.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
+
+## Cross-cutting requirements
+
+- Preserve daemon-owned sessions, node/configuration identities and existing storage compatibility.
+- Fleet dashboard is the launch view; selecting a node must never create a shell.
+- Five global views, contextual navigation, command palette, key help and mouse equivalents.
+- Scoped/all-node toggle, stable selection, grouping, typed filtering, sorting, marking and bulk confirmations.
+- Actual host capacity, lifecycle progress/failure details, daemon-owned operation history, hour-long metric history and on-demand process samples.
+- Raw terminal attach/detach, window/tmux launching, configurable shell mode; optional embedded shell passes every key except F6.
+- Live validation, dirty-form cancellation, configuration/environment order, restore and isolated environment test runs.
+- Dynamic forwarding presentation and explicit generic-route ownership pinning.
+- Theme tokens and ANSI fallback; wide, medium and 80×24 layouts; no clipped interactive controls.
+- Automated checks and every QA.md flow, live visual/interactive verification, documentation and disposable-state cleanup.
+
+## Current evidence
+
+- `ddabb01` checkpoints outstanding notes before implementation.
+- Prior baseline `make verify` passed on Linux/aarch64; baseline TUI menus and resize were exercised. These do not qualify the redesign.
+- Design files retrieved through an interactive Claude Code Artifact session; all 27 indexed files and manifest hashes verified.
+
+## Implementation sequence
+
+1. Fleet projection, typed navigation, adaptive geometry and reusable theme/panels.
+2. Wire dashboard and global/detail views to existing service snapshots; replace old sidebar and shell-first defaults.
+3. Add missing runtime contracts (history/processes, lifecycle progress/cancellation, raw attachment, route pins and settings) with regression tests.
+4. Complete forms, palette/help, mouse/keyboard paths, narrow layouts and all reference states.
+5. Run automated/native/manual gates, document results, resolve follow-ups and clean verification artifacts.
+
+## Implementation in progress
+
+The initial fleet projection, responsive table/preview, global navigation,
+initial detail views, palette/help and F6-only shell interception are wired
+into the app (ADR 150). `TestTUIFleet*`, `TestTUIManager*` and resize regressions
+pass. Full `make verify` and `make test-race` also pass after regression migration
+and compact, scrolling forms with dirty-cancel confirmation. An isolated live
+TUI verified navigation, palette filtering, resizing and edited-form cancellation;
+the disposable daemon, tmux session and home were cleaned. Scope refreshes now
+capture their request state and reject stale replies with regression coverage.
+Runtime contracts and artboard
+interaction completion remain open; no artboard is marked delivered yet.
+
+Current limitations include embedded-only shell launch, published-port-only
+Ports, window-local Activity, current-sample-only Metrics, basic event Logs,
+and existing forms inside the new modal geometry. These are implementation
+stages, not reductions of the accepted scope. See TODO #57.

@@ -120,8 +120,8 @@ func TestTUILogoAnimationTickRedrawsOnlyFixedWidthHeaderMark(t *testing.T) {
 	}
 
 	rendered := renderedScreenText(t, vx, 100, 24)
-	if !strings.Contains(rendered, app.logoAnimation.text()+"  Node: root-node") {
-		t.Fatalf("animated header lost its adjacent node context:\n%s", rendered)
+	if !strings.Contains(rendered, app.logoAnimation.text()+"   1 Nodes") {
+		t.Fatalf("animated header lost its adjacent view navigation:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Nodes") {
 		t.Fatalf("header-only animation redraw disturbed the TUI body:\n%s", rendered)

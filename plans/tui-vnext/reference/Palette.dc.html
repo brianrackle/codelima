@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Command palette</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+.fz{color:#91e6c0;text-decoration:underline;text-underline-offset:3px}
+</style>
+</helmet>
+<div style="position:relative;width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div aria-hidden="true" style="flex:1;padding:10px 2ch;opacity:.22;display:flex;flex-direction:column;gap:20px">
+<div style="height:20px;white-space:nowrap">7 nodes  ● 3 running  ◐ 1 starting  ○ 1 stopped  ◌ 1 created  ✕ 1 failed</div>
+<div style="border:1px solid #263442;border-radius:6px;height:260px"></div>
+<div style="border:1px solid #263442;border-radius:6px;flex:1"></div>
+</div>
+
+<section role="dialog" aria-label="Command palette" aria-modal="true" style="position:absolute;left:180px;top:70px;width:840px;box-sizing:border-box;background:#121a22;border:1px solid #91e6c0;border-radius:8px;padding:10px 2ch 10px;box-shadow:0 24px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:1ch;height:28px;white-space:nowrap">
+<label for="pl-q" class="mint b" style="font-size:15px">:</label>
+<input id="pl-q" value="sta" style="font:inherit;font-size:15px;color:#f0f5f8;background:transparent;border:0;padding:0;flex:1;height:24px">
+<span class="dim">9 results</span>
+</div>
+<div style="height:1px;background:#263442;margin:8px -2ch"></div>
+
+<div class="dim b" style="font-size:12px;letter-spacing:.06em">NODES</div>
+<a href="Dialogs.dc.html" style="display:grid;grid-template-columns:2ch 30ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span><span class="hi"><span class="fz">sta</span>rt perf-lab</span><span><span class="dim">○ stopped · xlarge ·</span> <span class="amber">⚠ needs 32 GiB, 16 free</span></span><span class="dim" style="text-align:right">s</span>
+</a>
+<div style="display:grid;grid-template-columns:2ch 30ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap">
+<span></span><span><span class="fz">sta</span>rt api-redesign-2</span><span class="dim">◌ created · medium · first start ≈ 2m40s</span><span class="dim" style="text-align:right">s</span>
+<span></span><span>re<span class="fz">sta</span>rt api-redesign</span><span class="dim">● running · 2 sessions end</span><span class="dim" style="text-align:right">r</span>
+<span></span><span>re<span class="fz">sta</span>rt codelima-dev</span><span class="dim">● running · 3 sessions end</span><span class="dim" style="text-align:right">r</span>
+<span></span><span><span class="fz">st</span>op test-h<span class="fz">a</span>rdening</span><span class="dim">● running · fuzzy match</span><span class="dim" style="text-align:right">s</span>
+</div>
+<div style="height:8px"></div>
+<div class="dim b" style="font-size:12px;letter-spacing:.06em">ACTIONS</div>
+<div style="display:grid;grid-template-columns:2ch 30ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap">
+<span></span><span><span class="fz">sta</span>rt all in ~/src/perf-lab</span><span class="dim">2 nodes · perf-lab, kvm-nested (retry)</span><span></span>
+<span></span><span><span class="fz">sta</span>tus: show only failed</span><span class="dim">applies filter status:failed</span><span class="dim" style="text-align:right">/</span>
+</div>
+<div style="height:8px"></div>
+<div class="dim b" style="font-size:12px;letter-spacing:.06em">GO TO</div>
+<div style="display:grid;grid-template-columns:2ch 30ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap">
+<span></span><span>Logs › kvm-nested › boot<span class="fz">st</span>r<span class="fz">a</span>p</span><span class="dim">failed 14:29</span><span></span>
+<span></span><span>System › daemon <span class="fz">sta</span>tus</span><span class="dim">pid 4312 · 7 sessions</span><span class="dim" style="text-align:right">5</span>
+</div>
+
+<div style="height:1px;background:#263442;margin:8px -2ch"></div>
+<div style="display:flex;gap:2ch;white-space:nowrap" class="dim">
+<span><span class="mint">⏎</span> run</span><span><span class="mint">↑↓</span> move</span><span><span class="mint">tab</span> complete</span><span><span class="mint">esc</span> close</span><span>· empty query shows recent commands</span>
+</div>
+</section>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">every palette command also has a key; the right column teaches it</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">⏎</span> <span class="mut">run</span></span>
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<span><span class="mint">tab</span> <span class="mut">complete</span></span>
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">close</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

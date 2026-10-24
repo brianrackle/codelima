@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TUI kit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:#91e6c0}a:hover{color:#f0f5f8}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:1000px;box-sizing:border-box;padding:48px;background:#0c1015;color:#d9e2ec;font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:20px;display:flex;flex-direction:column;gap:28px">
+
+<div style="display:flex;align-items:baseline;gap:24px">
+<h1 style="margin:0;font-size:32px;line-height:40px;font-weight:700;color:#f0f5f8">TUI kit</h1>
+<p style="margin:0;color:#9aabb9">JetBrains Mono 13/20 · one cell = 1ch × 20px · palette from codelima.com · every state has a glyph, not just a color</p>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:40px;flex:1;min-height:0">
+
+<div style="display:flex;flex-direction:column;gap:28px">
+<section style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0 0 6px;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">PALETTE</h2>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#0c1015;border:1px solid #263442;border-radius:4px"></span><span style="width:64px">ink</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#0c1015</span><span class="mut">ground</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#111820;border:1px solid #263442;border-radius:4px"></span><span style="width:64px">chrome</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#111820</span><span class="mut">header, footer</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#121a22;border:1px solid #263442;border-radius:4px"></span><span style="width:64px">raised</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#121a22</span><span class="mut">dialogs, popups</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#1b2a36;border-radius:4px"></span><span style="width:64px">select</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#1b2a36</span><span class="mut">cursor row, active tab</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#263442;border-radius:4px"></span><span style="width:64px">line</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#263442</span><span class="mut">panel borders</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#2b3a49;border-radius:4px"></span><span style="width:64px">track</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#2b3a49</span><span class="mut">empty gauge cells</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#d9e2ec;border-radius:4px"></span><span style="width:64px">text</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#d9e2ec</span><span class="mut">body</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#9aabb9;border-radius:4px"></span><span style="width:64px">muted</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#9aabb9</span><span class="mut">labels, hints</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#6f8597;border-radius:4px"></span><span style="width:64px">dim</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#6f8597</span><span class="mut">secondary · 5:1 on ink</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#91e6c0;border-radius:4px"></span><span style="width:64px">mint</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#91e6c0</span><span class="mut">running, focus, keys</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#f0c674;border-radius:4px"></span><span style="width:64px">amber</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#f0c674</span><span class="mut">in flight, 70–89%</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#f4877c;border-radius:4px"></span><span style="width:64px">coral</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#f4877c</span><span class="mut">failed, ≥90%, destroy, host</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#82b8ff;border-radius:4px"></span><span style="width:64px">blue</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#82b8ff</span><span class="mut">memory, info</span></div>
+<div style="display:flex;align-items:center;gap:12px"><span style="width:40px;height:22px;background:#c4a7ff;border-radius:4px"></span><span style="width:64px">violet</span><span class="dim" style="font-family:'JetBrains Mono',monospace;font-size:12px;width:64px">#c4a7ff</span><span class="mut">template names</span></div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0 0 6px;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">TERMINAL FALLBACK</h2>
+<p style="margin:0;color:#9aabb9">Truecolor when the terminal reports it; otherwise map to the 16 ANSI slots (mint→green, amber→yellow, coral→red, blue→blue, violet→magenta). Cursor row falls back to reverse video.</p>
+</section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:28px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:20px">
+<section style="display:flex;flex-direction:column">
+<h2 style="margin:0 0 12px;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">NODE STATUS</h2>
+<div style="display:grid;grid-template-columns:3ch 12ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">●</span><span>running</span><span class="dim">booted, bootstrap done</span>
+<span class="amber">◐</span><span>starting</span><span class="dim">create · boot · seed · bootstrap</span>
+<span class="amber">◐</span><span>cloning</span><span class="dim">source stops, disk copies</span>
+<span class="amber">◑</span><span>stopping</span><span class="dim">limactl stop</span>
+<span class="dim">○</span><span>stopped</span><span class="dim">disk kept, no CPU/RAM</span>
+<span class="dim">◌</span><span>created</span><span class="dim">never started</span>
+<span class="coral">✕</span><span class="coral">failed</span><span class="dim">lifecycle or bootstrap error</span>
+<span class="coral">⊘</span><span>deleting</span><span class="dim">teardown in progress</span>
+</div>
+<div style="margin-top:8px;white-space:nowrap"><span class="dim">spinner</span> <span class="amber">⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏</span> <span class="dim">10 fps</span></div>
+</section>
+
+<section style="display:flex;flex-direction:column">
+<h2 style="margin:0 0 12px;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">GAUGES · 10 CELLS, ⅛ STEPS</h2>
+<div style="white-space:nowrap"><span class="mint">██▎</span><span class="trk">░░░░░░░</span>  23%  <span class="dim">&lt; 70 mint</span></div>
+<div style="white-space:nowrap"><span class="amber">███████▌</span><span class="trk">░░</span>  76%  <span class="dim">70–89 amber</span></div>
+<div style="white-space:nowrap"><span class="coral">█████████▍</span>  94%  <span class="dim">≥ 90 coral</span></div>
+<div style="white-space:pre"><span class="dim">—</span>               <span class="dim">no sample yet / stopped</span></div>
+<div style="margin-top:12px;white-space:nowrap"><span class="mint">▃▄▆▇▅▄▅▄</span>  <span class="dim">sparkline · last 8s</span></div>
+<div style="margin-top:12px;display:flex;flex-direction:column">
+<sc-for list="{{rows}}" as="row" hint-placeholder-count="4"><div class="pre mint" style="height:20px">{{row}}</div></sc-for>
+</div>
+<div class="dim">block chart · 1 col = 1 sample</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:8px">
+<h2 style="margin:0 0 4px;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">MESSAGES</h2>
+<div style="white-space:nowrap"><span class="mint">✓</span> test-hardening started <span class="dim">· 38s</span></div>
+<div style="white-space:nowrap"><span class="blue">i</span> Copied http://api-redesign.localhost:3000</div>
+<div style="white-space:nowrap"><span class="amber">⚠</span> vCPU overcommitted: 20 of 16</div>
+<div style="white-space:nowrap"><span class="coral">✕</span> kvm-nested: bootstrap failed <span class="dim">· l logs</span></div>
+<div style="white-space:nowrap;background:#2a2414;color:#f0c674;padding:0 1ch">◐ daemon reconnecting… actions paused</div>
+</section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:28px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:20px">
+<section style="display:flex;flex-direction:column">
+<h2 style="margin:0 0 12px;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">ROWS</h2>
+<div style="white-space:pre;padding:0 1ch">  test-hardening   <span class="mint">●</span> running  <span class="dim">normal</span></div>
+<div style="white-space:pre;padding:0 1ch;background:#1b2a36"><span class="mint">▸</span> <span class="hi b">api-redesign</span>     <span class="mint">●</span> running  <span class="dim">cursor</span></div>
+<div style="white-space:pre;padding:0 1ch"><span class="mint">✓</span> codelima-dev     <span class="mint">●</span> running  <span class="dim">marked</span></div>
+<div style="white-space:pre;padding:0 1ch;background:#1b2a36"><span class="mint">▸✓</span><span class="hi b">perf-lab</span>         <span class="dim">○</span> stopped  <span class="dim">both</span></div>
+<div style="white-space:pre;padding:0 1ch">  <span class="mint" style="text-decoration:underline">api</span>-redesign-2   <span class="dim">◌</span> created  <span class="dim">filter match</span></div>
+<div style="white-space:pre;padding:0 1ch">  <span class="dim">docs-agent       </span><span class="amber">◐</span> <span class="dim">starting · x unavailable</span></div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:24px">
+<h2 style="margin:0;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">PANELS</h2>
+<div style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015"><span class="hi b">Ports</span> <span class="dim">2</span></div>
+<div style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015" class="dim">o open</div>
+<div class="dim">unfocused · line border</div>
+</div>
+<div style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015"><span class="hi b">Nodes</span> <span class="dim">7</span></div>
+<div class="dim">focused · tab moves focus</div>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0 0 6px;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">FORM CONTROLS</h2>
+<div style="display:grid;grid-template-columns:10ch minmax(0,1fr);row-gap:6px;white-space:nowrap;align-items:center">
+<label for="k-a" class="mut">text</label><input id="k-a" placeholder="acme-api" style="font:inherit;color:#d9e2ec;background:#0f151c;border:1px solid #263442;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box">
+<label for="k-b" class="mut">focused</label><input id="k-b" value="api-redesign" style="font:inherit;color:#f0f5f8;background:#0f151c;border:1px solid #91e6c0;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box">
+<label for="k-c" class="coral">error</label><input id="k-c" value="api-redesign" aria-invalid="true" style="font:inherit;color:#f0f5f8;background:#0f151c;border:1px solid #f4877c;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box">
+<span></span><span class="coral">✕ name already used</span>
+<span class="mut">choice</span><span><span class="dim">‹</span> <span class="violet">medium</span> <span class="dim">›</span>  <span class="dim">⏎ list</span></span>
+<span class="mut">radio</span><span><span class="mint">(●)</span> mounted  <span class="dim">( )</span> copy</span>
+<span class="mut">check</span><span><span class="mint">[x]</span> start now  <span class="dim">[ ]</span> attach</span>
+<span class="dim">disabled</span><span class="dim">‹ small › locked: default</span>
+</div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:6px">
+<h2 style="margin:0 0 6px;font-family:Inter,sans-serif;font-size:12px;letter-spacing:.08em;font-weight:600;color:#9aabb9">KEY HINTS</h2>
+<div style="white-space:nowrap"><span class="mint">s</span> <span class="mut">stop</span>  <span class="mint">⏎</span> <span class="mut">open</span>  <span class="dim">x shell</span> <span class="dim">· dim = unavailable now</span></div>
+</section>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var data = [20,28,35,30,42,55,61,58,49,44,52,66,72,64,57,50,46,41,47,53,60,68,74,70,62,55,48,44,40,42];
+    var B = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    var h = 4, rows = [];
+    for (var r = h - 1; r >= 0; r--) {
+      var s = '';
+      for (var i = 0; i < data.length; i++) {
+        var lvl = (data[i] / 100) * h - r;
+        s += lvl >= 1 ? '█' : (lvl <= 0 ? ' ' : B[Math.max(1, Math.round(lvl * 8))]);
+      }
+      rows.push(s);
+    }
+    return { rows: rows };
+  }
+}
+</script>
+</body>
+</html>

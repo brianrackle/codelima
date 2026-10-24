@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ports forwarding</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;color:#9aabb9">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<main style="flex:1;display:flex;flex-direction:column;gap:20px;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Forwarded ports" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Ports</span> <span class="dim">7 listeners on 4 nodes · discovered every 1s · sort port ▲</span></div>
+<div style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap" class="dim">HTTP + WebSocket route by host name · raw TCP needs a published port</div>
+<div style="display:grid;grid-template-columns:2ch 6ch 16ch 10ch 38ch 22ch minmax(0,1fr);column-gap:2ch;white-space:nowrap" class="dim">
+<span></span><span>PORT</span><span>NODE</span><span>PROCESS</span><span>ADDRESS</span><span>BARE localhost:PORT</span><span>STATUS</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 6ch 16ch 10ch 38ch 22ch minmax(0,1fr);column-gap:2ch;white-space:nowrap">
+<span></span><span class="mint">1455</span><span>test-hardening</span><span class="mut">codex</span><span>http://test-hardening.localhost:1455</span><span><span class="mint">✓</span> <span class="dim">newest listener wins</span></span><span><span class="mint">●</span> live</span>
+<span></span><span class="mint">3000</span><span>api-redesign</span><span class="mut">node</span><span>http://api-redesign.localhost:3000</span><span><span class="mint">✓</span> <span class="dim">owns · first active</span></span><span><span class="mint">●</span> live</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 6ch 16ch 10ch 38ch 22ch minmax(0,1fr);column-gap:2ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span><span class="mint b">3000</span><span class="hi b">test-hardening</span><span class="mut">node</span><span class="hi">http://test-hardening.localhost:3000</span><span><span class="dim">— shared</span> <span class="amber">· 2 nodes</span></span><span><span class="mint">●</span> live</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 6ch 16ch 10ch 38ch 22ch minmax(0,1fr);column-gap:2ch;white-space:nowrap">
+<span></span><span class="mint">5173</span><span>api-redesign</span><span class="mut">vite</span><span>http://api-redesign.localhost:5173</span><span><span class="mint">✓</span> <span class="dim">owns</span></span><span><span class="mint">●</span> live</span>
+<span></span><span class="mint">8080</span><span>codelima-dev</span><span class="mut">codelima</span><span>http://codelima-dev.localhost:8080</span><span><span class="mint">✓</span> <span class="dim">owns</span></span><span><span class="mint">●</span> live</span>
+<span></span><span class="mint">9229</span><span>codelima-dev</span><span class="mut">node</span><span>http://codelima-dev.localhost:9229</span><span><span class="mint">✓</span> <span class="dim">owns</span></span><span><span class="amber">◐</span> <span class="amber">502 · tunnel retrying 12s</span></span>
+<span></span><span class="dim">15432</span><span class="dim">perf-lab</span><span class="dim">tcp</span><span class="dim">127.0.0.1:15432 → guest :5432</span><span class="dim">published at create</span><span><span class="dim">○</span> <span class="dim">node stopped</span></span>
+</div>
+</section>
+
+<div style="flex:1;display:grid;grid-template-columns:minmax(0,1fr) 56ch;column-gap:2ch;min-height:0">
+<section aria-label="Selected route" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 2ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">:3000 on test-hardening</span></div>
+<div style="white-space:nowrap">Two nodes listen on guest port 3000.</div>
+<div style="height:10px"></div>
+<div style="display:grid;grid-template-columns:30ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">localhost:3000, 127.0.0.1:3000</span><span>→ <span class="hi">api-redesign</span> <span class="dim">(first active on the port)</span></span>
+<span class="dim">test-hardening.localhost:3000</span><span>→ <span class="hi">test-hardening</span> <span class="dim">(always)</span></span>
+<span class="dim">api-redesign.localhost:3000</span><span>→ <span class="hi">api-redesign</span> <span class="dim">(always)</span></span>
+</div>
+<div style="height:20px"></div>
+<div style="white-space:nowrap"><span class="mint">p</span> pin bare localhost:3000 to test-hardening <span class="dim">· until it stops, then it falls back</span></div>
+<div style="height:20px"></div>
+<div class="pre dim">$ curl http://test-hardening.localhost:3000/health</div>
+<div style="height:20px"></div>
+<div style="white-space:nowrap" class="dim">guest services may bind loopback only · routes survive daemon restarts</div>
+</section>
+
+<section aria-label="By node" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">By node</div>
+<div style="display:grid;grid-template-columns:16ch minmax(0,1fr);white-space:nowrap">
+<span>api-redesign</span><span class="mut">3000 5173</span>
+<span>test-hardening</span><span class="mut">1455 3000</span>
+<span>codelima-dev</span><span class="mut">8080 <span class="amber">9229</span></span>
+<span class="dim">perf-lab</span><span class="dim">15432 (stopped)</span>
+<span class="dim">docs-agent</span><span class="dim">none until ready</span>
+</div>
+<div style="height:20px"></div>
+<div class="dim">a degraded route keeps its host</div>
+<div class="dim">listener and answers 502 while it</div>
+<div class="dim">retries; routes go away only on</div>
+<div class="dim">stop or delete.</div>
+</section>
+</div>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span><span class="blue">i</span> Copied http://test-hardening.localhost:3000</span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<span><span class="mint">o</span> <span class="mut">open in browser</span></span>
+<span><span class="mint">y</span> <span class="mut">copy URL</span></span>
+<span><span class="mint">p</span> <span class="mut">pin bare localhost</span></span>
+<a href="NodeOverview.dc.html"><span class="mint">⏎</span> <span class="mut">go to node</span></a>
+<span><span class="mint">/</span> <span class="mut">filter</span></span>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

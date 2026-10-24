@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Confirmation dialogs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;padding:28px 32px;background:#0a0d11;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));grid-template-rows:repeat(2, minmax(0, 1fr));gap:24px 32px">
+
+<div style="display:flex;flex-direction:column;gap:16px">
+<div class="dim">d · delete a stopped node</div>
+<section role="dialog" aria-label="Delete perf-lab" style="position:relative;flex:1;box-sizing:border-box;background:#121a22;border:1px solid #f4877c;border-radius:8px;padding:18px 2ch 14px;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap" class="coral b">Delete perf-lab?</div>
+<div>Destroys the VM and its 100 GiB disk.</div>
+<div class="mut">Workspace mode is <span class="hi">copy</span>: changes made in the guest</div>
+<div class="mut">that were never copied out are lost.</div>
+<div class="dim" style="white-space:nowrap">last up 3d ago · published 15432:5432 · no sessions</div>
+<div style="height:16px"></div>
+<label for="dl-c" class="mut">Type <span class="hi">perf-lab</span> to confirm</label>
+<input id="dl-c" value="perf-la" style="font:inherit;color:#f0f5f8;background:#0c1015;border:1px solid #f4877c;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;width:30ch;margin-top:4px">
+<div style="flex:1"></div>
+<div style="display:flex;gap:2ch;justify-content:flex-end;white-space:nowrap">
+<button type="button" disabled style="font:inherit;color:#6f8597;background:transparent;border:1px solid #263442;border-radius:3px;padding:0 1ch">⏎ delete</button>
+<a href="Main.dc.html" style="border:1px solid #263442;border-radius:3px;padding:0 1ch"><span class="mint">esc</span> <span class="mut">cancel</span></a>
+</div>
+</section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:16px">
+<div class="dim">s · stop while a session is busy (otherwise stop is instant)</div>
+<section role="dialog" aria-label="Stop api-redesign" style="position:relative;flex:1;box-sizing:border-box;background:#121a22;border:1px solid #f0c674;border-radius:8px;padding:18px 2ch 14px;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap" class="amber b">Stop api-redesign?</div>
+<div>2 sessions will end:</div>
+<div style="display:grid;grid-template-columns:2ch 6ch minmax(0,1fr) 12ch;column-gap:1ch;white-space:nowrap;margin-top:4px">
+<span class="amber">⠹</span><span>codex</span><span class="hi">Refactor auth routes</span><span class="amber">working 1h</span>
+<span></span><span>shell</span><span>~/src/acme-api</span><span class="dim">idle 4m</span>
+</div>
+<div style="height:12px"></div>
+<div class="mut">Frees 4 vCPU and 8 GiB. Disk, workspace and frozen</div>
+<div class="mut">values stay; s starts it again in about 40s.</div>
+<div style="height:12px"></div>
+<div style="white-space:nowrap"><span class="dim">[ ]</span> <span class="mut">don't ask when no session is working</span></div>
+<div style="flex:1"></div>
+<div style="display:flex;gap:2ch;justify-content:flex-end;white-space:nowrap">
+<a href="ShellAttached.dc.html" style="border:1px solid #263442;border-radius:3px;padding:0 1ch"><span class="mint">x</span> <span class="mut">attach to codex first</span></a>
+<a href="Main.dc.html" style="border:1px solid #f0c674;border-radius:3px;padding:0 1ch;background:#2a2414"><span class="amber b">s</span> <span class="hi">stop</span></a>
+<a href="NodeOverview.dc.html" style="border:1px solid #263442;border-radius:3px;padding:0 1ch"><span class="mint">esc</span> <span class="mut">cancel</span></a>
+</div>
+</section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:16px">
+<div class="dim">c · clone a running node</div>
+<section role="dialog" aria-label="Clone api-redesign" style="position:relative;flex:1;box-sizing:border-box;background:#121a22;border:1px solid #91e6c0;border-radius:8px;padding:18px 2ch 14px;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap" class="hi b">Clone api-redesign</div>
+<div style="display:flex;align-items:center;gap:2ch;white-space:nowrap">
+<label for="cl-n" class="hi b">Name</label>
+<input id="cl-n" value="api-redesign-3" style="font:inherit;color:#f0f5f8;background:#0c1015;border:1px solid #91e6c0;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;width:30ch">
+<span class="mint">✓</span>
+</div>
+<div style="height:12px"></div>
+<div class="mut">Copies the disk. Keeps the directory, template link,</div>
+<div class="mut">frozen values, bootstrap state and workspace mode.</div>
+<div style="height:12px"></div>
+<div style="white-space:nowrap"><span class="amber">◑</span> api-redesign is running: it stops for the copy</div>
+<div style="white-space:nowrap" class="dim">  (~40s), then restarts. Its 2 sessions end.</div>
+<div style="height:12px"></div>
+<div style="white-space:nowrap"><span class="dim">[ ]</span> <span class="mut">start the clone when it's done</span></div>
+<div style="flex:1"></div>
+<div style="display:flex;gap:2ch;justify-content:flex-end;white-space:nowrap">
+<a href="Activity.dc.html" style="border:1px solid #91e6c0;border-radius:3px;padding:0 1ch;background:#13221e"><span class="mint b">ctrl+s</span> <span class="hi">clone</span></a>
+<a href="Main.dc.html" style="border:1px solid #263442;border-radius:3px;padding:0 1ch"><span class="mint">esc</span> <span class="mut">cancel</span></a>
+</div>
+</section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:16px">
+<div class="dim">s with 2 marked · one confirm for the batch</div>
+<section role="dialog" aria-label="Stop 2 nodes" style="position:relative;flex:1;box-sizing:border-box;background:#121a22;border:1px solid #f0c674;border-radius:8px;padding:18px 2ch 14px;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap" class="amber b">Stop 2 nodes?</div>
+<div style="display:grid;grid-template-columns:18ch minmax(0,1fr);white-space:nowrap">
+<span class="hi">codelima-dev</span><span>3 sessions <span class="dim">·</span> <span class="amber">⠼ 1 working</span></span>
+<span class="hi">test-hardening</span><span>1 session <span class="dim">· idle</span></span>
+</div>
+<div style="height:12px"></div>
+<div class="mut">Frees 8 vCPU and 20 GiB. Stops run in parallel;</div>
+<div class="mut">progress shows in each row and in Activity.</div>
+<div style="height:12px"></div>
+<div style="white-space:nowrap" class="dim">delete in bulk asks you to type the count: 2</div>
+<div style="flex:1"></div>
+<div style="display:flex;gap:2ch;justify-content:flex-end;white-space:nowrap">
+<a href="Main.dc.html" style="border:1px solid #f0c674;border-radius:3px;padding:0 1ch;background:#2a2414"><span class="amber b">s</span> <span class="hi">stop 2</span></a>
+<a href="NodesFilter.dc.html" style="border:1px solid #263442;border-radius:3px;padding:0 1ch"><span class="mint">esc</span> <span class="mut">cancel</span></a>
+</div>
+</section>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

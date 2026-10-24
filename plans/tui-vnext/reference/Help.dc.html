@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Help keymap</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="position:relative;width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+</header>
+
+<section role="dialog" aria-label="Keys" aria-modal="true" style="position:absolute;left:40px;top:44px;width:1120px;height:676px;box-sizing:border-box;background:#121a22;border:1px solid #91e6c0;border-radius:8px;padding:20px 3ch 14px;box-shadow:0 24px 80px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:16px">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap"><span class="hi b">Keys</span> <span class="dim">· opened from Nodes, so that column leads · / searches this list</span></div>
+
+<div style="flex:1;display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));column-gap:3ch;min-height:0">
+
+<div style="display:flex;flex-direction:column;background:#16212b;margin:-8px -1ch;padding:8px 1ch;border-radius:4px">
+<div class="mint b">NODES</div>
+<div style="height:6px"></div>
+<div style="display:grid;grid-template-columns:9ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">↑↓ j k</span><span>move</span>
+<span class="mint">⏎</span><span>open detail</span>
+<span class="mint">s</span><span>start / stop</span>
+<span class="mint">r</span><span>restart</span>
+<span class="mint">x</span><span>shell <span class="dim">(shell.mode)</span></span>
+<span class="mint">X</span><span>shell menu</span>
+<span class="mint">n</span><span>new node</span>
+<span class="mint">c</span><span>clone</span>
+<span class="mint">d</span><span>delete</span>
+<span class="mint">l</span><span>logs</span>
+<span class="mint">o</span><span>open first port</span>
+<span class="mint">y</span><span>copy name</span>
+<span class="mint">space</span><span>mark</span>
+<span class="mint">*</span><span>mark all shown</span>
+<span class="mint">/</span><span>filter</span>
+<span class="mint">&lt; &gt;</span><span>sort column</span>
+<span class="mint">=</span><span>reverse sort</span>
+<span class="mint">G</span><span>group by directory</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column">
+<div class="hi b">NODE DETAIL</div>
+<div style="height:6px"></div>
+<div style="display:grid;grid-template-columns:9ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">tab</span><span>next tab</span>
+<span class="mint">⇧tab</span><span>previous tab</span>
+<span class="mint">esc</span><span>back to Nodes</span>
+<span class="dim">overview</span><span></span>
+<span class="mint">t / T</span><span>new guest / host shell</span>
+<span class="mint">⏎</span><span>attach session</span>
+<span class="mint">K</span><span>end session</span>
+<span class="dim">metrics</span><span></span>
+<span class="mint">+ −</span><span>time window</span>
+<span class="mint">p</span><span>sort processes</span>
+<span class="mint">space</span><span>pause</span>
+<span class="dim">logs</span><span></span>
+<span class="mint">[ ]</span><span>source</span>
+<span class="mint">f / w</span><span>follow / wrap</span>
+<span class="mint">n N</span><span>next / prev match</span>
+<span class="dim">spec</span><span></span>
+<span class="mint">v</span><span>lima yaml</span>
+<span class="mint">e / N</span><span>edit template / new</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column">
+<div class="hi b">TEMPLATES &amp; FORMS</div>
+<div style="height:6px"></div>
+<div style="display:grid;grid-template-columns:9ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">tab</span><span>configs ⇄ envs</span>
+<span class="mint">n e c d</span><span>new edit clone delete</span>
+<span class="mint">N</span><span>node from template</span>
+<span class="mint">R</span><span>restore built-in</span>
+<span class="mint">t</span><span>test-run environment</span>
+<span class="dim">in forms</span><span></span>
+<span class="mint">tab ↑↓</span><span>field</span>
+<span class="mint">⏎ →</span><span>open choices</span>
+<span class="mint">←→</span><span>step a value</span>
+<span class="mint">space</span><span>toggle</span>
+<span class="mint">⇧↑↓</span><span>reorder</span>
+<span class="mint">ctrl+s</span><span>submit</span>
+<span class="mint">esc</span><span>cancel</span>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column">
+<div class="hi b">EVERYWHERE</div>
+<div style="height:6px"></div>
+<div style="display:grid;grid-template-columns:9ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">1–5</span><span>switch view</span>
+<span class="mint">:</span><span>command palette</span>
+<span class="mint">?</span><span>this help</span>
+<span class="mint">0</span><span>scope: path ⇄ all</span>
+<span class="mint">a / g</span><span>templates / envs</span>
+<span class="mint">m</span><span>activity</span>
+<span class="mint">esc</span><span>back · close · clear</span>
+<span class="mint">q</span><span>quit <span class="dim">(top level)</span></span>
+</div>
+<div style="height:16px"></div>
+<div class="hi b">SHELL</div>
+<div style="height:6px"></div>
+<div style="display:grid;grid-template-columns:9ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">ctrl+]</span><span>detach, keep running</span>
+<span class="mint">exit</span><span>end the session</span>
+<span class="dim">embedded</span><span></span>
+<span class="mint">F6</span><span>TUI ⇄ terminal focus</span>
+<span class="mint">[ ]</span><span>prev / next tab</span>
+<span class="mint">w</span><span>close tab</span>
+<span class="mint">F7</span><span>search history</span>
+</div>
+</div>
+
+</div>
+
+<div style="display:flex;gap:3ch;white-space:nowrap;border-top:1px solid #263442;padding-top:10px">
+<span class="dim">keys act once per press; arrows and text editing repeat while held</span>
+<span style="flex:1"></span>
+<span class="dim">remap in settings.yaml › keys</span>
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">close</span></a>
+</div>
+</section>
+
+<div style="flex:1"></div>
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0"></div>
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">/</span> <span class="mut">search keys</span></span>
+<a href="Main.dc.html"><span class="mint">esc ?</span> <span class="mut">close</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

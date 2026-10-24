@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Templates environments</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;color:#9aabb9">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<nav aria-label="Template kinds" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">Configurations 7</a>
+<a href="Environments.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Environments 4</a>
+<span style="flex:1"></span>
+<span class="dim">ordered bootstrap scripts · run once, on a node's first start, as root</span>
+</nav>
+
+<main style="flex:1;display:grid;grid-template-columns:56ch minmax(0,1fr);column-gap:2ch;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Environments" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px;min-height:0">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Environments</div>
+<div style="display:grid;grid-template-columns:2ch 16ch 9ch 5ch minmax(0,1fr);column-gap:1ch;white-space:nowrap" class="dim">
+<span></span><span>NAME</span><span>KIND</span><span>CMDS</span><span>USED BY</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 16ch 9ch 5ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span></span><span class="violet">codex</span><span class="dim">built-in</span><span>3</span><span class="mut">7 templates</span>
+<span></span><span class="violet">claude-code</span><span class="dim">built-in</span><span>3</span><span class="mut">5 templates</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 16ch 9ch 5ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span><span class="violet b">rust-toolchain</span><span>custom</span><span>3</span><span>rust-lab</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 16ch 9ch 5ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span></span><span class="violet">docker</span><span>custom</span><span>2</span><span class="mut">medium</span>
+</div>
+<div style="height:20px"></div>
+<div class="dim">built-ins update with codelima (seed rev 9);</div>
+<div class="dim">an edited built-in stops updating until R</div>
+<div class="dim">restores it.</div>
+<div style="height:20px"></div>
+<div class="mut b">ORDER IN A NODE</div>
+<div class="dim">template environments, top to bottom,</div>
+<div class="dim">then the template's direct commands.</div>
+<div class="dim">The first failing command stops the start</div>
+<div class="dim">and marks the node failed.</div>
+</section>
+
+<section aria-label="rust-toolchain commands" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;min-height:0;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="violet b">rust-toolchain</span> <span class="dim">3 commands · edited Oct 19</span></div>
+<div style="border:1px solid #263442;border-radius:3px;background:#0f151c;padding:4px 1ch">
+<div class="pre"><span class="dim">1 │</span> apt-get update &amp;&amp; apt-get install -y build-essential pkg-config libssl-dev</div>
+<div class="pre" style="background:#1b2a36;margin:0 -1ch;padding:0 1ch"><span class="dim">2 │</span> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y</div>
+<div class="pre"><span class="dim">  │</span> <span class="amber">⚠ uses curl; nothing earlier in this environment installs it.</span></div>
+<div class="pre"><span class="dim">  │</span> <span class="dim">  fine after codex or claude-code, which do. ⏎ add it to line 1</span></div>
+<div class="pre"><span class="dim">3 │</span> rustup component add clippy rustfmt</div>
+</div>
+<div style="height:20px"></div>
+<div style="display:grid;grid-template-columns:12ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">runs as</span><span>root · <span class="dim">sudo -H -- sh -c '…'</span></span>
+<span class="dim">used by</span><span><span class="violet">rust-lab</span> <span class="dim">(after codex, once you save that edit)</span></span>
+<span class="dim">last run</span><span><span class="coral">✕</span> kvm-nested <span class="dim">· step 2 · exit 127 · 14:29</span></span>
+</div>
+<div style="height:20px"></div>
+<div class="mut b">TEST RUN</div>
+<div style="white-space:nowrap"><span class="mint">t</span> runs these commands on a throwaway <span class="violet">xsmall</span> node <span class="dim">and deletes it after</span></div>
+<div style="white-space:nowrap" class="dim">  output streams into Activity; nothing touches your real nodes</div>
+<div style="flex:1"></div>
+<div style="display:flex;gap:2ch;white-space:nowrap">
+<span><span class="mint">⏎</span> <span class="mut">edit line</span></span>
+<span><span class="mint">o</span> <span class="mut">add line</span></span>
+<span><span class="mint">shift+↑↓</span> <span class="mut">move line</span></span>
+<span><span class="mint">D</span> <span class="mut">remove line</span></span>
+<span><span class="mint">E</span> <span class="mut">open in $EDITOR</span></span>
+</div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">d is refused while a template uses an environment, and names it</span>
+<span style="flex:1"></span>
+<span class="dim">cli · codelima environment show rust-toolchain</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<span><span class="mint">n</span> <span class="mut">new</span></span>
+<span><span class="mint">e</span> <span class="mut">edit</span></span>
+<span><span class="mint">c</span> <span class="mut">clone</span></span>
+<span class="dim">d delete</span>
+<span><span class="mint">t</span> <span class="mut">test run</span></span>
+<span><span class="mint">R</span> <span class="mut">restore built-in</span></span>
+<a href="Templates.dc.html"><span class="mint">tab</span> <span class="mut">configurations</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

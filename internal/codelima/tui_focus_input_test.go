@@ -17,11 +17,7 @@ func TestTUIFocusToggleKeyLifecycle(t *testing.T) {
 		repeat  string
 		release string
 	}{
-		{"alt backtick", "\x1b[96;3:1u", "\x1b[96;3:2u", "\x1b[96;3:3u"},
-		{"meta backtick", "\x1b[96;33:1u", "\x1b[96;33:2u", "\x1b[96;33:3u"},
-		{"alt meta backtick", "\x1b[96;35:1u", "\x1b[96;35:2u", "\x1b[96;35:3u"},
 		{"f6", "\x1b[17;1:1~", "\x1b[17;1:2~", "\x1b[17;1:3~"},
-		{"legacy alt backtick", "\x1b`", "", ""},
 		{"legacy f6", "\x1b[17~", "", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {

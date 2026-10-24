@@ -17,10 +17,6 @@ import (
 // tuiMessageLogDefaultCap bounds the message ring; older entries are evicted.
 const tuiMessageLogDefaultCap = 200
 
-// tuiTreeEntryHeight keeps each node's identity and six properties together
-// as one selectable block in the tree.
-const tuiTreeEntryHeight = 7
-
 // tuiMessage is one entry in the message surface: when it happened, its severity
 // (borrowed from slog so the view can colour it), and the human text.
 type tuiMessage struct {
@@ -246,14 +242,6 @@ func (a *vaxisTUIApp) setStatus(level slog.Level, text string) {
 func (a *vaxisTUIApp) clearStatus() {
 	a.status = ""
 	a.statusLevel = slog.LevelInfo
-}
-
-func (a *vaxisTUIApp) openMessagesView() {
-	var entries []tuiMessage
-	if a.messages != nil {
-		entries = a.messages.Entries()
-	}
-	a.overlay = newTUIMessagesView(entries)
 }
 
 type tuiRect struct {
@@ -523,25 +511,6 @@ func terminalTabLabel(session *tuiSession, metadata TerminalMetadata) string {
 	return label
 }
 
-func (a *vaxisTUIApp) drawRightPane(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle, errorStyle vaxis.Style) {
-	if a.overlay != nil {
-		a.overlay.Draw(win, headerStyle, mutedStyle, errorStyle)
-		return
-	}
-	if a.rightPaneShowsInfo() {
-		a.drawDetails(win, entry, headerStyle, mutedStyle)
-		return
-	}
-	a.drawTerminalSurface(win, entry, headerStyle, mutedStyle, errorStyle)
-}
-
-func (a *vaxisTUIApp) activePaneFooter(entry tuiTreeEntry, focus tuiFocus) string {
-	if a.overlay != nil {
-		return a.overlay.FooterHint()
-	}
-	return renderFooter(focus, a.state.treePaneMode, entry)
-}
-
 func (a *vaxisTUIApp) headerLogoText() string {
 	if a.logoAnimation == nil {
 		return tuiLogoText
@@ -550,9 +519,12 @@ func (a *vaxisTUIApp) headerLogoText() string {
 }
 
 func (a *vaxisTUIApp) headerStyle() vaxis.Style {
-	style := vaxis.Style{Attribute: vaxis.AttrBold}
+	theme := newTUITheme(a.vx != nil && a.vx.CanRGB())
+	style := theme.mint
+	style.Background = theme.chrome.Background
+	style.Attribute = vaxis.AttrBold
 	if a.hostTerminalTabActive() {
-		style.Foreground = vaxis.ColorRed
+		style.Foreground = theme.coral.Foreground
 	}
 	return style
 }
@@ -597,91 +569,7 @@ func (a *vaxisTUIApp) draw() {
 		return
 	}
 
-	headerStyle := a.headerStyle()
-	selectedStyle := tuiSelectedStyle()
-	mutedStyle := tuiMutedStyle()
-	errorStyle := vaxis.Style{Foreground: vaxis.ColorRed, Attribute: vaxis.AttrBold}
-
-	layoutFocus := a.effectiveLayoutFocus()
-	bodyTop := 1
-	bodyHeight := height - bodyTop - 1
-	layout := layoutTUIBody(width, layoutFocus)
-	entry := a.state.selectedEntry()
-	if layoutFocus == tuiFocusTerminal {
-		entry = a.state.activeTerminalEntry()
-	}
-
-	headerSegments := []vaxis.Segment{{Text: a.headerLogoText(), Style: headerStyle}}
-	if entry.valid() {
-		headerSegments = append(headerSegments,
-			vaxis.Segment{Text: "  Node: " + entry.node.Slug, Style: headerStyle},
-			vaxis.Segment{Text: "  Configuration: " + entry.node.ConfigurationSlug, Style: headerStyle},
-			vaxis.Segment{Text: "  Mode: " + nodeWorkspaceMode(entry.node), Style: headerStyle},
-		)
-	}
-	window.Println(0, headerSegments...)
-
-	termOuter := window.New(layout.termCol, bodyTop, layout.termWidth, bodyHeight)
-
-	if layout.treeVisible {
-		treeOuter := window.New(0, bodyTop, layout.treeWidth, bodyHeight)
-		treeInner := border.All(treeOuter, mutedStyle)
-
-		treeInner.Println(0, vaxis.Segment{Text: "Nodes", Style: headerStyle})
-		treeInnerWidth, treeInnerHeight := treeInner.Size()
-		treeContentHeight := treeInnerHeight - 1
-		if treeContentHeight < 0 {
-			treeContentHeight = 0
-		}
-		treeContent := treeInner.New(0, 1, treeInnerWidth, treeContentHeight)
-		treeOriginCol, treeOriginRow := treeContent.Origin()
-		a.treeContentRect = tuiRect{col: treeOriginCol, row: treeOriginRow, width: treeInnerWidth, height: treeContentHeight}
-
-		treeEntryCapacity := tuiTreeEntryCapacity(treeContentHeight)
-		treeViewportStart := a.state.viewportStart(treeEntryCapacity)
-		for visibleIndex, entry := range a.state.visibleEntries(treeEntryCapacity) {
-			index := treeViewportStart + visibleIndex
-			style := mutedStyle
-			if index == a.state.selection {
-				style = selectedStyle
-			}
-
-			startRow := visibleIndex * tuiTreeEntryHeight
-			for lineOffset, line := range a.treeEntryLines(entry) {
-				treeContent.Println(startRow+lineOffset, vaxis.Segment{Text: line, Style: style})
-			}
-		}
-	}
-
-	if a.sessions != nil {
-		cols, rows := a.activeTerminalSize(width, height, layoutFocus)
-		a.sessions.SetPreferredTerminalSize(cols, rows)
-	}
-
-	if a.rightPaneOverrideActive() {
-		a.drawRightPane(termOuter, entry, headerStyle, mutedStyle, errorStyle)
-	} else {
-		termBody := drawTerminalPane(termOuter, a.currentPaneTabSegments(entry, selectedStyle, mutedStyle), mutedStyle)
-		termInnerWidth, termInnerHeight := termBody.Size()
-		termOriginCol, termOriginRow := termBody.Origin()
-		a.terminalBodyRect = tuiRect{col: termOriginCol, row: termOriginRow, width: termInnerWidth, height: termInnerHeight}
-		a.drawRightPane(termBody, entry, headerStyle, mutedStyle, errorStyle)
-	}
-
-	footer := a.activePaneFooter(entry, layoutFocus)
-	if summary := a.backgroundOperationSummary(); summary != "" {
-		footer += "   " + summary
-	}
-	footerStyle := mutedStyle
-	if a.status != "" {
-		footer = a.status
-		// Only warnings and errors render in the error style; success
-		// statuses keep the normal footer style.
-		if a.statusLevel >= slog.LevelWarn {
-			footerStyle = errorStyle
-		}
-	}
-	window.Println(height-1, vaxis.Segment{Text: footer, Style: footerStyle})
+	a.drawManager(window)
 
 	a.vx.Render()
 }
@@ -690,8 +578,8 @@ func tuiEmbeddedTerminalSize(width int, height int, focus tuiFocus) (cols, rows 
 	return tuiTerminalPaneBodySize(width, height, focus)
 }
 
-func (a *vaxisTUIApp) activeTerminalSize(width int, height int, focus tuiFocus) (cols, rows int) {
-	return tuiTerminalPaneBodySize(width, height, focus)
+func (a *vaxisTUIApp) activeTerminalSize(width int, height int, _ tuiFocus) (cols, rows int) {
+	return max(0, width-2), max(0, height-9)
 }
 
 func tuiTerminalPaneBodySize(width int, height int, focus tuiFocus) (cols, rows int) {
@@ -756,17 +644,6 @@ func (a *vaxisTUIApp) nodeStatusText(node Node) string {
 	return nodeVMStatus(node)
 }
 
-func tuiTreeEntryCapacity(height int) int {
-	if height <= 0 {
-		return 0
-	}
-	capacity := height / tuiTreeEntryHeight
-	if capacity == 0 {
-		return 1
-	}
-	return capacity
-}
-
 func (a *vaxisTUIApp) treeEntryLines(entry tuiTreeEntry) []string {
 	status := ""
 	if entry.valid() {
@@ -817,56 +694,6 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func (a *vaxisTUIApp) drawDetails(win vaxis.Window, entry tuiTreeEntry, headerStyle, mutedStyle vaxis.Style) {
-	row := 0
-	switch {
-	case entry.valid():
-		win.Println(row, vaxis.Segment{Text: "Node controls", Style: headerStyle})
-		row++
-		win.Println(row, vaxis.Segment{Text: "Slug: " + entry.node.Slug})
-		row++
-		win.Println(row, vaxis.Segment{Text: "Configuration: " + entry.node.ConfigurationSlug})
-		row++
-		win.Println(row, vaxis.Segment{Text: "Status: " + a.nodeStatusText(entry.node)})
-		row++
-		win.Println(row, vaxis.Segment{Text: "CPU usage: " + nodeCPUUsageText(entry.node)})
-		row++
-		win.Println(row, vaxis.Segment{Text: "Memory usage: " + nodeMemoryUsageText(entry.node)})
-		row++
-		win.Println(row, vaxis.Segment{Text: "Disk usage: " + nodeDiskUsageText(entry.node)})
-		row++
-		nodePath := ""
-		if a.service != nil && a.service.store != nil {
-			nodePath = a.service.store.nodePath(entry.node.ID)
-		}
-		if nodePath != "" {
-			a.printLinkifiedLine(win, row, "Node file: "+nodePath, vaxis.Style{})
-			row++
-		}
-		win.Println(row, vaxis.Segment{Text: "Workspace mode: " + nodeWorkspaceMode(entry.node)})
-		row++
-		if entry.node.DirectoryPath != "" {
-			a.printLinkifiedLine(win, row, "Directory: "+entry.node.DirectoryPath, vaxis.Style{})
-			row++
-		}
-		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Resources: %d CPU, %d MiB memory, %d MiB disk", entry.node.VCPUs, entry.node.MemoryMiB, entry.node.DiskMiB), Style: mutedStyle})
-		row++
-		row++
-		if nodeGuestShellReady(entry.node) {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Node is running. Press %s to open a terminal tab or %s to focus its terminal.", terminalTabOpenFooterHint, terminalViewToggleTextHint), Style: mutedStyle})
-		} else if reason := nodeGuestShellBlocked(entry.node); reason != "" {
-			win.Println(row, vaxis.Segment{Text: reason + ".", Style: mutedStyle})
-		} else {
-			win.Println(row, vaxis.Segment{Text: "Start the node before opening its terminal tabs.", Style: mutedStyle})
-		}
-		row++
-		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
-	default:
-		win.Println(0, vaxis.Segment{Text: "Press [n] to create a node or [a] to manage configurations.", Style: mutedStyle})
-		a.drawEntryOperations(win, 2, entry, headerStyle, mutedStyle)
-	}
 }
 
 func (a *vaxisTUIApp) drawEntryOperations(win vaxis.Window, row int, entry tuiTreeEntry, headerStyle, mutedStyle vaxis.Style) {
@@ -929,36 +756,6 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 	default:
 		win.Println(0, vaxis.Segment{Text: "Select a node in the list.", Style: mutedStyle})
 	}
-}
-
-func drawTerminalPane(win vaxis.Window, tabs []vaxis.Segment, style vaxis.Style) vaxis.Window {
-	width, height := win.Size()
-	if width <= 0 || height <= 0 {
-		return win
-	}
-
-	borderCell := vaxis.Cell{
-		Character: vaxis.Character{Grapheme: "─", Width: 1},
-		Style:     style,
-	}
-	for col := range width {
-		win.SetCell(col, 0, borderCell)
-		if height > 1 {
-			win.SetCell(col, height-1, borderCell)
-		}
-	}
-	if len(tabs) > 0 {
-		borderTabs := make([]vaxis.Segment, 0, len(tabs)+2)
-		borderTabs = append(borderTabs, vaxis.Segment{Text: " ", Style: style})
-		borderTabs = append(borderTabs, tabs...)
-		borderTabs = append(borderTabs, vaxis.Segment{Text: " ", Style: style})
-		win.Println(0, borderTabs...)
-	}
-
-	if height <= 2 {
-		return win.New(0, 0, width, height)
-	}
-	return win.New(0, 1, width, height-2)
 }
 
 func renderFooter(focus tuiFocus, paneMode tuiTreePaneMode, entry tuiTreeEntry) string {

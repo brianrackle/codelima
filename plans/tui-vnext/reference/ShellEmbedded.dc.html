@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Embedded terminal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span class="dim">shell.mode: embedded</span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">api-redesign</span>
+<span><span class="mint">●</span> running <span class="dim">· up 2h14m ·</span> <span class="violet">medium</span> <span class="dim">·</span> ~/src/acme-api</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeOverview.dc.html" style="padding:0 1ch;color:#9aabb9">Overview</a>
+<a href="NodeMetrics.dc.html" style="padding:0 1ch;color:#9aabb9">Metrics</a>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;color:#9aabb9">Logs</a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;color:#9aabb9">Spec <span class="amber">•</span></a>
+<span style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Shell</span>
+<span style="flex:1"></span>
+<span class="dim">appears only when shell.mode is embedded</span>
+</nav>
+
+<main style="flex:1;display:flex;flex-direction:column;padding:10px 1ch 10px;min-height:0">
+
+<div role="tablist" aria-label="Sessions" style="display:flex;gap:1ch;white-space:nowrap;padding:0 1ch">
+<span role="tab" aria-selected="false" style="padding:0 1ch;border-top:2px solid transparent;color:#9aabb9">codex · Refactor auth routes <span class="amber">⠹</span></span>
+<span role="tab" aria-selected="true" style="padding:0 1ch;border-top:2px solid #91e6c0;background:#1b2a36;color:#f0f5f8" class="b">shell</span>
+<span role="tab" aria-selected="false" style="padding:0 1ch;border-top:2px solid #f4877c;color:#9aabb9">host: git log <span class="amber">!</span></span>
+<span style="padding:0 1ch" class="dim">+ t guest · T host</span>
+</div>
+
+<section aria-label="Terminal" style="position:relative;flex:1;min-height:0;border:1px solid #91e6c0;border-radius:0 6px 6px 6px;padding:6px 1ch;overflow:hidden">
+<div style="position:absolute;top:6px;right:1ch;white-space:nowrap" class="dim">terminal focus · F6 returns</div>
+<div class="pre"><span class="mint">brian@lima-codelima-api-redesign</span>:<span class="blue">/Users/brian/src/acme-api</span>$ npm run dev</div>
+<div class="pre"> </div>
+<div class="pre">&gt; acme-api@0.9.0 dev</div>
+<div class="pre">&gt; vite --host 127.0.0.1</div>
+<div class="pre"> </div>
+<div class="pre">  ready in 412 ms</div>
+<div class="pre"> </div>
+<div class="pre">  Local:   http://127.0.0.1:5173/</div>
+<div class="pre"> </div>
+<div class="pre dim">  14:31:09 [vite] page reload src/routes/auth.ts</div>
+<div class="pre dim">  14:31:44 [vite] page reload src/routes/session.ts</div>
+<div class="pre"><span style="background:#d9e2ec;color:#0c1015"> </span></div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span><span class="blue">i</span> :5173 forwarded <span class="dim">→</span> http://api-redesign.localhost:5173</span>
+<span style="flex:1"></span>
+<span class="dim">libghostty renderer · one worker per tab</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">F6</span> <span class="mut">back to the TUI</span></span>
+<span class="dim">every other key, ⌥←/→ included, goes to the shell</span>
+<span class="dim">· in TUI focus:</span>
+<span><span class="mint">[ ]</span> <span class="mut">tab</span></span>
+<span><span class="mint">t T</span> <span class="mut">new</span></span>
+<span><span class="mint">w</span> <span class="mut">close</span></span>
+<span><span class="mint">F7</span> <span class="mut">search</span></span>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

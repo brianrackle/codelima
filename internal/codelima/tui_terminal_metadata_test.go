@@ -32,7 +32,8 @@ func TestTerminalTabSegmentsUseCompactDefaults(t *testing.T) {
 	firstKey := putTestSession(sessions, target, &tuiSession{label: "codelima", shellKind: terminal.NodeShell}, first)
 	secondKey := putTestSession(sessions, target, &tuiSession{label: "codelima", shellKind: terminal.NodeShell}, second)
 	state.setActiveTab(target, firstKey)
-	app := &vaxisTUIApp{state: state, sessions: sessions}
+	state.treePaneMode = tuiTreePaneModeTerminal
+	app := &vaxisTUIApp{state: state, sessions: sessions, nodeDetail: true, detailTab: tuiDetailShell}
 
 	for _, tt := range []struct {
 		name   string
@@ -132,7 +133,8 @@ func TestTerminalBellClearsOnVisitAndReturnsForNewBell(t *testing.T) {
 	second := &metadataTestTerminal{fakeTUITerminal: newFakeTUITerminal(), metadata: TerminalMetadata{Title: "Task", BellCount: 2}}
 	secondKey := putTestSession(sessions, target, &tuiSession{label: "two", shellKind: terminal.NodeShell}, second)
 	state.setActiveTab(target, firstKey)
-	app := &vaxisTUIApp{state: state, sessions: sessions}
+	state.treePaneMode = tuiTreePaneModeTerminal
+	app := &vaxisTUIApp{state: state, sessions: sessions, nodeDetail: true, detailTab: tuiDetailShell}
 	check := func(want string) {
 		t.Helper()
 		if got := segmentsText(app.terminalTabSegments(tuiSelectedStyle(), tuiMutedStyle())); got != want {
@@ -181,7 +183,8 @@ func TestHiddenTerminalBellMetadataArrivesWithoutSnapshotPull(t *testing.T) {
 	hidden := &daemonTUITerminal{snapshotWake: make(chan struct{}, 1)}
 	hiddenKey := putTestSession(sessions, target, &tuiSession{label: "two", shellKind: terminal.NodeShell}, hidden)
 	state.setActiveTab(target, active)
-	app := &vaxisTUIApp{state: state, sessions: sessions}
+	state.treePaneMode = tuiTreePaneModeTerminal
+	app := &vaxisTUIApp{state: state, sessions: sessions, nodeDetail: true, detailTab: tuiDetailShell}
 	sessions.handleDaemonEvent(daemon.Event{Event: daemon.EventTerminalDirty, Data: map[string]any{
 		"terminal_id":       sessions.sessions[hiddenKey].terminalID,
 		"snapshot_sequence": 7,
@@ -218,7 +221,8 @@ func TestTerminalTabMetadataUpdatesRegardlessOfFocus(t *testing.T) {
 				state.setActiveTab(target, other)
 			}
 			sessions.setWindowFocused(mode != "unfocused window")
-			app := &vaxisTUIApp{state: state, sessions: sessions}
+			state.treePaneMode = tuiTreePaneModeTerminal
+			app := &vaxisTUIApp{state: state, sessions: sessions, nodeDetail: true, detailTab: tuiDetailShell}
 			for index, update := range []struct {
 				metadata TerminalMetadata
 				label    string

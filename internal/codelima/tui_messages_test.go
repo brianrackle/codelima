@@ -136,17 +136,17 @@ func TestMessagesViewOpensAndClosesViaKeys(t *testing.T) {
 	app.messages.Append(slog.LevelInfo, "hello world")
 
 	app.handleKey(vaxis.Key{Text: "m", Keycode: 'm'})
-	if app.activeMessagesView() == nil {
+	if app.view != tuiViewActivity {
 		t.Fatal("expected 'm' to open the messages view")
 	}
-	if !app.rightPaneOverrideActive() {
-		t.Fatal("messages view should register as an active right-pane override")
+	if app.overlay != nil {
+		t.Fatal("Activity must be a global view")
 	}
 
 	if _, err := app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEsc}); err != nil {
 		t.Fatalf("handleEvent(Esc) error = %v", err)
 	}
-	if app.activeMessagesView() != nil {
+	if app.view != tuiViewNodes {
 		t.Fatal("expected Esc to close the messages view")
 	}
 }

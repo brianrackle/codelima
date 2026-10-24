@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Edit template</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;color:#9aabb9">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Templates.dc.html" class="dim">‹ Templates</a>
+<span class="hi b">Edit <span class="violet">rust-lab</span></span>
+<span class="amber">• unsaved</span>
+<span class="dim">custom · used by kvm-nested</span>
+</div>
+
+<main style="flex:1;display:grid;grid-template-columns:80ch minmax(0,1fr);column-gap:2ch;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Template form" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:14px 2ch 10px;min-height:0;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Template</div>
+<div style="display:grid;grid-template-columns:14ch 30ch minmax(0,1fr);column-gap:2ch;row-gap:6px;align-items:center;white-space:nowrap">
+<label for="te-n" class="mut">Name</label>
+<input id="te-n" value="rust-lab" style="font:inherit;color:#f0f5f8;background:#0f151c;border:1px solid #263442;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;width:100%">
+<span class="dim">lowercase, unique</span>
+<span class="mut">Image</span>
+<span style="display:flex;gap:1ch;border:1px solid #263442;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;background:#0f151c"><span class="dim">‹</span>template:ubuntu<span class="dim">›</span></span>
+<span class="dim">⏎ Lima templates, or a path/URL</span>
+<span class="mut">Agent profile</span>
+<span style="display:flex;gap:1ch;border:1px solid #263442;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;background:#0f151c"><span class="dim">‹</span>codex-cli<span class="dim">›</span></span>
+<span class="dim">validated on first start</span>
+<span class="mut">vCPUs</span>
+<span><span class="dim">◂</span> <span class="hi">6</span> <span class="dim">▸</span></span>
+<span class="dim">host has 16 · ←→ steps 1 2 4 6 8 12</span>
+<span class="mut">Memory</span>
+<span><span class="dim">◂</span> <span class="hi">16 GiB</span> <span class="dim">▸</span></span>
+<span class="dim">host has 64 · or type 20G</span>
+<span class="mut">Disk</span>
+<span><span class="dim">◂</span> <span class="hi">75 GiB</span> <span class="dim">▸</span></span>
+<span class="dim">thin; only grows as used</span>
+</div>
+
+<div style="height:16px"></div>
+<div style="white-space:nowrap"><span class="hi b">Environments</span> <span class="dim">· space toggles · shift+↑↓ reorders · run top to bottom</span></div>
+<div style="display:grid;grid-template-columns:2ch 4ch 3ch 16ch 8ch 9ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;margin-top:4px">
+<span></span><span class="mint">[x]</span><span class="dim">1</span><span class="violet">codex</span><span class="dim">3 cmds</span><span class="dim">built-in</span><span class="mint">↑ moved up</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 4ch 3ch 16ch 8ch 9ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span><span class="mint">[x]</span><span class="hi">2</span><span class="violet b">rust-toolchain</span><span class="dim">3 cmds</span><span class="dim">custom</span><span class="dim">now runs after codex, so curl exists</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 4ch 3ch 16ch 8ch 9ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span></span><span class="dim">[ ]</span><span></span><span class="mut">claude-code</span><span class="dim">3 cmds</span><span class="dim">built-in</span><span></span>
+<span></span><span class="dim">[ ]</span><span></span><span class="mut">docker</span><span class="dim">2 cmds</span><span class="dim">custom</span><span></span>
+</div>
+
+<div style="height:16px"></div>
+<div style="white-space:nowrap"><span class="hi b">Bootstrap commands</span> <span class="dim">· run after environments, as root · ⏎ opens the editor</span></div>
+<div style="border:1px solid #263442;border-radius:3px;background:#0f151c;padding:2px 1ch;margin-top:4px">
+<div class="pre"><span class="dim">1 │</span> apt-get install -y ripgrep fd-find</div>
+<div class="pre"><span class="dim">2 │</span> <span class="dim">█</span></div>
+</div>
+</section>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="Resolved bootstrap preview" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">New nodes will run</span> <span class="dim">7 steps</span></div>
+<div style="display:grid;grid-template-columns:3ch 16ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="dim">1</span><span class="violet">codex</span><span>prerequisites <span class="dim">(installs curl)</span></span>
+<span class="dim">2</span><span class="violet">codex</span><span>native install</span>
+<span class="dim">3</span><span class="violet">codex</span><span>validate</span>
+<span class="dim">4</span><span class="violet">rust-toolchain</span><span>apt-get install build-essential …</span>
+<span class="dim">5</span><span class="violet">rust-toolchain</span><span class="mint">curl … sh.rustup.rs <span class="dim">✓ curl present</span></span>
+<span class="dim">6</span><span class="violet">rust-toolchain</span><span>rustup component add clippy …</span>
+<span class="dim">7</span><span class="mut">direct</span><span>apt-get install -y ripgrep fd-find</span>
+</div>
+</section>
+
+<section aria-label="Impact" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">When you save</div>
+<div style="white-space:nowrap">New nodes from rust-lab get this order.</div>
+<div style="white-space:nowrap"><span class="hi">kvm-nested</span> <span class="dim">keeps its frozen order; retry</span></div>
+<div style="white-space:nowrap" class="dim">it after installing curl, or create a new</div>
+<div style="white-space:nowrap" class="dim">node from rust-lab.</div>
+</section>
+
+<section aria-label="Changes" style="position:relative;flex:1;min-height:0;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Changes</div>
+<div class="pre"><span class="coral">−</span> environments  rust-toolchain, codex</div>
+<div class="pre"><span class="mint">+</span> environments  codex, rust-toolchain</div>
+<div class="pre"><span class="mint">+</span> bootstrap     apt-get install -y ripgrep…</div>
+</section>
+</div>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">esc asks before discarding unsaved changes</span>
+<span style="flex:1"></span>
+<span class="dim">cli · codelima configuration update rust-lab --environment codex --environment rust-toolchain …</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">tab ↑↓</span> <span class="mut">field</span></span>
+<span><span class="mint">←→</span> <span class="mut">step value</span></span>
+<span><span class="mint">space</span> <span class="mut">toggle env</span></span>
+<span><span class="mint">shift+↑↓</span> <span class="mut">reorder</span></span>
+<span><span class="mint">⏎</span> <span class="mut">open list / editor</span></span>
+<a href="Templates.dc.html"><span class="mint">ctrl+s</span> <span class="mut">save</span></a>
+<a href="Templates.dc.html"><span class="mint">esc</span> <span class="mut">cancel</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

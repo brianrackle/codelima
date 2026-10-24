@@ -9,6 +9,7 @@ import (
 
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/term"
+	"go.rockorager.dev/vaxis/widgets/textinput"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
@@ -33,6 +34,21 @@ type vaxisTUIApp struct {
 	openLink          func(string) error
 	screenHyperlinkAt func(int, int) (string, bool)
 	state             *tuiState
+	fleet             *tuiFleet
+	view              tuiView
+	nodeDetail        bool
+	detailTab         tuiDetailTab
+	filterInput       *textinput.Model
+	filterBefore      string
+	fleetMouseRows    []tuiFleetRow
+	viewRegions       []tuiRect
+	managerData       tuiManagerData
+	managerGeneration uint64
+	templateIndex     int
+	environmentIndex  int
+	environmentsView  bool
+	detailScroll      int
+	launchScope       string
 	// shortcutKeys consumes followups of one-shot shortcuts and keys that
 	// changed input context. It belongs to the UI event loop.
 	shortcutKeys      map[rune]struct{}
@@ -77,11 +93,13 @@ type vaxisTUIApp struct {
 	// refreshInFlight suppresses overlapping periodic reloads. refreshDeadline
 	// bounds it: a lost tuiRefreshCompleteEvent must not stop auto-refresh, so
 	// the next tick past the deadline starts a fresh load regardless.
-	refreshInFlight  bool
-	refreshDeadline  time.Time
-	clipboardPush    func(string) error
-	treeContentRect  tuiRect
-	terminalBodyRect tuiRect
+	refreshInFlight   bool
+	refreshDeadline   time.Time
+	refreshGeneration uint64
+	refreshScope      string
+	clipboardPush     func(string) error
+	treeContentRect   tuiRect
+	terminalBodyRect  tuiRect
 	// drawPasses counts full-screen rebuilds. It is owned by the event loop
 	// like every other field here; only the redraw-coalescing test reads it.
 	drawPasses int
@@ -121,11 +139,6 @@ func (a *vaxisTUIApp) activeMenu() *tuiMenu {
 func (a *vaxisTUIApp) activeSelector() *tuiSelector {
 	selector, _ := a.overlay.(*tuiSelector)
 	return selector
-}
-
-func (a *vaxisTUIApp) activeMessagesView() *tuiMessagesView {
-	view, _ := a.overlay.(*tuiMessagesView)
-	return view
 }
 
 // showSelector displays a selector overlay. A selector opened while a dialog
@@ -227,6 +240,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		postEvent:         vx.PostEvent,
 		postEventBlocking: vx.PostEventBlocking,
 		treeWorkspaceRoot: workspaceRoot,
+		launchScope:       workspaceRoot,
 		state:             state,
 		sessions:          sessions,
 		operations:        map[string]*tuiOperationState{},
@@ -240,9 +254,6 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	winWidth, winHeight := vx.Window().Size()
 	cols, rows := tuiEmbeddedTerminalSize(winWidth, winHeight, tuiFocusTree)
 	sessions.SetPreferredTerminalSize(cols, rows)
-	if err := state.ensureSelectedTerminalTab(); err != nil {
-		app.setStatus(slog.LevelError, err.Error())
-	}
 	app.syncSessionFocus()
 	app.startHostColorQuery(0)
 	app.draw()
@@ -377,6 +388,10 @@ func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) (
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case tuiManagerDataEvent:
+		a.applyManagerData(event)
+		a.draw()
+		return false, nil
 	case vaxis.Resize:
 		// Geometry is global even while an overlay owns interactive input.
 		a.handleResize(event)
@@ -682,16 +697,19 @@ func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) erro
 	}
 	a.reconcileNodeUsage()
 	a.sessions.PruneStaleSessions(a.targetKeyStillExists)
-	if err := a.ensureSelectedNodeTerminal(); err != nil {
-		return err
+	a.refreshFleet()
+	if preferredKey != "" {
+		a.fleet.selectID(a.state.selectedEntry().node.ID)
 	}
+	a.selectFleetNode()
 
 	a.syncSessionFocus()
 	return nil
 }
 
 func (a *vaxisTUIApp) ensureSelectedNodeTerminal() error {
-	return a.state.ensureSelectedTerminalTab()
+	// Browsing and refreshing the fleet must never create a shell.
+	return nil
 }
 
 // targetKeyStillExists reports whether targetKey resolves to a live node in
@@ -732,25 +750,31 @@ func (a *vaxisTUIApp) targetKeyStillExists(targetKey string) bool {
 // preferredKey is the selection to restore once the load lands; a request that
 // carries one always starts, because the periodic tick cannot reproduce it.
 func (a *vaxisTUIApp) startDataRefresh(preferredKey string) {
-	if preferredKey == "" && a.refreshInFlight && time.Now().Before(a.refreshDeadline) {
+	if preferredKey == "" && a.refreshInFlight && a.refreshScope == a.treeWorkspaceRoot && time.Now().Before(a.refreshDeadline) {
 		return
 	}
 
 	a.refreshInFlight = true
 	a.refreshDeadline = time.Now().Add(tuiRefreshStallTimeout)
+	a.refreshGeneration++
+	a.refreshScope = a.treeWorkspaceRoot
+	scope, generation := a.refreshScope, a.refreshGeneration
 	if a.postEvent == nil {
-		nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
-		a.finishDataRefresh(tuiRefreshCompleteEvent{Nodes: nodes, PreferredKey: preferredKey, Err: err})
+		nodes, err := loadTUINodes(a.ctx, a.service, scope)
+		a.finishDataRefresh(tuiRefreshCompleteEvent{Generation: generation, Nodes: nodes, PreferredKey: preferredKey, Err: err})
 		return
 	}
 
 	go func() {
-		nodes, err := loadTUINodes(a.ctx, a.service, a.treeWorkspaceRoot)
-		a.postCompletion(tuiRefreshCompleteEvent{Nodes: nodes, PreferredKey: preferredKey, Err: err})
+		nodes, err := loadTUINodes(a.ctx, a.service, scope)
+		a.postCompletion(tuiRefreshCompleteEvent{Generation: generation, Nodes: nodes, PreferredKey: preferredKey, Err: err})
 	}()
 }
 
 func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
+	if event.Generation != a.refreshGeneration {
+		return
+	}
 	a.refreshInFlight = false
 	if event.Err != nil {
 		// Auto-refresh errors were previously swallowed silently; surface them at
@@ -982,6 +1006,9 @@ func (a *vaxisTUIApp) forwardSessionEvent(sessionKey string, event vaxis.Event) 
 }
 
 func (a *vaxisTUIApp) syncSessionFocus() {
+	if a.sessions == nil || a.state == nil {
+		return
+	}
 	if a.search != nil && a.search.target != a.state.activeSessionKey() {
 		a.closeTerminalSearch()
 	}

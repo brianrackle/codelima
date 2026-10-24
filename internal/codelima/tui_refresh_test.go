@@ -14,6 +14,36 @@ import (
 	"github.com/brianrackle/codelima/internal/codelima/daemonclient"
 )
 
+func TestTUIRefreshIgnoresOlderScopeAndKeepsCurrentLoadPending(t *testing.T) {
+	t.Parallel()
+	service, _ := newTestService(t)
+	app := newTestTUIApp(t, context.Background(), service, newFakeTUISessionManager())
+	node := saveForwardingTestNode(t, service, "old-scope")
+	app.refreshGeneration = 2
+	app.refreshInFlight = true
+	app.finishDataRefresh(tuiRefreshCompleteEvent{Generation: 1, Nodes: []Node{node}})
+	if len(app.state.nodesByID) != 0 || !app.refreshInFlight {
+		t.Fatal("an old scope replaced the fleet or released the current refresh latch")
+	}
+	app.finishDataRefresh(tuiRefreshCompleteEvent{Generation: 2})
+	if app.refreshInFlight {
+		t.Fatal("the current refresh did not release its latch")
+	}
+}
+
+func TestTUIRefreshScopeChangeBypassesPeriodicLatch(t *testing.T) {
+	t.Parallel()
+	service, workspace := newTestService(t)
+	app := newTestTUIApp(t, context.Background(), service, newFakeTUISessionManager())
+	app.refreshInFlight = true
+	app.refreshDeadline = time.Now().Add(time.Minute)
+	app.treeWorkspaceRoot = workspace
+	app.startDataRefresh("")
+	if app.refreshGeneration == 0 || app.refreshInFlight {
+		t.Fatal("a scope change was suppressed by a refresh for the previous scope")
+	}
+}
+
 // The daemon pushes node.status_changed the moment a lifecycle operation lands.
 // That push — not the fallback ticker — is what makes a started node appear, so
 // it must reach the event loop as a reload request rather than a bare redraw of
@@ -348,7 +378,7 @@ func TestNodesChangedEventReloadsTheNodeList(t *testing.T) {
 // record can say the guest is unusable. The reload a push drives must preserve
 // that record, withhold the guest tab, and open one the moment the record says
 // the start finished.
-func TestPushedReloadWithholdsTheGuestTabUntilBootstrapCompletes(t *testing.T) {
+func TestPushedReloadReportsBootstrapCompletionWithoutOpeningShell(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -411,11 +441,11 @@ func TestPushedReloadWithholdsTheGuestTabUntilBootstrapCompletes(t *testing.T) {
 	if got := app.state.selectedEntry().node.Status; got != NodeStatusRunning {
 		t.Fatalf("completed record status = %q, want running", got)
 	}
-	if app.state.treePaneMode != tuiTreePaneModeTerminal {
-		t.Fatalf("completed-node pane mode = %q, want terminal", app.state.treePaneMode)
+	if app.state.treePaneMode != tuiTreePaneModeInfo {
+		t.Fatalf("completed-node pane mode = %q, want info", app.state.treePaneMode)
 	}
-	if got := sessions.opened[target]; got != 1 {
-		t.Fatalf("completed-node terminal opens = %d, want 1", got)
+	if got := sessions.opened[target]; got != 0 {
+		t.Fatalf("completed-node terminal opens = %d, want 0", got)
 	}
 }
 

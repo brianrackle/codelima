@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>System</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;color:#9aabb9">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<main style="flex:1;display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));grid-template-rows:auto minmax(0,1fr);gap:20px 2ch;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Doctor" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Doctor</span> <span class="dim">checked 14:32 · 2 warnings</span></div>
+<div style="display:grid;grid-template-columns:2ch 28ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="mint">✓</span><span>limactl 2.1.3</span><span class="dim">needs ≥ 2.1.0</span>
+<span class="mint">✓</span><span>Virtualization.framework</span><span class="dim">vz · virtiofs</span>
+<span class="mint">✓</span><span>nested virtualization</span><span class="dim">on for new nodes</span>
+<span class="mint">✓</span><span>LIMA_HOME ~/.lima</span><span class="dim">local · socket path 61/104</span>
+<span class="mint">✓</span><span>CODELIMA_HOME ~/.codelima</span><span class="dim">schema v4</span>
+<span class="mint">✓</span><span>git 2.47.0 · host logins</span><span class="dim">ssh, git, codex, claude</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 28ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="amber">⚠</span><span class="hi">1 unreadable node record</span><span><span class="dim">nodes/9f3a…/node.yaml ·</span> <span class="mint">R</span> quarantine</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 28ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="amber">⚠</span><span>vCPU overcommitted 20/16</span><span class="dim">stop a node, or accept</span>
+</div>
+<div style="height:10px"></div>
+<div style="white-space:nowrap" class="dim">R moves the record to _quarantine/ · nothing is deleted</div>
+</section>
+
+<section aria-label="Daemon" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Daemon</span> <span class="dim">owns sessions, forwarding, telemetry</span></div>
+<div style="display:grid;grid-template-columns:12ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">status</span><span><span class="mint">●</span> running <span class="dim">· pid 4312 · 0.3.5 · protocol 5</span></span>
+<span class="dim">uptime</span><span>5h22m <span class="dim">· updated in place 09:10</span></span>
+<span class="dim">sessions</span><span>7 <span class="dim">· 2 TUIs attached · this one holds the seat</span></span>
+<span class="dim">forwarding</span><span>7 listeners <span class="dim">·</span> <span class="amber">1 degraded</span></span>
+<span class="dim">telemetry</span><span>1s <span class="dim">· CPU, memory, disk over SSH peers</span></span>
+<span class="dim">virtiofs</span><span>reclaim on <span class="dim">· every 60s · last 14:31:40 · 4 nodes</span></span>
+</div>
+<div style="height:10px"></div>
+<div style="display:flex;gap:2ch;white-space:nowrap">
+<span><span class="mint">u</span> <span class="mut">update, keep sessions</span></span>
+<span><span class="mint">S</span> <span class="mut">restart</span></span>
+<span><span class="mint">L</span> <span class="mut">daemon log</span></span>
+<span><span class="mint">D</span> <span class="mut">diagnose freeze</span></span>
+</div>
+</section>
+
+<section aria-label="Host capacity" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px;min-height:0">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Host</span> <span class="dim">Apple M3 Max · 16 cores · 64 GiB</span></div>
+<div class="mut b">ALLOCATED TO VMs THAT ARE UP</div>
+<div style="display:grid;grid-template-columns:8ch 12ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="dim">vCPU</span><span class="pre"><span class="coral">██████████</span></span><span><span class="coral">20 / 16</span> <span class="dim">· overcommitted by 4</span></span>
+<span class="dim">memory</span><span class="pre"><span class="amber">███████▌</span><span class="trk">░░</span></span><span><span class="amber">48 / 64 GiB</span> <span class="dim">· 16 free</span></span>
+<span class="dim">disk</span><span class="pre"><span class="mint">████████</span><span class="trk">░░</span></span><span>188 GiB free <span class="dim">on the LIMA_HOME volume</span></span>
+</div>
+<div style="height:10px"></div>
+<div style="display:grid;grid-template-columns:16ch 6ch 7ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span>codelima-dev</span><span>6</span><span>16G</span><span class="dim">running</span>
+<span>kvm-nested</span><span>6</span><span>16G</span><span class="coral">failed · VM still up</span>
+<span>api-redesign</span><span>4</span><span>8G</span><span class="dim">running</span>
+<span>docs-agent</span><span>2</span><span>4G</span><span class="amber">starting</span>
+<span>test-hardening</span><span>2</span><span>4G</span><span class="dim">running</span>
+</div>
+</section>
+
+<section aria-label="Settings" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px;min-height:0">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Settings</span> <span class="dim">~/.codelima/_config/settings.yaml</span></div>
+<div style="display:grid;grid-template-columns:20ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">shell.mode</span><span><span class="dim">‹</span> <span class="hi">attach</span> <span class="dim">› · window · tmux · embedded</span></span>
+<span class="dim">shell.window</span><span>ghostty -e {cmd}</span>
+<span class="dim">shell.detach_key</span><span>ctrl+]</span>
+<span class="dim">import_host_auth</span><span><span class="mint">[x]</span> on <span class="dim">· new nodes only</span></span>
+<span class="dim">default template</span><span><span class="violet">small</span> <span class="mint">★</span></span>
+<span class="dim">confirm stop</span><span>when a session is busy</span>
+<span class="dim">group by directory</span><span>all-nodes view only</span>
+<span class="dim">color</span><span>auto <span class="dim">· truecolor detected</span></span>
+</div>
+<div style="height:10px"></div>
+<div class="dim" style="white-space:nowrap">⏎ edit · comments and unknown keys in the file are kept</div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">the System tab badge counts open doctor warnings</span>
+<span style="flex:1"></span>
+<span class="dim">cli · codelima doctor --repair</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">tab</span> <span class="mut">panel</span></span>
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<span><span class="mint">⏎</span> <span class="mut">details / edit</span></span>
+<span><span class="mint">R</span> <span class="mut">repair</span></span>
+<span><span class="mint">C</span> <span class="mut">re-check</span></span>
+<span><span class="mint">u</span> <span class="mut">update daemon</span></span>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

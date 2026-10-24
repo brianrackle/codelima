@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node failed</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">kvm-nested</span>
+<span><span class="coral">✕ failed</span> <span class="dim">· 14:29 ·</span> <span class="violet">rust-lab</span> <span class="dim">·</span> ~/src/perf-lab</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeFailed.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Overview</a>
+<span style="padding:0 1ch;color:#9aabb9">Metrics</span>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;color:#9aabb9">Logs <span class="coral">•</span></a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;color:#9aabb9">Spec</a>
+</nav>
+
+<main style="flex:1;display:flex;flex-direction:column;gap:20px;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Failure" style="position:relative;border:1px solid #f4877c;border-radius:6px;padding:10px 2ch 8px;background:#1a1214">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="coral b">✕ Bootstrap failed at step 2 of 6</span> <span class="dim">· rust-toolchain · exit 127 · after 1m48s</span></div>
+<div class="pre mut">$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y</div>
+<div class="pre coral">sh: 1: curl: not found</div>
+<div style="height:20px"></div>
+<div style="white-space:nowrap"><span class="amber b">Likely cause</span> <span class="dim">·</span> template rust-lab runs <span class="violet">rust-toolchain</span> before <span class="violet">codex</span>, and codex is what installs curl.</div>
+<div style="white-space:nowrap"><span class="mint b">Fix now</span>      <span class="dim">·</span> x, then <span class="hi">sudo apt-get install -y curl</span>, exit, and r to retry from step 2.</div>
+<div style="white-space:nowrap"><span class="mint b">Fix for next</span> <span class="dim">·</span> E opens rust-lab: move rust-toolchain below codex. Existing nodes keep their frozen order.</div>
+</section>
+
+<div style="flex:1;display:grid;grid-template-columns:64ch minmax(0,1fr);column-gap:2ch;min-height:0">
+<section aria-label="Steps" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Start, step by step</div>
+<div style="display:grid;grid-template-columns:2ch 20ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap">
+<span class="mint">✓</span><span>Create VM</span><span class="dim">limactl create</span><span class="dim" style="text-align:right">7s</span>
+<span class="mint">✓</span><span>Boot</span><span class="dim">vz · nested virt on</span><span class="dim" style="text-align:right">22s</span>
+<span class="mint">✓</span><span>Host credentials</span><span class="dim">5 imported</span><span class="dim" style="text-align:right">2s</span>
+<span class="mint">✓</span><span>Workspace</span><span class="dim">mounted ~/src/perf-lab</span><span class="dim" style="text-align:right">1s</span>
+<span class="coral">✕</span><span class="coral b">Bootstrap 2/6</span><span class="coral">failed</span><span class="dim" style="text-align:right">1m16s</span>
+</div>
+<div style="display:grid;grid-template-columns:4ch 2ch 3ch 16ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span></span><span class="mint">✓</span><span class="dim">1</span><span class="violet">rust-toolchain</span><span class="dim">apt-get install build-essential …</span>
+<span></span><span class="coral">✕</span><span class="hi">2</span><span class="violet">rust-toolchain</span><span class="coral">curl … sh.rustup.rs · exit 127</span>
+<span></span><span class="dim">○</span><span class="dim">3</span><span class="violet">rust-toolchain</span><span class="dim">rustup component add clippy rustfmt</span>
+<span></span><span class="dim">○</span><span class="dim">4</span><span class="violet">codex</span><span class="dim">prerequisites (installs curl)</span>
+<span></span><span class="dim">○</span><span class="dim">5</span><span class="violet">codex</span><span class="dim">native install</span>
+<span></span><span class="dim">○</span><span class="dim">6</span><span class="violet">codex</span><span class="dim">validate</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 20ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="dim">○</span><span class="dim">Validate agent</span><span class="dim">not run</span>
+</div>
+</section>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="State" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">What's still running</div>
+<div style="display:grid;grid-template-columns:8ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">node</span><span><span class="coral">✕</span> failed <span class="dim">· bootstrap incomplete</span></span>
+<span class="dim">VM</span><span><span class="mint">●</span> running in Lima <span class="dim">· holds 6 vCPU · 16 GiB</span></span>
+<span class="dim">shells</span><span>guest shell allowed for inspection</span>
+<span class="dim">ports</span><span class="dim">not forwarded until ready</span>
+</div>
+</section>
+
+<section aria-label="Actions" style="position:relative;flex:1;min-height:0;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Actions</div>
+<div style="display:grid;grid-template-columns:4ch 22ch minmax(0,1fr);white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint b">r</span><span class="hi b">retry from step 2</span><span class="dim">reruns 2–6 on this VM</span>
+</div>
+<div style="display:grid;grid-template-columns:4ch 22ch minmax(0,1fr);white-space:nowrap">
+<span class="mint b">x</span><span>shell in to inspect</span><span class="dim">which curl · apt logs</span>
+<span class="mint b">e</span><span>edit rust-toolchain</span><span class="dim">environment · future nodes</span>
+<span class="mint b">E</span><span>edit rust-lab</span><span class="dim">template · future nodes</span>
+<span class="mint b">s</span><span>stop the VM</span><span class="dim">frees 6 vCPU · 16 GiB</span>
+<span class="mint b">d</span><span>delete node</span><span class="dim">VM and disk</span>
+</div>
+</section>
+</div>
+</div>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span><span class="coral">✕</span> kvm-nested failed <span class="dim">· recorded as node.bootstrap.failed in Logs › events</span></span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">back</span></a>
+<span><span class="mint">r</span> <span class="mut">retry</span></span>
+<a href="ShellAttached.dc.html"><span class="mint">x</span> <span class="mut">shell</span></a>
+<a href="NodeLogs.dc.html"><span class="mint">l</span> <span class="mut">logs</span></a>
+<a href="Environments.dc.html"><span class="mint">e</span> <span class="mut">edit environment</span></a>
+<a href="TemplateEdit.dc.html"><span class="mint">E</span> <span class="mut">edit template</span></a>
+<a href="Dialogs.dc.html"><span class="mint">s</span> <span class="mut">stop VM</span></a>
+<a href="Dialogs.dc.html"><span class="mint">d</span> <span class="mut">delete</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -38,15 +38,14 @@ type tuiKeyBinding struct {
 // the same entries, so the shortcut set and the payload predicate can never
 // drift apart.
 var tuiKeyBindings = []tuiKeyBinding{
-	{match: func(key vaxis.Key) bool { return key.Matches(vaxis.KeyF07) }, run: (*vaxisTUIApp).openTerminalSearch, pressOnly: true},
-	{match: isHostTerminalTabOpenKey, run: (*vaxisTUIApp).openHostTerminalTab, pressOnly: true},
-	{match: isTerminalTabOpenKey, run: (*vaxisTUIApp).openTerminalTab, pressOnly: true},
-	{match: isTerminalTabMoveNextKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(1) }},
-	{match: isTerminalTabMovePreviousKey, run: func(a *vaxisTUIApp) error { return a.moveTerminalTab(-1) }},
-	{match: isTerminalTabNextKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(1) }},
-	{match: isTerminalTabPreviousKey, run: func(a *vaxisTUIApp) error { return a.switchTerminalTab(-1) }},
-	{match: isTerminalTabCloseKey, run: (*vaxisTUIApp).closeTerminalTab, pressOnly: true},
-	{match: isTerminalViewToggleKey, run: func(a *vaxisTUIApp) error { return a.state.toggleFocus() }, pressOnly: true},
+	{match: func(key vaxis.Key) bool { return key.Matches(vaxis.KeyF06) }, run: func(a *vaxisTUIApp) error {
+		if a.state.focus == tuiFocusTerminal {
+			a.state.focusTree()
+			a.nodeDetail, a.detailTab = true, tuiDetailShell
+			return nil
+		}
+		return a.openEmbeddedShell(false)
+	}, pressOnly: true},
 }
 
 // isTUITerminalPayloadKey reports whether a key is terminal input rather than
@@ -83,6 +82,8 @@ func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 	if key.EventType == vaxis.EventPaste {
 		if a.state.focus == tuiFocusTerminal {
 			a.forwardTerminalEvent(key)
+		} else if a.filterInput != nil {
+			return a.dispatchManagerKey(key)
 		}
 		return false
 	}
@@ -108,61 +109,11 @@ func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 		return false
 	}
 
-	// The info toggle is tree-scoped (in terminal focus a bare "i" is shell
-	// payload), so it stays outside the terminal-scope binding table.
-	if a.state.focus == tuiFocusTree && key.MatchString("i") && tuiKeyActivates(key, true) {
-		a.claimShortcutKey(key)
-		a.state.toggleTreePaneMode()
-		a.clearStatus()
-		a.syncSessionFocus()
-		return false
-	}
-
-	if a.state.focus == tuiFocusTree && key.MatchString("m") && tuiKeyActivates(key, true) {
-		a.claimShortcutKey(key)
-		a.openMessagesView()
-		return false
-	}
-
 	if a.state.focus == tuiFocusTerminal {
 		a.forwardTerminalEvent(key)
 		return false
 	}
-	if !tuiKeyActivates(key, false) {
-		return false
-	}
-
-	if action, ok := a.matchAction(key); ok {
-		a.claimShortcutKey(key)
-		if err := a.performAction(action); err != nil {
-			a.setStatus(slog.LevelError, err.Error())
-			return false
-		}
-		return false
-	}
-
-	var err error
-	switch {
-	case key.MatchString("q"), isQuitKey(key):
-		return tuiKeyActivates(key, true)
-	case key.MatchString("Up"):
-		err = a.state.moveSelection(-1)
-	case key.MatchString("Down"):
-		err = a.state.moveSelection(1)
-	default:
-		return false
-	}
-
-	if err == nil {
-		err = a.ensureSelectedNodeTerminal()
-	}
-	if err != nil {
-		a.setStatus(slog.LevelError, err.Error())
-	} else {
-		a.clearStatus()
-	}
-	a.syncSessionFocus()
-	return false
+	return a.dispatchManagerKey(key)
 }
 
 func (a *vaxisTUIApp) matchAction(key vaxis.Key) (tuiActionSpec, bool) {
@@ -271,22 +222,37 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 		}
 	}
 
-	if a.treeContentRect.contains(mouse.Col, mouse.Row) && mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
-		a.cancelTerminalMouseGesture()
-		a.state.focusTree()
-		contentRow := mouse.Row - a.treeContentRect.row
-		entryCapacity := tuiTreeEntryCapacity(a.treeContentRect.height)
-		if contentRow < entryCapacity*tuiTreeEntryHeight {
-			if err := a.state.selectTreeRow(contentRow/tuiTreeEntryHeight, entryCapacity); err != nil {
-				a.setStatus(slog.LevelError, err.Error())
-				return
-			}
-			if err := a.ensureSelectedNodeTerminal(); err != nil {
-				a.setStatus(slog.LevelError, err.Error())
+	if a.overlay != nil {
+		return
+	}
+	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
+		for i, rect := range a.viewRegions {
+			if rect.contains(mouse.Col, mouse.Row) {
+				a.switchView(tuiView(i))
 				return
 			}
 		}
-		a.clearStatus()
+	}
+	if a.treeContentRect.contains(mouse.Col, mouse.Row) {
+		if mouse.EventType != vaxis.EventPress {
+			return
+		}
+		a.refreshFleet()
+		switch mouse.Button {
+		case vaxis.MouseWheelUp:
+			a.fleet.move(-1)
+		case vaxis.MouseWheelDown:
+			a.fleet.move(1)
+		case vaxis.MouseLeftButton:
+			index := mouse.Row - a.treeContentRect.row
+			if index < len(a.fleetMouseRows) && a.fleetMouseRows[index].NodeID != "" {
+				a.fleet.selectID(a.fleetMouseRows[index].NodeID)
+			}
+		default:
+			return
+		}
+		a.selectFleetNode()
+		a.state.focusTree()
 		a.syncSessionFocus()
 		return
 	}

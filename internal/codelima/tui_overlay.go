@@ -48,22 +48,29 @@ type tuiDialogField struct {
 }
 
 type tuiDialog struct {
-	Title       string
-	Description []string
-	SubmitLabel string
-	Fields      []tuiDialogField
-	FieldIndex  int
-	Error       string
-	OnSubmit    func(values map[string]string) error
+	Title          string
+	Description    []string
+	SubmitLabel    string
+	Fields         []tuiDialogField
+	FieldIndex     int
+	Error          string
+	OnSubmit       func(values map[string]string) error
+	initialValues  map[string]string
+	confirmDiscard bool
 }
 
 func newTUIDialog(title string, submitLabel string, description []string, fields []tuiDialogField, onSubmit func(values map[string]string) error) *tuiDialog {
+	initial := make(map[string]string, len(fields))
+	for _, field := range fields {
+		initial[field.Key] = field.rawValue()
+	}
 	return &tuiDialog{
-		Title:       title,
-		Description: append([]string(nil), description...),
-		SubmitLabel: submitLabel,
-		Fields:      fields,
-		OnSubmit:    onSubmit,
+		Title:         title,
+		Description:   append([]string(nil), description...),
+		SubmitLabel:   submitLabel,
+		Fields:        fields,
+		OnSubmit:      onSubmit,
+		initialValues: initial,
 	}
 }
 
@@ -143,6 +150,19 @@ func (f *tuiDialogField) renderedValue() string {
 }
 
 func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
+	if d.confirmDiscard {
+		key, ok := event.(vaxis.Key)
+		if !ok || !tuiKeyActivates(key, true) {
+			return false, nil
+		}
+		if key.MatchString("y") {
+			return true, nil
+		}
+		if key.MatchString("n") || key.Matches(vaxis.KeyEsc) || key.Matches(vaxis.KeyEnter) {
+			d.confirmDiscard = false
+		}
+		return false, nil
+	}
 	switch event := event.(type) {
 	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
 		d.updateInput(event)
@@ -157,7 +177,14 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 		}
 		switch {
 		case isOverlayCancelKey(event):
-			return tuiKeyActivates(event, true), nil
+			if !tuiKeyActivates(event, true) {
+				return false, nil
+			}
+			if d.dirty() {
+				d.confirmDiscard = true
+				return false, nil
+			}
+			return true, nil
 		case event.Matches('s', vaxis.ModCtrl):
 			if tuiKeyActivates(event, true) {
 				return d.submit()
@@ -206,6 +233,15 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 	}
 }
 
+func (d *tuiDialog) dirty() bool {
+	for _, field := range d.Fields {
+		if field.rawValue() != d.initialValues[field.Key] {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *tuiDialog) updateInput(event vaxis.Event) {
 	if len(d.Fields) == 0 || d.Fields[d.FieldIndex].Input == nil {
 		return
@@ -231,6 +267,9 @@ func (d *tuiDialog) submit() (done bool, err error) {
 }
 
 func (d *tuiDialog) FooterHint() string {
+	if d.confirmDiscard {
+		return "Discard unsaved changes? y discard · n/Enter/Esc keep editing"
+	}
 	return "Tab/Up/Down move   Enter submit/open   Right choose   Ctrl+s submit   Esc cancel   Ctrl+c quit"
 }
 
@@ -262,23 +301,34 @@ func (d *tuiDialog) SetFieldValue(key, value string) {
 
 func (d *tuiDialog) Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle vaxis.Style) {
 	body := border.All(win, mutedStyle)
-	body.Println(0, vaxis.Segment{Text: d.Title, Style: headerStyle})
-
-	row := 1
-	for _, line := range d.Description {
-		body.Println(row, vaxis.Segment{Text: line, Style: mutedStyle})
-		row++
-	}
-
+	width, height := body.Size()
+	tuiFill(body, mutedStyle)
+	tuiLine(body, 0, d.Title, headerStyle)
+	row := 2
+	descriptionRows := max(0, height-6)
 	if d.Error != "" {
-		body.Println(row, vaxis.Segment{Text: d.Error, Style: errorStyle})
+		descriptionRows = max(0, descriptionRows-1)
+	}
+	for _, line := range d.Description[:min(len(d.Description), descriptionRows)] {
+		tuiLine(body, row, line, mutedStyle)
 		row++
 	}
-
-	for index, field := range d.Fields {
-		body.Println(row, vaxis.Segment{Text: field.Label, Style: mutedStyle})
+	if d.Error != "" {
+		tuiLine(body, row, d.Error, errorStyle)
 		row++
-		inputWin := body.New(0, row, -1, 1)
+	}
+	row++
+	available := max(1, height-row-2)
+	start := max(0, d.FieldIndex-available+1)
+	labelWidth := min(25, max(8, width/3))
+	for index := start; index < min(len(d.Fields), start+available); index++ {
+		field := d.Fields[index]
+		labelStyle := mutedStyle
+		if index == d.FieldIndex {
+			labelStyle = headerStyle
+		}
+		tuiLine(body.New(0, row, labelWidth, 1), 0, field.Label, labelStyle)
+		inputWin := body.New(labelWidth+1, row, max(1, width-labelWidth-1), 1)
 		if field.Input != nil {
 			placeholder := ""
 			if field.Input.String() == "" {
@@ -289,16 +339,19 @@ func (d *tuiDialog) Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle v
 			field.Input.HideCursor = index != d.FieldIndex
 			field.Input.Draw(inputWin)
 		} else {
-			style := vaxis.Style{}
+			style := mutedStyle
 			if index == d.FieldIndex {
 				style.Attribute = vaxis.AttrReverse
 			}
-			inputWin.Println(0, vaxis.Segment{Text: field.renderedValue(), Style: style})
+			tuiLine(inputWin, 0, field.renderedValue(), style)
 		}
-		row += 2
+		row++
 	}
-
-	body.Println(row, vaxis.Segment{Text: "Enter submit/open  Right choose  Tab/Up/Down move  Ctrl+s submit  Esc cancel", Style: mutedStyle})
+	if d.confirmDiscard {
+		tuiLine(body, height-2, "Discard unsaved changes? y discard · n keep editing", errorStyle)
+	} else {
+		tuiLine(body, height-1, "Ctrl+s "+d.SubmitLabel+" · Tab/↑↓ fields · Enter/→ choose · Esc cancel", mutedStyle)
+	}
 }
 
 type tuiMenuEntry struct {

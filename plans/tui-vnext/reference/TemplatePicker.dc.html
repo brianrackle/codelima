@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create node template picker</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="position:relative;width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div aria-hidden="true" style="flex:1;padding:10px 2ch;opacity:.22;display:flex;flex-direction:column;gap:20px">
+<div style="height:20px;white-space:nowrap">7 nodes  ● 3 running  ◐ 1 starting  ○ 1 stopped  ◌ 1 created  ✕ 1 failed</div>
+<div style="border:1px solid #263442;border-radius:6px;height:260px"></div>
+<div style="border:1px solid #263442;border-radius:6px;flex:1"></div>
+</div>
+
+<section role="dialog" aria-label="New node" aria-modal="true" style="position:absolute;left:150px;top:96px;width:900px;height:420px;box-sizing:border-box;background:#121a22;border:1px solid #263442;border-radius:8px;padding:20px 3ch 16px;box-shadow:0 24px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:2ch;padding:0 1ch;background:#121a22;white-space:nowrap"><span class="hi b">New node</span> <span class="dim">in ~/src/acme-api</span></div>
+<div style="display:grid;grid-template-columns:14ch 42ch minmax(0,1fr);column-gap:2ch;row-gap:8px;align-items:center;white-space:nowrap">
+<span class="mut">Name</span>
+<span style="border:1px solid #263442;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;background:#0c1015">api-redesign-3</span>
+<span class="mint">✓</span>
+<span class="mut">Directory</span>
+<span style="border:1px solid #263442;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;background:#0c1015" class="dim">~/src/acme-api  (current)</span>
+<span class="mint">✓</span>
+<span class="hi b">Template</span>
+<span style="display:flex;align-items:center;gap:1ch;border:1px solid #91e6c0;border-radius:3px;padding:0 1ch;height:22px;box-sizing:border-box;background:#0c1015"><span class="dim">‹</span><span class="violet">medium</span><span class="dim">›</span><span style="flex:1"></span><span class="mint">▾</span></span>
+<span></span>
+</div>
+</section>
+
+<section role="listbox" aria-label="Templates" style="position:absolute;left:276px;top:214px;width:820px;box-sizing:border-box;background:#16212b;border:1px solid #91e6c0;border-radius:6px;padding:8px 1ch 8px;box-shadow:0 16px 48px rgba(0,0,0,.55);display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:1ch;white-space:nowrap;padding:0 1ch">
+<label for="tp-q" class="mint">›</label>
+<input id="tp-q" placeholder="type to filter" style="font:inherit;color:#f0f5f8;background:transparent;border:0;padding:0;height:20px;width:30ch">
+<span style="flex:1"></span>
+<span><span class="amber">⚠</span> <span class="dim">vCPU already overcommitted (20/16): fit shows memory</span></span>
+</div>
+<div style="height:1px;background:#263442;margin:6px 0"></div>
+<div style="display:grid;grid-template-columns:2ch 12ch 5ch 7ch 8ch 30ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;padding:0 1ch" class="dim">
+<span></span><span>NAME</span><span style="text-align:right">vCPU</span><span style="text-align:right">MEM</span><span style="text-align:right">DISK</span><span>ENVIRONMENTS</span><span>MEMORY FIT · 16 GiB free</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 12ch 5ch 7ch 8ch 30ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;padding:0 1ch">
+<span></span><span class="violet">xsmall</span><span style="text-align:right">1</span><span style="text-align:right">1G</span><span style="text-align:right">10G</span><span class="mut">codex, claude-code</span><span><span class="mint">✓</span> <span class="dim">15 left</span></span>
+<span></span><span><span class="violet">small</span> <span class="mint">★</span></span><span style="text-align:right">2</span><span style="text-align:right">4G</span><span style="text-align:right">25G</span><span class="mut">codex, claude-code</span><span><span class="mint">✓</span> <span class="dim">12 left</span></span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 12ch 5ch 7ch 8ch 30ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;background:#24323f;padding:0 1ch" role="option" aria-selected="true">
+<span class="mint">▸</span><span><span class="violet b">medium</span> <span class="amber">•</span></span><span style="text-align:right" class="hi">4</span><span style="text-align:right" class="hi">12G</span><span style="text-align:right" class="hi">50G</span><span>codex, claude-code, docker</span><span><span class="mint">✓</span> <span class="dim">4 left</span></span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 12ch 5ch 7ch 8ch 30ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;padding:0 1ch">
+<span></span><span class="violet">large</span><span style="text-align:right">6</span><span style="text-align:right">16G</span><span style="text-align:right">75G</span><span class="mut">codex, claude-code</span><span><span class="amber">⚠</span> <span class="amber">0 left for the host</span></span>
+<span></span><span class="violet">xlarge</span><span style="text-align:right">8</span><span style="text-align:right">32G</span><span style="text-align:right">100G</span><span class="mut">codex, claude-code</span><span><span class="coral">✕</span> <span class="coral">16 GiB short</span></span>
+<span></span><span class="violet">rust-lab</span><span style="text-align:right">6</span><span style="text-align:right">16G</span><span style="text-align:right">75G</span><span class="mut">rust-toolchain, codex</span><span><span class="amber">⚠</span> <span class="amber">0 left for the host</span></span>
+<span></span><span class="violet">web-agent</span><span style="text-align:right">4</span><span style="text-align:right">8G</span><span style="text-align:right">40G</span><span class="mut">codex <span class="dim">+ 1 command</span></span><span><span class="mint">✓</span> <span class="dim">8 left</span></span>
+</div>
+<div style="height:1px;background:#263442;margin:6px 0"></div>
+<a href="TemplateEdit.dc.html" style="white-space:nowrap;padding:0 1ch"><span class="mint">+</span> new template… <span class="dim">opens the editor, then comes back here with it selected</span></a>
+<div style="height:1px;background:#263442;margin:6px 0"></div>
+<div style="white-space:nowrap;padding:0 1ch" class="dim"><span class="violet">medium</span> · image template:ubuntu · agent codex-cli · <span class="amber">•</span> edited Oct 22 · ★ default</div>
+</section>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">picking never blocks: a memory shortfall warns here and again on ctrl+s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<a href="CreateNode.dc.html"><span class="mint">⏎</span> <span class="mut">select</span></a>
+<span><span class="mint">type</span> <span class="mut">filter</span></span>
+<a href="Templates.dc.html"><span class="mint">→</span> <span class="mut">details</span></a>
+<a href="CreateNode.dc.html"><span class="mint">esc</span> <span class="mut">close list</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nodes dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="dim">scope</span> all nodes</span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<main style="flex:1;display:flex;flex-direction:column;gap:20px;padding:10px 1ch 10px;min-height:0">
+
+<div style="display:flex;gap:2ch;height:20px;white-space:nowrap;padding:0 1ch">
+<span><span class="hi b">7</span> <span class="mut">nodes</span></span>
+<span><span class="mint">●</span> 3 running</span>
+<span><span class="amber">◐</span> 1 starting</span>
+<span><span class="dim">○</span> 1 stopped</span>
+<span><span class="dim">◌</span> 1 created</span>
+<span><span class="coral">✕</span> 1 failed</span>
+<span style="flex:1"></span>
+<span class="dim">allocated</span>
+<span><span class="dim">vCPU</span> <span class="coral">██████████</span> <span class="coral">20/16 ⚠</span></span>
+<span><span class="dim">mem</span> <span class="amber">███████▌</span><span class="trk">░░</span> <span class="amber">48/64G</span></span>
+<span><span class="dim">disk</span> 188G free</span>
+</div>
+
+<section aria-label="Nodes" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;flex-shrink:0">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Nodes</span> <span class="dim">7 · grouped by directory · sort name ▲</span></div>
+<div style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap" class="dim">/ filter · G group · &lt; &gt; sort</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap" class="dim">
+<span></span><span>NAME ▲</span><span>STATUS</span><span>TEMPLATE</span><span>CPU</span><span>MEMORY</span><span>DISK</span><span>SES</span><span>PORTS</span><span>UPTIME</span>
+</div>
+
+<div style="height:20px;white-space:nowrap"><span class="mut">▾</span> <span class="hi">~/src/acme-api</span> <span class="dim">· 3 nodes</span></div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span>
+<span class="hi b">api-redesign</span>
+<span><span class="mint">●</span> running</span>
+<span class="violet">medium</span>
+<span class="pre"><span class="mint">▃▄▆▇▅▄▅▄</span>  42%</span>
+<span><span class="mint">████</span><span class="trk">░░░░░░</span> 3.1/7.7G</span>
+<span><span class="mint">██▌</span><span class="trk">░░░░░░░</span> 12/48G</span>
+<span>2</span>
+<span class="mut">3000 5173</span>
+<span>2h14m</span>
+</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>api-redesign-2</span>
+<span><span class="dim">◌</span> created</span>
+<span class="violet">medium</span>
+<span style="grid-column:5 / -1" class="dim">never started · clone of api-redesign · s to start</span>
+</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>test-hardening</span>
+<span><span class="mint">●</span> running</span>
+<span class="violet">small</span>
+<span class="pre"><span class="mint">▁▁▂▁▁▁▂▁</span>   4%</span>
+<span><span class="mint">███▎</span><span class="trk">░░░░░░</span> 1.2/3.8G</span>
+<span><span class="mint">██▋</span><span class="trk">░░░░░░░</span> 6.3/24G</span>
+<span>1</span>
+<span class="mut">1455 3000</span>
+<span>47m</span>
+</div>
+
+<div style="height:20px;white-space:nowrap"><span class="mut">▾</span> <span class="hi">~/src/codelima</span> <span class="dim">· 1 node</span></div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>codelima-dev</span>
+<span><span class="mint">●</span> running</span>
+<span class="violet">large</span>
+<span class="pre"><span class="amber">▅▆▇▆▇█▇▆</span>  <span class="amber">71%</span></span>
+<span><span class="amber">████████▎</span><span class="trk">░</span> <span class="amber">12.9/15.6G</span></span>
+<span><span class="mint">█████▋</span><span class="trk">░░░░</span> 41/73G</span>
+<span>3</span>
+<span class="mut">8080 9229</span>
+<span>1d3h</span>
+</div>
+
+<div style="height:20px;white-space:nowrap"><span class="mut">▾</span> <span class="hi">~/src/docs-site</span> <span class="dim">· 1 node</span></div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>docs-agent</span>
+<span><span class="amber">◐</span> starting</span>
+<span class="violet">small</span>
+<span style="grid-column:5 / -1"><span class="amber">⠹</span> bootstrap 5/6 <span class="dim">·</span> claude-code: install native agent  <span class="amber">██████████</span><span class="trk">░░░░░░</span>  <span class="dim">1m12s</span></span>
+</div>
+
+<div style="height:20px;white-space:nowrap"><span class="mut">▾</span> <span class="hi">~/src/perf-lab</span> <span class="dim">· 2 nodes</span></div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>kvm-nested</span>
+<span><span class="coral">✕</span> <span class="coral">failed</span></span>
+<span class="violet">rust-lab</span>
+<span style="grid-column:5 / -1"><span class="coral">bootstrap 2/6 failed · rust-toolchain · exit 127</span>  <span class="dim">⏎ details · l logs</span></span>
+</div>
+
+<div style="display:grid;grid-template-columns:2ch 18ch 12ch 9ch 13ch 21ch 18ch 4ch 12ch 7ch;column-gap:2ch;height:20px;white-space:nowrap">
+<span></span>
+<span>perf-lab</span>
+<span><span class="dim">○</span> stopped</span>
+<span class="violet">xlarge</span>
+<span style="grid-column:5 / -1" class="dim">stopped 3d ago · copy workspace · published 15432:5432</span>
+</div>
+</section>
+
+<section aria-label="Selected node preview" style="position:relative;flex:1;min-height:0;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px;display:grid;grid-template-columns:44ch 46ch minmax(0,1fr);column-gap:3ch">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">api-redesign</span> <span class="dim">preview</span></div>
+<a href="NodeOverview.dc.html" style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap" class="dim">⏎ open detail</a>
+
+<div style="display:grid;grid-template-columns:10ch minmax(0,1fr);align-content:start;white-space:nowrap">
+<span class="dim">status</span><span><span class="mint">●</span> running <span class="dim">· up 2h14m</span></span>
+<span class="dim">template</span><span><span class="violet">medium</span> <span class="dim">·</span> 4 vCPU <span class="dim">·</span> 8 GiB <span class="dim">·</span> 50 GiB</span>
+<span class="dim">image</span><span>ubuntu 24.04 <span class="dim">· template:ubuntu</span></span>
+<span class="dim">directory</span><span>~/src/acme-api</span>
+<span class="dim">workspace</span><span>mounted <span class="dim">· same path · rw</span></span>
+<span class="dim">runtime</span><span>vz <span class="dim">·</span> virtiofs <span class="dim">·</span> nested virt</span>
+<span class="dim">agents</span><span>codex <span class="mint">✓</span>  claude-code <span class="mint">✓</span></span>
+<span class="dim">created</span><span>Oct 21 <span class="dim">· host auth imported</span></span>
+<span class="dim">lima</span><span class="mut">codelima-api-redesign</span>
+</div>
+
+<div style="display:flex;flex-direction:column;white-space:nowrap">
+<div><span class="mut b">CPU</span> <span class="hi">42%</span> <span class="dim">· avg 44% · peak 61% · 4 vCPU</span></div>
+<div style="display:flex;gap:1ch">
+<div class="dim pre" style="display:flex;flex-direction:column;text-align:right;width:4ch"><span>100</span><span> </span><span> 50</span><span> </span><span>  0</span></div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{cpuRows}}" as="row" hint-placeholder-count="5"><div class="pre mint" style="height:20px">{{row}}</div></sc-for>
+</div>
+</div>
+<div class="dim pre" style="padding-left:5ch">60s                                 now</div>
+<div><span class="mut b">MEMORY</span> <span class="hi">3.1</span><span class="dim">/7.7 GiB · 40% · available 4.6 GiB</span></div>
+<div style="display:flex;gap:1ch">
+<div class="dim pre" style="display:flex;flex-direction:column;text-align:right;width:4ch"><span>100</span><span> </span><span> </span><span>  0</span></div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{memRows}}" as="row" hint-placeholder-count="4"><div class="pre blue" style="height:20px">{{row}}</div></sc-for>
+</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;white-space:nowrap;min-width:0;overflow:hidden">
+<div><span class="mut b">SESSIONS</span> <span class="dim">2 · ⏎ attach in detail</span></div>
+<div><span class="dim">1</span> codex <span class="dim">·</span> Refactor auth routes <span class="amber">⠹</span> <span class="dim">working</span></div>
+<div><span class="dim">2</span> shell <span class="dim">·</span> ~/src/acme-api <span class="dim">idle 4m</span></div>
+<div> </div>
+<div><span class="mut b">PORTS</span> <span class="dim">2 · o open</span></div>
+<div><span class="mint">3000</span> api-redesign.localhost:3000 <span class="dim">vite</span></div>
+<div><span class="mint">5173</span> localhost:5173 <span class="dim">vite · generic</span></div>
+<div> </div>
+<div><span class="mut b">RECENT</span></div>
+<div><span class="dim">14:31</span> forwarding :5173 added</div>
+<div><span class="dim">12:17</span> started <span class="dim">· 41s</span></div>
+<div><span class="dim">12:16</span> host auth imported <span class="dim">· 5 items</span></div>
+</div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span><span class="blue">i</span> api-redesign <span class="dim">·</span> route :5173 added <span class="dim">· vite</span></span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s · 14:32:08</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<a href="NodeOverview.dc.html"><span class="mint">⏎</span> <span class="mut">open</span></a>
+<a href="Dialogs.dc.html"><span class="mint">s</span> <span class="mut">stop</span></a>
+<a href="ShellAttached.dc.html"><span class="mint">x</span> <span class="mut">shell</span></a>
+<a href="ShellChooser.dc.html"><span class="mint">X</span> <span class="mut">shell…</span></a>
+<a href="CreateNode.dc.html"><span class="mint">n</span> <span class="mut">new</span></a>
+<a href="Dialogs.dc.html"><span class="mint">c</span> <span class="mut">clone</span></a>
+<a href="Dialogs.dc.html"><span class="mint">d</span> <span class="mut">delete</span></a>
+<a href="NodesFilter.dc.html"><span class="mint">space</span> <span class="mut">mark</span></a>
+<a href="NodesFilter.dc.html"><span class="mint">/</span> <span class="mut">filter</span></a>
+<a href="Palette.dc.html"><span class="mint">:</span> <span class="mut">command</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+<span><span class="mint">q</span> <span class="mut">quit</span></span>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  chart(data, h) {
+    var B = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    var rows = [];
+    for (var r = h - 1; r >= 0; r--) {
+      var s = '';
+      for (var i = 0; i < data.length; i++) {
+        var lvl = (data[i] / 100) * h - r;
+        s += lvl >= 1 ? '█' : (lvl <= 0 ? ' ' : B[Math.max(1, Math.round(lvl * 8))]);
+      }
+      rows.push(s);
+    }
+    return rows;
+  }
+  renderVals() {
+    var cpu = [31,30,35,41,38,33,30,36,44,52,58,61,55,49,45,40,38,35,37,42,47,53,57,54,48,44,41,39,36,34,38,43,46,50,55,52,47,44,40,42];
+    var mem = [36,36,36,37,37,37,37,38,38,38,38,39,39,39,39,39,40,40,40,40,40,41,41,41,41,40,40,40,40,40,40,40,40,40,40,40,40,40,40,40];
+    return { cpuRows: this.chart(cpu, 5), memRows: this.chart(mem, 4) };
+  }
+}
+</script>
+</body>
+</html>

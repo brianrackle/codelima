@@ -16,7 +16,7 @@ the local hashes match the manifest. The published DC runtime is also saved.
 The editor supplies `support.js`, which is not a published file; no image
 assets or imported components are used. Fonts are external Google Fonts.
 
-Problem: the requested redesign has not been implemented. The reference is a
+Problem: the requested redesign is in progress and is not complete. The reference is a
 VM manager first: a fleet table, five global views, node details and lifecycle
 states, configuration/environment editing, forwarding and operations views,
 system controls, palette/help, shell launching and optional embedded terminals.
@@ -32,7 +32,34 @@ visually inspect and interact with the running new TUI, update numbered ADRs,
 README, BUILD, patterns and roadmap as applicable, and clean verification
 artifacts. The initial worktree was clean at `1029f58`, so there were no
 outstanding changes to commit before starting. The implementation goal was
-paused at the user's request; retrieving the files resolves its access issue.
+previously paused at the user's request; retrieving the files resolved its
+access issue and implementation has resumed. `ddabb01` committed the outstanding
+notes before implementation. Exact sources now also live in
+`plans/tui-vnext/reference/` and the full delivery ledger is
+`plans/tui-vnext/README.md`.
+
+Current implementation: identity-based fleet filtering/sorting/grouping/marks,
+responsive table and preview, five view routes, initial detail screens,
+palette/help, centered existing forms and F6-only embedded-shell interception
+are wired into the application (ADR 150). Focused fleet/manager/resize tests
+pass. Sidebar/autostart/Option-key regressions have been migrated to the new
+contract. Full `make verify` passed on Linux/aarch64 after the frontend and
+form changes (Go suite, lint, formatting, vaxis suite and both builds).
+`make test-race` also passed. A live isolated TUI verified global navigation,
+palette filtering, 80×24 form visibility, replacement of default values and
+dirty-cancel confirmation. The disposable daemon, tmux session and home were
+stopped and removed. Initial views
+are partial: do not treat their presence as completed artboards.
+
+Remaining required work: complete visual fidelity and interactions for all 26 boards; implement raw
+attach/detach and shell window/tmux modes; daemon-owned persistent operations
+and progress/retry/cancel; one-hour metrics and on-demand processes; dynamic
+forwarding route presentation/pinning; settings/key mappings; comprehensive
+form validation/dirty cancellation, template restoration and environment test
+runs; complete documentation, all automated gates and manual QA, then clean
+all disposable state. Real VM lifecycle QA remains unqualified in this guest:
+Lima reports `/dev/kvm` permission denied and the attempted disposable nodes
+failed creation; their rolled-back verification state was removed.
 
 Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified
 Lima 2.1.0 installation allowed the existing TUI to run in an isolated home.

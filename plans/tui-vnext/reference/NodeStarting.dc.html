@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node starting</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">docs-agent</span>
+<span><span class="amber">◐</span> starting <span class="dim">· 2m01s ·</span> <span class="violet">small</span> <span class="dim">·</span> ~/src/docs-site</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeStarting.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Overview</a>
+<span style="padding:0 1ch" class="dim">Metrics</span>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;color:#9aabb9">Logs</a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;color:#9aabb9">Spec</a>
+<span style="flex:1"></span>
+<span class="dim">Metrics unlocks once the node is running</span>
+</nav>
+
+<main style="flex:1;display:grid;grid-template-columns:72ch minmax(0,1fr);column-gap:2ch;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Start progress" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;min-height:0;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Starting docs-agent</span> <span class="dim">first start</span></div>
+<div style="display:grid;grid-template-columns:2ch 20ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap">
+<span class="mint">✓</span><span>Create VM</span><span class="dim">rendered, validated, limactl create</span><span class="dim" style="text-align:right">6s</span>
+<span class="mint">✓</span><span>Boot</span><span class="dim">vz · 2 vCPU · 4 GiB</span><span class="dim" style="text-align:right">19s</span>
+<span class="mint">✓</span><span>Host credentials</span><span class="dim">5 imported · id_rsa absent</span><span class="dim" style="text-align:right">2s</span>
+<span class="mint">✓</span><span>Workspace</span><span class="dim">mounted ~/src/docs-site</span><span class="dim" style="text-align:right">1s</span>
+<span class="amber">◐</span><span class="hi b">Bootstrap 5/6</span><span>claude-code native install <span class="amber">⠹</span></span><span class="amber" style="text-align:right">1m12s</span>
+</div>
+<div style="display:grid;grid-template-columns:4ch 2ch 3ch 16ch minmax(0,1fr) 5ch;column-gap:1ch;white-space:nowrap">
+<span></span><span class="mint">✓</span><span class="dim">1</span><span class="violet">codex</span><span class="dim">prerequisites</span><span class="dim" style="text-align:right">41s</span>
+<span></span><span class="mint">✓</span><span class="dim">2</span><span class="violet">codex</span><span class="dim">native install</span><span class="dim" style="text-align:right">22s</span>
+<span></span><span class="mint">✓</span><span class="dim">3</span><span class="violet">codex</span><span class="dim">validate</span><span class="dim" style="text-align:right">1s</span>
+<span></span><span class="mint">✓</span><span class="dim">4</span><span class="violet">claude-code</span><span class="dim">prerequisites</span><span class="dim" style="text-align:right">3s</span>
+<span></span><span class="amber">⠹</span><span class="hi">5</span><span class="violet">claude-code</span><span class="hi">native install</span><span class="amber" style="text-align:right">45s</span>
+<span></span><span class="dim">○</span><span class="dim">6</span><span class="violet">claude-code</span><span class="dim">validate</span><span></span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 20ch minmax(0,1fr) 6ch;column-gap:1ch;white-space:nowrap">
+<span class="dim">○</span><span class="dim">Validate agent</span><span class="dim">codex-cli profile, as login user</span><span></span>
+<span class="dim">○</span><span class="dim">Ready</span><span class="dim">guest shells open · ports forward</span><span></span>
+</div>
+<div style="flex:1"></div>
+<div class="pre"><span class="amber">██████████████████████████████████████████</span><span class="trk">░░░░░░░░░░░░░░░░░░</span>  <span class="hi">2m01s</span></div>
+<div class="dim">usually ≈ 2m40s for small on this host · later starts skip bootstrap (≈ 40s)</div>
+</section>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="Live output" style="position:relative;flex:1;min-height:0;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px;overflow:hidden">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Output</span> <span class="dim">step 5 · following</span></div>
+<a href="NodeLogs.dc.html" style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015" class="dim">l full log →</a>
+<div class="pre mut">$ curl -fsSL https://claude.ai/install.sh | bash</div>
+<div class="pre dim">  as login user brian · HOME=/home/brian.linux</div>
+<div class="pre">  resolving latest stable for linux-arm64</div>
+<div class="pre">  downloading  <span class="mint">███████████████</span><span class="trk">░░░░░░░░░</span>  61%</div>
+<div class="pre dim">  …</div>
+<div class="pre dim"> </div>
+<div class="pre dim">streams the last 200 lines; older output is in Logs › bootstrap</div>
+</section>
+
+<section aria-label="While it starts" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">While it starts</div>
+<div style="display:grid;grid-template-columns:4ch minmax(0,1fr);white-space:nowrap">
+<span class="mint">x</span><span>attach as soon as it's ready <span class="dim">· queued, cancel with esc</span></span>
+<span class="mint">T</span><span>host shell in ~/src/docs-site <span class="dim">· works now</span></span>
+<span class="mint">s</span><span>cancel start <span class="dim">· stops the VM; bootstrap reruns next start</span></span>
+<span class="mint">esc</span><span>back to Nodes <span class="dim">· the start keeps going in the daemon</span></span>
+</div>
+</section>
+</div>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span><span class="amber">◐</span> <span class="dim">guest shells are refused until the node is ready, so the shell never contradicts the status</span></span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">back</span></a>
+<span><span class="mint">x</span> <span class="mut">attach when ready</span></span>
+<span><span class="mint">T</span> <span class="mut">host shell</span></span>
+<a href="Dialogs.dc.html"><span class="mint">s</span> <span class="mut">cancel start</span></a>
+<a href="NodeLogs.dc.html"><span class="mint">l</span> <span class="mut">logs</span></a>
+<span class="dim">c clone</span>
+<span class="dim">d delete</span>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

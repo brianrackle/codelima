@@ -172,10 +172,6 @@ func (s *tuiState) guestShellReady(entry tuiTreeEntry) bool {
 // readiness that choice came from.
 func (s *tuiState) applyDefaultTreePaneMode(entry tuiTreeEntry) {
 	s.guestReadyAtDefault = s.guestShellReady(entry)
-	if s.guestReadyAtDefault {
-		s.treePaneMode = tuiTreePaneModeTerminal
-		return
-	}
 	s.treePaneMode = tuiTreePaneModeInfo
 }
 
@@ -448,15 +444,6 @@ func (s *tuiState) focusTree() {
 	s.focus = tuiFocusTree
 }
 
-func (s *tuiState) toggleFocus() error {
-	if s.focus == tuiFocusTerminal {
-		s.focusTree()
-		return nil
-	}
-
-	return s.focusTerminal()
-}
-
 func (s *tuiState) toggleTreePaneMode() {
 	if s.treePaneMode == tuiTreePaneModeTerminal {
 		s.treePaneMode = tuiTreePaneModeInfo
@@ -464,55 +451,6 @@ func (s *tuiState) toggleTreePaneMode() {
 	}
 
 	s.treePaneMode = tuiTreePaneModeTerminal
-}
-
-func (s *tuiState) visibleEntries(capacity int) []tuiTreeEntry {
-	if len(s.entries) == 0 || capacity <= 0 {
-		return nil
-	}
-
-	start := s.viewportStart(capacity)
-	end := start + capacity
-	if end > len(s.entries) {
-		end = len(s.entries)
-	}
-	return s.entries[start:end]
-}
-
-func (s *tuiState) selectTreeRow(row int, capacity int) error {
-	index := s.viewportStart(capacity) + row
-	if index < 0 || index >= len(s.entries) {
-		return nil
-	}
-
-	return s.selectIndex(index)
-}
-
-func (s *tuiState) viewportStart(capacity int) int {
-	if capacity <= 0 || len(s.entries) == 0 {
-		return 0
-	}
-
-	if s.selection < s.scroll {
-		s.scroll = s.selection
-	}
-	if s.selection >= s.scroll+capacity {
-		s.scroll = s.selection - capacity + 1
-	}
-
-	if s.scroll < 0 {
-		s.scroll = 0
-	}
-
-	maxScroll := len(s.entries) - capacity
-	if maxScroll < 0 {
-		maxScroll = 0
-	}
-	if s.scroll > maxScroll {
-		s.scroll = maxScroll
-	}
-
-	return s.scroll
 }
 
 func (s *tuiState) activeNode() (Node, bool) {

@@ -25,11 +25,12 @@ func dispatchShortcutKey(t *testing.T, app *vaxisTUIApp, sequence string, kind v
 	}
 }
 
-func TestTUIShortcutSearchAndInfoLifecycle(t *testing.T) {
+func TestTUIShortcutSearchAndDetailLifecycle(t *testing.T) {
 	for _, route := range []string{"handleKey", "handleEvent"} {
 		t.Run(route, func(t *testing.T) {
 			app, terminal := newInspectionTestApp(t)
-			app.state.focus = tuiFocusTerminal
+			app.state.focus = tuiFocusTree
+			app.nodeDetail, app.detailTab = true, tuiDetailShell
 			app.state.terminalTarget = nodeTargetKey("node-root")
 			dispatch := func(sequence string, kind vaxis.EventType) {
 				t.Helper()
@@ -62,20 +63,7 @@ func TestTUIShortcutSearchAndInfoLifecycle(t *testing.T) {
 					t.Fatalf("close followup reopened search or reached shell: %#v", terminal.events)
 				}
 			}
-			app.state.focusTree()
-			for range 2 {
-				before := app.state.treePaneMode
-				dispatch("\x1b[105;1:%du", vaxis.EventPress)
-				if app.state.treePaneMode == before {
-					t.Fatal("fresh i press did not toggle pane")
-				}
-				for _, kind := range []vaxis.EventType{vaxis.EventRepeat, vaxis.EventRelease} {
-					dispatch("\x1b[105;1:%du", kind)
-					if app.state.treePaneMode == before {
-						t.Fatal("i followup toggled pane again")
-					}
-				}
-			}
+
 		})
 	}
 }
@@ -110,7 +98,7 @@ func TestTUIShortcutSelectorFollowupsCannotActOnParent(t *testing.T) {
 }
 
 func TestTUIShortcutOpeningMenuOrFormConsumesFollowups(t *testing.T) {
-	for _, code := range []rune{'n', 'a', 'g', 'd', 'c', 'm'} {
+	for _, code := range []rune{'n', 'd', 'c', ':', '?'} {
 		t.Run(string(code), func(t *testing.T) {
 			app, _ := newInspectionTestApp(t)
 			sequence := fmt.Sprintf("\x1b[%d;1:%%du", code)
@@ -237,14 +225,15 @@ func TestTUIShortcutNavigationRepeatsWithoutReleaseMovement(t *testing.T) {
 			}
 		})
 	}
-	t.Run("tab switch and reorder", func(t *testing.T) {
+	t.Run("tab switch", func(t *testing.T) {
 		app, _ := newInspectionTestApp(t)
 		for range 3 {
 			if err := app.openTerminalTab(); err != nil {
 				t.Fatal(err)
 			}
 		}
-		for _, sequence := range []string{"\x1b[1;3:%dC", "\x1b[1;4:%dD"} {
+		app.nodeDetail, app.detailTab = true, tuiDetailShell
+		for _, sequence := range []string{"\x1b[93;1:%du", "\x1b[91;1:%du"} {
 			keys := app.sessions.TargetSessionKeys(nodeTargetKey("node-root"))
 			app.state.setActiveTab(nodeTargetKey("node-root"), keys[len(keys)-1])
 			for _, kind := range []vaxis.EventType{vaxis.EventPress, vaxis.EventRepeat} {
@@ -263,6 +252,9 @@ func TestTUIShortcutNavigationRepeatsWithoutReleaseMovement(t *testing.T) {
 	})
 	t.Run("tree", func(t *testing.T) {
 		app, _ := newInspectionTestApp(t)
+		app.refreshFleet()
+		app.fleet.selectID(app.fleet.visible[0].Node.ID)
+		app.selectFleetNode()
 		for index, kind := range []vaxis.EventType{vaxis.EventPress, vaxis.EventRepeat} {
 			before := app.state.selectedEntry().key()
 			sequence := []string{"\x1b[1;1:%dB", "\x1b[1;1:%dA"}[index]
@@ -382,27 +374,17 @@ func TestTUIShortcutDialogFollowupsStayOutOfShell(t *testing.T) {
 	}
 }
 
-func TestTUIShortcutTabFollowupsAfterModifierRelease(t *testing.T) {
+func TestTUIShortcutTabFollowupsStayInManager(t *testing.T) {
 	app, _ := newInspectionTestApp(t)
-	if err := app.state.focusTerminal(); err != nil {
-		t.Fatal(err)
-	}
-	for _, sequence := range []string{"\x1b[116;3:%du", "\x1b[116;4:%du", "\x1b[119;3:%du"} {
+	app.nodeDetail, app.detailTab = true, tuiDetailShell
+	for _, sequence := range []string{"\x1b[116;1:%du", "\x1b[84;1:%du", "\x1b[119;1:%du"} {
 		dispatchShortcutKey(t, app, sequence, vaxis.EventPress)
-		backend, ok := app.sessions.SessionTerminal(app.state.activeSessionKey())
-		if !ok {
-			t.Fatal("missing active tab")
-		}
-		term := backend.(*fakeTUITerminal)
+		before := app.state.activeSessionKey()
 		for _, kind := range []vaxis.EventType{vaxis.EventRepeat, vaxis.EventRelease} {
-			key := shortcutLifecycleKey(t, sequence, kind)
-			key.Modifiers = 0
-			if quit, err := app.handleEvent(key); quit || err != nil {
-				t.Fatalf("followup = (%v, %v)", quit, err)
-			}
+			dispatchShortcutKey(t, app, sequence, kind)
 		}
-		if len(term.events) != 0 {
-			t.Fatalf("tab shortcut leaked into shell after modifier release: %#v", term.events)
+		if before != app.state.activeSessionKey() {
+			t.Fatal("tab action followup changed the active session")
 		}
 	}
 }

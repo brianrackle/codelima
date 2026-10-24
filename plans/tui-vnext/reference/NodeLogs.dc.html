@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node detail logs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+.m{background:#24493b;color:#f0f5f8}.mc{background:#91e6c0;color:#0c1015}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">api-redesign</span>
+<span><span class="mint">●</span> running <span class="dim">· up 2h14m ·</span> <span class="violet">medium</span> <span class="dim">·</span> ~/src/acme-api</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeOverview.dc.html" style="padding:0 1ch;color:#9aabb9">Overview</a>
+<a href="NodeMetrics.dc.html" style="padding:0 1ch;color:#9aabb9">Metrics</a>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Logs</a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;color:#9aabb9">Spec <span class="amber">•</span></a>
+</nav>
+
+<main style="flex:1;display:flex;flex-direction:column;gap:10px;padding:10px 1ch 10px;min-height:0">
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;white-space:nowrap;padding:0 1ch">
+<span class="dim">source</span>
+<span style="background:#1b2a36;color:#91e6c0;padding:0 1ch">events</span>
+<span class="mut">bootstrap</span>
+<span class="mut">lima</span>
+<span class="mut">serial</span>
+<span class="dim">[ ] cycle</span>
+<span class="dim">· nodes/&lt;id&gt;/events.jsonl</span>
+<span style="flex:1"></span>
+<span><span class="dim">○</span> follow paused <span class="dim">· f resumes</span></span>
+<span class="dim">wrap off w</span>
+</div>
+
+<section aria-label="Event log" style="position:relative;flex:1;min-height:0;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;overflow:hidden">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Events</span> <span class="dim">19 · all levels</span></div>
+<div style="display:grid;grid-template-columns:16ch 5ch 26ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="dim">Oct 21 09:42:03</span><span class="dim">info</span><span>node.create.requested</span><span class="mut">template=medium dir=~/src/acme-api mode=mounted</span>
+<span class="dim">Oct 21 09:42:04</span><span class="dim">info</span><span>node.template.rendered</span><span class="mut">limactl validate ok</span>
+<span class="dim">Oct 21 09:42:09</span><span class="dim">info</span><span>node.created</span><span class="mut">lima=codelima-api-redesign</span>
+<span class="dim">Oct 21 09:42:10</span><span class="dim">info</span><span>node.start.requested</span><span class="mut">via tui</span>
+<span class="dim">Oct 21 09:42:31</span><span class="dim">info</span><span>node.booted</span><span class="mut">vz · 21s</span>
+<span class="dim">Oct 21 09:42:33</span><span class="dim">info</span><span>node.auth.imported</span><span class="mut">id_ed25519 known_hosts gitconfig codex claude · skipped id_rsa (absent)</span>
+<span class="dim">Oct 21 09:42:34</span><span class="dim">info</span><span>node.workspace.ready</span><span class="mut">mounted /Users/brian/src/acme-api</span>
+<span class="dim">Oct 21 09:42:35</span><span class="dim">info</span><span>node.bootstrap.started</span><span class="mut">6 steps · codex, claude-code</span>
+<span class="dim">Oct 21 09:44:58</span><span class="dim">info</span><span>node.bootstrap.completed</span><span class="mut">6/6 · 2m23s</span>
+<span class="dim">Oct 21 09:45:02</span><span class="dim">info</span><span>node.agent.validated</span><span class="mut">codex --version · claude --version</span>
+<span class="dim">Oct 21 09:45:02</span><span class="dim">info</span><span class="mint">node.started</span><span class="mut">total 2m52s</span>
+<span class="dim">Oct 21 18:10:44</span><span class="dim">info</span><span>node.cloned</span><span class="mut">→ api-redesign-2 · source stopped for 38s, restarted</span>
+<span class="dim">Oct 23 19:02:11</span><span class="dim">info</span><span>node.stopped</span><span class="mut">via cli</span>
+<span class="dim">Oct 24 12:16:50</span><span class="dim">info</span><span>node.start.requested</span><span class="mut">via tui</span>
+<span class="dim">Oct 24 12:17:31</span><span class="dim">info</span><span class="mint">node.started</span><span class="mut">boot 41s</span>
+<span class="dim">Oct 24 12:40:02</span><span class="amber">warn</span><span>forwarding.<span class="mc">route</span>.degraded</span><span class="mut">:3000 · tunnel reset · answering 502 while it retries</span>
+<span class="dim">Oct 24 12:40:05</span><span class="dim">info</span><span>forwarding.<span class="m">route</span>.restored</span><span class="mut">:3000</span>
+<span class="dim">Oct 24 14:12:44</span><span class="dim">info</span><span>forwarding.<span class="m">route</span>.added</span><span class="mut">:3000 · node</span>
+<span class="dim">Oct 24 14:31:05</span><span class="dim">info</span><span>forwarding.<span class="m">route</span>.added</span><span class="mut">:5173 · vite</span>
+</div>
+</section>
+
+<div style="display:flex;align-items:center;gap:1ch;height:20px;white-space:nowrap;padding:0 1ch">
+<label for="lg-q" class="mint b">/</label>
+<input id="lg-q" value="route" style="font:inherit;color:#f0f5f8;background:#0f151c;border:1px solid #91e6c0;border-radius:3px;padding:0 1ch;height:20px;box-sizing:border-box;width:30ch">
+<span><span class="hi">1</span><span class="dim">/4 matches</span></span>
+<span class="dim">· n next · N previous · esc close · search stops following</span>
+</div>
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">bootstrap = output per step · lima = ha.stderr.log · serial = guest console (first boot problems)</span>
+<span style="flex:1"></span>
+<span class="dim">G end · g top</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">back</span></a>
+<a href="NodeSpec.dc.html"><span class="mint">tab</span> <span class="mut">next tab</span></a>
+<span><span class="mint">[ ]</span> <span class="mut">source</span></span>
+<span><span class="mint">f</span> <span class="mut">follow</span></span>
+<span><span class="mint">/</span> <span class="mut">search</span></span>
+<span><span class="mint">w</span> <span class="mut">wrap</span></span>
+<span><span class="mint">L</span> <span class="mut">level</span></span>
+<span><span class="mint">y</span> <span class="mut">copy line</span></span>
+<span><span class="mint">o</span> <span class="mut">open in $PAGER</span></span>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -250,8 +250,17 @@ func TestTUISelectionMoveDoesNotBlockOnHungDaemonTerminalOpen(t *testing.T) {
 	}
 	select {
 	case <-handler.opened:
+		t.Fatal("selection issued terminal.open")
+	default:
+	}
+	// Explicit shell opening remains asynchronous when the daemon is hung.
+	if err := app.openTerminalTab(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handler.opened:
 	case <-time.After(2 * time.Second):
-		t.Fatal("selection move did not issue terminal.open")
+		t.Fatal("explicit shell open did not issue terminal.open")
 	}
 
 	// The loop keeps running while the open is outstanding, and returning to the

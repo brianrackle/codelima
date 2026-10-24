@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node detail overview</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">api-redesign</span>
+<span><span class="mint">●</span> running <span class="dim">· up 2h14m ·</span> <span class="violet">medium</span> <span class="dim">·</span> ~/src/acme-api</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeOverview.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Overview</a>
+<a href="NodeMetrics.dc.html" style="padding:0 1ch;color:#9aabb9">Metrics</a>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;color:#9aabb9">Logs</a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;color:#9aabb9">Spec <span class="amber">•</span></a>
+<span style="flex:1"></span>
+<span class="dim">tab / shift+tab</span>
+</nav>
+
+<main style="flex:1;display:grid;grid-template-columns:64ch minmax(0,1fr);column-gap:2ch;padding:20px 1ch 10px;min-height:0">
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="Identity" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Identity</div>
+<div style="display:grid;grid-template-columns:12ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">status</span><span><span class="mint">●</span> running <span class="dim">· since 12:17 today</span></span>
+<span class="dim">template</span><span><span class="violet">medium</span> <span class="dim">· frozen Oct 21 ·</span> <a href="NodeSpec.dc.html" class="amber">template changed since →</a></span>
+<span class="dim">image</span><span>ubuntu 24.04 LTS <span class="dim">· template:ubuntu · arm64</span></span>
+<span class="dim">directory</span><span>~/src/acme-api</span>
+<span class="dim">workspace</span><span>mounted <span class="dim">· same path in guest · read/write</span></span>
+<span class="dim">lima</span><span>codelima-api-redesign <span class="dim">· vz · virtiofs</span></span>
+<span class="dim">nested virt</span><span>on <span class="dim">· KVM available in guest</span></span>
+<span class="dim">agents</span><span>codex <span class="mint">✓</span>  claude-code <span class="mint">✓</span> <span class="dim">· validated as login user</span></span>
+<span class="dim">host auth</span><span>imported Oct 21 <span class="dim">· ssh, git, codex, claude</span></span>
+<span class="dim">clones</span><span>api-redesign-2 <span class="dim">◌ created</span></span>
+<span class="dim">created</span><span>Oct 21 09:42 <span class="dim">· id nd_7f3a9c</span></span>
+</div>
+</section>
+
+<section aria-label="Resources" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015"><span class="hi b">Resources</span> <span class="dim">live · 1s</span></div>
+<a href="NodeMetrics.dc.html" style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015" class="dim">history in Metrics →</a>
+<div style="display:grid;grid-template-columns:8ch 8ch minmax(0,1fr);white-space:nowrap">
+<span class="dim">CPU</span><span>4 vCPU</span><span class="pre"><span class="mint">▃▄▆▇▅▄▅▄▃▄</span>  <span class="hi">42%</span> <span class="dim">· avg 44% over 1m</span></span>
+<span class="dim">memory</span><span>8 GiB</span><span class="pre"><span class="blue">████</span><span class="trk">░░░░░░</span>  <span class="hi">3.1</span><span class="dim"> / 7.7 GiB · 4.6 available</span></span>
+<span class="dim">disk</span><span>50 GiB</span><span class="pre"><span class="mint">██▌</span><span class="trk">░░░░░░░</span>  <span class="hi">12</span><span class="dim"> / 48 GiB root fs</span></span>
+<span></span><span></span><span class="dim">workspace lives on the host; not counted</span>
+</div>
+</section>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="Sessions" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015"><span class="hi b">Sessions</span> <span class="dim">3 · owned by the daemon, survive the TUI</span></div>
+<div style="display:grid;grid-template-columns:2ch 3ch 6ch minmax(0,1fr) 11ch 6ch;column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="mint">▸</span><span class="dim">1</span><span>codex</span><span class="hi">Refactor auth routes</span><span><span class="amber">⠹</span> working</span><span class="dim">1h02m</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 3ch 6ch minmax(0,1fr) 11ch 6ch;column-gap:1ch;white-space:nowrap">
+<span></span><span class="dim">2</span><span>shell</span><span>~/src/acme-api</span><span class="dim">idle 4m</span><span class="dim">18m</span>
+</div>
+<div style="display:grid;grid-template-columns:2ch 3ch 6ch minmax(0,1fr) 11ch 6ch;column-gap:1ch;white-space:nowrap">
+<span></span><span class="dim">3</span><span class="coral">host</span><span>git log --oneline</span><span><span class="amber">!</span> <span class="dim">bell</span></span><span class="dim">6m</span>
+</div>
+<div style="height:20px"></div>
+<div style="display:flex;gap:2ch;white-space:nowrap">
+<a href="ShellAttached.dc.html"><span class="mint">⏎</span> <span class="mut">attach</span></a>
+<span><span class="mint">t</span> <span class="mut">new shell</span></span>
+<span><span class="mint">T</span> <span class="mut">new host shell</span></span>
+<span><span class="mint">K</span> <span class="mut">end session</span></span>
+</div>
+</section>
+
+<section aria-label="Ports" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015"><span class="hi b">Ports</span> <span class="dim">2 · discovered automatically</span></div>
+<a href="Ports.dc.html" style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015" class="dim">all ports →</a>
+<div style="display:grid;grid-template-columns:6ch minmax(0,1fr) 6ch 12ch;column-gap:1ch;white-space:nowrap">
+<span class="mint">3000</span><span>http://api-redesign.localhost:3000</span><span class="dim">node</span><span class="dim">+ localhost</span>
+<span class="mint">5173</span><span>http://localhost:5173</span><span class="dim">vite</span><span class="dim">generic</span>
+</div>
+<div style="display:flex;gap:2ch;white-space:nowrap;margin-top:4px">
+<span><span class="mint">o</span> <span class="mut">open</span></span>
+<span><span class="mint">y</span> <span class="mut">copy URL</span></span>
+</div>
+</section>
+
+<section aria-label="Recent events" style="position:relative;flex:1;min-height:0;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015" class="hi b">Recent events</div>
+<a href="NodeLogs.dc.html" style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015" class="dim">l all events →</a>
+<div style="display:grid;grid-template-columns:9ch 24ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span class="dim">14:31:05</span><span>forwarding.route.added</span><span class="dim">:5173 · vite</span>
+<span class="dim">14:12:44</span><span>forwarding.route.added</span><span class="dim">:3000 · node</span>
+<span class="dim">12:17:31</span><span class="mint">node.started</span><span class="dim">boot 41s</span>
+<span class="dim">12:16:50</span><span>node.start.requested</span><span class="dim">via tui</span>
+<span class="dim">Oct 23</span><span>node.stopped</span><span class="dim">via cli</span>
+<span class="dim">Oct 21</span><span>node.auth.imported</span><span class="dim">5 items · id_rsa absent</span>
+</div>
+</section>
+</div>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">focus: Sessions · tab cycles tabs · ↑↓ moves within the focused panel · ctrl+↑↓ moves between panels</span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">back</span></a>
+<a href="NodeMetrics.dc.html"><span class="mint">tab</span> <span class="mut">next tab</span></a>
+<a href="Dialogs.dc.html"><span class="mint">s</span> <span class="mut">stop</span></a>
+<span><span class="mint">r</span> <span class="mut">restart</span></span>
+<a href="ShellAttached.dc.html"><span class="mint">x</span> <span class="mut">shell</span></a>
+<a href="ShellChooser.dc.html"><span class="mint">X</span> <span class="mut">shell…</span></a>
+<a href="Dialogs.dc.html"><span class="mint">c</span> <span class="mut">clone</span></a>
+<a href="Dialogs.dc.html"><span class="mint">d</span> <span class="mut">delete</span></a>
+<a href="NodeLogs.dc.html"><span class="mint">l</span> <span class="mut">logs</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node detail metrics</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;color:#9aabb9">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<div style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 2ch;margin-top:10px;white-space:nowrap;flex-shrink:0">
+<a href="Main.dc.html" class="dim">‹ Nodes</a>
+<span class="hi b">api-redesign</span>
+<span><span class="mint">●</span> running <span class="dim">· up 2h14m ·</span> <span class="violet">medium</span> <span class="dim">·</span> ~/src/acme-api</span>
+</div>
+<nav aria-label="Node tabs" style="display:flex;gap:1ch;height:20px;padding:0 1ch;margin-top:10px;white-space:nowrap;flex-shrink:0;border-bottom:1px solid #263442">
+<a href="NodeOverview.dc.html" style="padding:0 1ch;color:#9aabb9">Overview</a>
+<a href="NodeMetrics.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0" class="b">Metrics</a>
+<a href="NodeLogs.dc.html" style="padding:0 1ch;color:#9aabb9">Logs</a>
+<a href="NodeSpec.dc.html" style="padding:0 1ch;color:#9aabb9">Spec <span class="amber">•</span></a>
+<span style="flex:1"></span>
+<span><span class="dim">window</span>  <span class="dim">1m</span>  <span style="background:#1b2a36;color:#91e6c0;padding:0 1ch">5m</span>  <span class="dim">15m</span>  <span class="dim">1h</span>  <span class="dim">· + / −</span></span>
+</nav>
+
+<main style="flex:1;display:grid;grid-template-columns:92ch minmax(0,1fr);column-gap:2ch;padding:20px 1ch 10px;min-height:0">
+
+<div style="display:flex;flex-direction:column;gap:20px;min-height:0">
+<section aria-label="CPU" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">CPU</span> <span class="hi">42%</span> <span class="dim">· 4 vCPU · avg 42% · peak 68% at 14:29</span></div>
+<div style="display:flex;gap:1ch">
+<div class="dim pre" style="display:flex;flex-direction:column;text-align:right;width:4ch"><span>100</span><span> </span><span> </span><span> 50</span><span> </span><span> </span><span> </span><span>  0</span></div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{cpuRows}}" as="row" hint-placeholder-count="8"><div class="pre" style="height:20px"><span class="mint">{{row}}</span></div></sc-for>
+</div>
+</div>
+<div class="dim pre" style="padding-left:5ch">−5m                 −4m                 −3m                 −2m             now</div>
+<div style="display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));column-gap:4ch;white-space:nowrap;margin-top:4px">
+<span class="pre"><span class="dim">cpu0</span> <span class="mint">█████▋</span><span class="trk">░░░░</span>  58%</span>
+<span class="pre"><span class="dim">cpu1</span> <span class="mint">████▋</span><span class="trk">░░░░░</span>  46%</span>
+<span class="pre"><span class="dim">cpu2</span> <span class="mint">███▉</span><span class="trk">░░░░░░</span>  39%</span>
+<span class="pre"><span class="dim">cpu3</span> <span class="mint">██▌</span><span class="trk">░░░░░░░</span>  25%</span>
+</div>
+</section>
+
+<section aria-label="Memory" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Memory</span> <span class="hi">3.1</span><span class="dim"> / 7.7 GiB · 40% · MemTotal − MemAvailable</span></div>
+<div style="display:flex;gap:1ch">
+<div class="dim pre" style="display:flex;flex-direction:column;text-align:right;width:4ch"><span>100</span><span> </span><span> </span><span>  0</span></div>
+<div style="display:flex;flex-direction:column">
+<sc-for list="{{memRows}}" as="row" hint-placeholder-count="4"><div class="pre" style="height:20px"><span class="blue">{{row}}</span></div></sc-for>
+</div>
+</div>
+<div style="white-space:nowrap;margin-top:4px"><span class="dim">used</span> 3.1 GiB  <span class="dim">page cache</span> 2.2 GiB  <span class="dim">available</span> 4.6 GiB  <span class="dim">swap</span> 0 B</div>
+</section>
+
+<section aria-label="Disk" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Disk</span> <span class="dim">guest root filesystem</span></div>
+<div class="pre"><span class="dim">/</span>  <span class="mint">██▌</span><span class="trk">░░░░░░░</span>  <span class="hi">12</span><span class="dim"> / 48 GiB · 25% · +0.4 GiB in the last 5m</span></div>
+<div class="dim">~/src/acme-api is a virtiofs mount from the host and is not counted here</div>
+</section>
+</div>
+
+<section aria-label="Processes" style="position:relative;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px;min-height:0;display:flex;flex-direction:column">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Processes</span> <span class="dim">top by CPU ▼ · p memory</span></div>
+<div style="display:grid;grid-template-columns:5ch 6ch 6ch 6ch minmax(0,1fr);column-gap:1ch;white-space:nowrap" class="dim">
+<span style="text-align:right">PID</span><span>USER</span><span style="text-align:right">CPU%</span><span style="text-align:right">RSS</span><span>COMMAND</span>
+</div>
+<div style="display:grid;grid-template-columns:5ch 6ch 6ch 6ch minmax(0,1fr);column-gap:1ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span style="text-align:right">2214</span><span>brian</span><span style="text-align:right" class="hi">61.0</span><span style="text-align:right">412M</span><span style="overflow:hidden;text-overflow:ellipsis">node …/.bin/vite</span>
+</div>
+<div style="display:grid;grid-template-columns:5ch 6ch 6ch 6ch minmax(0,1fr);column-gap:1ch;white-space:nowrap">
+<span style="text-align:right">2190</span><span>brian</span><span style="text-align:right">38.5</span><span style="text-align:right">688M</span><span>codex</span>
+<span style="text-align:right">3021</span><span>brian</span><span style="text-align:right">31.7</span><span style="text-align:right">402M</span><span>node vitest --watch</span>
+<span style="text-align:right">1544</span><span>brian</span><span style="text-align:right">9.2</span><span style="text-align:right">210M</span><span>tsserver</span>
+<span style="text-align:right">1203</span><span>brian</span><span style="text-align:right">2.0</span><span style="text-align:right">48M</span><span>bash</span>
+<span style="text-align:right">655</span><span class="dim">root</span><span style="text-align:right">1.4</span><span style="text-align:right">22M</span><span>sshd: brian</span>
+<span style="text-align:right">402</span><span class="dim">root</span><span style="text-align:right">0.6</span><span style="text-align:right">18M</span><span>lima-guestagent</span>
+<span style="text-align:right">318</span><span class="dim">root</span><span style="text-align:right">0.3</span><span style="text-align:right">31M</span><span>systemd-journald</span>
+</div>
+<div style="height:20px"></div>
+<div style="white-space:nowrap"><span class="dim">load</span> 1.68 1.42 1.20 <span class="dim">· procs</span> 142 <span class="dim">· per-core %, sum = 168 of 400</span></div>
+<div style="height:20px"></div>
+<div class="dim">Sampled over the daemon's existing SSH peer</div>
+<div class="dim">only while this tab is open.</div>
+<div style="flex:1"></div>
+<div style="display:flex;gap:2ch;white-space:nowrap">
+<span><span class="mint">p</span> <span class="mut">sort cpu/mem</span></span>
+<span><span class="mint">space</span> <span class="mut">pause</span></span>
+<span><span class="mint">y</span> <span class="mut">copy pid</span></span>
+</div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">1 column = 4s · history kept in the daemon for 1h, lost on daemon restart</span>
+<span style="flex:1"></span>
+<span class="dim">live · 1s</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<a href="Main.dc.html"><span class="mint">esc</span> <span class="mut">back</span></a>
+<a href="NodeLogs.dc.html"><span class="mint">tab</span> <span class="mut">next tab</span></a>
+<span><span class="mint">+ −</span> <span class="mut">window</span></span>
+<span><span class="mint">p</span> <span class="mut">sort processes</span></span>
+<span><span class="mint">space</span> <span class="mut">pause</span></span>
+<a href="Dialogs.dc.html"><span class="mint">s</span> <span class="mut">stop</span></a>
+<a href="ShellAttached.dc.html"><span class="mint">x</span> <span class="mut">shell</span></a>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  chart(data, h) {
+    var B = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    var rows = [];
+    for (var r = h - 1; r >= 0; r--) {
+      var s = '';
+      for (var i = 0; i < data.length; i++) {
+        var lvl = (data[i] / 100) * h - r;
+        s += lvl >= 1 ? '█' : (lvl <= 0 ? ' ' : B[Math.max(1, Math.round(lvl * 8))]);
+      }
+      rows.push(s);
+    }
+    return rows;
+  }
+  renderVals() {
+    var cpu = [], mem = [];
+    for (var i = 0; i < 80; i++) {
+      var v = 42 + 12 * Math.sin(i / 5) + 7 * Math.sin(i / 1.7) + 4 * Math.cos(i / 3.1);
+      if (i >= 56 && i <= 61) v += 30 - Math.abs(i - 58.5) * 6;
+      cpu.push(Math.max(6, Math.min(96, Math.round(v))));
+      mem.push(Math.round(36 + i * 0.05 + (i >= 56 && i <= 64 ? 5 : 0)));
+    }
+    return { cpuRows: this.chart(cpu, 8), memRows: this.chart(mem, 4) };
+  }
+}
+</script>
+</body>
+</html>

@@ -421,7 +421,40 @@ Verify generic `localhost`, `127.0.0.1`, and the second node's explicit hostname
 
 On a node with an IPv6-capable HTTP test server, repeat the request on an unused port with the guest server bound only to `::1`. Verify `http://localhost:{port}`, `http://127.0.0.1:{port}`, and `http://{node}.localhost:{port}` return the service response instead of a 502. The daemon log should show neither address failing after the successful IPv6 fallback.
 
-## Flow 7: path-scoped flat TUI
+## Flow 7: path-scoped fleet manager
+
+
+The major-version frontend uses the reference in
+`plans/tui-vnext/reference/`. Begin with these manager checks. The remaining
+historical shell and renderer stress cases in this flow still need to be
+qualified using the new controls; TODO #57 tracks the incomplete design and
+manual qualification.
+
+- At 150×38, verify the fleet spans the window and the selected preview sits
+  below it. At 120 columns the large preview disappears; at 80×24 the table
+  uses percentage columns and a selected-node summary. Preserve selection
+  through each resize and an automatic refresh.
+- Select several running nodes, press Enter/Esc and refresh. `terminal list`
+  must show no newly created shell. Directory headings cannot be selected by
+  keyboard or mouse. `G` toggles groups; `<`/`>` chooses sort and `=` reverses.
+- Filter with free text, `status:running`, `template:small`, a quoted
+  `dir:"path with spaces"`, and an exact `port:3000`. Combine these terms.
+  A nonmatching query shows an empty result, and Esc clears it.
+- Mark nodes with Space, filter one out and verify the confirmation still
+  names every marked target. Cancel the confirmation. `*` marks all visible
+  nodes. Never execute a bulk deletion against non-disposable nodes.
+- Visit global views 1–5, then `:` and search for `templates`; Enter navigates
+  and Esc backs out. `?` filters key help. Numbers typed in a form or filter
+  must remain text.
+- In the create form, type a replacement slug and verify the muted default
+  disappears. Esc asks whether to discard; `n` preserves edits and `y`
+  discards. Resize while editing a long template and visit every field with
+  Tab: the focused field and submit help must stay visible.
+- In an embedded shell, every key except F6 is shell input, including
+  Option/Alt arrows and Option+t/w. F6 returns to TUI focus; there `t`, `T`,
+  `[`/`]`, `w` and F7 open guest/host tabs, switch, close and search. Check
+  press/repeat/release lifecycles in both the decoded and legacy protocols.
+- `make test-tui-manager` exercises these model, input and rendering contracts.
 
 Run in a real terminal:
 

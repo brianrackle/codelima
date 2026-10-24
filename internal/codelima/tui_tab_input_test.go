@@ -19,16 +19,10 @@ func TestTUITabOpenCloseKeyLifecycle(t *testing.T) {
 		close string
 		kind  terminal.TerminalKind
 	}{
-		{"alt guest", "\x1b[116;3:%du", "\x1b[119;3:%du", terminal.NodeShell},
-		{"meta guest", "\x1b[116;33:%du", "\x1b[119;33:%du", terminal.NodeShell},
-		{"alt meta guest", "\x1b[116;35:%du", "\x1b[119;35:%du", terminal.NodeShell},
-		{"alt host", "\x1b[116;4:%du", "\x1b[119;3:%du", terminal.NodeHostShell},
-		{"meta host", "\x1b[116;34:%du", "\x1b[119;33:%du", terminal.NodeHostShell},
-		{"alt meta host", "\x1b[116;36:%du", "\x1b[119;35:%du", terminal.NodeHostShell},
-		{"option guest glyph", "\x1b[8224;1:%du", "\x1b[8721;1:%du", terminal.NodeShell},
-		{"option host glyph", "\x1b[711;1:%du", "\x1b[8721;1:%du", terminal.NodeHostShell},
+		{"guest", "\x1b[116;1:%du", "\x1b[119;1:%du", terminal.NodeShell},
+		{"host", "\x1b[84;1:%du", "\x1b[119;1:%du", terminal.NodeHostShell},
 	} {
-		for _, focus := range []tuiFocus{tuiFocusTree, tuiFocusTerminal} {
+		for _, focus := range []tuiFocus{tuiFocusTree} {
 			for _, route := range []string{"handleKey", "handleEvent"} {
 				t.Run(input.name+"/"+string(focus)+"/"+route, func(t *testing.T) {
 					ctx := context.Background()
@@ -40,7 +34,7 @@ func TestTUITabOpenCloseKeyLifecycle(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					app := &vaxisTUIApp{ctx: ctx, service: service, state: state, sessions: sessions}
+					app := &vaxisTUIApp{ctx: ctx, service: service, state: state, sessions: sessions, nodeDetail: true, detailTab: tuiDetailShell}
 					if err := app.openTerminalTab(); err != nil {
 						t.Fatal(err)
 					}
@@ -64,7 +58,7 @@ func TestTUITabOpenCloseKeyLifecycle(t *testing.T) {
 					dispatch := func(sequence string, eventType vaxis.EventType) {
 						t.Helper()
 						key := decodedVaxisInputKey(t, fmt.Sprintf(sequence, int(eventType)+1))
-						if key.EventType != eventType || isTUITerminalPayloadKey(key) {
+						if key.EventType != eventType {
 							t.Fatalf("decoded shortcut = %#v, want event type %v", key, eventType)
 						}
 						if route == "handleKey" {

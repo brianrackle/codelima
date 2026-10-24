@@ -1,5 +1,20 @@
 # Patterns
 
+## Fleet projection and navigation reads
+
+Keep durable identity separate from rendered row position. Fleet selection and
+batch marks use node IDs; filtering/sorting produces a new view with directory
+headings that cannot be selected. Prune marks against authoritative records,
+not the current filter. Missing or nonfinite metrics remain unavailable and
+sort last in either direction. Keep grouping preference independent of metric
+sort order. Use the rendered projection for mouse hit testing (ADR 150).
+
+Run view-specific service reads outside the UI loop and tag each response with
+the requesting navigation generation. Ignore late replies after changing view
+or selected node. Give text widgets and terminal payload priority over global
+navigation. Claim focus-changing shortcut followups, but do not classify
+ordinary shell keys as manager commands. Embedded shell focus reserves only F6.
+
 ## Observe progress in native process tests
 
 Wait for specific output or state with a bounded deadline before triggering

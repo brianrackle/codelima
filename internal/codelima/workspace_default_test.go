@@ -123,9 +123,13 @@ func assertRenderedTextUsesStyle(t *testing.T, vx *vaxis.Vaxis, rendered, text s
 	t.Helper()
 
 	for row, line := range strings.Split(rendered, "\n") {
-		col := strings.Index(line, text)
-		if col < 0 {
+		index := strings.Index(line, text)
+		if index < 0 {
 			continue
+		}
+		col := 0
+		for _, character := range vaxis.Characters(line[:index]) {
+			col += character.Width
 		}
 		if got := renderedCellStyle(t, vx, col, row); got.Foreground != want.Foreground || got.Attribute != want.Attribute {
 			t.Fatalf("rendered %q style = %#v, want foreground %#v and attribute %#v", text, got, want.Foreground, want.Attribute)

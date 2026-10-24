@@ -1,5 +1,18 @@
 # Build And Release
 
+## Fleet-manager frontend checks
+
+`make test-tui-manager` runs the identity/filter/sort/mark projection, responsive
+layout, global/detail navigation, palette, key lifecycle, shell payload and
+resize regressions. `make test-tui-input` remains available for a selected
+`TUI_INPUT_TEST_FILTER`. Run `make verify` before packaging the major-version
+redesign, and run every applicable flow in QA.md. Focused checks do not qualify
+the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
+
+The exact reference sources are retained in `plans/tui-vnext/reference/` with
+provenance and hashes in `SOURCE.md`; they are implementation references and
+are not runtime assets or inputs to the native release package.
+
 This document is for maintainers.
 User-facing setup and usage stay in `README.md`.
 

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Activity</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0c1015}
+a{color:inherit;text-decoration:none}
+a:hover{color:#f0f5f8;text-decoration:underline}
+.mint{color:#91e6c0}.amber{color:#f0c674}.coral{color:#f4877c}.blue{color:#82b8ff}.violet{color:#c4a7ff}
+.mut{color:#9aabb9}.dim{color:#6f8597}.trk{color:#2b3a49}.hi{color:#f0f5f8}.b{font-weight:700}.pre{white-space:pre}
+</style>
+</helmet>
+<div style="width:1200px;height:760px;box-sizing:border-box;display:flex;flex-direction:column;background:#0c1015;color:#d9e2ec;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:20px;font-variant-ligatures:none;overflow:hidden">
+
+<header style="display:flex;align-items:center;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap">
+<span class="mint b">CodeLima</span>
+<nav aria-label="Views" style="display:flex">
+<a href="Main.dc.html" style="padding:0 1ch;color:#9aabb9">1 Nodes</a>
+<a href="Templates.dc.html" style="padding:0 1ch;color:#9aabb9">2 Templates</a>
+<a href="Ports.dc.html" style="padding:0 1ch;color:#9aabb9">3 Ports</a>
+<a href="Activity.dc.html" style="padding:0 1ch;background:#1b2a36;color:#91e6c0">4 Activity <span class="amber">◐1</span></a>
+<a href="System.dc.html" style="padding:0 1ch;color:#9aabb9">5 System <span class="amber">⚠2</span></a>
+</nav>
+<span style="flex:1"></span>
+<span><span class="mint">●</span> <span class="mut">daemon</span></span>
+<span><span class="dim">host</span> M3 Max <span class="dim">·</span> 16 vCPU <span class="dim">·</span> 64 GiB</span>
+</header>
+
+<main style="flex:1;display:flex;flex-direction:column;gap:20px;padding:20px 1ch 10px;min-height:0">
+
+<section aria-label="Running operations" style="position:relative;border:1px solid #263442;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">Running</span> <span class="dim">1 · owned by the daemon, keeps going if you quit</span></div>
+<div style="display:grid;grid-template-columns:2ch 14ch 7ch minmax(0,1fr) 22ch 7ch 18ch;column-gap:2ch;white-space:nowrap">
+<span class="amber">◐</span><span class="hi">docs-agent</span><span>start</span><span>bootstrap 5/6 <span class="dim">·</span> claude-code native install <span class="amber">⠹</span></span><span class="pre"><span class="amber">██████████████</span><span class="trk">░░░░░░░░</span></span><span class="amber">2m01s</span><span class="dim">⏎ open · K cancel</span>
+</div>
+<div style="white-space:nowrap" class="dim">one operation per node at a time; a second request on the same node is refused with the reason</div>
+</section>
+
+<section aria-label="History" style="position:relative;flex:1;min-height:0;border:1px solid #91e6c0;border-radius:6px;padding:10px 1ch 8px">
+<div style="position:absolute;top:-10px;left:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span class="hi b">History</span> <span class="dim">today · newest first</span></div>
+<div style="position:absolute;top:-10px;right:1ch;padding:0 1ch;background:#0c1015;white-space:nowrap"><span style="background:#1b2a36;color:#91e6c0;padding:0 1ch">all</span> <span class="dim">warnings</span> <span class="dim">errors</span> <span class="dim">· f</span></div>
+<div style="display:grid;grid-template-columns:9ch 2ch 16ch minmax(0,1fr) 16ch;column-gap:2ch;white-space:nowrap">
+<span class="dim">14:31:05</span><span class="blue">i</span><span>api-redesign</span><span>route :5173 added <span class="dim">· vite</span></span><span></span>
+<span class="dim">14:30:12</span><span class="amber">◐</span><span>docs-agent</span><span>start requested <span class="dim">· via tui</span></span><span></span>
+</div>
+<div style="display:grid;grid-template-columns:9ch 2ch 16ch minmax(0,1fr) 16ch;column-gap:2ch;white-space:nowrap;background:#1b2a36;margin:0 -1ch;padding:0 1ch">
+<span class="dim">14:29:40</span><span class="coral">✕</span><span class="hi b">kvm-nested</span><span class="coral">bootstrap failed · step 2/6 · rust-toolchain · exit 127</span><span class="dim">⏎ details</span>
+</div>
+<div style="display:grid;grid-template-columns:9ch 2ch 16ch minmax(0,1fr) 16ch;column-gap:2ch;white-space:nowrap">
+<span class="dim">14:27:52</span><span class="amber">⚠</span><span class="dim">host</span><span>vCPU overcommitted <span class="dim">· 18 of 16 allocated</span></span><span class="dim">5 system</span>
+<span class="dim">14:27:51</span><span class="amber">◐</span><span>kvm-nested</span><span>start requested <span class="dim">· via cli</span></span><span></span>
+<span class="dim">14:21:55</span><span class="blue">i</span><span>test-hardening</span><span>codex login on :1455 <span class="dim">· now owns localhost:1455</span></span><span></span>
+<span class="dim">14:02:57</span><span class="amber">⚠</span><span>codelima-dev</span><span>route :9229 degraded <span class="dim">· tunnel reset, answering 502 while it retries</span></span><span class="dim">3 ports</span>
+<span class="dim">13:58:12</span><span class="blue">i</span><span class="dim">clipboard</span><span>Copied http://api-redesign.localhost:3000</span><span></span>
+<span class="dim">13:45:48</span><span class="mint">✓</span><span>test-hardening</span><span>started <span class="dim">· 38s</span></span><span></span>
+<span class="dim">13:45:10</span><span class="amber">◐</span><span>test-hardening</span><span>start requested <span class="dim">· via tui</span></span><span></span>
+<span class="dim">12:17:31</span><span class="mint">✓</span><span>api-redesign</span><span>started <span class="dim">· 41s</span></span><span></span>
+<span class="dim">12:16:50</span><span class="amber">◐</span><span>api-redesign</span><span>start requested <span class="dim">· via tui</span></span><span></span>
+<span class="dim">11:04:19</span><span class="blue">i</span><span>codex session</span><span>"Fix renderer backpressure" on codelima-dev <span class="dim">· bell</span></span><span class="dim">⏎ attach</span>
+<span class="dim">09:10:02</span><span class="mint">✓</span><span class="dim">daemon</span><span>updated in place 0.3.4 → 0.3.5 <span class="dim">· 7 sessions kept</span></span><span></span>
+</div>
+</section>
+
+</main>
+
+<div style="display:flex;height:20px;padding:0 2ch;white-space:nowrap;flex-shrink:0">
+<span class="dim">the footer shows the latest warning or error for 6s; everything lands here, nothing pops up</span>
+<span style="flex:1"></span>
+<span class="dim">kept 7 days</span>
+</div>
+
+<footer style="display:flex;gap:2ch;height:20px;padding:0 1ch;background:#111820;flex-shrink:0;white-space:nowrap;overflow:hidden">
+<span><span class="mint">↑↓</span> <span class="mut">move</span></span>
+<a href="NodeFailed.dc.html"><span class="mint">⏎</span> <span class="mut">open</span></a>
+<span><span class="mint">K</span> <span class="mut">cancel operation</span></span>
+<span><span class="mint">f</span> <span class="mut">all / warn / error</span></span>
+<span><span class="mint">/</span> <span class="mut">filter</span></span>
+<span><span class="mint">y</span> <span class="mut">copy</span></span>
+<a href="Help.dc.html"><span class="mint">?</span> <span class="mut">help</span></a>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

@@ -61,10 +61,9 @@ lines. Running-node usage is sampled once per second. CPU is normalized to
 used/total binary units. Scoped views show the working directory relative to
 the path used to open the TUI.
 
-Selecting a running node shows its terminal by default, reuses any existing
-node tab, and opens a guest tab when none exists. Selecting a stopped node shows
-its info view without opening a guest shell. Press `i` to inspect the alternate
-view for the current node.
+The TUI opens a fleet table. Selecting or refreshing a node never opens a
+shell. Press `Enter` for node details or `x` to explicitly open a shell; `Esc`
+returns from detail to the same node.
 
 When the TUI opens, its fixed-width `CodeLima` wordmark briefly shuffles like a
 slot machine and settles from left to right. The effect runs independently of
@@ -76,9 +75,9 @@ In the TUI:
 
 1. Press `n` to create a sandbox.
 2. Press `s` to start it.
-3. Press `Option+t` to open a guest terminal tab.
-4. Press `Option+Backtick` to move focus into the terminal.
-5. Run your agent with the freedom it needs.
+3. Select the node and press `x` to open its shell.
+4. Run your agent with the freedom it needs.
+5. Press `F6` to return from the embedded shell to the manager.
 
 ```sh
 codex --yolo
@@ -295,48 +294,47 @@ installations. Agent credentials and unrelated npm packages are preserved.
 
 ### The TUI
 
+The TUI opens the fleet manager. Browsing or refreshing nodes never creates a
+shell. Wide terminals show a selected-node preview below the table; widths
+below 100 columns use a compact table. `Enter` opens node detail, and `Esc`
+returns to the same selection.
+
 | Key | Action |
 | --- | --- |
-| `Up` / `Down` | Select a node |
-| `n` | Create a node |
-| `s` | Start or stop the selected node |
-| `c` | Clone the selected node |
-| `d` | Delete the selected node |
-| `i` | Switch between node info and terminal views |
-| `Option+Backtick` or `F6` | Toggle node-list and terminal focus |
-| `Option+t` | Open a guest terminal tab |
-| `Option+Shift+t` | Open a host terminal tab in the project directory |
-| `Option+Left` / `Option+Right` | Switch terminal tabs |
-| `Option+Shift+Left` / `Option+Shift+Right` | Move the active terminal tab |
-| `Option+w` | Close the active terminal tab |
-| `a` | Manage node configurations |
-| `g` | Manage environment bootstrap bundles |
-| `m` | Show background-task messages |
-| `q` | Quit from the node-list focus |
+| `1`–`5` | Nodes, Templates, Ports, Activity, System |
+| `0` | Toggle all nodes / launch-directory scope |
+| `Up` / `Down` or `j` / `k` | Select a node |
+| `/` | Filter names/directories, or use `status:`, `template:`, `dir:`, `port:` |
+| `G`, `<` / `>`, `=` | Toggle directory grouping, choose sort, reverse order |
+| `Space`, `*` | Mark one node / all visible nodes; marks survive filtering |
+| `n`, `s`, `c`, `d` | Create, start/stop, clone, delete |
+| `x`, `X` | Open a shell / show shell choices |
+| `Tab` / `Shift-Tab` | Cycle node detail tabs |
+| `a`, `g`, `m` | Configurations, environments, activity |
+| `:`, `?` | Search commands / keyboard shortcuts |
+| `q` | Quit from a global view; return from node detail |
+
+For example, `/status:running template:small dir:"acme api"` combines filters.
+Selection follows node identity through sorting and refreshes. Missing metrics
+show `—`. Metric sorts place unavailable readings last and temporarily flatten
+directory groups. Batch actions include marked nodes hidden by the filter and
+show one confirmation; deleting a batch requires its node count.
+
+The embedded Shell tab reserves **F6 only** while the shell has focus. All
+other keys, including Option/Alt arrows, reach the shell. Press F6 to return
+to TUI focus, then use `[` / `]` to switch tabs, `t` for a guest tab, `T` for a
+host tab, `w` to close, or `F7` to search. Tab creation/closing and focus changes
+act once per press; navigation and text editing repeat while held. Releases
+from a focus-changing key cannot act on the newly opened form or shell.
 
 Inside forms, use `Tab`, `Up`, and `Down` to move between fields, `Enter` or
-`Right` to open choices, `Ctrl+s` to submit, and `Esc` to cancel.
+`Right` to open choices, `Ctrl+s` to submit, and `Esc` to cancel. The Create
+Node form proposes the current directory and its slug-safe leaf name. These
+muted defaults disappear when an explicit value is typed.
 
-The Create Node form proposes the slug-safe leaf name of the current directory
-as the node slug. The slug and current-directory defaults are shown in muted
-text and disappear when you type an explicit value.
-
-On macOS, configure the terminal with `macos-option-as-alt = true` when
-available. codelima also recognizes the standard US-layout Option glyphs for
-its core shortcuts.
-
-When the terminal reports key repeats and releases, tab opening/closing,
-focus toggles, `F7` search, `i` Info, node/menu actions, form submit/cancel,
-and selector toggles act once per press. Separate presses act immediately.
-Releasing `Enter` after choosing a selector value does not submit the parent
-form; releasing `Esc` does not dismiss that form too. Holding a shortcut that
-opens a form does not type the shortcut letter into it.
-
-Navigation and text editing repeat while held: this includes tab movement,
-arrows, field navigation, message scrolling, and search-match navigation.
-Releasing the key does not move again. Shell input and pasted text retain their
-normal behavior. Legacy terminals that report repeats as ordinary presses
-cannot distinguish holding a key from separate presses.
+The major-version implementation is still in progress. The
+[delivery ledger](plans/tui-vnext/README.md) records incomplete design surfaces
+and runtime contracts, including raw shell attachment and durable activity.
 
 Host and guest terminals are tabs on the same node. Ordinary guest tabs are
 named `shell` and host tabs `host`, without numbers. Common shell titles such
