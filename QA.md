@@ -441,9 +441,21 @@ Raw shell attachment checks (ADR 151):
    claiming the ended session is running. Interrupt the client or stop/update
    the daemon and confirm the host terminal is usable afterward.
 
+Host capacity and System panels (ADR 153): at 150×38 inspect the header's
+model/CPU/memory and compare them to the local OS. Check free disk space on the
+LIMA_HOME volume. Create or use two disposable nodes in different directories;
+while both VMs are up, switching directory scope and applying a fleet filter
+must leave global allocation unchanged. A bootstrap-failed node whose VM is
+still up must still count; stopping its VM must release the allocation. Inspect
+any overcommit warning. In System, cycle Doctor → Daemon → Host → Settings in
+both directions, scroll long lists, and select panels/settings with the mouse.
+Resize to 120×30 and 80×24: only the focused panel is visible, and all panels and
+settings remain reachable. Compare daemon PID/version/session count to
+`codelima daemon status`. Stop and remove every disposable node/home afterward.
+
 Settings and shell choices (ADR 152):
 
-1. Open System, Tab to Settings, and change shell mode with Enter. Quit and
+1. Open System, cycle Tab to Settings, and change shell mode with Enter. Quit and
    reopen; confirm the saved choice remains. Edit a file comment and unknown
    setting, change another preference, and confirm both remain in YAML.
 2. At 80×24 and a wide size, visit every setting. Change color to ANSI and back

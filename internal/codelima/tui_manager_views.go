@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
 )
@@ -20,6 +21,8 @@ type tuiManagerData struct {
 	loading        bool
 	err            error
 	preferences    *Config
+	daemon         *daemon.Status
+	daemonErr      error
 }
 
 type tuiManagerDataEvent struct {
@@ -55,6 +58,13 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 				data.environments, data.err = a.service.EnvironmentConfigList(ctx, false)
 			}
 		case tuiViewSystem:
+			if a.service.daemonClient != nil {
+				var status daemon.Status
+				data.daemonErr = a.service.daemonClient.Call(ctx, "daemon.status", nil, &status)
+				if data.daemonErr == nil {
+					data.daemon = &status
+				}
+			}
 			var cfg Config
 			cfg, data.err = a.service.SettingsRead()
 			if data.err == nil {
@@ -266,47 +276,6 @@ func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
 			style = theme.amber
 		}
 		tuiLine(inner, row, entry.Time.Format("15:04:05")+"  "+entry.Level.String()+"  "+entry.Text, style)
-		row++
-	}
-}
-
-func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
-	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "System · C check · R repair · Tab doctor/settings · Enter edit", theme.mint)
-	doctorRect := tuiRect{col: 1, row: 4, width: width - 2, height: height - 7}
-	settingsRect := doctorRect
-	if width >= 100 {
-		doctorRect.width = (width - 3) / 2
-		settingsRect.col = doctorRect.col + doctorRect.width + 1
-		settingsRect.width = width - settingsRect.col - 1
-	}
-	if width >= 100 || a.systemPanel == 1 {
-		a.drawManagerSettings(win.New(settingsRect.col, settingsRect.row, settingsRect.width, settingsRect.height), theme)
-	}
-	if width < 100 && a.systemPanel == 1 {
-		return
-	}
-	style := theme.border
-	if a.systemPanel == 0 {
-		style = theme.mint
-	}
-	inner := border.All(win.New(doctorRect.col, doctorRect.row, doctorRect.width, doctorRect.height), style)
-	tuiLine(inner, 0, "Doctor", theme.muted)
-	if a.managerData.loading {
-		tuiLine(inner, 2, "Checking system…", theme.dim)
-		return
-	}
-	row := 2
-	for _, check := range a.managerData.doctor.Checks {
-		style := theme.mint
-		if check.Status != "ok" {
-			style = theme.amber
-		}
-		tuiLine(inner, row, fmt.Sprintf("%-8s %-20s %s", check.Status, check.Name, check.Message), style)
-		row++
-	}
-	for _, warning := range a.managerData.doctor.Warnings {
-		tuiLine(inner, row, warning, theme.amber)
 		row++
 	}
 }

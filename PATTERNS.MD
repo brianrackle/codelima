@@ -1,5 +1,14 @@
 # Patterns
 
+## Capacity observations and global allocation
+
+Sample native host data outside the UI loop, preserving nil for unavailable
+measurements. Combine capacity with the authoritative global node list before
+applying directory scope or search. Use runtime observations when deciding
+whether resources are allocated: a failed bootstrap can leave a VM running.
+Deliver the immutable summary with the same generation as its node refresh.
+Read-only checks must not create directories or invoke repair (ADR 153).
+
 ## Editable preferences and external shell launch
 
 Patch only the selected YAML leaf under the settings lock, retaining comments,

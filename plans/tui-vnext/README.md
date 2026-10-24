@@ -93,3 +93,17 @@ Current limitations include published-port-only Ports,
 window-local Activity, current-sample-only Metrics, basic event Logs,
 and existing forms inside the new modal geometry. These are implementation
 stages, not reductions of the accepted scope. See TODO #57.
+
+Host model/CPU/memory and LIMA_HOME free space now use native observations
+(ADR 153). Allocation is global across scopes and includes failed nodes whose
+VMs remain up. System renders four responsive panels with keyboard and mouse
+navigation. Focused tests and macOS sampler cross-builds pass; runtime macOS
+sampling and two-VM allocation changes remain part of native qualification.
+Daemon actions and the rest of System's reference behavior remain in progress.
+
+Full verify, race and integration checks pass for host capacity. Live 150×38
+and 80×24 panels were inspected and compared with OS readings; the VirtioFS
+fragment-size regression prevents an inflated disk total. A real Ubuntu guest
+now boots under TCG/Cortex-A72; raw detach/reattach retained its shell PID and
+variable through resize. The disposable fixture remains active for remaining
+launch, lifecycle and allocation checks and must be cleaned before completion.

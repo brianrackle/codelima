@@ -1,0 +1,158 @@
+package codelima
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"go.rockorager.dev/vaxis"
+	"go.rockorager.dev/vaxis/widgets/border"
+)
+
+const (
+	tuiSystemDoctor = iota
+	tuiSystemDaemon
+	tuiSystemHost
+	tuiSystemSettings
+	tuiSystemPanelCount
+)
+
+func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
+	width, height := win.Size()
+	tuiLine(win.New(2, 2, width-4, 1), 0, "System · Tab/Shift-Tab panel · ↑↓ scroll · C check · R repair", theme.mint)
+	a.systemRects = [tuiSystemPanelCount]tuiRect{}
+	full := tuiRect{col: 1, row: 4, width: width - 2, height: height - 7}
+	if width >= 120 && height >= 34 {
+		left, top := (full.width-1)/2, (full.height-1)/2
+		for panel := range tuiSystemPanelCount {
+			r := full
+			r.width, r.height = left, top
+			if panel%2 == 1 {
+				r.col += left + 1
+				r.width = full.width - left - 1
+			}
+			if panel >= 2 {
+				r.row += top + 1
+				r.height = full.height - top - 1
+			}
+			a.systemRects[panel] = r
+		}
+	} else {
+		a.systemRects[a.systemPanel] = full
+	}
+	for panel, rect := range a.systemRects {
+		if rect.width == 0 {
+			continue
+		}
+		window := win.New(rect.col, rect.row, rect.width, rect.height)
+		if panel == tuiSystemSettings {
+			a.drawManagerSettings(window, theme)
+			continue
+		}
+		style := theme.border
+		if a.systemPanel == panel {
+			style = theme.mint
+		}
+		inner := border.All(window, style)
+		switch panel {
+		case tuiSystemDoctor:
+			a.drawSystemDoctor(inner, theme)
+		case tuiSystemDaemon:
+			a.drawSystemDaemon(inner, theme)
+		case tuiSystemHost:
+			a.drawSystemHost(inner, theme)
+		}
+	}
+}
+
+func (a *vaxisTUIApp) drawSystemDoctor(win vaxis.Window, theme tuiTheme) {
+	tuiLine(win, 0, "Doctor · C re-check · R repair", theme.muted)
+	if a.managerData.loading {
+		tuiLine(win, 2, "Checking system…", theme.dim)
+		return
+	}
+	_, height := win.Size()
+	lines := make([]string, 0, len(a.managerData.doctor.Checks)+len(a.managerData.doctor.Warnings))
+	for _, check := range a.managerData.doctor.Checks {
+		lines = append(lines, fmt.Sprintf("%-8s %-16s %s", check.Status, check.Name, check.Message))
+	}
+	lines = append(lines, a.managerData.doctor.Warnings...)
+	for row, line := range visibleSystemLines(lines, &a.systemScroll[tuiSystemDoctor], height-2) {
+		style := theme.amber
+		if strings.HasPrefix(line, "ok ") {
+			style = theme.mint
+		}
+		tuiLine(win, row+2, line, style)
+	}
+}
+
+func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, theme tuiTheme) {
+	tuiLine(win, 0, "Daemon · sessions, forwarding, telemetry", theme.muted)
+	status := a.managerData.daemon
+	if status == nil || a.daemonDisconnected {
+		message := "Daemon status unavailable · C re-check"
+		if a.managerData.daemonErr != nil {
+			message = a.managerData.daemonErr.Error()
+		}
+		tuiLine(win, 2, message, theme.amber)
+		return
+	}
+	tuiLine(win, 2, fmt.Sprintf("status     running · pid %d", status.PID), theme.mint)
+	tuiLine(win, 3, fmt.Sprintf("version    %s · protocol %d", status.Version, status.Protocol), theme.text)
+	if !status.StartedAt.IsZero() {
+		tuiLine(win, 4, "uptime     "+time.Since(status.StartedAt).Round(time.Second).String(), theme.text)
+	}
+	tuiLine(win, 5, fmt.Sprintf("sessions   %d", status.TerminalCount), theme.text)
+	tuiLine(win, 6, "telemetry  1s · CPU, memory, disk over SSH", theme.dim)
+}
+
+func (a *vaxisTUIApp) drawSystemHost(win vaxis.Window, theme tuiTheme) {
+	host := a.host
+	tuiLine(win, 0, "Host capacity · "+host.model(), theme.muted)
+	if !host.AllocationsKnown {
+		tuiLine(win, 2, "VM allocation unavailable", theme.amber)
+		return
+	}
+	tuiLine(win, 2, "ALLOCATED TO VMs THAT ARE UP · all directories", theme.muted)
+	cpuText, cpuStyle := fmt.Sprintf("vCPU    %d / %d", host.AllocatedCPUs, host.Capacity.CPUs), theme.text
+	if host.Capacity.CPUs > 0 {
+		cpuText = fmt.Sprintf("vCPU    %s  %d / %d", tuiGauge(100*float64(host.AllocatedCPUs)/float64(host.Capacity.CPUs), 8), host.AllocatedCPUs, host.Capacity.CPUs)
+	}
+	if host.Capacity.CPUs > 0 && host.AllocatedCPUs > uint64(host.Capacity.CPUs) {
+		cpuText += fmt.Sprintf(" · overcommitted by %d", host.AllocatedCPUs-uint64(host.Capacity.CPUs))
+		cpuStyle = theme.coral
+	}
+	tuiLine(win, 3, cpuText, cpuStyle)
+	memoryText, memoryStyle := fmt.Sprintf("memory  %s / %s", tuiHostBytes(&host.AllocatedMemoryBytes), tuiHostBytes(host.Capacity.MemoryBytes)), theme.text
+	if host.Capacity.MemoryBytes != nil && *host.Capacity.MemoryBytes > 0 {
+		memoryText = fmt.Sprintf("memory  %s  %s / %s", tuiGauge(100*float64(host.AllocatedMemoryBytes)/float64(*host.Capacity.MemoryBytes), 8), tuiHostBytes(&host.AllocatedMemoryBytes), tuiHostBytes(host.Capacity.MemoryBytes))
+	}
+	if host.Capacity.MemoryBytes != nil && host.AllocatedMemoryBytes > *host.Capacity.MemoryBytes {
+		memoryText += " · overcommitted"
+		memoryStyle = theme.coral
+	}
+	tuiLine(win, 4, memoryText, memoryStyle)
+	tuiLine(win, 5, "disk    "+tuiHostBytes(host.Capacity.DiskAvailableBytes)+" free on LIMA_HOME volume", theme.text)
+	_, height := win.Size()
+	lines := make([]string, 0, len(host.Nodes)+1)
+	if host.UnknownNodes > 0 {
+		lines = append(lines, fmt.Sprintf("%d nodes have no runtime observation", host.UnknownNodes))
+	}
+	for _, node := range host.Nodes {
+		status := string(node.Status)
+		if node.Status == NodeStatusFailed {
+			status += " · VM still up"
+		}
+		memory := uint64(node.MemoryMiB) << 20
+		lines = append(lines, fmt.Sprintf("%-18s %2d CPU  %s  %s", node.Slug, node.VCPUs, tuiHostBytes(&memory), status))
+	}
+	for i, line := range visibleSystemLines(lines, &a.systemScroll[tuiSystemHost], height-7) {
+		tuiLine(win, 7+i, line, theme.text)
+	}
+}
+
+func visibleSystemLines(lines []string, scroll *int, height int) []string {
+	height = max(0, height)
+	*scroll = max(0, min(*scroll, len(lines)-height))
+	return lines[*scroll:min(len(lines), *scroll+height)]
+}

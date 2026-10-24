@@ -492,7 +492,7 @@ func TestServeAppliesNonRedrawEventsQueuedBehindRedraws(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NodeCreate() error = %v", err)
 	}
-	nodes, err := loadTUINodes(ctx, service, "")
+	nodes, err := loadTUINodes(ctx, service)
 	if err != nil {
 		t.Fatalf("loadTUINodes() error = %v", err)
 	}

@@ -75,17 +75,36 @@ These are required follow-ups, not completed design scope. The suggested
 approach retains native snapshot export plus an acknowledged journal tail;
 it avoids historical side effects but requires explicit mode and lease tests.
 
+Host capacity is now sampled through native OS reads outside the UI loop
+(ADR 153). Global allocations use observed VM state before applying directory
+scope; failed-but-running VMs count, and missing observations stay explicit.
+Full verify, race and integration gates pass. Live OS comparison corrected
+VirtioFS block units and confirmed CPU/memory/disk values; screenshots at
+150×38 and 80×24 were inspected. System has responsive
+Doctor/Daemon/Host/Settings panels with reverse Tab,
+scrolling and mouse access. Focused parsing, scope, stale-response, layout and
+settings tests pass, and the sampler cross-compiles for both macOS architectures.
+Native macOS values and the two-live-VM allocation flow still need qualification;
+the required solution is to run the QA flow on a host with working guest boots.
+This validates actual capacity/release behavior but needs sufficient VM memory.
+Daemon controls and richer status remain open alongside other System work.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
 and progress/retry/cancel; one-hour metrics and on-demand processes; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean
-all disposable state. The earlier VM test-environment issue is resolved:
+all disposable state. QEMU installation and device access are resolved:
 `make init-qemu-guest` supplies project-local QEMU and firmware, and
 `make run-kvm` adds KVM access only to the current user's child process tree.
 The automated KVM probe succeeds and a disposable real node was created.
-Boot and lifecycle qualification are in progress under `tmp/v`; stop/delete
+The 25.10 and 24.04 KVM guests stalled during kernel initialization before SSH.
+Software emulation with a Cortex-A72 CPU booted Ubuntu 24.04 successfully.
+A project-local tmpfs socket directory and SSH master avoid VirtioFS socket
+hard-link failures. Guest attach/detach/reattach preserved PID 4418 and a shell
+variable, including 150×38 → 80×24 resize. Launch/guest qualification continues
+under `tmp/v`; close the SSH master, unmount its sockets directory, stop/delete
 its VM, daemon and tmux session and remove the fixture before completion.
 
 Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified

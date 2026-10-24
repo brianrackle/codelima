@@ -9,6 +9,11 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-host-capacity` checks native capacity parsing, read-only volume
+sampling, global allocation across directory scopes, stale-response rejection,
+responsive System panels and settings navigation. It also cross-compiles the
+sampler for macOS arm64 and amd64; native macOS readings require manual QA.
+
 The exact reference sources are retained in `plans/tui-vnext/reference/` with
 provenance and hashes in `SOURCE.md`; they are implementation references and
 are not runtime assets or inputs to the native release package.

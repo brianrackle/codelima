@@ -12,7 +12,9 @@ func TestTUIManagerSettingsEditPersistsAndControlsShellMode(t *testing.T) {
 	app, _ := newTestManager(t, 80, 24)
 	app.service = app.sessions.service
 	app.view = tuiViewSystem
-	app.handleKey(vaxis.Key{Keycode: vaxis.KeyTab})
+	for range tuiSystemSettings {
+		app.handleKey(vaxis.Key{Keycode: vaxis.KeyTab})
+	}
 	app.draw()
 	screen := renderedScreenText(t, app.vx, 80, 24)
 	for _, want := range []string{"shell.mode", "shell.window", "import_host_auth", "confirm stop", "group by directory", "color"} {

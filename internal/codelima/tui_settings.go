@@ -40,27 +40,31 @@ func (a *vaxisTUIApp) managerSettingRows() []tuiManagerSetting {
 
 func (a *vaxisTUIApp) drawManagerSettings(win vaxis.Window, theme tuiTheme) {
 	style := theme.border
-	if a.systemPanel == 1 {
+	if a.systemPanel == tuiSystemSettings {
 		style = theme.mint
 	}
 	inner := border.All(win, style)
 	tuiLine(inner, 0, "Settings · Enter edit", theme.muted)
 	_, height := inner.Size()
 	rows := a.managerSettingRows()
-	visible := max(1, height-5)
-	start := max(0, a.settingIndex-visible+1)
+	start, visible := a.managerSettingsViewport(height)
 	for i := start; i < len(rows) && i < start+visible; i++ {
 		style := theme.text
 		if rows[i].key == "" {
 			style = theme.dim
 		}
-		if a.systemPanel == 1 && i == a.settingIndex {
+		if a.systemPanel == tuiSystemSettings && i == a.settingIndex {
 			style = theme.selected
 		}
 		tuiLine(inner, 2+i-start, fmt.Sprintf("%-20s %s", rows[i].label, rows[i].value), style)
 	}
 	tuiLine(inner, height-2, "Changes preserve comments and unknown keys.", theme.dim)
 	tuiLine(inner, height-1, "Host credentials: new nodes only · Tab panel", theme.dim)
+}
+
+func (a *vaxisTUIApp) managerSettingsViewport(height int) (start, visible int) {
+	visible = max(1, height-5)
+	return max(0, a.settingIndex-visible+1), visible
 }
 
 func (a *vaxisTUIApp) editManagerSetting() error {

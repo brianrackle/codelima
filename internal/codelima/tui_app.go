@@ -54,6 +54,9 @@ type vaxisTUIApp struct {
 	preferenceRevision uint64
 	systemPanel        int
 	settingIndex       int
+	host               tuiHostSummary
+	systemRects        [tuiSystemPanelCount]tuiRect
+	systemScroll       [tuiSystemPanelCount]int
 	// shortcutKeys consumes followups of one-shot shortcuts and keys that
 	// changed input context. It belongs to the UI event loop.
 	shortcutKeys      map[rune]struct{}
@@ -218,10 +221,11 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		defer func() { _ = closeLog() }()
 	}
 
-	nodes, err := loadTUINodes(ctx, service, workspaceRoot)
-	if err != nil {
-		return err
+	initial := loadTUIRefresh(ctx, service, workspaceRoot)
+	if initial.Err != nil {
+		return initial.Err
 	}
+	nodes := initial.Nodes
 
 	vx, err := vaxis.New(vaxis.Options{})
 	if err != nil {
@@ -251,6 +255,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		operations:        map[string]*tuiOperationState{},
 		messages:          newTUIMessageLog(tuiMessageLogDefaultCap),
 		logoAnimation:     newTUILogoAnimation(),
+		host:              *initial.Host,
 	}
 	preferences, err := service.SettingsRead()
 	if err != nil {
@@ -382,15 +387,15 @@ func collapseQueuedRedraws(events chan vaxis.Event) vaxis.Event {
 	}
 }
 
-func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) ([]Node, error) {
+func loadTUINodes(ctx context.Context, service *Service) ([]Node, error) {
 	if service != nil && service.daemonClient != nil {
 		var nodes []Node
 		if err := service.daemonClient.Call(ctx, "node.list", map[string]bool{"include_deleted": false}, &nodes); err != nil {
 			return nil, fromDaemonError(err)
 		}
-		return filterNodesByDirectoryRoot(nodes, workspaceRoot)
+		return nodes, nil
 	}
-	return service.NodeListByDirectoryRoot(ctx, workspaceRoot, false)
+	return service.NodeList(ctx, false)
 }
 
 // serve() contract even while every current handler routes errors to status.
@@ -780,16 +785,18 @@ func (a *vaxisTUIApp) startDataRefresh(preferredKey string) {
 	a.refreshGeneration++
 	a.refreshScope = a.treeWorkspaceRoot
 	scope, generation := a.refreshScope, a.refreshGeneration
+	service, ctx := a.service, a.ctx
+	load := func() tuiRefreshCompleteEvent {
+		event := loadTUIRefresh(ctx, service, scope)
+		event.Generation, event.PreferredKey = generation, preferredKey
+		return event
+	}
 	if a.postEvent == nil {
-		nodes, err := loadTUINodes(a.ctx, a.service, scope)
-		a.finishDataRefresh(tuiRefreshCompleteEvent{Generation: generation, Nodes: nodes, PreferredKey: preferredKey, Err: err})
+		a.finishDataRefresh(load())
 		return
 	}
 
-	go func() {
-		nodes, err := loadTUINodes(a.ctx, a.service, scope)
-		a.postCompletion(tuiRefreshCompleteEvent{Generation: generation, Nodes: nodes, PreferredKey: preferredKey, Err: err})
-	}()
+	go func() { a.postCompletion(load()) }()
 }
 
 func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
@@ -797,6 +804,9 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		return
 	}
 	a.refreshInFlight = false
+	if event.Host != nil {
+		a.host = *event.Host
+	}
 	if event.Err != nil {
 		// Auto-refresh errors were previously swallowed silently; surface them at
 		// the log seam (warn, not per-tick success) without disturbing the UI,

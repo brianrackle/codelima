@@ -252,6 +252,32 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 			}
 		}
 	}
+	if a.view == tuiViewSystem && mouse.EventType == vaxis.EventPress {
+		for panel, rect := range a.systemRects {
+			if !rect.contains(mouse.Col, mouse.Row) {
+				continue
+			}
+			a.systemPanel = panel
+			switch mouse.Button {
+			case vaxis.MouseWheelUp:
+				a.moveManagerSelection(-1)
+			case vaxis.MouseWheelDown:
+				a.moveManagerSelection(1)
+			case vaxis.MouseLeftButton:
+				if panel == tuiSystemSettings {
+					start, visible := a.managerSettingsViewport(rect.height - 2)
+					index := start + mouse.Row - rect.row - 3
+					if index >= start && index < min(len(a.managerSettingRows()), start+visible) {
+						a.settingIndex = index
+						if err := a.editManagerSetting(); err != nil {
+							a.setStatus(slog.LevelError, err.Error())
+						}
+					}
+				}
+			}
+			return
+		}
+	}
 	if a.treeContentRect.contains(mouse.Col, mouse.Row) {
 		if mouse.EventType != vaxis.EventPress {
 			return

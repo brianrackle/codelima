@@ -330,6 +330,16 @@ show `—`. Metric sorts place unavailable readings last and temporarily flatten
 directory groups. Batch actions include marked nodes hidden by the filter and
 show one confirmation; deleting a batch requires its node count.
 
+At 140 columns and wider, the header shows the host model, logical CPUs and
+memory. The allocation summary includes CodeLima VMs in every directory, even
+when the fleet is scoped or filtered. A failed node still counts while its VM
+is up. Disk space is measured on the LIMA_HOME volume; missing observations
+show `—`. These are configured allocations, not current host CPU/RAM usage.
+
+System has Doctor, Daemon, Host and Settings panels. Use `Tab`/`Shift-Tab` to
+move between them and arrows or the mouse wheel to scroll. Smaller terminals
+show the focused panel; wide terminals of at least 34 rows show all four.
+
 By default, `x` attaches the node's daemon session directly to your terminal and suspends
 the manager. `Ctrl+]` detaches; `exit` ends the session. `codelima shell NODE`
 uses the same managed shell, and `codelima terminal attach TERMINAL_ID` resumes
@@ -339,7 +349,7 @@ a specific session from `codelima terminal list`. Supplying a command after
 `X` opens a scrollable chooser: Enter attaches, `w` opens a new terminal window,
 `t` opens a tmux window when running inside tmux, and `h` opens a host shell.
 Existing sessions are selectable with arrows/Enter or `1`–`9`. Shift with a
-mode choice saves it as `x`'s default. Open **System**, press Tab for Settings,
+mode choice saves it as `x`'s default. Open **System**, cycle to Settings,
 then Enter to edit shell mode, the window command, host credential import,
 stop confirmations, directory grouping or color. Edits preserve YAML comments
 and unknown keys. These preferences can also be changed from the CLI:

@@ -2263,7 +2263,7 @@ func TestReadSurfacesDoNotWrite(t *testing.T) {
 	}
 
 	// The TUI auto-refresh tick reloads the node list through this path.
-	if _, err := loadTUINodes(ctx, service, ""); err != nil {
+	if _, err := loadTUINodes(ctx, service); err != nil {
 		t.Fatalf("loadTUINodes() error = %v", err)
 	}
 

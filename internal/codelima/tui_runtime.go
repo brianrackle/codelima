@@ -147,6 +147,7 @@ func nodeUsageFromNode(node Node) nodeUsageEvent {
 type tuiRefreshCompleteEvent struct {
 	Generation uint64
 	Nodes      []Node
+	Host       *tuiHostSummary
 	// PreferredKey is the tree selection to restore once the reload lands. It
 	// is empty for the periodic tick and set for reloads requested by a
 	// finished background operation.

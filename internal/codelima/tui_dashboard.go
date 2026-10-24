@@ -183,7 +183,14 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: len(label), height: 1})
 		col += len(label)
 	}
-	if width-col > 18 {
+	right := width
+	if width >= 140 && !a.host.Capacity.ObservedAt.IsZero() {
+		host := "host " + a.host.identity()
+		hostWidth := min(renderedTextWidth(a.vx, host), width-col-20)
+		right = width - hostWidth - 2
+		tuiLine(bar.New(right+2, 0, hostWidth, 1), 0, host, theme.chrome)
+	}
+	if right-col > 18 {
 		scope := "all nodes"
 		if a.treeWorkspaceRoot != "" {
 			scope = a.treeWorkspaceRoot
@@ -194,7 +201,7 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 		} else if a.service == nil || a.service.daemonClient == nil {
 			connection = "○ local"
 		}
-		tuiLine(bar.New(col+1, 0, width-col-1, 1), 0, connection+"   scope "+scope, theme.chrome)
+		tuiLine(bar.New(col+1, 0, right-col-1, 1), 0, connection+"   scope "+scope, theme.chrome)
 	}
 }
 
@@ -212,6 +219,16 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 		}
 	}
 	tuiLine(win.New(2, 1, width-4, 1), 0, countText, theme.muted)
+	if width >= 140 && !a.host.Capacity.ObservedAt.IsZero() {
+		allocation := a.host.allocationText()
+		space := width - renderedTextWidth(a.vx, countText) - 6
+		allocationWidth := min(space, renderedTextWidth(a.vx, allocation))
+		style := theme.muted
+		if a.host.Capacity.CPUs > 0 && a.host.AllocatedCPUs > uint64(a.host.Capacity.CPUs) {
+			style = theme.coral
+		}
+		tuiLine(win.New(width-allocationWidth-2, 1, allocationWidth, 1), 0, allocation, style)
+	}
 	layout := layoutTUIFleet(width, height, len(a.fleet.rows))
 	table := win.New(layout.Table.col, layout.Table.row, layout.Table.width, layout.Table.height)
 	inner := border.All(table, theme.mint)
@@ -462,7 +479,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 	case tuiViewActivity:
 		return "↑↓ scroll · Esc nodes · : commands · ? help · q quit"
 	case tuiViewSystem:
-		return "C check · R repair · Esc nodes · : commands · ? help · q quit"
+		return "Tab panel · ↑↓ move · Enter edit · C check · R repair · Esc nodes · ? help"
 	}
 	if a.vx != nil {
 		if width, _ := a.vx.Window().Size(); width < 100 {

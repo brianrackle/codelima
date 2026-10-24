@@ -138,7 +138,11 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	case key.MatchString("Tab"), key.Matches(vaxis.KeyTab, vaxis.ModShift):
 		switch {
 		case a.view == tuiViewSystem:
-			a.systemPanel = (a.systemPanel + 1) % 2
+			delta := 1
+			if key.Modifiers&vaxis.ModShift != 0 {
+				delta = -1
+			}
+			a.systemPanel = (a.systemPanel + delta + tuiSystemPanelCount) % tuiSystemPanelCount
 		case a.view == tuiViewTemplates:
 			a.environmentsView = !a.environmentsView
 		case a.nodeDetail:
@@ -161,7 +165,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		err = a.handleTemplateAction(key)
 	case a.view == tuiViewSystem && (key.MatchString("C") || key.MatchString("R")):
 		a.loadManagerData(key.MatchString("R"))
-	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == 1:
+	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemSettings:
 		err = a.editManagerSetting()
 	case a.view != tuiViewNodes:
 		return false
@@ -234,8 +238,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 	switch {
 	case a.view == tuiViewSystem:
-		if a.systemPanel == 1 {
+		if a.systemPanel == tuiSystemSettings {
 			a.settingIndex = max(0, min(len(a.managerSettingRows())-1, a.settingIndex+delta))
+		} else {
+			a.systemScroll[a.systemPanel] = max(0, a.systemScroll[a.systemPanel]+delta)
 		}
 	case a.view == tuiViewTemplates:
 		if a.environmentsView {

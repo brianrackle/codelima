@@ -1264,7 +1264,7 @@ func newOverlayGateTestApp(t *testing.T, ctx context.Context, service *Service) 
 	events := make(chan vaxis.Event, 64)
 	postEvent := func(event vaxis.Event) { events <- event }
 	sessions := newFakeTUISessionManager()
-	nodes, err := loadTUINodes(ctx, service, "")
+	nodes, err := loadTUINodes(ctx, service)
 	if err != nil {
 		t.Fatalf("loadTUINodes() error = %v", err)
 	}
@@ -4066,7 +4066,7 @@ func actionIDs(actions []tuiActionSpec) string {
 func newTestTUIApp(t *testing.T, ctx context.Context, service *Service, sessions tuiSessionManager) *vaxisTUIApp {
 	t.Helper()
 
-	nodes, err := loadTUINodes(ctx, service, "")
+	nodes, err := loadTUINodes(ctx, service)
 	if err != nil {
 		t.Fatalf("loadTUINodes() error = %v", err)
 	}
@@ -4095,7 +4095,7 @@ func newAsyncTestTUIApp(t *testing.T, ctx context.Context, service *Service) (*v
 		events <- event
 	}
 	sessions := newTUISessionStore(ctx, service, postEvent)
-	nodes, err := loadTUINodes(ctx, service, "")
+	nodes, err := loadTUINodes(ctx, service)
 	if err != nil {
 		t.Fatalf("loadTUINodes() error = %v", err)
 	}
