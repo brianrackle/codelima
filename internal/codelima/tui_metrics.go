@@ -42,7 +42,7 @@ type tuiMetricsDataEvent struct {
 }
 
 func (a *vaxisTUIApp) metricsVisible() bool {
-	return a.view == tuiViewNodes && a.nodeDetail && a.detailTab == tuiDetailMetrics
+	return a.view == tuiViewNodes && a.nodeDetail && a.detailTab == tuiDetailMetrics && !a.nodeStarting()
 }
 
 func (a *vaxisTUIApp) startMetricsLoad() {

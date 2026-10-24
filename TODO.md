@@ -194,9 +194,9 @@ in `tmp/stepqa` are retained for the next lifecycle checks and must be cleaned.
 The nested TCG guest uses a bounded cache and a project-local SSH ControlMaster
 socket to avoid VirtioFS hard-link errors; Lima's guest agent became healthy.
 
-Required follow-up: use these records in the Starting/Failed views, persist
-phase-level progress, and move operations into the daemon so closing a TUI
-does not cancel work. Add explicit cancel/stop and queued-attach behavior.
+The subsequent deliveries below use these records in Starting/Failed views,
+persist phase-level progress and move operations into the daemon so closing
+a TUI does not cancel work, with explicit cancel/stop and queued attachment.
 The step records supply reliable execution evidence but do not themselves
 change operation ownership or provide seven-day Activity history. This
 separation keeps retry compatible with existing callers at the cost of a
@@ -211,10 +211,9 @@ is ongoing. Bounded live bootstrap/validation output and shared Activity now
 have automated coverage, including real-socket caller disconnect, reconnection
 and cancellation from a second frontend. Activity supports identity-preserving
 selection, pagination, search/severity, copy, mouse selection and node navigation.
-Required next work: capture boot output and phase progress, wire CLI lifecycle
-admission, persist general Activity messages, integrate Starting/Failed and
-queued attach, and finish lifecycle qualification
-with the disposable guest. A daemon-owned manager removes frontend lifetime
+Subsequent deliveries below capture boot/phase progress, wire CLI admission
+and integrate Starting/Failed/queued attachment. General Activity messages
+and final native/artboard qualification remain. A daemon-owned manager removes frontend lifetime
 coupling; it adds storage/RPC lifecycle responsibilities that must be qualified
 before release. The QA daemon and TUI now use protocol 11. Live checks verified
 quit/reopen survival, shared busy counts, ID/slug conflicts, update refusal
@@ -248,8 +247,8 @@ pagination, typed missing-receipt errors and explicit cancellation to stopped.
 Activity displayed the surviving CLI operation at 80×24. Enabled autostart
 started a fresh daemon; disabled autostart refused mutation while help remained
 local. Both temporary homes were removed. The extra disposable guest and
-temporary runtime override were removed. Phase-level progress, boot output, shared
-general messages and Starting/Failed/queued attach remain required follow-up.
+temporary runtime override were removed. Phase/boot output and lifecycle views
+are delivered below; shared general messages remain required follow-up.
 The shared path gives consistent ownership across frontends at the cost of
 requiring a compatible daemon for CLI mutations and explicit cancellation.
 
@@ -259,21 +258,63 @@ bootstrap, validation and ready; skipped work has no invented duration and
 interrupted work has no known finish. Repeated command updates preserve the
 phase clock. Focused tests cover failure/retry/later starts, storage failure
 and recovery; the boot-stream regression found and fixed suppressed Lima
-stdout. Full verify, race and integration pass. Real-guest phase qualification
-and Starting/Failed views are still in progress. The existing operation protocol supplies reusable
-evidence but requires a wire upgrade and additional atomic phase writes.
-Lifecycle detail integration must look up the latest start/retry by canonical
-node ID independently of the current Activity page. Prefer a new boot failure
-over stale bootstrap failure evidence, fence asynchronous replies by selected
-node/navigation, and bind queued attachment to both node and operation IDs.
-Navigation or Escape must revoke the queue; only verified readiness may open
-the shell. Starting cancellation must target the admitted operation, not issue
-a conflicting stop. The failed-node port claim needs an actual forwarding
-readiness gate before the UI can say ports are held until ready.
+stdout. Full verify, race and integration pass. Real retry succeeded with the
+first command's attempt unchanged, measured boot/bootstrap/validation and
+skipped credential/workspace phases. A subsequent start on the running VM
+skipped boot/bootstrap and incremented validation only. Normal shutdown and
+a full restart also passed: boot was measured, all three bootstrap attempt
+IDs stayed unchanged, and validation reached attempt 3. This completes the
+earlier ready-node stop/start check. The existing operation protocol supplies
+reusable evidence but requires a wire upgrade and additional atomic phase writes.
+The failed-node port claim needs an actual forwarding readiness gate before the
+UI can say ports are held until ready.
+Explicit `Node.Ports` mappings currently become static Lima forwards as soon as
+the VM boots; dynamic discovery also admits listeners on provisioning/failed
+VMs. The Ports delivery must gate application routes independently of telemetry
+and coordinate explicit mappings with daemon ownership before claiming all ports
+wait for readiness. Centralizing mappings gives consistent lifecycle/ownership
+control, but must preserve host-to-guest port remapping and existing templates.
+Gating only discovery is smaller, but leaves static mappings active and cannot
+satisfy the full design promise. Until that work lands, the Failed view omits
+the unsupported “not forwarded until ready” claim.
+
+Protocol 13 supplies node-scoped latest-start inspection and Starting/Failed
+detail views (ADR 164). Queue intent follows one node/receipt and is revoked by
+Escape/navigation/failure; a successful receipt and a running VM observation
+are both required before attachment. Tests cover both sizes, exact-ID cancellation
+through a real daemon socket, late replies, metadata rollback and interruption.
+Regressions caught stale receipt/metadata attachment races, hidden boot failures,
+a stale navigation message and unavailable cancellation affordances. These are
+fixed. Final focused, full verify, race, integration and gopls checks pass.
+
+Real Lima verification passed at 150×38 and 80×24: boot and validation progress,
+measured/skipped phases, output, Metrics lockout, Escape cancellation, navigation
+without auto-attachment, one queued attachment after readiness, raw input,
+detach/reuse/exit, failure canceling the queue, recorded step 2/exit 23, exact
+attempt logs, source environment/template editors and failed-VM inspection.
+Confirmed startup cancellation stopped the VM under the original receipt,
+without a competing stop operation. All terminal sessions ended. Original
+fixture bytes were restored and the release marker removed. This reuses durable
+execution without moving attachment intent into the daemon; it adds polling
+and deliberately loses the queue when the frontend exits.
+
+QA cleanup remains required under `tmp/stepqa`. Kernel evidence confirmed an
+OOM kill when full lint/compile and the nested guest overlapped in this 3.8 GiB
+VM. Keep heavy gates and QEMU sequential. Lima metadata now lives on a 64 MiB
+project-rooted tmpfs; regular disk/ISO files remain on the share via symlinks.
+The VM is stopped, with protocol-13 daemon/TUI and the two QA tmpfs mounts
+retained for further qualification. Remove them, the backing files and all
+helpers/evidence before final completion. Four stale socket entries under
+`tmp/stepqa/l-virtiofs-old/qa-steps` (`serial.sock`, `serialv.sock`, `serialp.sock`,
+`qmp.sock`) return EOPNOTSUPP for guest lookup/unlink/rename, including root and
+descriptor-relative operations. Host SSH has no authenticated guest login.
+Those entries need removal through the host filesystem. The tmpfs workaround
+prevents recurrence, but cannot erase the old host entries and requires explicit
+mount teardown; do not report the old QA tree as cleaned.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
-raw attach qualification and shell window/tmux modes; phase-level lifecycle
-progress, Starting/Failed/queued attach and shared messages; final fleet/preview and Metrics qualification; dynamic
+raw attach qualification and shell window/tmux modes; shared Activity messages;
+final lifecycle/fleet/preview and Metrics artboard qualification; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean

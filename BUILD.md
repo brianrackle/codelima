@@ -47,6 +47,14 @@ responsive rendering, filtering, copy and stable selection. CLI coverage adds
 directory resolution, stderr progress, receipt inspection/cancellation and
 protection of responsive daemons during startup recovery (ADR 162). Run the shared
 operation procedure in QA.md for live TUI exit and actual VM cleanup as well.
+Lifecycle coverage includes node-scoped latest-start inspection, compact/wide
+Starting and Failed views, cancellation through a real daemon socket, late
+response fences and queued attachment readiness/navigation gates (ADR 164).
+In a constrained development VM, stop nested QEMU guests before full lint/race
+gates. Focused iteration can use `GOMEMLIMIT=384MiB GOMAXPROCS=1 GOFLAGS=-p=1`
+with the existing make targets. Keep QA socket-bearing Lima metadata on a
+project-rooted Linux filesystem; macOS VirtioFS can retain socket entries that
+the guest cannot later look up or unlink.
 Stop regressions cover stale cached observations in both directions and reject
 an unconfirmed shutdown. History ordering uses observed completion times.
 Phase tests cover failed-command boundaries, skipped work, retry and later

@@ -27,6 +27,13 @@ skipped work and unknown finish times explicit, and retain command-level
 attempt records separately. Stream mutation progress deliberately while
 keeping query stdout private (ADR 163).
 
+Query a node's latest start by admission time and canonical identity, independently
+of paginated Activity history and later stop receipts. Fence detail replies by
+request serial, navigation generation and node ID. Bind deferred attachment to
+one node/operation pair; revoke it on navigation, cancellation or failure and
+consume it once only after both the receipt and live node prove readiness.
+New boot failures take precedence over older bootstrap evidence (ADR 164).
+
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
 outside producer writes and flush before the terminal receipt. Keep a global

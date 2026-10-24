@@ -81,11 +81,18 @@ func TestCLIOperationCreateResolvesCallerDirectoryAndRecordsReceipt(t *testing.T
 	if stdout.Len() != 0 {
 		t.Fatal("lifecycle progress polluted result stdout", stdout.String())
 	}
+	var latest NodeOperation
+	if err := frontend.callOperationCLI(context.Background(), "operation.latest", map[string]string{"node": node.Slug}, &latest); !IsNotFound(err) {
+		t.Fatal("a creation receipt was presented as a start", latest, err)
+	}
 	if _, err := frontend.NodeStart(context.Background(), node.ID); err != nil {
 		t.Fatal(err)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "CLI-PROGRESS") {
 		t.Fatal("CLI did not keep progress on stderr", stdout.String(), stderr.String())
+	}
+	if err := frontend.callOperationCLI(context.Background(), "operation.latest", map[string]string{"node": node.Slug}, &latest); err != nil || latest.NodeID != node.ID || latest.Request.Kind != "start" || latest.State != "succeeded" {
+		t.Fatal("latest-start query lost node identity or outcome", latest, err)
 	}
 	_, err = frontend.NodeStart(context.Background(), "does-not-exist")
 	if !IsNotFound(err) || exitCodeForError(err) != ExitNotFound {

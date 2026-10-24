@@ -38,12 +38,15 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	a.cancelHiddenMetricsLoad()
 	a.cancelHiddenLogsLoad()
 	a.cancelHiddenSpecLoad()
+	a.cancelHiddenLifecycleLoad()
 	if a.service == nil {
 		return
 	}
 	a.managerGeneration++
 	a.cancelSpecLoad()
 	a.startSpecLoad()
+	a.cancelLifecycleLoad()
+	a.startLifecycleLoad()
 	a.startActivityLoad(a.view == tuiViewActivity)
 	if a.logsVisible() {
 		a.cancelLogsLoad()
@@ -134,6 +137,9 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 		if a.detailTab == tuiDetailTab(i) {
 			style = theme.selected
 		}
+		if tuiDetailTab(i) == tuiDetailMetrics && a.nodeStarting() {
+			style = theme.dim
+		}
 		cells := len(name) + 4
 		if tuiDetailTab(i) == tuiDetailSpec && a.spec.nodeID == record.Node.ID && a.spec.err == nil && len(a.spec.snapshot.Differences) > 0 {
 			win.New(col, 3, cells+2, 1).PrintTruncate(0, vaxis.Segment{Text: " " + name + " ", Style: style}, vaxis.Segment{Text: "•", Style: theme.amber})
@@ -146,6 +152,9 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 	body := win.New(1, 5, width-2, height-8)
 	switch a.detailTab {
 	case tuiDetailOverview:
+		if a.drawNodeLifecycle(body, record, theme) {
+			break
+		}
 		leftWidth := max(20, (width-4)/2)
 		identity := border.All(body.New(0, 0, leftWidth, max(1, height-8)), theme.border)
 		tuiLine(identity, 0, "Identity · frozen at creation", theme.muted)
@@ -167,7 +176,11 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 			}
 		}
 	case tuiDetailMetrics:
-		a.drawNodeMetrics(body, theme)
+		if a.nodeStarting() {
+			tuiLine(body, 1, "Metrics unlock when the node is ready.", theme.dim)
+		} else {
+			a.drawNodeMetrics(body, theme)
+		}
 	case tuiDetailLogs:
 		a.drawNodeLogs(body, theme)
 	case tuiDetailSpec:

@@ -415,6 +415,19 @@ If a CLI loses its connection or stops waiting, its error includes the receipt
 ID. Inspect that ID before retrying: a lost response does not prove the action
 failed. Direct Go SDK services retain their existing inline execution behavior.
 
+Node Overview shows the latest startup's measured phases and retained output.
+While it runs, `x` queues attachment to that specific startup; it opens only
+after successful completion and confirmed node readiness. `Esc` cancels the
+queue, and leaving the node detail view also cancels it. Startup continues
+when you navigate away. `s` requests cancellation of the active startup and
+stops the VM; Metrics becomes available after startup ends.
+
+A failed Overview shows the recorded command, source, exit status and duration
+when available, alongside the VM's separately observed state. `x` inspects a
+running failed VM, `l` opens the failed attempt's output, and `r` retries the
+recorded suffix. `e` opens the source environment and `E` the source template;
+those edits affect future nodes, while this node retains its frozen commands.
+
 Press `4` for shared operation history. Select an operation with the arrows;
 `Enter` opens its node and `K` requests cancellation. Canceling start or retry
 also stops the VM. `f` cycles all/warnings/errors, `/` filters the current

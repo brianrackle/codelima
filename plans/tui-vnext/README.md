@@ -19,8 +19,8 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
-| [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Partial: real Lima phases/output, cancellation and queued attachment verified at both sizes; final artboard qualification remains |
+| [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions and VM inspection verified at both sizes; readiness-gated ports and final artboard qualification remain |
 | [Create node · validation](reference/CreateNode.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -124,9 +124,24 @@ Protocol 12 supplies observed phase state, timestamps and both boot streams
 without invented durations, failure leaves later phases pending, and daemon
 interruption leaves finish unknown. Focused, full verify, race and integration
 pass. A real boot failure from stale VirtioFS sockets retained the correct
-failed/pending phases and output; stale QA sockets were removed and real-guest
-retry/later-start qualification is continuing. Lifecycle detail rendering,
-queued attachment and shared general messages remain open.
+failed/pending phases and output; stale QA sockets were removed. Real retry
+preserved the successful prefix, and both an already-running start and a full
+stop/start retained all bootstrap attempt IDs while rerunning validation.
+Measured and skipped phase fields matched those actions.
+
+Protocol 13 adds independent latest-start inspection and receipt-bound detail
+views (ADR 164). Tests cover late replies, queued attachment readiness/navigation,
+real-socket cancellation, failure precedence and status rollback/interruption.
+Live checks at both sizes verified boot/validation progress, Metrics lockout,
+queue Escape/navigation/failure, one attachment on successful readiness,
+raw input/detach/reuse/exit, failed-step provenance/output, source editors and
+inspection. Confirmed cancellation stopped the VM under its original receipt.
+Navigation messaging and cancellation affordances were tightened after review;
+final focused/full verify, race, integration and gopls checks pass. Fixture changes are restored
+and terminal sessions ended. The stopped QA VM, daemon/TUI, two tmpfs mounts
+and evidence remain under `tmp/stepqa`; four old VirtioFS socket entries require
+host-side removal (see TODO). Shared general Activity messages, forwarding
+readiness and final native/artboard qualification remain open.
 
 ## Implementation sequence
 

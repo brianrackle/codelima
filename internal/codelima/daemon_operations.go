@@ -55,6 +55,19 @@ func (h *daemonHost) handleNodeOperation(ctx context.Context, method string, raw
 		}
 		page, err := operations.ListPage(params.Before, params.Limit)
 		return page, toDaemonError(err)
+	case "operation.latest":
+		var params struct {
+			Node string `json:"node"`
+		}
+		if err := json.Unmarshal(raw, &params); err != nil || strings.TrimSpace(params.Node) == "" {
+			return nil, toDaemonError(invalidArgument("node is required", nil))
+		}
+		node, err := h.service.store.NodeByIDOrSlug(params.Node)
+		if err != nil {
+			return nil, toDaemonError(err)
+		}
+		record, err := operations.LatestStart(node.ID)
+		return record, toDaemonError(err)
 	default:
 		var params struct {
 			ID string `json:"id"`

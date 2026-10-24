@@ -33,7 +33,7 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
 
 ## Related Draft Plans
 
-- Major-version fleet manager [partially complete]: fleet/navigation, managed raw shell attachment, persistent preferences, native host capacity/global allocations, responsive System panels, CPU trends, bounded Metrics history/processes, local log sources, bootstrap output capture, stable fallback grapheme rendering, frozen/current Spec inspection, recorded bootstrap steps with explicit retry, daemon operation ownership, shared history, CLI lifecycle admission and observed phase/boot-output records are implemented (ADRs 150–163). Lifecycle progress views, shared messages, forms and full visual/native qualification remain in the [design and delivery ledger](plans/tui-vnext/README.md) and TODO #57.
+- Major-version fleet manager [partially complete]: fleet/navigation, managed raw shell attachment, persistent preferences, native host capacity/global allocations, responsive System panels, CPU trends, bounded Metrics history/processes, local log sources, bootstrap output capture, stable fallback grapheme rendering, frozen/current Spec inspection, recorded bootstrap steps with explicit retry, daemon operation ownership, shared history, CLI lifecycle admission, observed phase/boot-output records and receipt-bound Starting/Failed views are implemented (ADRs 150–164). Lifecycle visual qualification, shared messages, forms and full visual/native qualification remain in the [design and delivery ledger](plans/tui-vnext/README.md) and TODO #57.
 
 - September 7 architectural and current libghostty-vt review [review complete;
   adoption implemented, qualification partial]: [plans/sep_7_plan.md](plans/sep_7_plan.md).

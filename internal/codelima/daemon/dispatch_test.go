@@ -37,6 +37,7 @@ func TestMethodDeliveryClassesCoverEveryMutation(t *testing.T) {
 		"operation.cancel":          ClassControl,
 		"operation.get":             ClassQuery,
 		"operation.list":            ClassQuery,
+		"operation.latest":          ClassQuery,
 		"daemon.update":             ClassLifecycle,
 		"node.list":                 ClassQuery,
 		"terminal.list":             ClassQuery,

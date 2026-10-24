@@ -399,6 +399,27 @@ func (m *nodeOperations) Get(id string) (NodeOperation, error) {
 	return cloneNodeOperation(operation.record), nil
 }
 
+// Node detail needs the newest start attempt, independent of Activity's cursor
+// and completion ordering. A later stop/delete must not hide its failure.
+func (m *nodeOperations) LatestStart(nodeID string) (NodeOperation, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var latest *NodeOperation
+	for _, operation := range m.records {
+		record := &operation.record
+		if record.NodeID != nodeID || operationExpired(*record, m.service.now()) || (record.Request.Kind != "start" && record.Request.Kind != "retry") {
+			continue
+		}
+		if latest == nil || record.CreatedAt.After(latest.CreatedAt) || record.CreatedAt.Equal(latest.CreatedAt) && record.ID > latest.ID {
+			latest = record
+		}
+	}
+	if latest == nil {
+		return NodeOperation{}, notFound("no retained start operation for node", map[string]any{"node_id": nodeID})
+	}
+	return cloneNodeOperation(*latest), nil
+}
+
 func (m *nodeOperations) List() []NodeOperation {
 	m.mu.Lock()
 	defer m.mu.Unlock()

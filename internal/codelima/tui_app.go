@@ -58,6 +58,7 @@ type vaxisTUIApp struct {
 	logs               tuiLogsState
 	spec               tuiSpecState
 	activity           tuiActivityState
+	lifecycle          tuiLifecycleState
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
 	systemScroll       [tuiSystemPanelCount]int
@@ -447,11 +448,16 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applySpecData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiLifecycleDataEvent:
+		a.applyLifecycleData(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiMetricsTickEvent:
 		a.startActivityLoad(false)
 		a.startMetricsLoad()
 		a.startLogsLoad(false)
 		a.startSpecLoad()
+		a.startLifecycleLoad()
 		if a.metricsVisible() && !a.metrics.paused {
 			a.requestRedraw()
 		}
@@ -776,6 +782,7 @@ func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) erro
 	a.selectFleetNode()
 
 	a.syncSessionFocus()
+	a.finishQueuedLifecycleAttach()
 	return nil
 }
 

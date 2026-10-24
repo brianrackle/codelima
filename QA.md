@@ -635,6 +635,25 @@ For recorded bootstrap steps and explicit retry, use one disposable guest:
   validation gets a new attempt. Check `s` stops a failed-but-running VM.
 - Clean the guest, nodes, metadata, daemons, terminals, sockets and helper files.
 
+For Starting and Failed Overview, reuse that disposable guest:
+
+- Hold a recorded bootstrap or validation command long enough to inspect
+  150×38 and 80×24. Verify observed phases/output, no automatic shell, and a
+  dimmed Metrics tab that Tab skips. View another node and return; progress
+  must follow its canonical identity rather than the current Activity page.
+- Press `x` then `Esc`: only queued attachment is canceled. Queue again and
+  navigate away; completion must not open a shell. Queue on another run and
+  remain in detail; it must attach once only after the receipt succeeds and
+  the node is ready. Detach and confirm it does not attach again.
+- Press `s`, dismiss confirmation and verify work continues. Confirm on the
+  next attempt: the original startup receipt must become canceled only after
+  VM shutdown, without a competing stop receipt or queued attachment.
+- Cause a recorded failure. Inspect both layouts, the exact captured attempt
+  via `l`, and source environment/template via `e`/`E`. Dismiss editors without
+  changes. Verify the VM state and allocation agree, inspection works only
+  with a running VM, and a newer boot failure supersedes older command errors.
+- Restore any temporary fixture changes and remove all verification state.
+
 Run in a real terminal:
 
 ```sh

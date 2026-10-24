@@ -233,7 +233,7 @@ func (e *daemonTerminalEntry) markSnapshotStale() {
 
 func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
 	switch method {
-	case "operation.submit", "operation.get", "operation.list", "operation.cancel":
+	case "operation.submit", "operation.get", "operation.list", "operation.latest", "operation.cancel":
 		return h.handleNodeOperation(ctx, method, raw)
 	case "daemon.update":
 		var params struct {

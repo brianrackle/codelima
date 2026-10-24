@@ -62,6 +62,31 @@ func TestNodeOperationsHistoryOrdersByObservedCompletion(t *testing.T) {
 	}
 }
 
+func TestNodeOperationsLatestStartIsIndependentOfHistoryPagesAndStopReceipts(t *testing.T) {
+	s, node := setupBootstrapStepsTest(t)
+	operations := testNodeOperations(t, s)
+	now := time.Now()
+	old := NodeOperation{ID: newID(), NodeID: node.ID, State: "failed", CreatedAt: now.Add(-time.Hour), FinishedAt: &now, Request: NodeOperationRequest{Kind: "start"}}
+	latest := NodeOperation{ID: newID(), NodeID: node.ID, State: "running", CreatedAt: now.Add(-time.Minute), Request: NodeOperationRequest{Kind: "retry"}, Output: []string{"current output"}}
+	stop := NodeOperation{ID: newID(), NodeID: node.ID, State: "succeeded", CreatedAt: now, FinishedAt: &now, Request: NodeOperationRequest{Kind: "stop"}}
+	other := NodeOperation{ID: newID(), NodeID: newID(), State: "running", CreatedAt: now, Request: NodeOperationRequest{Kind: "start"}}
+	for _, record := range []NodeOperation{old, latest, stop, other} {
+		operations.records[record.ID] = &runningNodeOperation{record: record}
+	}
+	got, err := operations.LatestStart(node.ID)
+	if err != nil || got.ID != latest.ID || len(got.Output) != 1 {
+		t.Fatal("latest start followed completion sorting or another mutation/node", got, err)
+	}
+	got.Output[0] = "mutated"
+	stored, _ := operations.Get(latest.ID)
+	if stored.Output[0] != "current output" {
+		t.Fatal("latest query exposed mutable receipt storage")
+	}
+	if _, err := operations.LatestStart(newID()); !IsNotFound(err) {
+		t.Fatal("unknown node invented a start receipt", err)
+	}
+}
+
 func TestNodeOperationsClientExitAndActivityCancellation(t *testing.T) {
 	s, n := setupBootstrapStepsTest(t)
 	s.sandbox = outputOperationSandbox{SandboxClient: s.sandbox}

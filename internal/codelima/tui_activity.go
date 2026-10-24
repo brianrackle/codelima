@@ -279,11 +279,19 @@ func (a *vaxisTUIApp) cancelActivityOperation() {
 	if index < 0 || s.canceling[s.selected] {
 		return
 	}
+	a.requestOperationCancel(s.selected)
+}
+
+func (a *vaxisTUIApp) requestOperationCancel(id string) {
+	s := &a.activity
+	if id == "" || s.canceling[id] {
+		return
+	}
 	if a.service == nil || a.service.daemonClient == nil {
 		a.setStatus(slog.LevelError, "Daemon connection is required to cancel an operation")
 		return
 	}
-	id, client := s.selected, a.service.daemonClient
+	client := a.service.daemonClient
 	if s.canceling == nil {
 		s.canceling = make(map[string]bool)
 	}

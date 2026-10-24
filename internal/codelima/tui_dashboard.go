@@ -503,8 +503,20 @@ func (a *vaxisTUIApp) managerFooter() string {
 		return "N new from template · e edit · v YAML · y path · c clone · Tab view · Esc nodes"
 	}
 	if a.nodeDetail {
-		if a.state.selectedEntry().node.Status == NodeStatusFailed {
-			return "r retry failed step · x inspect · s stop/start VM · l logs · Tab view · Esc nodes"
+		if a.nodeStarting() {
+			if operation, ok := a.activeStartOperation(); ok && operation.State == "canceling" {
+				return "Canceling start · l logs · T host shell · Esc nodes"
+			}
+			if a.lifecycle.queuedOperation != "" {
+				return "Attachment queued · Esc cancels queue · s cancel start · l logs · T host shell"
+			}
+			return "x attach when ready · s cancel start · l logs · T host shell · Esc nodes"
+		}
+		if a.nodeLifecycleFailed() {
+			if a.state.selectedEntry().node.Status == NodeStatusFailed && a.lifecycleFailure().step != nil {
+				return "r retry · x inspect · e env · E template · s stop/start · l logs · Esc nodes"
+			}
+			return "s start/stop · x inspect · E template · l logs · Esc nodes"
 		}
 		return "Tab/Shift-Tab view · x shell · s start/stop · l logs · Esc nodes · : commands · ? help"
 	}

@@ -28,6 +28,9 @@ func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
 	if !a.state.selectedEntry().valid() {
 		return
 	}
+	if tab == tuiDetailMetrics && a.nodeStarting() {
+		tab = tuiDetailOverview
+	}
 	a.view, a.nodeDetail, a.detailTab, a.detailScroll = tuiViewNodes, true, tab, 0
 	a.state.focusTree()
 	a.state.treePaneMode = tuiTreePaneModeInfo
@@ -41,6 +44,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	defer a.cancelHiddenMetricsLoad()
 	defer a.cancelHiddenLogsLoad()
 	defer a.cancelHiddenSpecLoad()
+	defer a.cancelHiddenLifecycleLoad()
 	a.refreshFleet()
 	if a.handleLogsSearchKey(key) || a.handleActivitySearchKey(key) {
 		return false
@@ -97,6 +101,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		return false
 	}
 	a.claimShortcutKey(key)
+	if a.handleLifecycleKey(key) {
+		return false
+	}
 	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) || a.handleActivityKey(key) {
 		return false
 	}
@@ -164,6 +171,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 				delta = -1
 			}
 			a.detailTab = tuiDetailTab((int(a.detailTab) + delta + count) % count)
+			if a.detailTab == tuiDetailMetrics && a.nodeStarting() {
+				a.detailTab = tuiDetailTab((int(a.detailTab) + delta + count) % count)
+			}
 			a.state.treePaneMode = tuiTreePaneModeInfo
 			if a.detailTab == tuiDetailShell {
 				a.state.treePaneMode = tuiTreePaneModeTerminal
