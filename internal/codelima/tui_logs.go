@@ -25,6 +25,8 @@ type tuiLogsState struct {
 	snapshot           nodeLogSnapshot
 	selected, offset   int
 	selectedPart       int
+	revealMatch        bool
+	layoutWidth        int
 	query, beforeQuery string
 	input              *textinput.Model
 	serial             uint64
@@ -108,6 +110,7 @@ func (a *vaxisTUIApp) applyLogsData(event tuiLogsDataEvent) {
 	if !a.logsVisible() || event.generation != a.managerGeneration {
 		return
 	}
+	initial := !l.loaded
 	l.loaded, l.err = true, event.err
 	if event.err != nil {
 		return
@@ -134,6 +137,9 @@ func (a *vaxisTUIApp) applyLogsData(event tuiLogsDataEvent) {
 		l.selectLast()
 	} else {
 		l.ensureSelection()
+		if initial && l.query != "" {
+			l.nextMatch(1, true)
+		}
 	}
 }
 
@@ -207,6 +213,7 @@ func (l *tuiLogsState) nextMatch(delta int, includeCurrent bool) {
 		return
 	}
 	l.selectedPart = 0
+	l.revealMatch = true
 	if delta > 0 {
 		for _, index := range matches {
 			if index > l.selected || (includeCurrent && index == l.selected) {
@@ -332,6 +339,7 @@ func (a *vaxisTUIApp) handleLogsKey(key vaxis.Key) bool {
 	case key.MatchString("w"):
 		l.wrap, l.offset = !l.wrap, 0
 		l.selectedPart = 0
+		l.revealMatch = l.query != ""
 	case key.MatchString("L"):
 		l.level, l.offset = (l.level+1)%len(tuiLogLevels), 0
 		l.ensureSelection()

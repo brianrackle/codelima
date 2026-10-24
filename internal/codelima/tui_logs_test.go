@@ -190,3 +190,24 @@ func TestTUILogsHighlightsAcrossWrapWithoutSplittingGraphemes(t *testing.T) {
 		t.Fatalf("split emoji: %+v", segments)
 	}
 }
+
+func TestTUILogsSearchRevealsMatchInsideTallWrappedRecord(t *testing.T) {
+	app := testLogsApp(t, 80, 24)
+	app.logs.snapshot.Lines = []nodeLogLine{{Text: strings.Repeat("prefix ", 400) + "NEEDLE", Level: "info"}}
+	app.logs.follow, app.logs.wrap, app.logs.selected = false, true, 0
+	app.draw()
+	app.handleKey(vaxis.Key{Keycode: '/', Text: "/"})
+	for _, r := range "NEEDLE" {
+		app.handleKey(vaxis.Key{Keycode: r, Text: string(r)})
+	}
+	app.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter})
+	app.draw()
+	if app.logs.selectedPart == 0 {
+		t.Fatal("search only selected the record header")
+	}
+	screenRows := strings.Split(renderedScreenText(t, app.vx, 80, 24), "\n")
+	body := strings.Join(screenRows[app.logs.bodyRect.row:app.logs.bodyRect.row+app.logs.bodyRect.height], "\n")
+	if !strings.Contains(body, "NEEDLE") {
+		t.Fatal("matching wrapped row is off screen")
+	}
+}

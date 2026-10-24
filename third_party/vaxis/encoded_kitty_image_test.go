@@ -183,7 +183,9 @@ func TestEncodedKittyRejectsInvalidGeometryAndClips(t *testing.T) {
 
 type encodedKittyShortWriter struct{}
 
-func (encodedKittyShortWriter) Write(data []byte) (int, error) { return len(data) / 2, nil }
+func (encodedKittyShortWriter) Write(data []byte) (int, error) {
+	return len(data) / 2, nil
+}
 
 func TestEncodedKittyWriteFailureIsTerminal(t *testing.T) {
 	vx, _, source := encodedKittyFixture(t)

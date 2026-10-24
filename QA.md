@@ -542,6 +542,10 @@ For Logs, use an isolated node with events and bootstrap output:
 - Cycle severity with `L`. Wrap a long Unicode line with `w`, scroll through
   its continuations, click one and use `y`; the clipboard request must contain
   the complete selected record. Repeat at both sizes.
+- Include joined emoji such as `👩🏽‍💻` and `👩‍🚀`, resize in both directions,
+  and confirm no old characters remain beside them or shift later text. Search
+  for a marker near the end of a record taller than the viewport; its matching
+  continuation must become visible without manually scrolling to it.
 - Set `PAGER='less -S'`, press `o`, inspect the source and quit the pager.
   The manager must resume with its selection intact and follow paused.
 - Start a disposable node whose bootstrap prints distinct stdout/stderr

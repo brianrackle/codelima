@@ -496,6 +496,12 @@ wrapped screen rows. Text inputs own paste and numbers before global keys.
 Strip terminal controls before drawing logs, and invoke external tools with
 literal argument vectors while the TUI is suspended (ADR 157).
 
+When a terminal has not negotiated reliable grapheme widths, treat a complex
+cluster's reserved cells conservatively: clear its span and explicitly
+position subsequent output. Do not rely on the host cursor advancing by the
+same width as the model, or replace the grapheme with separated code points
+(ADR 158).
+
 Dialogs, selectors and menus occupy centered overlays and scroll the focused
 control into view. `Tab`/`Up`/`Down` move between dialog fields, text inputs
 receive `Left` and `Right` for cursor movement, and `Right` chooses only when

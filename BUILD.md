@@ -28,6 +28,12 @@ failure preservation, search/paste ownership, follow, stale replies, wrapping,
 mouse selection, clipboard and pager argument parsing (ADR 157). Run the
 Logs procedure in QA.md in a terminal as well as these automated checks.
 
+`make test-vaxis-fork` exercises the vendored terminal renderer, including
+fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
+required `mise run check`; it installs pinned mise and the upstream tool
+versions below `.tooling`, keeping temporary builds under `tmp`. This is an
+additional maintainer check when editing `third_party/vaxis`.
+
 The exact reference sources are retained in `plans/tui-vnext/reference/` with
 provenance and hashes in `SOURCE.md`; they are implementation references and
 are not runtime assets or inputs to the native release package.

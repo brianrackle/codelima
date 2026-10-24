@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.rockorager.dev/vaxis/ansi"
 	"go.rockorager.dev/vaxis/log"
@@ -886,6 +887,15 @@ func (vx *Vaxis) render() {
 				_, _ = vx.tw.WriteString(" ")
 			case next.Width > 1 && vx.caps.explicitWidth:
 				vx.tw.writeExplicitWidth(next.Width, next.Grapheme)
+			case next.Width > 1 && !vx.caps.unicodeCore && utf8.RuneCountInString(next.Grapheme) > 1:
+				// Fallback width is conservative: a host may shape this cluster
+				// into fewer cells. Clear the reserved span first and position
+				// subsequent output explicitly, or old cells and following text
+				// drift when the host's cursor advances by a different amount.
+				_, _ = vx.tw.WriteString(strings.Repeat(" ", min(next.Width, len(nextRow)-col)))
+				vx.tw.writeCUP(row+1, col+1)
+				_, _ = vx.tw.WriteString(next.Grapheme)
+				reposition = true
 			default:
 				_, _ = vx.tw.WriteString(next.Grapheme)
 			}

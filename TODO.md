@@ -138,17 +138,20 @@ Using the same disposable guest as the remaining lifecycle checks reduces
 setup cost and validates actual transport output; it requires another guest
 boot and must not be substituted with these local fixture checks.
 
-The final Logs resize check exposed a separate renderer defect: Vaxis reserves
-six fallback cells for `👩🏽‍💻`, while tmux 3.6 reports four; `👩‍🚀` reserves four
-but tmux reports two. Contiguous writes then leave stale text or shift following
-content. Before qualifying Logs, fix fallback multi-codepoint rendering to
-clear its reserved span and explicitly reposition following output (while
-keeping negotiated Unicode/explicit-width paths unchanged), add renderer
-regressions, and repeat the live wrap/resize/search check. This keeps terminal
-graphemes intact and repairs other manager text too, at the cost of extra
-cursor movement for ambiguous fallback clusters. The isolated `tmp/logqa`
-terminal, daemon and files are temporarily retained for that immediate fix;
-clean all of them after verification.
+The fallback emoji renderer defect found by Logs QA is fixed (ADR 158):
+reserved spans are cleared and following output is explicitly positioned.
+Negotiated Unicode and explicit-width paths are unchanged. Regression tests,
+full verify/race/integration, the upstream Vaxis mise formatting/lint/test
+check, and live 80×24 → 150×38 → 80×24 wrapping/search checks pass. Searches
+also reveal the matching continuation of tall records, including a live
+400-repeat Unicode fixture ending in `SEARCH-MARKER-END`.
+
+The QA daemon and all TUI/tmux processes are stopped, and `tmp/logqa` is fully
+removed, including fixtures, images, scripts and metadata. An obsolete socket
+initially returned VirtioFS EOPNOTSUPP for absolute lookup/unlink, but cleanup
+through its parent directory descriptor succeeded. No host-side action is
+needed. Unlink live QA sockets before server shutdown or use a project-rooted
+tmpfs socket directory to avoid this shared-filesystem behavior.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations

@@ -8,6 +8,13 @@ CODELIMA_RENDERER_BIN := $(BIN_DIR)/codelima-renderer-worker
 CODELIMA_COMPAT_BIN := $(BIN_ROOT)/codelima
 GO_VERSION ?= 1.24.1
 GOPLS_VERSION ?= v0.18.1
+MISE_VERSION ?= 2026.10.18
+VAXIS_CGO_LDFLAGS := $(CGO_LDFLAGS)
+ifeq ($(PLATFORM_TAG),linux-aarch64)
+# Upstream's Go 1.25 external link defaults to gold; minimal Linux guests
+# provide BFD. The last compiler flag selects the installed system linker.
+VAXIS_CGO_LDFLAGS += -fuse-ld=bfd
+endif
 GOLANGCI_LINT_VERSION ?= 1.64.8
 ZIG_VERSION ?= 0.16.0
 PKGCONF_VERSION ?= 2.5.1
@@ -53,6 +60,7 @@ export PKG_CONFIG_PATH := $(GHOSTTY_VT_CURRENT)/share/pkgconfig:$(PKG_CONFIG_PAT
 # .tooling/, tmp/ and the module cache are deliberately outside this list.
 FMT_DIRS := cmd internal tests scripts/tooling_lock.go scripts/renderer_build.go
 FMT_DIRS += third_party/vaxis/encoded_kitty_image.go third_party/vaxis/encoded_kitty_image_test.go third_party/vaxis/image.go third_party/vaxis/vaxis.go
+FMT_DIRS += third_party/vaxis/render_fallback_width_test.go
 
 PACKAGE_VERSION ?= 0.0.0-dev
 RENDERER_LDFLAGS = $(if $(wildcard $(GHOSTTY_VT_CURRENT)/.native-build-id),-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=$(shell cat $(GHOSTTY_VT_CURRENT)/.native-build-id))
@@ -141,6 +149,22 @@ test-renderer-boundary:
 .PHONY: test-vaxis-fork
 test-vaxis-fork:
 	$(GO) test go.rockorager.dev/vaxis/...
+
+.PHONY: test-vaxis-upstream init-mise
+init-mise:
+	sh scripts/install_mise.sh $(MISE_VERSION) '$(TOOLS_DIR)' '$(CURDIR)/tmp'
+
+test-vaxis-upstream: init-mise
+	@set -eu; \
+	  mkdir -p '$(CURDIR)/tmp'; \
+	  vaxis_check_tmp="$$(mktemp -d '$(CURDIR)/tmp/.vaxis-upstream.XXXXXX')"; \
+	  trap 'rm -rf "$$vaxis_check_tmp"' EXIT; \
+	  cd third_party/vaxis; \
+	  MISE_DATA_DIR='$(TOOLS_DIR)/mise-data' MISE_CACHE_DIR='$(TOOLS_DIR)/mise-cache' \
+	  MISE_CONFIG_DIR='$(TOOLS_DIR)/mise-config' MISE_STATE_DIR='$(TOOLS_DIR)/mise-state' \
+	  MISE_TRUSTED_CONFIG_PATHS='$(CURDIR)/third_party/vaxis' TMPDIR="$$vaxis_check_tmp" GOMAXPROCS=2 MISE_JOBS=2 \
+	  CGO_LDFLAGS='$(VAXIS_CGO_LDFLAGS)' \
+	  '$(TOOLS_DIR)/mise/$(MISE_VERSION)/bin/mise' run check
 
 test-ghostty-adapter: ghostty-vt
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/ghostty ./internal/codelima ./internal/terminalstate -run '$(GHOSTTY_TEST_FILTER)' -count=1

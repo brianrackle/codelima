@@ -256,6 +256,11 @@ check a downloaded archive for the current platform, place it and its matching m
 under `./tmp/` and run `make test-package-artifact DIST_DIR=./tmp/release-check`.
 Remove those downloaded verification files afterward.
 
+For renderer development, `make test-vaxis-fork` runs the local fork's tests;
+`make test-vaxis-upstream` installs project-local mise tooling and runs its
+upstream formatting, lint and test checks. Build and release details are in
+[BUILD.md](BUILD.md).
+
 Requirements:
 
 - macOS arm64, Linux amd64, or Linux arm64

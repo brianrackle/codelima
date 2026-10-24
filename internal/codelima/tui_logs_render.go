@@ -90,6 +90,10 @@ func logHighlightSegments(row tuiLogRow, matches [][]int, style, highlight vaxis
 func (a *vaxisTUIApp) drawNodeLogs(win vaxis.Window, theme tuiTheme) {
 	l := &a.logs
 	width, height := win.Size()
+	if l.layoutWidth != width {
+		l.layoutWidth = width
+		l.revealMatch = l.query != ""
+	}
 	l.mouseRows = nil
 	l.bodyRect = tuiRect{}
 	l.sourceRects = [4]tuiRect{}
@@ -145,6 +149,7 @@ func (a *vaxisTUIApp) drawNodeLogs(win vaxis.Window, theme tuiTheme) {
 	case len(rows) == 0:
 		tuiLine(inner, 0, "No lines at this severity.", theme.dim)
 	default:
+		pattern := l.searchPattern()
 		first, last := -1, -1
 		for i, row := range rows {
 			if row.index == l.selected {
@@ -153,6 +158,18 @@ func (a *vaxisTUIApp) drawNodeLogs(win vaxis.Window, theme tuiTheme) {
 				}
 				last = i
 			}
+		}
+		if l.revealMatch && first >= 0 && pattern != nil {
+			match := pattern.FindStringIndex(logLineText(l.snapshot.Lines[l.selected]))
+			if len(match) > 0 {
+				for i := first; i <= last; i++ {
+					if rows[i].start+len(rows[i].text) > match[0] {
+						l.selectedPart = i - first
+						break
+					}
+				}
+			}
+			l.revealMatch = false
 		}
 		if l.follow {
 			l.offset = max(0, len(rows)-h)
@@ -168,7 +185,6 @@ func (a *vaxisTUIApp) drawNodeLogs(win vaxis.Window, theme tuiTheme) {
 			}
 		}
 		l.offset = max(0, min(l.offset, max(0, len(rows)-h)))
-		pattern := l.searchPattern()
 		matchCache := make(map[int][][]int)
 		for i, row := range rows[l.offset:min(len(rows), l.offset+max(0, h))] {
 			style := theme.text

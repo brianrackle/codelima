@@ -49,10 +49,10 @@ func (vx *Vaxis) NewEncodedKittyImage(data []byte, pixelW, pixelH int) (*Encoded
 	vx.mu.Lock()
 	defer vx.mu.Unlock()
 	if vx.closed || vx.graphicsProtocol != kitty || vx.tw == nil || vx.tw.terminal == nil || vx.tw.terminal.w == nil {
-		return nil, errors.New("Kitty graphics transport is unavailable")
+		return nil, errors.New("kitty graphics transport is unavailable")
 	}
 	if vx.graphicsIDNext >= 1<<32-1 {
-		return nil, errors.New("Kitty image identifiers exhausted")
+		return nil, errors.New("kitty image identifiers exhausted")
 	}
 	return &EncodedKittyImage{vx: vx, id: vx.nextGraphicID(), png: slices.Clone(data), width: pixelW, height: pixelH}, nil
 }
@@ -121,7 +121,9 @@ func (k *EncodedKittyImage) Err() error {
 	return k.err
 }
 
-func (k *EncodedKittyImage) Draw(win Window) { k.DrawAtZ(win, 0) }
+func (k *EncodedKittyImage) Draw(win Window) {
+	k.DrawAtZ(win, 0)
+}
 
 // DrawAtZ places the exact PNG pixels at win's origin with the requested Kitty
 // z order. The caller must crop beforehand; images extending beyond a window

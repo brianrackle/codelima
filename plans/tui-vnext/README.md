@@ -17,7 +17,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
-| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded local sources, capture and controls; fallback emoji rendering defect and real failed-bootstrap/native qualification open |
+| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources and controls verified; real failed-bootstrap/native qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -62,9 +62,11 @@ automated coverage, including stale completions, paste ownership, Unicode
 graphemes and failed bootstrap state/output. Full verify, race and integration
 checks pass. Live terminal checks with isolated diagnostic fixtures covered
 150×38/80×24 layouts, source selection, following/pausing/appending, search,
-severity, wrapping, clipboard delivery and pager restoration. The final joined
-emoji wrap/resize check exposed a fallback cell-width renderer defect; it is
-recorded with a concrete fix and retained reproduction in TODO #57. Actual failed
+severity, wrapping, clipboard delivery and pager restoration. A fallback
+grapheme-width defect is fixed and verified across resize/search (ADR 158).
+Tall-record searches reveal the matching continuation. The upstream Vaxis
+mise check passes. The daemon, terminals, sockets and diagnostic fixtures were
+fully cleaned. Actual failed
 guest-bootstrap output and final native/artboard qualification remain open
 in QA.md and TODO #57.
 
