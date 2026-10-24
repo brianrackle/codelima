@@ -65,10 +65,11 @@ Window/tmux choices and comment-preserving settings edits are wired (ADR 152).
 Focused settings/menu tests, full verify, race and integration checks pass.
 Live 120×34 and 80×24 settings checks covered editing, restart persistence,
 ANSI/auto color, invalid-value rejection and retained comments/unknown keys.
-The disposable TUI, daemon and home were cleaned. External window/tmux launch
-and guest-session qualification remain open; use real supported terminals and
-the disposable VM fixture to finish them. This validates actual window/session
-handoff but requires a working VM and desktop terminal for the window branch.
+The disposable TUI, daemon and home were cleaned. Guest raw attach/detach/reattach and tmux launch retained PID 4418 and a
+shell variable through resizing. The external-command branch also launched the
+same session through a headless tmux wrapper. Native desktop-terminal window
+qualification remains open; use a real supported desktop terminal to validate
+window creation, focus and lifetime beyond the tested argument/session pipeline.
 Also qualify initial retained graphics, scrolling regions/origin/wrap modes,
 clipboard handling, resize, disconnect/update and outer-terminal restoration.
 These are required follow-ups, not completed design scope. The suggested
@@ -84,9 +85,11 @@ VirtioFS block units and confirmed CPU/memory/disk values; screenshots at
 Doctor/Daemon/Host/Settings panels with reverse Tab,
 scrolling and mouse access. Focused parsing, scope, stale-response, layout and
 settings tests pass, and the sampler cross-compiles for both macOS architectures.
-Native macOS values and the two-live-VM allocation flow still need qualification;
-the required solution is to run the QA flow on a host with working guest boots.
-This validates actual capacity/release behavior but needs sufficient VM memory.
+Live allocation reached 3/2 CPUs with two VMs; the host then ran out of memory
+and killed the first disposable guest. A deliberate bootstrap failure in the
+remaining VM stayed allocated and visible from an unrelated directory scope;
+stopping it returned allocation to zero. Native macOS readings and sustained
+multi-VM qualification still require a host with enough memory.
 Daemon controls and richer status remain open alongside other System work.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
@@ -103,9 +106,14 @@ The 25.10 and 24.04 KVM guests stalled during kernel initialization before SSH.
 Software emulation with a Cortex-A72 CPU booted Ubuntu 24.04 successfully.
 A project-local tmpfs socket directory and SSH master avoid VirtioFS socket
 hard-link failures. Guest attach/detach/reattach preserved PID 4418 and a shell
-variable, including 150×38 → 80×24 resize. Launch/guest qualification continues
-under `tmp/v`; close the SSH master, unmount its sockets directory, stop/delete
-its VM, daemon and tmux session and remove the fixture before completion.
+variable, including 150×38 → 80×24 resize. Both disposable nodes were deleted;
+the daemon, tmux, SSH masters and VM processes were stopped; the temporary
+socket mount was unmounted; and `tmp/v` plus its environment file were removed.
+The forced-stop-assisted cleanup does not qualify ordinary nested KVM boot or
+all native lifecycle flows. For future constrained-host QA, use one guest at a
+time and bound QEMU's TCG translation cache; two 1 GiB guests consumed more
+than their assigned RAM and exceeded this 3.8 GiB VM's available memory.
+
 
 Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified
 Lima 2.1.0 installation allowed the existing TUI to run in an isolated home.

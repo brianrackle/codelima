@@ -105,5 +105,10 @@ Full verify, race and integration checks pass for host capacity. Live 150×38
 and 80×24 panels were inspected and compared with OS readings; the VirtioFS
 fragment-size regression prevents an inflated disk total. A real Ubuntu guest
 now boots under TCG/Cortex-A72; raw detach/reattach retained its shell PID and
-variable through resize. The disposable fixture remains active for remaining
-launch, lifecycle and allocation checks and must be cleaned before completion.
+variable through resize. Tmux and a headless external launcher resumed that same session. Native desktop
+window behavior still requires qualification. Global allocation counted a failed
+but running VM outside the current directory scope, then released it on stop.
+Two-VM overcommit was visible before host memory exhaustion killed one fixture.
+Both nodes, daemons, tmux/SSH processes, socket mount and verification files
+were stopped/deleted/unmounted and cleaned; sustained multi-VM and native KVM
+qualification remain open.
