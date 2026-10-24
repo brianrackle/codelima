@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
 )
@@ -410,7 +411,11 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 		}
 		text := fmt.Sprintf("%.0f%%", value)
 		if !compact && width >= 14 {
-			text = tuiGauge(value, min(10, width-7)) + " " + text
+			if field == tuiFleetSortCPU && record.Node.LastRuntimeObservation != nil {
+				text = tuiCPUSparkline(record.Node.LastRuntimeObservation.CPUHistory, time.Now(), 8*time.Second, 8) + " " + text
+			} else {
+				text = tuiGauge(value, min(10, width-7)) + " " + text
+			}
 		}
 		return text, theme.usage(value)
 	}
@@ -425,10 +430,16 @@ func (a *vaxisTUIApp) drawNodePreview(win vaxis.Window, record tuiFleetRecord, t
 	resources := inner.New(third+1, 0, third-2, height)
 	sessions := inner.New(2*third+1, 0, width-2*third-2, height)
 	a.drawNodeIdentity(identity, record, theme)
-	tuiLine(resources, 0, "Resources", theme.muted)
-	for i, field := range []tuiFleetSort{tuiFleetSortCPU, tuiFleetSortMemory, tuiFleetSortDisk} {
+	tuiLine(resources, 0, "CPU · last 60s", theme.muted)
+	var cpuHistory []daemon.NodeMetricPoint
+	if observation := record.Node.LastRuntimeObservation; observation != nil {
+		cpuHistory = observation.CPUHistory
+	}
+	graphHeight := max(1, min(4, height-6))
+	drawTUIMetricChart(resources.New(0, 1, third-2, graphHeight), cpuHistory, time.Now(), time.Minute, metricCPU, theme.mint)
+	for i, field := range []tuiFleetSort{tuiFleetSortMemory, tuiFleetSortDisk} {
 		text, style := a.fleetCell(record, field, false, third-10, theme)
-		tuiLine(resources, 2*i+2, fmt.Sprintf("%-7s %s", field, text), style)
+		tuiLine(resources, graphHeight+2+i, fmt.Sprintf("%-7s %s", field, text), style)
 	}
 	tuiLine(sessions, 0, fmt.Sprintf("Sessions · %d", record.Sessions), theme.muted)
 	keys := a.state.sessions.TargetSessionKeys(tuiTreeEntry{node: record.Node}.key())

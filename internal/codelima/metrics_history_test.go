@@ -90,6 +90,7 @@ func TestNodeMetricsHistoryFitsProtocolFrame(t *testing.T) {
 	processes := daemon.NodeProcessSnapshot{}
 	for i := range maxProcessRows {
 		processes.Rows = append(processes.Rows, daemon.NodeProcess{PID: i + 1, User: strings.Repeat("&", 32), Command: strings.Repeat("&", 160), CPUPercent: &cpu, RSSBytes: maxBytes})
+		processes.AlternateRows = append(processes.AlternateRows, daemon.NodeProcess{PID: i + maxProcessRows + 1, User: strings.Repeat("&", 32), Command: strings.Repeat("&", 160), CPUPercent: &cpu, RSSBytes: maxBytes})
 	}
 	details := daemon.NodeUsageDetails{}
 	for i := range 256 {

@@ -99,6 +99,8 @@ type InputRevokedEvent struct {
 // time, so a cleared reading clears the display.
 type NodeUsageEvent struct {
 	NodeID           string            `json:"node_id"`
+	MetricsEpoch     string            `json:"metrics_epoch,omitempty"`
+	CPUHistory       []NodeMetricPoint `json:"cpu_history,omitempty"`
 	SampledAt        time.Time         `json:"sampled_at"`
 	CPUUsagePercent  *float64          `json:"cpu_usage_percent,omitempty"`
 	MemoryUsedBytes  *uint64           `json:"memory_used_bytes,omitempty"`

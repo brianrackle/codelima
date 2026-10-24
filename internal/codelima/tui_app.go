@@ -682,7 +682,7 @@ func (a *vaxisTUIApp) applyNodeUsage(usage nodeUsageEvent) bool {
 	if a.state == nil || strings.TrimSpace(usage.NodeID) == "" {
 		return false
 	}
-	if known, ok := a.nodeUsage[usage.NodeID]; ok && usage.SampledAt.Before(known.SampledAt) {
+	if known, ok := a.nodeUsage[usage.NodeID]; ok && usage.MetricsEpoch == known.MetricsEpoch && usage.SampledAt.Before(known.SampledAt) {
 		return false
 	}
 	if !a.state.applyNodeUsage(usage) {
@@ -691,7 +691,7 @@ func (a *vaxisTUIApp) applyNodeUsage(usage nodeUsageEvent) bool {
 	if a.nodeUsage == nil {
 		a.nodeUsage = map[string]nodeUsageEvent{}
 	}
-	a.nodeUsage[usage.NodeID] = usage
+	a.nodeUsage[usage.NodeID] = nodeUsageFromNode(a.state.nodesByID[usage.NodeID])
 	return true
 }
 
@@ -708,7 +708,7 @@ func (a *vaxisTUIApp) reconcileNodeUsage() {
 	kept := make(map[string]nodeUsageEvent, len(a.state.nodes))
 	for _, node := range a.state.nodes {
 		listed := nodeUsageFromNode(node)
-		if pushed, ok := a.nodeUsage[node.ID]; ok && listed.SampledAt.Before(pushed.SampledAt) {
+		if pushed, ok := a.nodeUsage[node.ID]; ok && listed.SampledAt.Before(pushed.SampledAt) && (listed.MetricsEpoch == pushed.MetricsEpoch || !listed.SampledAt.IsZero()) {
 			a.state.applyNodeUsage(pushed)
 			kept[node.ID] = pushed
 			continue

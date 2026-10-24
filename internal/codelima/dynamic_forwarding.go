@@ -738,7 +738,8 @@ type dynamicForwarder struct {
 
 func newDynamicForwarder(service *Service, runtime LimaSSHRuntime) *dynamicForwarder {
 	return &dynamicForwarder{
-		logger: service.log(),
+		metricsEpoch: newID(),
+		logger:       service.log(),
 
 		service: service, factory: limaSSHForwardingPeerFactory{runtime: runtime}, interval: forwardingPollInterval,
 		listen: net.Listen, now: func() time.Time { return time.Now().UTC() },
@@ -1153,6 +1154,9 @@ func nextForwardingBackoff(current time.Duration) time.Duration {
 
 func (f *dynamicForwarder) recordNodeUsage(nodeID string, observation forwardingGuestObservation, sampledAt time.Time) {
 	f.mu.Lock()
+	if f.metricsEpoch == "" {
+		f.metricsEpoch = newID()
+	}
 	if f.cpu == nil {
 		f.cpu = map[string]nodeCPUUsageSample{}
 	}
@@ -1219,7 +1223,7 @@ func (f *dynamicForwarder) clearNodeUsage(nodeID string) {
 // would merge it into a node.list reply, so a pushed sample and a polled one
 // describe the same thing and are comparable by SampledAt. Callers hold f.mu.
 func (f *dynamicForwarder) nodeUsageEventLocked(nodeID string, sampledAt time.Time) nodeUsageEvent {
-	event := nodeUsageEvent{NodeID: nodeID, SampledAt: sampledAt}
+	event := nodeUsageEvent{NodeID: nodeID, SampledAt: sampledAt, MetricsEpoch: f.metricsEpoch}
 	if sample, ok := f.usageDetails[nodeID]; ok {
 		event.Details = cloneNodeUsageDetails(&sample.Details)
 	}
@@ -1276,6 +1280,12 @@ func (f *dynamicForwarder) addNodeUsage(nodes []Node) {
 			continue
 		}
 		enriched := *observation
+		enriched.MetricsEpoch = f.metricsEpoch
+		if history := f.metricsHistory[nodes[index].ID]; history != nil {
+			enriched.CPUHistory = history.recentCPU(f.nowUTC())
+			at := history.latestAt()
+			enriched.CPUUsageSampledAt = &at
+		}
 		if sample, ok := f.usageDetails[nodes[index].ID]; ok {
 			enriched.UsageDetails = cloneNodeUsageDetails(&sample.Details)
 			at := sample.SampledAt

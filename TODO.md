@@ -111,18 +111,20 @@ qualify ordinary VM shutdown. The node, daemon, four frontend sessions, SSH
 master, workload, socket mount, VM disks, screenshots and helper files were
 deleted/stopped/unmounted and cleaned.
 
-Metrics follow-ups: connect the fleet's eight-second CPU sparkline and preview's
-60-second history to bounded daemon data, and finish exact artboard/native
-qualification. Reuse the new history rings and merge live pushes; this preserves
-history across frontend reconnects but adds bounded data to fleet/preview
-reads. Paused process sorting currently reorders the retained top 64 rows.
-Retaining the union of CPU and memory leaders would preserve both global top
-sets during pause, at the cost of a larger bounded response and additional
-selection/size tests. These remain part of the full redesign work.
+Fleet eight-second CPU sparklines and 60-second preview history now reuse a
+bounded inventory slice plus existing pushes (ADR 156, protocol 10). Paused
+Metrics sorting retains the union of CPU and memory leaders, at most 128
+transferred rows and 64 visible rows. Focused retention, epoch, stale-refresh,
+both-ranking selection/clipboard and frame-size tests pass, along with full
+verify, race and integration gates. gopls is clean. Exact artboard and
+native qualification, including live fleet/preview trend inspection and paused
+sorting with disjoint leader sets, remain required. Reuse the existing QA
+fixture and compare retained data across windows; this validates the final
+presentation while requiring another real guest run on a suitable host.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
-and progress/retry/cancel; fleet/preview history and final Metrics qualification; dynamic
+and progress/retry/cancel; final fleet/preview and Metrics qualification; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean

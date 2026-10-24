@@ -228,8 +228,30 @@ func processSnapshot(current guestProcessObservation, previous *guestProcessObse
 }
 
 func sortedProcessSnapshot(value daemon.NodeProcessSnapshot, order string) daemon.NodeProcessSnapshot {
-	value.Rows = slices.Clone(value.Rows)
-	slices.SortFunc(value.Rows, func(a, b daemon.NodeProcess) int {
+	pool := append(slices.Clone(value.Rows), value.AlternateRows...)
+	value.Rows = sortedProcessRows(pool, order)
+	opposite := "memory"
+	if order == "memory" {
+		opposite = "cpu"
+	}
+	leaders := sortedProcessRows(pool, opposite)
+	seen := make(map[int]bool, len(value.Rows))
+	for _, row := range value.Rows {
+		seen[row.PID] = true
+	}
+	value.AlternateRows = nil
+	for _, row := range leaders {
+		if !seen[row.PID] {
+			value.AlternateRows = append(value.AlternateRows, row)
+		}
+	}
+	value.Truncated = value.Truncated || len(pool) > maxProcessRows
+	return value
+}
+
+func sortedProcessRows(rows []daemon.NodeProcess, order string) []daemon.NodeProcess {
+	rows = slices.Clone(rows)
+	slices.SortFunc(rows, func(a, b daemon.NodeProcess) int {
 		if order == "memory" {
 			if a.RSSBytes > b.RSSBytes {
 				return -1
@@ -255,14 +277,11 @@ func sortedProcessSnapshot(value daemon.NodeProcessSnapshot, order string) daemo
 		}
 		return a.PID - b.PID
 	})
-	if len(value.Rows) > maxProcessRows {
-		value.Rows = value.Rows[:maxProcessRows]
-		value.Truncated = true
+	rows = slices.Clone(rows[:min(len(rows), maxProcessRows)])
+	for i := range rows {
+		rows[i].CPUPercent = metricValueCopy(rows[i].CPUPercent)
 	}
-	for i := range value.Rows {
-		value.Rows[i].CPUPercent = metricValueCopy(value.Rows[i].CPUPercent)
-	}
-	return value
+	return rows
 }
 
 func (f *dynamicForwarder) sampleProcesses(ctx context.Context, nodeID, order string) (daemon.NodeProcessSnapshot, error) {

@@ -55,9 +55,10 @@ type NodeProcess struct {
 
 // CPU percentages use one logical CPU as 100%, matching top's process view.
 type NodeProcessSnapshot struct {
-	SampledAt time.Time     `json:"sampled_at"`
-	Rows      []NodeProcess `json:"rows"`
-	Load      [3]float64    `json:"load"`
-	Count     int           `json:"count"`
-	Truncated bool          `json:"truncated,omitempty"`
+	SampledAt     time.Time     `json:"sampled_at"`
+	Rows          []NodeProcess `json:"rows"`
+	AlternateRows []NodeProcess `json:"alternate_rows,omitempty"`
+	Load          [3]float64    `json:"load"`
+	Count         int           `json:"count"`
+	Truncated     bool          `json:"truncated,omitempty"`
 }

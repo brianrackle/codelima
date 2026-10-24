@@ -128,6 +128,8 @@ type RuntimeObservation struct {
 	DiskTotalBytes         *uint64                  `json:"disk_total_bytes,omitempty" yaml:"disk_total_bytes,omitempty"`
 	ResourceUsageSampledAt *time.Time               `json:"resource_usage_sampled_at,omitempty" yaml:"resource_usage_sampled_at,omitempty"`
 	UsageDetails           *daemon.NodeUsageDetails `json:"usage_details,omitempty" yaml:"usage_details,omitempty"`
+	MetricsEpoch           string                   `json:"metrics_epoch,omitempty" yaml:"metrics_epoch,omitempty"`
+	CPUHistory             []daemon.NodeMetricPoint `json:"cpu_history,omitempty" yaml:"cpu_history,omitempty"`
 }
 
 type Node struct {

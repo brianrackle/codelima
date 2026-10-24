@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 9 adds bounded,
-	// daemon-owned metric history and incremental history reads.
-	ProtocolVersion               = 9
+	// whenever a wire shape this protocol carries changes; 10 adds bounded
+	// CPU trends and the metric epoch to inventory/usage observations.
+	ProtocolVersion               = 10
 	SessionVersion                = 2
 	HandoffVersion                = 5
 	PreviousChunkedHandoffVersion = 4

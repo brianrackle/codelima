@@ -64,8 +64,8 @@ refreshes; clipboard delivery uses the existing host clipboard path.
 ### Negative Consequences
 
 * History is intentionally lost on daemon restart or live daemon replacement.
-* A paused table can sort only the retained top rows; another live request is
-  needed to select a different top-64 population.
+* The initial paused table could sort only the retained top rows. ADR 156
+  extends the bounded snapshot to retain both ranking sets.
 * The process sampler uses Linux procfs and procps inside the supported guest.
 * A resumed process view needs two nearby samples for meaningful CPU deltas.
 

@@ -39,6 +39,31 @@ func TestTUIMetricsProcessSelectionSortAndCopy(t *testing.T) {
 	}
 }
 
+func TestTUIMetricsPausedSortSelectsVisibleGlobalLeader(t *testing.T) {
+	app, _ := newTestManager(t, 80, 24)
+	app.nodeDetail, app.detailTab = true, tuiDetailMetrics
+	app.metrics.nodeID = app.state.selectedEntry().node.ID
+	app.metrics.paused = true
+	full := daemon.NodeProcessSnapshot{}
+	for i := range 200 {
+		cpu := float64(200 - i)
+		full.Rows = append(full.Rows, daemon.NodeProcess{PID: i + 1, CPUPercent: &cpu, RSSBytes: uint64(i)})
+	}
+	sorted := sortedProcessSnapshot(full, "cpu")
+	app.metrics.processes = &sorted
+	app.ensureMetricProcessSelection()
+	app.handleKey(vaxis.Key{Keycode: 'p', Text: "p"})
+	if app.metrics.processPID != 200 || !app.metrics.paused {
+		t.Fatalf("paused sort selected invisible PID %d", app.metrics.processPID)
+	}
+	value := ""
+	app.clipboardPush = func(text string) error { value = text; return nil }
+	app.handleKey(vaxis.Key{Keycode: 'y', Text: "y"})
+	if value != "200" {
+		t.Fatalf("copied %q instead of visible selection", value)
+	}
+}
+
 func TestTUIMetricsNavigationAndPauseCancelSampling(t *testing.T) {
 	for _, key := range []vaxis.Key{{Keycode: vaxis.KeyEsc}, {Keycode: ' ', Text: " "}, {Keycode: '2', Text: "2"}} {
 		app, _ := newTestManager(t, 80, 24)

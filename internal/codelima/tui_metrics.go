@@ -164,6 +164,7 @@ func (a *vaxisTUIApp) handleMetricsKey(key vaxis.Key) bool {
 		if a.metrics.processes != nil {
 			sorted := sortedProcessSnapshot(*a.metrics.processes, a.metrics.processSort)
 			a.metrics.processes = &sorted
+			a.ensureMetricProcessSelection()
 		}
 		a.cancelMetricsLoad()
 		a.startMetricsLoad()

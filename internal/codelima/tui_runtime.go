@@ -107,6 +107,11 @@ func applyNodeUsageSample(u nodeUsageEvent, observation *RuntimeObservation) {
 	if observation == nil {
 		return
 	}
+	if observation.MetricsEpoch != u.MetricsEpoch {
+		observation.CPUHistory = nil
+	}
+	observation.CPUHistory = mergeCPUTrend(observation.CPUHistory, u.CPUHistory, u.SampledAt, u.CPUUsagePercent)
+	observation.MetricsEpoch = u.MetricsEpoch
 	observation.CPUUsagePercent = u.CPUUsagePercent
 	observation.MemoryUsedBytes = u.MemoryUsedBytes
 	observation.MemoryTotalBytes = u.MemoryTotalBytes
@@ -137,12 +142,14 @@ func nodeUsageFromNode(node Node) nodeUsageEvent {
 	usage.DiskUsedBytes = observation.DiskUsedBytes
 	usage.DiskTotalBytes = observation.DiskTotalBytes
 	usage.Details = cloneNodeUsageDetails(observation.UsageDetails)
+	usage.MetricsEpoch = observation.MetricsEpoch
 	switch {
 	case observation.ResourceUsageSampledAt != nil:
 		usage.SampledAt = *observation.ResourceUsageSampledAt
 	case observation.CPUUsageSampledAt != nil:
 		usage.SampledAt = *observation.CPUUsageSampledAt
 	}
+	usage.CPUHistory = mergeCPUTrend(nil, observation.CPUHistory, usage.SampledAt, usage.CPUUsagePercent)
 	return usage
 }
 

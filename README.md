@@ -330,6 +330,10 @@ show `—`. Metric sorts place unavailable readings last and temporarily flatten
 directory groups. Batch actions include marked nodes hidden by the filter and
 show one confirmation; deleting a batch requires its node count.
 
+Wide fleet rows show the last eight seconds of CPU as a sparkline. The
+selected-node preview shows 60 seconds, including samples retained before
+this window opened. Missing samples remain blank; memory and disk use gauges.
+
 Open a node with Enter and Tab to Metrics. `+`/`-` select 1m, 5m, 15m or 1h;
 Space pauses/resumes. CPU and memory charts use observed samples, with gaps
 when unavailable. The daemon retains up to one hour, lost on restart. Disk is
@@ -340,7 +344,8 @@ The process table samples only while Metrics is open and unpaused. `p` switches
 CPU/memory order, arrows select a process, and `y` sends its PID to the host
 clipboard. Process CPU uses one core as 100%, so a multithreaded process may
 exceed 100%. The first sample shows `—` until a second reading is available.
-Only the top 64 processes are returned; while paused, sorting uses those rows.
+The table shows the top 64 processes and retains both CPU and memory leaders
+so sorting remains accurate while paused.
 
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even

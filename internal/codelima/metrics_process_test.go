@@ -105,6 +105,30 @@ type metricsProcessPeer struct {
 	wait  chan struct{}
 }
 
+func TestNodeMetricsProcessPauseRetainsBothGlobalRankings(t *testing.T) {
+	full := daemon.NodeProcessSnapshot{Count: 200}
+	for i := range 200 {
+		cpu := float64(200 - i)
+		full.Rows = append(full.Rows, daemon.NodeProcess{PID: i + 1, CPUPercent: &cpu, RSSBytes: uint64(i)})
+	}
+	byCPU := sortedProcessSnapshot(full, "cpu")
+	if len(byCPU.Rows) != 64 || len(byCPU.AlternateRows) != 64 || byCPU.Rows[0].PID != 1 {
+		t.Fatal("CPU leaders were not bounded")
+	}
+	byMemory := sortedProcessSnapshot(byCPU, "memory")
+	if byMemory.Rows[0].PID != 200 || len(byMemory.Rows) != 64 || len(byMemory.AlternateRows) != 64 {
+		t.Fatal("paused memory sort lost its global leaders")
+	}
+	back := sortedProcessSnapshot(byMemory, "cpu")
+	if back.Rows[0].PID != 1 {
+		t.Fatal("switching back lost CPU leaders")
+	}
+	*back.Rows[0].CPUPercent = 0
+	if *byCPU.Rows[0].CPUPercent != 200 {
+		t.Fatal("sorted leaders alias the source snapshot")
+	}
+}
+
 func (p *metricsProcessPeer) SampleProcesses(ctx context.Context) (guestProcessObservation, error) {
 	p.calls.Add(1)
 	if p.wait != nil {

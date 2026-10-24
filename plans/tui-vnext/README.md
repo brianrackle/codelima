@@ -90,7 +90,7 @@ and tmux launch, shifted default choices, scrolling, Enter and mouse activation
 color, with the disposable daemon/home cleaned. Verify, race and integration
 checks pass; external-window and guest-session qualification remain open.
 Current limitations include published-port-only Ports,
-window-local Activity, incomplete fleet/preview history, basic event Logs,
+window-local Activity, incomplete final visual qualification, basic event Logs,
 and existing forms inside the new modal geometry. These are implementation
 stages, not reductions of the accepted scope. See TODO #57.
 
@@ -124,5 +124,8 @@ delivery passed. History survived new client connections and reset on daemon
 replacement; unavailable connections retained history with explicit errors.
 The fixture was fully cleaned. Nested Lima guest-agent socket degradation and
 a later host-agent SIGINT limit lifecycle conclusions from that run.
-Fleet/preview sparklines, both global top process sets during pause, and final
-artboard/native qualification remain in TODO #57.
+Fleet/preview sparklines and both global top process sets during pause now have
+bounded data and regression coverage (ADR 156, protocol 10). Full verify, race
+and integration pass; gopls is clean. Final live
+fleet/preview and disjoint-ranking qualification, plus artboard/native checks,
+remain in TODO #57.

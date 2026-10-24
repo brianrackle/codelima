@@ -18,6 +18,20 @@ func metricPercent(value *float64) string {
 	return fmt.Sprintf("%.0f%%", *value)
 }
 
+func tuiCPUSparkline(points []daemon.NodeMetricPoint, now time.Time, window time.Duration, width int) string {
+	columns := tuiMetricColumns(points, now, window, width, metricCPU)
+	var line strings.Builder
+	for _, value := range columns {
+		if value == nil {
+			line.WriteByte(' ')
+			continue
+		}
+		level := min(7, max(0, int(math.Round(*value/100*7))))
+		line.WriteRune([]rune("▁▂▃▄▅▆▇█")[level])
+	}
+	return line.String()
+}
+
 func metricResource(used, total *uint64) string {
 	percent, ok := tuiFleetUsagePercent(used, total)
 	if !ok {

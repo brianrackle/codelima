@@ -482,6 +482,9 @@ manual qualification.
   below it. At 120 columns the large preview disappears; at 80×24 the table
   uses percentage columns and a selected-node summary. Preserve selection
   through each resize and an automatic refresh.
+- With a running guest, compare the fleet's eight-second CPU sparkline and
+  preview's 60-second plot across two frontends. New windows must include
+  retained observations; blank intervals must remain blank after disconnection.
 - Select several running nodes, press Enter/Esc and refresh. `terminal list`
   must show no newly created shell. Directory headings cannot be selected by
   keyboard or mouse. `G` toggles groups; `<`/`>` chooses sort and `=` reverses.
@@ -512,6 +515,9 @@ For Metrics, use a disposable running Linux guest:
 - Run a temporary CPU workload in the guest. Confirm its PID appears, CPU
   rises after a second sample, `p` changes CPU/memory order, arrows and mouse
   select processes, and `y` requests the selected PID on the host clipboard.
+- With more than 64 processes and different CPU/memory leaders, pause and
+  switch `p` in both directions. Each ranking must preserve its global leaders;
+  selection and copied PID must refer to a visible process after either sort.
 - Exercise all four windows with `+`/`-`, pause with Space, and confirm both
   plots and process values freeze. Resume, switch tabs, return and open a
   second frontend. Selection must remain valid and history must survive a
