@@ -1,5 +1,18 @@
 # Patterns
 
+## Execution evidence and explicit retry
+
+Freeze command provenance at creation. Persist a unique running attempt before
+the command, then its observed outcome with bounded rollback locks even when
+the caller is canceled. Carry the attempt ID into logs and events so links do
+not depend on ambiguous command prefixes. Keep slow execution outside locks.
+Only skip a prefix with durable success evidence, and defer resetting records
+until preflight succeeds. Changed commands invalidate old success evidence;
+legacy records and interrupted runs must retain explicit unknown fields.
+Cloned disk history keeps its original execution identity (ADR 160).
+Anchor a selected command to its frozen step identity when refreshed outcomes
+change row counts. Matching command text alone merges repeated commands.
+
 ## Frozen recipe inspection
 
 Compare stored node/bootstrap values with the current recipe resolved through

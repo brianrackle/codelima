@@ -499,6 +499,9 @@ func (a *vaxisTUIApp) managerFooter() string {
 		return "N new from template · e edit · v YAML · y path · c clone · Tab view · Esc nodes"
 	}
 	if a.nodeDetail {
+		if a.state.selectedEntry().node.Status == NodeStatusFailed {
+			return "r retry failed step · x inspect · s stop/start VM · l logs · Tab view · Esc nodes"
+		}
 		return "Tab/Shift-Tab view · x shell · s start/stop · l logs · Esc nodes · : commands · ? help"
 	}
 	switch a.view {

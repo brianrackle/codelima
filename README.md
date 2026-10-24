@@ -372,13 +372,23 @@ The Spec tab shows frozen values, current template drift, and the actual
 `instance.lima.yaml`. The amber dot appears when a compared value differs,
 including changes inside assigned environments. `←`/`→` or `Ctrl+↑`/`Ctrl+↓`
 select a panel; arrows, Page Up/Down and the mouse wheel scroll it. Compact
-terminals show the selected panel. Enter on a bootstrap command opens its
-captured output in Logs with follow paused. Older output may have rotated out.
+terminals show the selected panel. Steps show their frozen source, latest
+outcome, observed duration and exit code. Enter opens that attempt's captured
+output in Logs with follow paused. Older output may have rotated out; older
+nodes explicitly show unrecorded history, and clones label inherited runs.
 
 In Spec, `N` opens a new node form with the current template and node directory;
 `c` clones the frozen node; `e` edits the current template. `v` opens the stored
 Lima YAML in `$PAGER`, and `y` copies its path. Missing templates or YAML do not
-hide the frozen recipe. Per-step bootstrap source and timing are not yet stored.
+hide the frozen recipe.
+
+For a failed node, press `r` or run `codelima node retry NODE` to resume its first
+recorded failed step, skipping a recorded successful prefix. A command may have
+partially changed the guest before failing, so review its output first.
+`codelima node start NODE` still reruns every step of an incomplete bootstrap;
+after successful bootstrap it only revalidates the agent. Canceled attempts
+and old failures without step records require ordinary start. `s` stops a VM
+that remains running after bootstrap failure.
 
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even

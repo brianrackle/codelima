@@ -569,12 +569,33 @@ For Spec, use an isolated node and editable template:
   Cancel, use `e` to inspect/edit today's values, and `c` to open the frozen
   clone action. Cancel unwanted creations without leaving verification state.
 - Select a bootstrap command and press Enter. Verify Logs opens Bootstrap,
-  searches for that command and stays paused. Inspect retained output; absent
+  searches for its attempt ID (or command for older records) and stays paused. Inspect retained output; absent
   output from older versions or rotated files must not be presented as success.
 - With `PAGER='less -S'`, press `v`, inspect the original YAML, quit and confirm
   the TUI resumes. Press `y` and verify the complete YAML path reaches the host
   clipboard. A missing/malformed YAML file must leave frozen values readable.
 - Stop and remove the disposable TUI, daemon, node, VM and all fixture files.
+
+For recorded bootstrap steps and explicit retry, use one disposable guest:
+
+- Freeze three short environment commands: the first appends a counter and
+  writes distinct stdout/stderr markers, the second fails with exit 23 until a
+  guest marker exists, and the third prints a completion marker. Use a simple
+  shell agent profile with a validation command. Disable host credential import.
+- Start it and inspect Spec at 150×38 and 80×24. The first step must show success,
+  the second failure/exit 23, the third pending, and each executed step must
+  have its real source and duration. Open the failed step's retained output.
+- Confirm both streams and the failed attempt ID in Bootstrap, mode 0600 on
+  the log, and `node.bootstrap.failed` in Events. Verify VM-up allocation and
+  inspection remain available while the node is failed.
+- Create the marker through an inspection shell. Press `r` and verify only
+  the failed suffix and validation run; the first counter/attempt ID must stay
+  unchanged, while the failed step's attempt count increases and ID changes.
+- Repeat failure (or restore the disposable fixture's saved failure metadata)
+  with ordinary `node start` and verify the incomplete prefix
+  reruns. Stop/start a completed node and verify bootstrap is skipped while
+  validation gets a new attempt. Check `s` stops a failed-but-running VM.
+- Clean the guest, nodes, metadata, daemons, terminals, sockets and helper files.
 
 Run in a real terminal:
 

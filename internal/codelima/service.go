@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -931,9 +932,13 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 			return err
 		}
 
-		configurationCommands, err := s.resolveConfigurationBootstrapCommands(configuration)
+		configurationSteps, err := s.resolveConfigurationBootstrapSteps(configuration)
 		if err != nil {
 			return err
+		}
+		configurationCommands := make([]string, 0, len(configurationSteps))
+		for _, step := range configurationSteps {
+			configurationCommands = append(configurationCommands, step.Command)
 		}
 
 		nodeSlug := input.Slug
@@ -955,6 +960,9 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 			Environment:       cloneStringMap(profile.Environment),
 			Completed:         false,
 		}
+		bootstrap.Steps = appendBootstrapSteps(nil, profile.InstallCommands, "bootstrap", "agent", "", profile.Name)
+		bootstrap.Steps = append(bootstrap.Steps, configurationSteps...)
+		bootstrap.Steps = appendBootstrapSteps(bootstrap.Steps, []string{profile.ValidationCommand}, "validation", "agent", "", profile.Name)
 
 		workspaceMountPath := ""
 		if workspaceMode == WorkspaceModeMounted {
@@ -1268,9 +1276,24 @@ func (s *Service) nodeTerminalMetadata(ctx context.Context, value string) (Node,
 	return s.store.NodeByIDOrSlug(value)
 }
 
-func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err error) {
-	s.log().Debug("operation started", "op", "node.start", "node", value)
-	defer s.logOperation("node.start", s.now(), &err)
+func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
+	return s.nodeStart(ctx, value, false)
+}
+
+// NodeRetry explicitly resumes an incomplete start at its recorded failed
+// step. Ordinary NodeStart keeps its existing full-rerun behavior after a
+// failed or canceled first bootstrap.
+func (s *Service) NodeRetry(ctx context.Context, value string) (Node, error) {
+	return s.nodeStart(ctx, value, true)
+}
+
+func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ Node, err error) {
+	op := "node.start"
+	if resume {
+		op = "node.retry"
+	}
+	s.log().Debug("operation started", "op", op, "node", value)
+	defer s.logOperation(op, s.now(), &err)
 
 	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
@@ -1281,7 +1304,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		return Node{}, err
 	}
 
-	token, err := s.claimNodeOperation("node.start", resolved.ID)
+	token, err := s.claimNodeOperation(op, resolved.ID)
 	if err != nil {
 		return Node{}, err
 	}
@@ -1291,6 +1314,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		node           Node
 		bootstrap      BootstrapState
 		previousStatus NodeStatus
+		firstStep      int
 	)
 	// Metadata phase. Publishing the provisioning status here is what makes the
 	// unlocked runtime work below safe: a second operation on this node sees an
@@ -1315,9 +1339,17 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 				return phaseErr
 			}
 		}
-		if phaseErr := s.recoverStaleNodeClaim("node.start", &node, bootstrap); phaseErr != nil {
+		if phaseErr := s.recoverStaleNodeClaim(op, &node, bootstrap); phaseErr != nil {
 			return phaseErr
 		}
+		if resume && node.Status != NodeStatusFailed {
+			return preconditionFailed("only a failed node can retry a recorded step", map[string]any{"node_id": node.ID})
+		}
+		firstStep, phaseErr = bootstrap.prepareSteps(resume)
+		if phaseErr != nil {
+			return phaseErr
+		}
+		node.BootstrapCommands = bootstrap.CombinedCommands()
 
 		previousStatus = node.Status
 		now := s.now()
@@ -1326,7 +1358,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 		if phaseErr := s.store.SaveNode(node, bootstrap); phaseErr != nil {
 			return phaseErr
 		}
-		return s.store.AppendNodeEvent(node.ID, Event{Timestamp: now, Type: "node.start.started"})
+		return s.store.AppendNodeEvent(node.ID, Event{Timestamp: now, Type: op + ".started", Fields: map[string]any{"from_step": firstStep + 1}})
 	}); err != nil {
 		return Node{}, err
 	}
@@ -1407,22 +1439,34 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 			}
 		}
 
-		for _, command := range bootstrap.CombinedCommands() {
-			if err := s.runBootstrapGuestCommand(ctx, node, command); err != nil {
+	}
+	bootstrap.resetSteps(firstStep)
+	if bootstrapRan {
+		for index := firstStep; index < len(bootstrap.Steps); index++ {
+			step := bootstrap.Steps[index]
+			if step.Kind != "bootstrap" {
+				continue
+			}
+			if err := s.runRecordedBootstrapStep(ctx, node, &bootstrap, index); err != nil {
 				node.Status = NodeStatusFailed
 				node.UpdatedAt = s.now()
-				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"command": command, "error": err.Error()}})
+				s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"command": step.Command, "step": index + 1, "error": err.Error()}})
 				return Node{}, err
 			}
 		}
 
 	}
 
-	if err := s.runLoggedGuestCommand(ctx, node, bootstrap.ValidationCommand, "validation"); err != nil {
-		node.Status = NodeStatusFailed
-		node.UpdatedAt = s.now()
-		s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"validation_command": bootstrap.ValidationCommand, "error": err.Error()}})
-		return Node{}, err
+	for index := firstStep; index < len(bootstrap.Steps); index++ {
+		if bootstrap.Steps[index].Kind != "validation" {
+			continue
+		}
+		if err := s.runRecordedBootstrapStep(ctx, node, &bootstrap, index); err != nil {
+			node.Status = NodeStatusFailed
+			node.UpdatedAt = s.now()
+			s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"validation_command": bootstrap.ValidationCommand, "step": index + 1, "error": err.Error()}})
+			return Node{}, err
+		}
 	}
 	if bootstrapRan {
 		completedAt := s.now()
@@ -1683,6 +1727,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 	bootstrap.InstallCommands = append([]string(nil), sourceBootstrap.InstallCommands...)
 	bootstrap.BootstrapCommands = append([]string(nil), sourceBootstrap.BootstrapCommands...)
 	bootstrap.Environment = cloneStringMap(sourceBootstrap.Environment)
+	bootstrap.Steps = slices.Clone(sourceBootstrap.Steps)
 
 	var (
 		cloneTarget Node
@@ -2076,18 +2121,14 @@ func (s *Service) resolveEnvironmentConfigRefs(refs []string) ([]string, error) 
 }
 
 func (s *Service) resolveConfigurationBootstrapCommands(configuration Configuration) ([]string, error) {
-	commands := make([]string, 0)
-	for _, slug := range configuration.Environments {
-		environment, err := s.store.EnvironmentConfigByIDOrSlug(slug)
-		if err != nil {
-			return nil, err
-		}
-		if environment.DeletedAt != nil {
-			return nil, notFound("environment not found", map[string]any{"query": slug})
-		}
-		commands = append(commands, environment.BootstrapCommands...)
+	steps, err := s.resolveConfigurationBootstrapSteps(configuration)
+	if err != nil {
+		return nil, err
 	}
-	commands = append(commands, configuration.BootstrapCommands...)
+	commands := make([]string, 0, len(steps))
+	for _, step := range steps {
+		commands = append(commands, step.Command)
+	}
 	return commands, nil
 }
 
@@ -2166,19 +2207,6 @@ func (s *Service) generateSandboxName(nodeSlug string) (string, error) {
 // plausible honest install and still short enough that a genuinely wedged
 // command surfaces the same day.
 const bootstrapGuestCommandTimeout = 45 * time.Minute
-
-// runBootstrapGuestCommand runs one bootstrap/agent-install command under the
-// long budget. The deadline is set here, at the call site that knows the class
-// of work, and the runtime honors it (see guestCommandTimeout).
-func (s *Service) runBootstrapGuestCommand(ctx context.Context, node Node, command string) error {
-	if strings.TrimSpace(command) == "" {
-		return nil
-	}
-
-	bootstrapCtx, cancel := context.WithTimeout(ctx, bootstrapGuestCommandTimeout)
-	defer cancel()
-	return s.runLoggedGuestCommand(bootstrapCtx, node, command, "bootstrap")
-}
 
 // runGuestCommand runs one service-issued provisioning command — a frozen
 // bootstrap/agent-install step or the agent validation probe — as root.

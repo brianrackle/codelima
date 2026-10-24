@@ -351,6 +351,16 @@ var cliCommands = []*cliCommand{
 	},
 	{
 		Group:      "node",
+		Name:       "retry",
+		Summary:    "resume a failed node from its recorded failed bootstrap or validation step",
+		Positional: "node",
+		MinArgs:    1,
+		Run: func(ctx context.Context, service *Service, node string, _ *flag.FlagSet, _ []string) (any, error) {
+			return service.NodeRetry(ctx, node)
+		},
+	},
+	{
+		Group:      "node",
 		Name:       "clone",
 		Summary:    "clone a node and its workspace under a new slug",
 		Positional: "source-node",

@@ -132,11 +132,11 @@ verify, race and CLI integration checks pass. An isolated terminal fixture
 exercised wide/80×24 rendering, all sources, source mouse clicks, severity,
 search, wrapping, follow growth/pause/resume, pager restoration and clipboard
 delivery. The terminal check used diagnostic fixture files, not a newly
-failed guest bootstrap. Required follow-up: run QA.md's failed-bootstrap flow
-on a real guest and finish exact-artboard/native presentation qualification.
-Using the same disposable guest as the remaining lifecycle checks reduces
-setup cost and validates actual transport output; it requires another guest
-boot and must not be substituted with these local fixture checks.
+failed guest bootstrap. The later real-guest step/retry check below verifies
+actual stdout/stderr, exit status and attempt-linked output. Exact-artboard/
+native presentation qualification remains required. Reusing that guest for
+the remaining lifecycle checks reduces setup cost and validates transport
+behavior alongside the local diagnostic fixture coverage.
 
 The fallback emoji renderer defect found by Logs QA is fixed (ADR 158):
 reserved spans are cleared and following output is explicitly positioned.
@@ -170,13 +170,37 @@ or qualify per-step execution history. Both TUI runs exited normally; the
 disposable daemon, tmux server/socket, metadata, Lima fixture, screenshots and
 scripts were removed from `tmp/specqa`.
 
-Spec remains partial because bootstrap.json does not record per-step source,
-status or duration. Required follow-up: freeze provenance at node creation,
-record execution attempts and timings durably, then populate Spec and the
-Starting/Failed views from those records. Preserve explicit unknown state for
-older nodes. This also enables failed-step retry and clear progress, but needs
-a storage contract, migration rules and real guest failure/retry qualification.
-Final native/artboard qualification remains part of the full design scope.
+Bootstrap now freezes per-step source and records latest attempts, status,
+duration and observed exit codes in JSON/YAML (ADR 160). Spec displays these
+records and opens logs by attempt identity. Explicit CLI/TUI retry skips a
+proven successful prefix; ordinary start retains full incomplete-bootstrap
+reruns. Legacy unknowns, canceled/interrupted work, clone provenance and
+preflight rejection have regression coverage. Focused, full verify, race and
+CLI integration checks pass. A real Ubuntu 24.04 guest completed boot and
+failed at the intended second command with exit 23. Both streams, private log
+mode, event/attempt identity, frozen source and actual duration were verified.
+The TUI displayed wide/compact step records, opened the exact failed attempt,
+and allowed a managed inspection shell to repair it. Raw detach returned to
+the manager; `r` completed the suffix and validation while preserving the
+first step's attempt ID and one execution. Restoring the disposable failure
+snapshot and using ordinary start reran the prefix, confirmed by the guest
+counter. A selection shift caused by inserted error rows is fixed with a
+regression covering repeated commands. Full verify, race and integration pass
+for the final code. TUI `s` stopped the failed VM through normal guest poweroff;
+Lima reported Stopped and global allocation returned to zero. Ready-node
+stop/start validation still needs its final observation. The stopped guest/home,
+TUI, daemon, tmpfs SSH socket, screenshots and helpers
+in `tmp/stepqa` are retained for the next lifecycle checks and must be cleaned.
+The nested TCG guest uses a bounded cache and a project-local SSH ControlMaster
+socket to avoid VirtioFS hard-link errors; Lima's guest agent became healthy.
+
+Required follow-up: use these records in the Starting/Failed views, persist
+phase-level progress, and move operations into the daemon so closing a TUI
+does not cancel work. Add explicit cancel/stop and queued-attach behavior.
+The step records supply reliable execution evidence but do not themselves
+change operation ownership or provide seven-day Activity history. This
+separation keeps retry compatible with existing callers at the cost of a
+second runtime/RPC change. Final native/artboard qualification remains open.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations

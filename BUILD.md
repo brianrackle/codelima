@@ -33,6 +33,11 @@ profile edits, deleted templates, bounded YAML inspection, special files,
 responsive panels, navigation fencing and Spec actions (ADR 159). Run the
 Spec terminal procedure in QA.md before qualifying this surface.
 
+`make test-bootstrap-steps` covers frozen provenance, durable attempts,
+failure/cancellation/interruption, explicit suffix retry, legacy metadata,
+clone inheritance, JSON/YAML round trips, CLI/TUI retry and failed-VM stopping
+(ADR 160). Run the real guest failure/retry procedure in QA.md as well.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool

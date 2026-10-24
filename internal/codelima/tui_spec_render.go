@@ -3,6 +3,7 @@ package codelima
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
@@ -10,6 +11,8 @@ import (
 
 type tuiSpecRow struct {
 	text, command string
+	logQuery      string
+	step          int
 	style         vaxis.Style
 	action        rune
 }
@@ -87,15 +90,31 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 		if s.BootstrapError != nil {
 			add("Bootstrap metadata: "+s.BootstrapError.Error(), theme.coral, "")
 		}
-		add("Per-step source/timing not recorded. Enter opens captured output.", theme.dim, "")
-		if len(n.BootstrapCommands) == 0 {
-			add("No bootstrap commands.", theme.dim, "")
-		}
-		for i, command := range n.BootstrapCommands {
-			add(fmt.Sprintf("%d  %s", i+1, command), theme.text, command)
-		}
-		if s.Bootstrap.ValidationCommand != "" {
-			add("validate  "+s.Bootstrap.ValidationCommand, theme.text, s.Bootstrap.ValidationCommand)
+		if len(s.Bootstrap.Steps) > 0 {
+			add("Enter opens command output · — means timing was not recorded", theme.dim, "")
+			for i, step := range s.Bootstrap.Steps {
+				first := len(rows)
+				label, style := bootstrapStepDisplay(step, i, n.ID, theme)
+				add(label+"\n"+step.Command, style, step.Command)
+				if step.Error != "" {
+					add(step.Error, theme.coral, step.Command)
+				}
+				for j := first; j < len(rows); j++ {
+					rows[j].logQuery = step.AttemptID
+					rows[j].step = i + 1
+				}
+			}
+		} else {
+			add("Per-step source/timing not recorded. Enter opens captured output.", theme.dim, "")
+			if len(n.BootstrapCommands) == 0 {
+				add("No bootstrap commands.", theme.dim, "")
+			}
+			for i, command := range n.BootstrapCommands {
+				add(fmt.Sprintf("%d  %s", i+1, command), theme.text, command)
+			}
+			if s.Bootstrap.ValidationCommand != "" {
+				add("validate  "+s.Bootstrap.ValidationCommand, theme.text, s.Bootstrap.ValidationCommand)
+			}
 		}
 	case 1:
 		if s.Template != nil {
@@ -135,6 +154,41 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 		add(s.LimaPath, theme.dim, "")
 	}
 	return rows
+}
+
+func bootstrapStepDisplay(step BootstrapStep, index int, nodeID string, theme tuiTheme) (string, vaxis.Style) {
+	symbol, style := "○", theme.dim
+	switch step.State {
+	case BootstrapStepSucceeded:
+		symbol, style = "✓", theme.mint
+	case BootstrapStepRunning:
+		symbol, style = "◐", theme.amber
+	case BootstrapStepFailed:
+		symbol, style = "✕", theme.coral
+	case BootstrapStepCanceled:
+		symbol, style = "⊘", theme.amber
+	case BootstrapStepInterrupted, BootstrapStepUnrecorded:
+		symbol, style = "?", theme.dim
+	}
+	duration := "—"
+	if step.DurationMillis != nil {
+		duration = (time.Duration(*step.DurationMillis) * time.Millisecond).Round(time.Millisecond).String()
+	}
+	if step.State == BootstrapStepRunning && step.StartedAt != nil {
+		duration = max(time.Duration(0), time.Since(*step.StartedAt)).Round(time.Second).String()
+	}
+	number := fmt.Sprint(index + 1)
+	if step.Kind == "validation" {
+		number = "validate"
+	}
+	label := fmt.Sprintf("%s %s · %s · %s · %s", symbol, number, step.SourceName, step.State, duration)
+	if step.ExitCode != nil && *step.ExitCode != 0 {
+		label += fmt.Sprintf(" · exit %d", *step.ExitCode)
+	}
+	if step.ExecutionNodeID != "" && step.ExecutionNodeID != nodeID {
+		label += " · inherited"
+	}
+	return label, style
 }
 
 func (a *vaxisTUIApp) drawNodeSpec(win vaxis.Window, theme tuiTheme) {
@@ -190,7 +244,28 @@ func (a *vaxisTUIApp) drawSpecPanel(win vaxis.Window, panel int, title string, t
 	width, height = inner.Size()
 	x, y := inner.Origin()
 	s.rects[panel] = tuiRect{col: x, row: y, width: width, height: height}
-	s.rows[panel] = a.specRows(panel, width, theme)
+	rows := a.specRows(panel, width, theme)
+	if cursor := s.cursor[panel]; cursor >= 0 && cursor < len(s.rows[panel]) {
+		selected := s.rows[panel][cursor]
+		if selected.step > 0 {
+			first := cursor
+			for first > 0 && s.rows[panel][first-1].step == selected.step {
+				first--
+			}
+			for i, row := range rows {
+				if row.step != selected.step {
+					continue
+				}
+				last := i
+				for last+1 < len(rows) && rows[last+1].step == selected.step {
+					last++
+				}
+				s.cursor[panel] = min(i+cursor-first, last)
+				break
+			}
+		}
+	}
+	s.rows[panel] = rows
 	s.cursor[panel] = max(0, min(s.cursor[panel], len(s.rows[panel])-1))
 	if s.cursor[panel] < s.offset[panel] {
 		s.offset[panel] = s.cursor[panel]

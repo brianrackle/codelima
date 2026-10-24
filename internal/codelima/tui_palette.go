@@ -155,6 +155,7 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "Space / *", hint: "Mark node / mark every visible node; marks survive filtering"},
 		{label: "n / c / d", hint: "Create / clone / delete node"},
 		{label: "s", hint: "Start or stop selected/marked nodes"},
+		{label: "r", hint: "Failed node: retry from its recorded failed bootstrap or validation step"},
 		{label: "x / X", hint: "Open shell / shell chooser"},
 		{label: "Tab / Shift-Tab", hint: "Cycle detail tabs or templates/environments"},
 		{label: "+ − / Space", hint: "Metrics: 1m / 5m / 15m / 1h window; pause samples"},

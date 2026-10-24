@@ -211,10 +211,12 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		err = a.fleetNodeAction(tuiActionNodeDelete)
 	case key.MatchString("s"):
 		action := tuiActionNodeStart
-		if selected, ok := a.fleetSelected(); ok && selected.Status == "running" {
+		if selected, ok := a.fleetSelected(); ok && nodeIsRunning(selected.Node) {
 			action = tuiActionNodeStop
 		}
 		err = a.fleetNodeAction(action)
+	case key.MatchString("r") && a.state.selectedEntry().node.Status == NodeStatusFailed:
+		err = a.performAction(tuiActionSpec{ID: tuiActionNodeRetry})
 	case key.MatchString("y"):
 		err = a.copyToHostClipboard(a.state.selectedEntry().node.Slug)
 	case key.MatchString("X"):

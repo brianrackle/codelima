@@ -130,3 +130,55 @@ func TestTUISpecLongCommandsAndMouseActions(t *testing.T) {
 		t.Fatalf("mouse copy=%q", copied)
 	}
 }
+
+func TestTUISpecShowsRecordedStepOriginOutcomeAndDuration(t *testing.T) {
+	a := testSpecApp(t, 150, 38)
+	duration, code := int64(1250), 23
+	a.spec.snapshot.Bootstrap.Steps = []BootstrapStep{{Kind: "bootstrap", SourceKind: "environment", SourceName: "rust-tools", Command: "curl install", State: BootstrapStepFailed, DurationMillis: &duration, ExitCode: &code, Error: "curl: not found", AttemptID: "unique-attempt-id"}}
+	a.draw()
+	a.handleKey(vaxis.Key{Keycode: vaxis.KeyEnd})
+	a.draw()
+	screen := renderedScreenText(t, a.vx, 150, 38)
+	for _, want := range []string{"rust-tools", "failed", "1.25s", "exit 23", "curl: not found"} {
+		if !strings.Contains(screen, want) {
+			t.Fatalf("missing %q:\n%s", want, screen)
+		}
+	}
+	a.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter})
+	if a.logs.query != "unique-attempt-id" {
+		t.Fatalf("step output link lost attempt identity: %q", a.logs.query)
+	}
+}
+
+func TestTUISpecStepSelectionSurvivesNewFailureRows(t *testing.T) {
+	a := testSpecApp(t, 80, 24)
+	a.spec.snapshot.Bootstrap.Steps = []BootstrapStep{
+		{Kind: "bootstrap", Command: "same command", State: BootstrapStepPending},
+		{Kind: "bootstrap", Command: "same command", State: BootstrapStepPending},
+		{Kind: "validation", Command: "validate", State: BootstrapStepPending},
+	}
+	a.draw()
+	a.handleKey(vaxis.Key{Keycode: vaxis.KeyEnd})
+	a.draw()
+	a.spec.snapshot.Bootstrap.Steps[0].State = BootstrapStepFailed
+	a.spec.snapshot.Bootstrap.Steps[0].Error = "first error\nsecond line\nthird line"
+	a.draw()
+	row := a.spec.rows[0][a.spec.cursor[0]]
+	if row.command != "validate" {
+		t.Fatalf("failure moved selection to another step: %+v", row)
+	}
+	// Repeated commands are separate steps. Keep the second one's selection
+	// when its prefix acquires a different number of wrapped error lines.
+	a.spec.cursor[0] = 0
+	for i, row := range a.spec.rows[0] {
+		if strings.Contains(row.text, "2 ·") {
+			a.spec.cursor[0] = i
+			break
+		}
+	}
+	a.spec.snapshot.Bootstrap.Steps[0].Error = "shorter"
+	a.draw()
+	if row := a.spec.rows[0][a.spec.cursor[0]]; !strings.Contains(row.text, "2 ·") {
+		t.Fatalf("duplicate command selection changed: %+v", row)
+	}
+}

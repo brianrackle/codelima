@@ -154,7 +154,7 @@ func (a *vaxisTUIApp) handleSpecKey(key vaxis.Key) bool {
 		rows, cursor := s.rows[s.panel], s.cursor[s.panel]
 		if cursor >= 0 && cursor < len(rows) {
 			if rows[cursor].command != "" {
-				a.openSpecCommandLogs(rows[cursor].command)
+				a.openSpecCommandLogs(rows[cursor].command, rows[cursor].logQuery)
 			}
 			if action := rows[cursor].action; action != 0 {
 				a.dispatchManagerKey(vaxis.Key{Keycode: action, Text: string(action)})
@@ -169,9 +169,11 @@ func (a *vaxisTUIApp) handleSpecKey(key vaxis.Key) bool {
 	return true
 }
 
-func (a *vaxisTUIApp) openSpecCommandLogs(command string) {
+func (a *vaxisTUIApp) openSpecCommandLogs(command, query string) {
 	a.cancelLogsLoad()
-	query := strings.TrimSpace(strings.Split(command, "\n")[0])
+	if query == "" {
+		query = strings.TrimSpace(strings.Split(command, "\n")[0])
+	}
 	a.logs = tuiLogsState{nodeID: a.spec.nodeID, source: 1, wrap: true, follow: false, query: plainLogText(query), selected: -1, serial: a.logs.serial}
 	a.openNodeDetail(tuiDetailLogs)
 	// Opening another tab normally resumes follow. A step is an inspection of

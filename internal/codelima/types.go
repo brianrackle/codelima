@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -342,6 +343,7 @@ type BootstrapState struct {
 	Environment       map[string]string `json:"environment" yaml:"environment"`
 	Completed         bool              `json:"completed" yaml:"completed"`
 	CompletedAt       *time.Time        `json:"completed_at,omitempty" yaml:"completed_at,omitempty"`
+	Steps             []BootstrapStep   `json:"steps,omitempty" yaml:"steps,omitempty"`
 }
 
 func (b BootstrapState) CombinedCommands() []string {
@@ -384,6 +386,7 @@ type IncompleteNodeCleanupResult struct {
 }
 
 type bootstrapStateWire struct {
+	Steps               []BootstrapStep   `json:"steps,omitempty" yaml:"steps,omitempty"`
 	AgentProfileName    string            `json:"agent_profile_name" yaml:"agent_profile_name"`
 	InstallCommands     []string          `json:"install_commands" yaml:"install_commands"`
 	BootstrapCommands   []string          `json:"bootstrap_commands" yaml:"bootstrap_commands"`
@@ -426,6 +429,7 @@ func (b *BootstrapState) UnmarshalYAML(node *yaml.Node) error {
 
 func newBootstrapStateWire(state BootstrapState) bootstrapStateWire {
 	return bootstrapStateWire{
+		Steps:             slices.Clone(state.Steps),
 		AgentProfileName:  state.AgentProfileName,
 		InstallCommands:   append([]string(nil), state.InstallCommands...),
 		BootstrapCommands: append([]string(nil), state.BootstrapCommands...),
@@ -439,6 +443,7 @@ func newBootstrapStateWire(state BootstrapState) bootstrapStateWire {
 
 func (w bootstrapStateWire) bootstrapState() BootstrapState {
 	return BootstrapState{
+		Steps:             slices.Clone(w.Steps),
 		AgentProfileName:  w.AgentProfileName,
 		InstallCommands:   append([]string(nil), w.InstallCommands...),
 		BootstrapCommands: commandSliceWithLegacy(w.BootstrapCommands, w.EnvironmentCommands, w.SetupCommands),

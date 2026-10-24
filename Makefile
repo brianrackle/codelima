@@ -219,6 +219,10 @@ test-terminal-attach: init
 .PHONY: test-host-capacity test-manager-settings test-metrics
 .PHONY: test-node-logs
 .PHONY: test-node-spec
+.PHONY: test-bootstrap-steps
+test-bootstrap-steps: init
+	$(GO) test ./internal/codelima -run 'Test(BootstrapSteps|NodeStart|NodeClone|TUISpec)' -count=1
+
 test-node-spec: init
 	$(GO) test ./internal/codelima -run 'Test(NodeSpec|TUI.*Spec)' -count=1
 

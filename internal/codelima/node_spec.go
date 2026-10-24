@@ -46,6 +46,10 @@ func (s *Service) NodeSpec(ctx context.Context, value string) (nodeSpecSnapshot,
 	}
 	result := nodeSpecSnapshot{Node: node, LimaPath: filepath.Join(s.store.nodeDir(node.ID), "instance.lima.yaml")}
 	result.Bootstrap, result.BootstrapError = s.store.LoadBootstrapState(node.ID)
+	if result.BootstrapError == nil {
+		result.Bootstrap.ensureSteps()
+		result.Node.BootstrapCommands = result.Bootstrap.CombinedCommands()
+	}
 	configuration, err := s.store.ConfigurationByID(node.ConfigurationID)
 	if err == nil && configuration.DeletedAt != nil {
 		err = errors.New("the source template was deleted")
@@ -62,8 +66,8 @@ func (s *Service) NodeSpec(ctx context.Context, value string) (nodeSpecSnapshot,
 			profile, resolveErr = s.store.LoadAgentProfile(configuration.AgentProfileName)
 			if resolveErr == nil {
 				current := append(slices.Clone(profile.InstallCommands), commands...)
-				if !slices.Equal(node.BootstrapCommands, current) {
-					result.Differences = append(result.Differences, nodeSpecDifference{"bootstrap", commandCount(node.BootstrapCommands), commandCount(current) + " · changed"})
+				if !slices.Equal(result.Node.BootstrapCommands, current) {
+					result.Differences = append(result.Differences, nodeSpecDifference{"bootstrap", commandCount(result.Node.BootstrapCommands), commandCount(current) + " · changed"})
 				}
 				if result.BootstrapError == nil {
 					result.addDifference("validation", result.Bootstrap.ValidationCommand, profile.ValidationCommand)

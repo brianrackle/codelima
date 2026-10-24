@@ -139,7 +139,7 @@ func (a *vaxisTUIApp) actionResourceKeys(action tuiActionSpec, entry tuiTreeEntr
 		return []string{"configurations"}
 	case tuiActionNodeCreate:
 		return []string{"nodes"}
-	case tuiActionNodeStart, tuiActionNodeStop, tuiActionNodeDelete:
+	case tuiActionNodeStart, tuiActionNodeRetry, tuiActionNodeStop, tuiActionNodeDelete:
 		return []string{terminal.NodeTarget(entry.node.ID).String()}
 	case tuiActionNodeClone:
 		return []string{terminal.NodeTarget(entry.node.ID).String()}
@@ -167,14 +167,20 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 		return a.openEnvironmentConfigsMenu()
 	case tuiActionNodeCreate:
 		return a.openCreateNodeDialog()
-	case tuiActionNodeStart:
+	case tuiActionNodeStart, tuiActionNodeRetry:
 		return a.startOperation(tuiOperationRequest{
 			Title:         "Starting " + entry.node.Slug,
 			DisplayStatus: "starting",
 			ResourceKeys:  []string{terminal.NodeTarget(entry.node.ID).String()},
 			EntryKeys:     []string{terminal.NodeTarget(entry.node.ID).String()},
 			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-				node, err := service.NodeStart(ctx, entry.node.ID)
+				var node Node
+				var err error
+				if action.ID == tuiActionNodeRetry {
+					node, err = service.NodeRetry(ctx, entry.node.ID)
+				} else {
+					node, err = service.NodeStart(ctx, entry.node.ID)
+				}
 				if err != nil {
 					return tuiOperationResult{}, err
 				}

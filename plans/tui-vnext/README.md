@@ -17,8 +17,8 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
-| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources and controls verified; real failed-bootstrap/native qualification remains |
-| [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, actual YAML and actions; per-step provenance/timing and final qualification remain |
+| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
+| [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Create node · validation](reference/CreateNode.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -66,9 +66,8 @@ severity, wrapping, clipboard delivery and pager restoration. A fallback
 grapheme-width defect is fixed and verified across resize/search (ADR 158).
 Tall-record searches reveal the matching continuation. The upstream Vaxis
 mise check passes. The daemon, terminals, sockets and diagnostic fixtures were
-fully cleaned. Actual failed
-guest-bootstrap output and final native/artboard qualification remain open
-in QA.md and TODO #57.
+fully cleaned. The later step/retry run verifies actual failed guest-bootstrap
+output; final native/artboard qualification remains open in QA.md and TODO #57.
 
 Spec now has a read-only frozen/current recipe comparison and actual stored
 Lima YAML inspection (ADR 159). Wide and compact panels, drift refresh,
@@ -76,7 +75,18 @@ new/clone/edit, long-command scrolling, bootstrap log navigation, pager and
 path copy passed isolated terminal checks. The run also verified missing
 dependencies, malformed YAML and corrected Create-form defaults. Focused
 tests, full verify, race and CLI integration checks pass. Per-step provenance,
-execution status/timing and final native/artboard qualification remain open.
+execution status/timing and explicit retry now have durable records (ADR 160),
+with legacy unknowns and inherited clone execution identity preserved.
+Attempt IDs link to captured output. Focused, full verify, race and integration
+checks pass. Real Ubuntu failure output, exit 23, frozen source/timing,
+wide/compact step display, exact-attempt output navigation and TUI retry were
+verified. The successful prefix kept its attempt and guest counter; ordinary
+start of the restored failure fixture reran that prefix. Refresh now retains
+the selected step when error rows appear. TUI stop shut down the failed guest
+normally and released allocation. Full verify, race and integration pass.
+The reusable stopped guest and its testing
+state remain under `tmp/stepqa` while lifecycle qualification continues. Starting/
+Failed views, operation ownership and final native/artboard qualification remain open.
 The disposable Spec fixture, TUI, daemon, tmux/socket and screenshots were cleaned.
 
 ## Implementation sequence
