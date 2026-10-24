@@ -78,6 +78,17 @@ TUI_INPUT_TEST_FILTER ?= ^TestTUI(FocusToggle|Tab|TerminalTabKey|HandleKeyOption
 GO_TEST_PARALLEL ?= 4
 GO_RACE_TEST_PARALLEL ?= 1
 DIAG_ARGS ?=
+KVM_ARGS ?= id
+
+.PHONY: init-qemu-guest run-kvm test-qemu-guest
+init-qemu-guest:
+	bash scripts/install_qemu_guest.sh '$(TOOLS_DIR)' '$(CURDIR)/tmp'
+
+run-kvm:
+	bash scripts/with_kvm.sh $(KVM_ARGS)
+
+test-qemu-guest: init-qemu-guest
+	@printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"query-kvm"}' '{"execute":"quit"}' | bash scripts/with_kvm.sh '$(TOOLS_DIR)/qemu/bin/qemu-system-aarch64' -machine virt -accel kvm -cpu host -m 256 -nodefaults -display none -S -qmp stdio
 
 .PHONY: go-toolchain release-metadata test-release
 go-toolchain:

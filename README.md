@@ -239,6 +239,16 @@ implementation (`pkgconf`), and the static Ghostty dependency under
 `.tooling/<os>-<arch>`. No Homebrew or system `pkg-config` installation is needed
 for source builds; the first bootstrap requires network access.
 
+In a Debian/Ubuntu arm64 development VM, `make init-qemu-guest` installs QEMU
+and firmware under `.tooling/linux-aarch64/qemu` using the configured APT
+repositories, without changing system packages. Add its `bin` directory to
+PATH alongside Lima. `make test-qemu-guest` boots and immediately quits a small
+empty KVM machine. If the current process lacks access to `/dev/kvm`, these
+checks use passwordless sudo to add the device's group only to the child
+process; device permissions and user membership are unchanged. Use
+`make run-kvm KVM_ARGS='COMMAND ARGUMENTS'` for other development commands.
+Pass fixture variables after `env` in KVM_ARGS so they cross the sudo boundary.
+
 Run `make verify` for formatting, lint, tests and a build. Run
 `make test-tui-input` for focused shortcut and input-lifecycle regressions, and
 `make test-tui-resize` for window resizing and terminal geometry regressions. To

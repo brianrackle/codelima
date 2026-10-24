@@ -81,9 +81,12 @@ and progress/retry/cancel; one-hour metrics and on-demand processes; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean
-all disposable state. Real VM lifecycle QA remains unqualified in this guest:
-Lima reports `/dev/kvm` permission denied and the attempted disposable nodes
-failed creation; their rolled-back verification state was removed.
+all disposable state. The earlier VM test-environment issue is resolved:
+`make init-qemu-guest` supplies project-local QEMU and firmware, and
+`make run-kvm` adds KVM access only to the current user's child process tree.
+The automated KVM probe succeeds and a disposable real node was created.
+Boot and lifecycle qualification are in progress under `tmp/v`; stop/delete
+its VM, daemon and tmux session and remove the fixture before completion.
 
 Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified
 Lima 2.1.0 installation allowed the existing TUI to run in an isolated home.

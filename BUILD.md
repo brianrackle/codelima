@@ -18,6 +18,18 @@ User-facing setup and usage stay in `README.md`.
 
 ## Local Build
 
+For nested Linux arm64 VM qualification, `make init-qemu-guest` downloads and
+extracts Debian/Ubuntu QEMU runtime packages into the project tool directory.
+The installation records package versions and SHA-256 hashes, excludes
+documentation links to absent system packages, and publishes only after both
+QEMU executables pass version checks. `make test-qemu-guest` verifies real KVM
+initialization and QMP shutdown. `make run-kvm KVM_ARGS='...'` keeps the current
+UID and adds only process-local KVM group access using passwordless sudo when
+needed. No system package, device permission or persistent group is changed.
+All disposable Lima homes, images, instances and sockets still require cleanup.
+Lima discovers the local executable via PATH and its firmware beside the
+installation ([Lima configuration](https://lima-vm.io/docs/config/environment-variables/)).
+
 CodeLima bootstraps its own local toolchain under `.tooling/<os>-<arch>`.
 Use the make targets from the repository root:
 
