@@ -408,6 +408,7 @@ func TestNodeOperationsRecoverHistoryWithoutReplayingWork(t *testing.T) {
 	now := time.Now().UTC()
 	old := now.Add(-8 * 24 * time.Hour)
 	running := NodeOperation{ID: newID(), State: "running", CreatedAt: now, Request: NodeOperationRequest{Kind: "start", Node: "missing"}}
+	running.Phases = []NodeOperationPhase{{ID: "boot", Label: "Boot", State: "running", StartedAt: &now}}
 	finished := NodeOperation{ID: newID(), State: "failed", CreatedAt: old, FinishedAt: &old}
 	for _, record := range []NodeOperation{running, finished} {
 		data, err := json.Marshal(record)
@@ -422,6 +423,9 @@ func TestNodeOperationsRecoverHistoryWithoutReplayingWork(t *testing.T) {
 	got, err := ops.Get(running.ID)
 	if err != nil || got.State != "interrupted" || got.Error == "" || got.FinishedAt != nil {
 		t.Fatalf("recovery invented a finish/replayed work: %+v, %v", got, err)
+	}
+	if len(got.Phases) != 1 || got.Phases[0].State != "interrupted" || got.Phases[0].FinishedAt != nil {
+		t.Fatal("crash recovery invented phase completion", got.Phases)
 	}
 	if _, err := os.Stat(filepath.Join(dir, finished.ID+".json")); !os.IsNotExist(err) {
 		t.Fatalf("expired history remains: %v", err)

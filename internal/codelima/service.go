@@ -29,6 +29,7 @@ type Service struct {
 	stdout           io.Writer
 	stderr           io.Writer
 	operationOutput  io.Writer
+	operationPhase   func(id, detail string, skipped bool) error
 	now              func() time.Time
 	ready            *serviceReadiness
 	logger           *slog.Logger
@@ -1379,6 +1380,16 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 	// boot the VM at all, and the daemon's cache can be a full reconciliation
 	// interval behind — or hold an entry synthesized from a watch event that
 	// only ever carried a running/exiting bit.
+	defer func() {
+		var progressErr *nodeOperationProgressError
+		if errors.As(err, &progressErr) {
+			node.Status, node.UpdatedAt = NodeStatusFailed, s.now()
+			s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"error": err.Error()}})
+		}
+	}()
+	if err := s.advanceOperationPhase("boot", "checking runtime and booting VM", false); err != nil {
+		return Node{}, err
+	}
 	node, err = s.reconcileNodeUncached(ctx, node)
 	if err != nil {
 		s.restoreNodeStatus(resolved.ID, previousStatus)
@@ -1391,10 +1402,16 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 			return Node{}, err
 		}
 		s.logRuntime("start", node.ID)
-		if err := s.sandbox.Start(ctx, node); err != nil {
+		bootService := s
+		if s.operationOutput != nil {
+			bootService = s.withIO(operationOutputTee(s.stdout, s.operationOutput), operationOutputTee(s.stderr, s.operationOutput))
+		}
+		if err := bootService.sandbox.Start(ctx, node); err != nil {
 			s.restoreNodeStatus(node.ID, previousStatus)
 			return Node{}, err
 		}
+	} else if err := s.advanceOperationPhase("boot", "VM already running", true); err != nil {
+		return Node{}, err
 	}
 
 	// The credential import belongs here and nowhere else. NodeCreate only
@@ -1407,6 +1424,15 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 	// The gate is the node's own record, not this call: AuthImportCompleted
 	// survives a failed start, so a retry re-runs bootstrap without re-copying
 	// credentials the guest may already have rotated.
+	authDetail := "import host credentials"
+	if node.AuthImportCompleted {
+		authDetail = "already completed"
+	} else if !node.ImportHostAuth {
+		authDetail = "disabled for this node"
+	}
+	if err := s.advanceOperationPhase("credentials", authDetail, node.AuthImportCompleted || !node.ImportHostAuth); err != nil {
+		return Node{}, err
+	}
 	if !node.AuthImportCompleted {
 		if node.ImportHostAuth {
 			if err := s.importHostAuth(ctx, node); err != nil {
@@ -1429,6 +1455,14 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 	}
 
 	bootstrapRan := !bootstrap.Completed
+	workspaceNeeded := bootstrapRan && !node.WorkspaceSeeded
+	workspaceDetail := node.DirectoryPath
+	if !workspaceNeeded {
+		workspaceDetail = "already prepared"
+	}
+	if err := s.advanceOperationPhase("workspace", workspaceDetail, !workspaceNeeded); err != nil {
+		return Node{}, err
+	}
 	if bootstrapRan {
 		if !node.WorkspaceSeeded {
 			if err := s.prepareGuestWorkspace(ctx, node); err != nil {
@@ -1449,11 +1483,30 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 
 	}
 	bootstrap.resetSteps(firstStep)
+	bootstrapTotal, bootstrapRemaining := 0, 0
+	for index, step := range bootstrap.Steps {
+		if step.Kind == "bootstrap" {
+			bootstrapTotal++
+			if bootstrapRan && index >= firstStep {
+				bootstrapRemaining++
+			}
+		}
+	}
+	bootstrapDetail := fmt.Sprintf("%d commands remaining", bootstrapRemaining)
+	if bootstrap.Completed {
+		bootstrapDetail = "already completed"
+	}
+	if err := s.advanceOperationPhase("bootstrap", bootstrapDetail, bootstrapRemaining == 0); err != nil {
+		return Node{}, err
+	}
 	if bootstrapRan {
 		for index := firstStep; index < len(bootstrap.Steps); index++ {
 			step := bootstrap.Steps[index]
 			if step.Kind != "bootstrap" {
 				continue
+			}
+			if err := s.advanceOperationPhase("bootstrap", fmt.Sprintf("step %d/%d · %s", index+1, bootstrapTotal, step.Command), false); err != nil {
+				return Node{}, err
 			}
 			if err := s.runRecordedBootstrapStep(ctx, node, &bootstrap, index); err != nil {
 				node.Status = NodeStatusFailed
@@ -1465,6 +1518,20 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 
 	}
 
+	validationNeeded := false
+	for index := firstStep; index < len(bootstrap.Steps); index++ {
+		if bootstrap.Steps[index].Kind == "validation" {
+			validationNeeded = true
+			break
+		}
+	}
+	validationDetail := bootstrap.AgentProfileName
+	if !validationNeeded {
+		validationDetail = "no validation command"
+	}
+	if err := s.advanceOperationPhase("validation", validationDetail, !validationNeeded); err != nil {
+		return Node{}, err
+	}
 	for index := firstStep; index < len(bootstrap.Steps); index++ {
 		if bootstrap.Steps[index].Kind != "validation" {
 			continue
@@ -1475,6 +1542,9 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 			s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"validation_command": bootstrap.ValidationCommand, "step": index + 1, "error": err.Error()}})
 			return Node{}, err
 		}
+	}
+	if err := s.advanceOperationPhase("ready", "save completed state and reconcile VM", false); err != nil {
+		return Node{}, err
 	}
 	if bootstrapRan {
 		completedAt := s.now()

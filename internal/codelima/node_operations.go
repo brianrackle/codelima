@@ -47,6 +47,8 @@ type NodeOperation struct {
 	Output        []string             `json:"output,omitempty"`
 	OutputStart   uint64               `json:"output_start,omitempty"`
 	OutputPartial string               `json:"output_partial,omitempty"`
+	CurrentPhase  string               `json:"current_phase,omitempty"`
+	Phases        []NodeOperationPhase `json:"phases,omitempty"`
 }
 
 type NodeOperationResult struct {
@@ -78,6 +80,7 @@ func newNodeOperations(service *Service) (*nodeOperations, error) {
 	localService := *service
 	localService.daemonClient = nil
 	localService.operationConnect = nil
+	localService.operationPhase = nil
 	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation)}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return nil, err
@@ -111,6 +114,7 @@ func newNodeOperations(service *Service) (*nodeOperations, error) {
 		if record.State == "running" || record.State == "canceling" {
 			record.State, record.Error = "interrupted", errNodeOperationsClosed.Error()
 			record.FinishedAt = nil
+			finishNodeOperationPhases(&record, "interrupted", nil)
 			if err := m.persist(record); err != nil {
 				return nil, err
 			}
@@ -239,6 +243,7 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 		return NodeOperation{}, preconditionFailed("16 lifecycle operations are already running", nil)
 	}
 	record := NodeOperation{ID: request.ID, Request: request, NodeID: node.ID, NodeSlug: node.Slug, State: "running", CreatedAt: m.service.now()}
+	record.Phases = initialNodeOperationPhases(request.Kind)
 	if err := m.persist(record); err != nil {
 		return NodeOperation{}, err
 	}
@@ -290,25 +295,46 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 	nodeID := operation.record.NodeID
 	var node Node
 	var err error
-	switch request.Kind {
-	case "start":
-		node, err = service.NodeStart(ctx, nodeID)
-	case "retry":
-		node, err = service.NodeRetry(ctx, nodeID)
-	case "stop":
-		node, err = service.NodeStop(ctx, nodeID)
-	case "delete":
-		node, err = service.NodeDelete(ctx, nodeID)
-	case "create":
-		node, err = service.NodeCreate(ctx, *request.Create)
-	case "clone":
-		input := *request.Clone
-		input.SourceNode = nodeID
-		node, err = service.NodeClone(ctx, input)
+	service.operationPhase = func(id, detail string, skipped bool) error {
+		return m.advancePhase(operation, id, detail, skipped)
+	}
+	firstPhase := request.Kind
+	if firstPhase == "start" || firstPhase == "retry" {
+		firstPhase = "prepare"
+	}
+	if err = service.advanceOperationPhase(firstPhase, "", false); err == nil {
+		switch request.Kind {
+		case "start":
+			node, err = service.NodeStart(ctx, nodeID)
+		case "retry":
+			node, err = service.NodeRetry(ctx, nodeID)
+		case "stop":
+			node, err = service.NodeStop(ctx, nodeID)
+		case "delete":
+			node, err = service.NodeDelete(ctx, nodeID)
+		case "create":
+			node, err = service.NodeCreate(ctx, *request.Create)
+		case "clone":
+			input := *request.Clone
+			input.SourceNode = nodeID
+			node, err = service.NodeClone(ctx, input)
+		}
 	}
 	err = errors.Join(err, output.Close())
 	m.mu.Lock()
 	cause := context.Cause(ctx)
+	phaseState := "succeeded"
+	if err != nil {
+		phaseState = "failed"
+	}
+	if errors.Is(cause, errNodeOperationCanceled) {
+		phaseState = "canceled"
+	}
+	if errors.Is(cause, errNodeOperationsClosed) {
+		phaseState = "interrupted"
+	}
+	executionFinished := m.service.now()
+	finishNodeOperationPhases(&operation.record, phaseState, &executionFinished)
 	stopFailed := false
 	if errors.Is(cause, errNodeOperationCanceled) && (request.Kind == "start" || request.Kind == "retry") {
 		// The start released its liveness token. Keep this manager's resource
@@ -385,6 +411,7 @@ func (m *nodeOperations) List() []NodeOperation {
 			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind}
 			record.Result = nil
 			record.Output, record.OutputPartial = nil, ""
+			record.Phases = nil
 			record.NodeSlug = boundedOperationText(record.NodeSlug, 1024)
 			record.Error = boundedOperationText(record.Error, 4096)
 			if record.FinishedAt != nil {

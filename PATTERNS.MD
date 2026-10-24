@@ -21,6 +21,12 @@ Keep daemon execution copies free of frontend connection hooks. Startup must
 not replace a responsive operation-owning daemon; use the update admission
 gate rather than a check-then-stop sequence (ADR 162).
 
+Record lifecycle phase boundaries before execution. Advance only after the
+previous phase succeeds; a detail update must not reset its start time. Keep
+skipped work and unknown finish times explicit, and retain command-level
+attempt records separately. Stream mutation progress deliberately while
+keeping query stdout private (ADR 163).
+
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
 outside producer writes and flush before the terminal receipt. Keep a global

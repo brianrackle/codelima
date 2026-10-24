@@ -409,6 +409,8 @@ codelima --json operation list --before CURSOR_FROM_PREVIOUS_NEXT_FIELD
 ```
 
 Cancel requests return a receipt; use `show` to confirm cleanup has finished.
+`show` includes retained output and recorded lifecycle phases. Skipped work
+has no invented duration, and interrupted work has an unknown finish time.
 If a CLI loses its connection or stops waiting, its error includes the receipt
 ID. Inspect that ID before retrying: a lost response does not prove the action
 failed. Direct Go SDK services retain their existing inline execution behavior.

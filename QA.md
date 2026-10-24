@@ -590,6 +590,11 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   confirm the node records the caller's absolute directory. Exercise list
   cursors and missing receipt errors. With daemon autostart disabled, mutation
   must fail with start guidance rather than execute inline; help stays local.
+- Inspect `operation show` during boot and bootstrap, after failure, after
+  retry and after a completed node starts again. Phase clocks must follow
+  observed work, skipped phases must have no times, and later starts must
+  skip bootstrap while recording validation. Confirm both boot streams reach
+  the output tail and a daemon interruption leaves the active finish unknown.
 - In Activity, inspect 150×38 and 80×24 layouts, select running/history rows
   with arrows and mouse, filter with `/`, paste text containing global shortcut
   digits, cycle severity with `f`, and copy a failure with `y`. Refresh must

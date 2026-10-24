@@ -678,7 +678,7 @@ func (c *LimaClient) Start(ctx context.Context, node Node) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.runCommands(ctx, limaCommandTimeout, "start Lima instance", commands, map[string]any{"sandbox_name": node.SandboxName}); err != nil {
+	if _, err := c.runCommandsWithOutput(ctx, limaCommandTimeout, "start Lima instance", commands, map[string]any{"sandbox_name": node.SandboxName}, c.Stdout); err != nil {
 		return err
 	}
 	return c.verifyObservation(ctx, node.SandboxName, ObservationRunning)
@@ -855,9 +855,15 @@ func (c *LimaClient) removeCachedObservation(name string) {
 }
 
 func (c *LimaClient) runCommands(ctx context.Context, timeout time.Duration, action string, commands []resolvedRuntimeCommand, fields map[string]any) ([]byte, error) {
+	return c.runCommandsWithOutput(ctx, timeout, action, commands, fields, nil)
+}
+
+// Mutation progress may be streamed explicitly; query stdout stays private
+// because version/list output is structured data consumed by the caller.
+func (c *LimaClient) runCommandsWithOutput(ctx context.Context, timeout time.Duration, action string, commands []resolvedRuntimeCommand, fields map[string]any, output io.Writer) ([]byte, error) {
 	var combined bytes.Buffer
 	for index, command := range commands {
-		stdout, stderr, err := runRuntimeCommand(ctx, timeout, command, nil, c.Stderr)
+		stdout, stderr, err := runRuntimeCommand(ctx, timeout, command, output, c.Stderr)
 		if err != nil {
 			commandFields := cloneAnyMap(fields)
 			commandFields["command_index"] = index

@@ -253,6 +253,24 @@ general messages and Starting/Failed/queued attach remain required follow-up.
 The shared path gives consistent ownership across frontends at the cost of
 requiring a compatible daemon for CLI mutations and explicit cancellation.
 
+Protocol 12 now records lifecycle phase state/timestamps and boot stdout/stderr
+(ADR 163). Start/retry distinguishes prepare, boot, credentials, workspace,
+bootstrap, validation and ready; skipped work has no invented duration and
+interrupted work has no known finish. Repeated command updates preserve the
+phase clock. Focused tests cover failure/retry/later starts, storage failure
+and recovery; the boot-stream regression found and fixed suppressed Lima
+stdout. Full verify, race and integration pass. Real-guest phase qualification
+and Starting/Failed views are still in progress. The existing operation protocol supplies reusable
+evidence but requires a wire upgrade and additional atomic phase writes.
+Lifecycle detail integration must look up the latest start/retry by canonical
+node ID independently of the current Activity page. Prefer a new boot failure
+over stale bootstrap failure evidence, fence asynchronous replies by selected
+node/navigation, and bind queued attachment to both node and operation IDs.
+Navigation or Escape must revoke the queue; only verified readiness may open
+the shell. Starting cancellation must target the admitted operation, not issue
+a conflicting stop. The failed-node port claim needs an actual forwarding
+readiness gate before the UI can say ports are held until ready.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; phase-level lifecycle
 progress, Starting/Failed/queued attach and shared messages; final fleet/preview and Metrics qualification; dynamic

@@ -49,6 +49,9 @@ protection of responsive daemons during startup recovery (ADR 162). Run the shar
 operation procedure in QA.md for live TUI exit and actual VM cleanup as well.
 Stop regressions cover stale cached observations in both directions and reject
 an unconfirmed shutdown. History ordering uses observed completion times.
+Phase tests cover failed-command boundaries, skipped work, retry and later
+validation, conservative restart recovery, storage failure before execution,
+and both boot output streams without duplication (ADR 163).
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's

@@ -119,6 +119,15 @@ history cursors, missing IDs and enabled/disabled autostart with local help. The
 test guest and runtime override were removed. Shared messages, phase/boot
 output and lifecycle detail views remain open.
 
+Protocol 12 supplies observed phase state, timestamps and both boot streams
+(ADR 163). Command updates preserve phase start time; completed work is skipped
+without invented durations, failure leaves later phases pending, and daemon
+interruption leaves finish unknown. Focused, full verify, race and integration
+pass. A real boot failure from stale VirtioFS sockets retained the correct
+failed/pending phases and output; stale QA sockets were removed and real-guest
+retry/later-start qualification is continuing. Lifecycle detail rendering,
+queued attachment and shared general messages remain open.
+
 ## Implementation sequence
 
 1. Fleet projection, typed navigation, adaptive geometry and reusable theme/panels.
