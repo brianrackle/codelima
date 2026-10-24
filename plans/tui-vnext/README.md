@@ -28,7 +28,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operation history, cancel/filter/copy/navigation; shared messages and final qualification remain |
+| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared request/completion history and TUI messages, cancel/filter/copy/navigation; native event producers and final qualification remain |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -217,3 +217,25 @@ bounded data and regression coverage (ADR 156, protocol 10). Full verify, race
 and integration pass; gopls is clean. Final live
 fleet/preview and disjoint-ranking qualification, plus artboard/native checks,
 remain in TODO #57.
+
+Protocol 14 adds a private, bounded daemon message journal and a merged Activity
+projection (ADR 165). General TUI notifications survive restart after an explicit
+acknowledgement; pending messages remain visibly local. Requests and completions
+retain distinct stable IDs, with CLI/TUI provenance on new receipts. Message
+writes retry idempotently and use epoch/sequence watermarks to bridge the interval
+before history refresh. Known lifecycle output is not republished into this
+journal. Footer notices expire after six seconds while history remains.
+Native route/capacity/update producers and final artboard qualification remain
+open. Full verify, full race, integration and focused race checks pass. Gopls
+reported no new-file diagnostics and three pre-existing modernization suggestions
+in the operation wrapper. Live checks passed at 150×38 and 80×24: two independent
+TUIs shared one copied-record notice, 60 seeded messages paginated correctly,
+search/severity and older-page node opening worked, pending offline messages
+remained local and became shared once after reconnect, and all messages survived
+restart. A corrupted journal left operation history visible with an explicit
+message error. Live retries exposed notification flooding; a red regression and
+fix now record one outage and recovery across twenty seconds of retries.
+The corruption fixture was restored/removed, both TUIs and the daemon stopped,
+and all 87 disposable message records removed. Slice scratch evidence is cleaned;
+the stopped reusable guest/mounts and earlier qualification state remain under
+the existing TODO cleanup ledger.

@@ -2,8 +2,6 @@ package codelima
 
 import (
 	"context"
-	"crypto/sha256"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -15,7 +13,7 @@ import (
 )
 
 type tuiActivityState struct {
-	page                         NodeOperationsPage
+	page                         ActivityPage
 	loaded, inFlight             bool
 	serial                       uint64
 	cancel                       context.CancelFunc
@@ -36,7 +34,7 @@ type tuiActivityState struct {
 type tuiActivityDataEvent struct {
 	serial uint64
 	before string
-	page   NodeOperationsPage
+	page   ActivityPage
 	err    error
 }
 
@@ -50,6 +48,7 @@ type tuiActivityRow struct {
 	at                     time.Time
 	level                  slog.Level
 	operation              bool
+	success                bool
 }
 
 type tuiActivityMouseRow struct {
@@ -62,6 +61,13 @@ type tuiActivityMouseRow struct {
 // replacing a new page without tying daemon ownership to navigation.
 func (a *vaxisTUIApp) startActivityLoad(force bool) {
 	s := &a.activity
+	if s.inFlight && time.Since(s.lastLoad) >= 6*time.Second {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		s.serial++
+		s.inFlight = false
+	}
 	if a.service == nil || a.service.daemonClient == nil || a.daemonDisconnected || s.inFlight {
 		return
 	}
@@ -82,8 +88,8 @@ func (a *vaxisTUIApp) startActivityLoad(force bool) {
 	serial, before, client := s.serial, s.before, a.service.daemonClient
 	load := func() tuiActivityDataEvent {
 		defer cancel()
-		var page NodeOperationsPage
-		err := client.Call(ctx, "operation.list", map[string]any{"before": before, "limit": 50}, &page)
+		var page ActivityPage
+		err := client.Call(ctx, "activity.list", map[string]any{"before": before, "limit": 50}, &page)
 		return tuiActivityDataEvent{serial: serial, before: before, page: page, err: err}
 	}
 	if a.postEvent == nil {
@@ -107,19 +113,19 @@ func (a *vaxisTUIApp) applyActivityData(event tuiActivityDataEvent) {
 }
 
 func activityOperationRow(op NodeOperation) tuiActivityRow {
-	level := slog.LevelInfo
-	switch op.State {
-	case "failed":
-		level = slog.LevelError
-	case "canceled", "canceling", "interrupted":
-		level = slog.LevelWarn
+	row := activityRecordRow(activityOperationRecord(op, false))
+	if op.CurrentPhase != "" {
+		row.text += " · " + plainLogText(op.CurrentPhase)
 	}
-	text := op.Request.Kind + " · " + op.State
-	if op.Error != "" {
-		text += " · " + op.Error
+	return row
+}
+
+func activityRecordRow(record ActivityRecord) tuiActivityRow {
+	text := record.Text
+	if record.OperationID != "" && record.Source != "" {
+		text += " · via " + strings.ToUpper(record.Source)
 	}
-	at := nodeOperationHistoryTime(op)
-	return tuiActivityRow{id: op.ID, nodeID: op.NodeID, node: coalesce(op.NodeSlug, op.NodeID), text: plainLogText(text), at: at, level: level, operation: true}
+	return tuiActivityRow{id: record.ID, nodeID: record.NodeID, node: coalesce(record.NodeSlug, record.NodeID, record.Source), text: plainLogText(text), at: record.Time, level: record.Level, operation: record.OperationID != "", success: record.Success}
 }
 
 func (a *vaxisTUIApp) activityRows() (running, history []tuiActivityRow) {
@@ -127,15 +133,28 @@ func (a *vaxisTUIApp) activityRows() (running, history []tuiActivityRow) {
 	for _, op := range s.page.Running {
 		running = append(running, activityOperationRow(op))
 	}
-	for _, op := range s.page.History {
-		history = append(history, activityOperationRow(op))
+	seen := make(map[string]bool)
+	for _, record := range s.page.History {
+		history = append(history, activityRecordRow(record))
+		seen[record.ID] = true
 	}
-	// Until the shared message journal is wired, keep this window's diagnostics
-	// accessible and identify their origin explicitly. Do not imply persistence.
+	// Only the newest page overlays this window's pending messages. Acked
+	// messages remain until a same-epoch snapshot covers their sequence;
+	// membership in the current fifty rows is not a persistence watermark.
 	if s.before == "" {
 		for _, entry := range a.messages.Entries() {
-			id := fmt.Sprintf("message:%d:%x", entry.Time.UnixNano(), sha256.Sum256([]byte(entry.Text)))
-			history = append(history, tuiActivityRow{id: id, node: "this window", text: plainLogText(entry.Text), at: entry.Time, level: entry.Level})
+			id := "message:" + entry.ID
+			if seen[id] {
+				continue
+			}
+			if entry.ack.Epoch != "" {
+				if s.loaded && s.page.Epoch != "" && (entry.ack.Epoch != s.page.Epoch || entry.ack.Message.Sequence <= s.page.MessageThrough) {
+					continue
+				}
+				history = append(history, activityRecordRow(activityMessageRecord(entry.ack.Message)))
+			} else {
+				history = append(history, tuiActivityRow{id: id, node: "this window", text: plainLogText(entry.Text), at: entry.Time, level: entry.Level})
+			}
 		}
 	}
 	slices.SortStableFunc(history, func(x, y tuiActivityRow) int { return y.at.Compare(x.at) })
@@ -261,6 +280,8 @@ func (a *vaxisTUIApp) handleActivityKey(key vaxis.Key) bool {
 		if row, ok := a.activitySelection(); ok {
 			if err := a.copyToHostClipboard(row.at.Format(time.RFC3339) + " " + row.node + " " + row.text); err != nil {
 				a.setStatus(slog.LevelError, err.Error())
+			} else {
+				a.setStatus(slog.LevelInfo, "Copied activity record")
 			}
 		}
 	case key.MatchString("K"):

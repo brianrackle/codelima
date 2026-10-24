@@ -30,6 +30,7 @@ type Service struct {
 	stderr           io.Writer
 	operationOutput  io.Writer
 	operationPhase   func(id, detail string, skipped bool) error
+	operationReceipt func(id string)
 	now              func() time.Time
 	ready            *serviceReadiness
 	logger           *slog.Logger

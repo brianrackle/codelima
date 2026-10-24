@@ -47,7 +47,9 @@ func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperation
 		request.Create = &input
 	}
 	client, writer := s.daemonClient, s.stdout
+	request.Origin = "tui"
 	if client == nil {
+		request.Origin = "cli"
 		var err error
 		client, err = s.operationConnect(ctx)
 		if err != nil {
@@ -66,6 +68,9 @@ func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperation
 			return Node{}, fromDaemonError(err)
 		}
 		return Node{}, operationWaitError(request.ID, "admission was not confirmed", err)
+	}
+	if s.operationReceipt != nil {
+		s.operationReceipt(record.ID)
 	}
 	output := nodeOperationPrinter{writer: writer}
 	output.write(record)

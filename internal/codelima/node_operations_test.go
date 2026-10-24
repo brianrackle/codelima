@@ -145,7 +145,7 @@ func TestNodeOperationsClientExitAndActivityCancellation(t *testing.T) {
 		return err == nil && record.State == "canceled"
 	}, "Activity cancellation finished")
 	a.startActivityLoad(true)
-	if len(a.activity.page.Running) != 0 || len(a.activity.page.History) != 1 || a.activity.selected != id {
+	if len(a.activity.page.Running) != 0 || len(a.activity.page.History) < 2 || a.activity.selected != id {
 		t.Fatal("Activity did not move the selected operation into history")
 	}
 	node, err := s.NodeShow(context.Background(), n.ID)

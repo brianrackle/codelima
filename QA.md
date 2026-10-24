@@ -607,8 +607,24 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   history and produce an explicit unavailable message.
 - Browse older history with `]`, newer with `[`, and newest with `g`. Records
   must not duplicate across pages, active work must remain visible, and
-  expired cursors must offer reload. Local diagnostics must be identified as
-  belonging to this window rather than claimed to survive restart.
+  expired cursors must offer reload. Request/completion rows must have distinct
+  stable identities; new CLI/TUI requests show their origin and old unknown
+  origins remain unclaimed.
+- Open two TUIs on one disposable home. Produce a notification in one and
+  confirm it appears once in both Activity views, with successful completions
+  marked with a check. Select a row, allow newer messages to arrive, and confirm
+  selection stays on that row. Inspect 150×38 and 80×24, search, severity, copy,
+  older/newer pages and node navigation. Footer notices must disappear after
+  six seconds while Activity retains them.
+- Stop the disposable daemon and produce a message. It must remain labeled
+  “this window”; restart/reconnect and confirm it becomes shared exactly once.
+  Leave it disconnected through several retry attempts: each window records
+  one outage, with recovery recorded after synchronization.
+  Quit/reopen both TUIs and restart the daemon again: acknowledged messages
+  remain, while messages never acknowledged are not promised after exit.
+  In a disposable home only, corrupt a message JSON and restart; Activity must
+  report unavailable messages while still showing operation history and
+  cancellation controls. Remove the corrupt fixture before continuing.
 - Confirm daemon update refuses while lifecycle work is active. Explicitly
   stop/restart the disposable daemon during a blocked operation: the recovered
   receipt must say interrupted, with unknown finish time and no automatic replay.

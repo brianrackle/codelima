@@ -19,7 +19,11 @@ func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
 	}
 
 	if a.postEvent == nil {
-		result, err := request.Run(a.ctx, a.service)
+		var receiptID string
+		service := *a.service
+		service.operationReceipt = func(id string) { receiptID = id }
+		result, err := request.Run(a.ctx, &service)
+		result.ReceiptID = receiptID
 		if err != nil {
 			return err
 		}
@@ -46,9 +50,12 @@ func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
 	go func() {
 		progress := newTUIProgressWriter(a.postEvent, operationID)
 		service := a.service.withIO(progress, progress)
+		var receiptID string
+		service.operationReceipt = func(id string) { receiptID = id }
 		result, err := request.Run(a.ctx, service)
+		result.ReceiptID = receiptID
 		progress.Flush()
-		completion := tuiOperationCompleteEvent{OperationID: operationID, Result: result, Err: err}
+		completion := tuiOperationCompleteEvent{OperationID: operationID, ReceiptID: receiptID, Result: result, Err: err}
 		operation.completion.Store(&completion)
 		a.postCompletion(completion)
 	}()
@@ -69,7 +76,11 @@ func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperati
 		a.state.treePaneMode = tuiTreePaneModeTerminal
 	}
 	if result.Status != "" {
-		a.setStatus(slog.LevelInfo, result.Status)
+		if result.ReceiptID != "" {
+			a.setFooterStatus(slog.LevelInfo, result.Status)
+		} else {
+			a.setStatus(slog.LevelInfo, result.Status)
+		}
 	}
 	if result.Apply != nil {
 		return result.Apply(a)
@@ -206,7 +217,11 @@ func (a *vaxisTUIApp) finishOperation(event tuiOperationCompleteEvent) {
 	a.retainOperationMessages(operation, event)
 
 	if event.Err != nil {
-		a.setStatus(slog.LevelError, event.Err.Error())
+		if event.ReceiptID != "" {
+			a.setFooterStatus(slog.LevelError, event.Err.Error())
+		} else {
+			a.setStatus(slog.LevelError, event.Err.Error())
+		}
 	} else if err := a.applyOperationResult(a.resultSelectionKey(operation, event.Result), event.Result); err != nil {
 		a.setStatus(slog.LevelError, err.Error())
 	}
@@ -219,7 +234,7 @@ const tuiRetainedOperationOutputLines = 40
 // per-operation output is capped to its tail so one noisy operation cannot evict
 // the entire ring.
 func (a *vaxisTUIApp) retainOperationMessages(operation *tuiOperationState, event tuiOperationCompleteEvent) {
-	if operation == nil {
+	if operation == nil || event.ReceiptID != "" {
 		return
 	}
 

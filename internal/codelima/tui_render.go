@@ -20,16 +20,16 @@ const tuiMessageLogDefaultCap = 200
 // tuiMessage is one entry in the message surface: when it happened, its severity
 // (borrowed from slog so the view can colour it), and the human text.
 type tuiMessage struct {
+	ID    string
 	Time  time.Time
 	Level slog.Level
 	Text  string
+	ack   activityMessageAck
 }
 
-// tuiMessageLog is a bounded ring of status/notification messages. It replaces
-// the single overwritable status string as the durable record: the footer still
-// shows the newest transient status, but every notable message (including
-// completed/failed background-operation output that used to be discarded) is
-// retained here and browsable in the messages view (ADR 59).
+// tuiMessageLog bounds local status/notification history and pending journal
+// writes. Only an acknowledged entry is durable (ADR 165); the footer can
+// expire without discarding this window's pending messages.
 type tuiMessageLog struct {
 	entries []tuiMessage
 	cap     int
@@ -57,7 +57,7 @@ func (l *tuiMessageLog) Append(level slog.Level, text string) {
 	if l.now != nil {
 		now = l.now
 	}
-	l.entries = append(l.entries, tuiMessage{Time: now(), Level: level, Text: text})
+	l.entries = append(l.entries, tuiMessage{ID: newID(), Time: now(), Level: level, Text: text})
 	if l.cap > 0 && len(l.entries) > l.cap {
 		l.entries = append([]tuiMessage(nil), l.entries[len(l.entries)-l.cap:]...)
 	}
@@ -226,6 +226,7 @@ func (a *vaxisTUIApp) pushMessage(level slog.Level, text string) {
 		return
 	}
 	a.messages.Append(level, text)
+	a.startActivityMessageDelivery()
 }
 
 // setStatus sets the transient footer status and records it in the message
@@ -233,9 +234,12 @@ func (a *vaxisTUIApp) pushMessage(level slog.Level, text string) {
 // slog.LevelInfo). The footer renders statuses at warn level or above in the
 // error style; info statuses render in the normal muted style.
 func (a *vaxisTUIApp) setStatus(level slog.Level, text string) {
-	a.status = text
-	a.statusLevel = level
+	a.setFooterStatus(level, text)
 	a.pushMessage(level, text)
+}
+
+func (a *vaxisTUIApp) setFooterStatus(level slog.Level, text string) {
+	a.status, a.statusLevel, a.statusAt = text, level, time.Now()
 }
 
 // clearStatus clears the transient footer status; nothing is recorded.

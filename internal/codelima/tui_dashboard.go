@@ -135,6 +135,9 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 		a.drawSystem(window, theme)
 	}
 	status := a.status
+	if !a.statusAt.IsZero() && time.Since(a.statusAt) >= 6*time.Second {
+		status = ""
+	}
 	style := theme.muted
 	if status == "" {
 		status = a.backgroundOperationSummary()

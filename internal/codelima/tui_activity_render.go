@@ -44,7 +44,7 @@ func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
 	if s.before != "" {
 		page = fmt.Sprintf("page %d", len(s.previous)+1)
 	}
-	tuiLine(historyBox, 0, fmt.Sprintf("History · %s · %s · operations kept 7 days", page, levels[s.level]), theme.muted)
+	tuiLine(historyBox, 0, fmt.Sprintf("History · %s · %s · kept up to 7 days", page, levels[s.level]), theme.muted)
 	s.viewport = max(1, historyHeight-3)
 	a.drawActivityRows(historyBox.New(1, 1, width-6, s.viewport), history, &s.historyScroll, false, 3, historyY+2, theme)
 	if len(history) == 0 {
@@ -58,8 +58,15 @@ func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
 	if s.page.Next == "" {
 		status = "End of retained history · local messages marked ‘this window’"
 	}
-	if s.err != nil {
+	switch {
+	case s.err != nil:
 		status, style = "Activity unavailable: "+plainLogText(s.err.Error())+" · g reload", theme.coral
+	case s.page.HistoryError != "":
+		status, style = "History cursor unavailable · g reload newest", theme.amber
+	case s.page.MessageError != "":
+		status, style = "Messages unavailable: "+plainLogText(s.page.MessageError), theme.coral
+	case a.messageDelivery.err != nil:
+		status, style = "Messages awaiting persistence · this window · retrying", theme.amber
 	}
 	tuiLine(win.New(2, height-3, width-4, 1), 0, status, style)
 }
@@ -81,10 +88,13 @@ func (a *vaxisTUIApp) drawActivityRows(win vaxis.Window, rows []tuiActivityRow, 
 	for i := *scroll; i < min(len(rows), *scroll+height); i++ {
 		row := rows[i]
 		style, icon := theme.text, "i"
+		if row.success {
+			style, icon = theme.mint, "✓"
+		}
 		if row.level >= slog.LevelError {
 			style, icon = theme.coral, "✕"
 		} else if row.level >= slog.LevelWarn {
-			style, icon = theme.amber, "!"
+			style, icon = theme.amber, "⚠"
 		}
 		stamp := row.at.Local().Format("15:04:05")
 		if running {

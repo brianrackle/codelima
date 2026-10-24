@@ -58,6 +58,7 @@ type vaxisTUIApp struct {
 	logs               tuiLogsState
 	spec               tuiSpecState
 	activity           tuiActivityState
+	messageDelivery    tuiActivityDelivery
 	lifecycle          tuiLifecycleState
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
@@ -103,6 +104,7 @@ type vaxisTUIApp struct {
 	messages    *tuiMessageLog
 	status      string
 	statusLevel slog.Level
+	statusAt    time.Time
 	// refreshInFlight suppresses overlapping periodic reloads. refreshDeadline
 	// bounds it: a lost tuiRefreshCompleteEvent must not stop auto-refresh, so
 	// the next tick past the deadline starts a fresh load regardless.
@@ -436,6 +438,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyActivityData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiActivityMessageEvent:
+		a.applyActivityMessage(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiActivityCancelEvent:
 		a.finishActivityCancel(event)
 		a.requestRedraw()
@@ -453,6 +459,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:
+		a.startActivityMessageDelivery()
+		if a.status != "" && !a.statusAt.IsZero() && time.Since(a.statusAt) >= 6*time.Second {
+			a.clearStatus()
+			a.requestRedraw()
+		}
 		a.startActivityLoad(false)
 		a.startMetricsLoad()
 		a.startLogsLoad(false)
@@ -553,8 +564,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiDaemonDisconnectedEvent:
 		a.resetGraphicsEpoch()
+		wasDisconnected := a.daemonDisconnected
 		a.daemonDisconnected = true
-		a.setStatus(slog.LevelError, event.Err.Error())
+		if !wasDisconnected {
+			a.setStatus(slog.LevelError, event.Err.Error())
+		}
 		a.draw()
 		return false, nil
 	case tuiDaemonSynchronizedEvent:
@@ -564,8 +578,11 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 			syncErr = a.sessions.applyDaemonSynchronization(event.Snapshot)
 			if syncErr != nil {
 				event.complete(syncErr)
+				wasDisconnected := a.daemonDisconnected
 				a.daemonDisconnected = true
-				a.setStatus(slog.LevelError, fmt.Sprintf("daemon synchronization failed; reconnecting: %v", syncErr))
+				if !wasDisconnected {
+					a.setStatus(slog.LevelError, fmt.Sprintf("daemon synchronization failed; reconnecting: %v", syncErr))
+				}
 				a.draw()
 				return false, nil
 			}
@@ -870,8 +887,10 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		// so consecutive duplicates are collapsed.
 		a.service.log().Warn("tui refresh failed", "error", event.Err.Error())
 		message := "refresh failed: " + event.Err.Error()
-		if latest, ok := a.messages.Latest(); !ok || latest.Text != message {
-			a.pushMessage(slog.LevelWarn, message)
+		if !a.daemonDisconnected {
+			if latest, ok := a.messages.Latest(); !ok || latest.Text != message {
+				a.pushMessage(slog.LevelWarn, message)
+			}
 		}
 		return
 	}

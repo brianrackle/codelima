@@ -113,6 +113,6 @@ func (a *vaxisTUIApp) recordTerminalNotices() {
 		if a.messages == nil {
 			a.messages = newTUIMessageLog(tuiMessageLogDefaultCap)
 		}
-		a.messages.Append(slog.LevelInfo, "terminal "+key+": "+message)
+		a.pushMessage(slog.LevelInfo, "terminal "+key+": "+message)
 	}
 }

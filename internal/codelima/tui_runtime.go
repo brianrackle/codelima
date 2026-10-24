@@ -39,6 +39,7 @@ type tuiOperationState struct {
 }
 
 type tuiOperationResult struct {
+	ReceiptID        string
 	Status           string
 	PreferredKey     string
 	CloseNodeID      string
@@ -64,6 +65,7 @@ type tuiOperationProgressEvent struct {
 }
 
 type tuiOperationCompleteEvent struct {
+	ReceiptID   string
 	OperationID string
 	Result      tuiOperationResult
 	Err         error

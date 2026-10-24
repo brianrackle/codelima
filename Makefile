@@ -221,6 +221,11 @@ test-terminal-attach: init
 .PHONY: test-node-spec
 .PHONY: test-bootstrap-steps
 .PHONY: test-node-operations
+.PHONY: test-activity
+test-activity: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(ActivityJournal|ActivityPage|TUIActivity)' -count=1
+
 test-node-operations: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(NodeOperations|NodeStop|TUIActivity|TUILifecycle|CLIOperation|DaemonStartupRecovery)' -count=1

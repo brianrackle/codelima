@@ -278,6 +278,25 @@ Gating only discovery is smaller, but leaves static mappings active and cannot
 satisfy the full design promise. Until that work lands, the Failed view omits
 the unsupported “not forwarded until ready” claim.
 
+Protocol 14 now provides the bounded shared Activity journal and merged
+request/completion/message history (ADR 165). Two-client socket tests cover
+lost acknowledgements, idempotent retry and snapshot watermarks. Full verify,
+race and integration checks pass; the reconnect reporting fix also passes a
+focused race run. Live 150×38/80×24 checks passed for two-window sharing,
+60-message pagination/search/severity, selection, node opening, offline pending
+labels, reconnect/restart persistence, and graceful corrupt-journal reporting.
+A twenty-second outage produced one outage and one recovery after a regression
+fixed repeated retry notifications. Corruption was restored, both TUIs and the
+QA daemon stopped, and all 87 disposable journal records were removed. This replaces the earlier
+window-only message limitation. Native producers for route ownership/degraded
+routes, capacity transitions and daemon-update events remain: hook observed
+state transitions into the journal with stable event IDs and bounded summaries.
+This captures events without an open TUI, but requires deduplication at each
+producer and tests for reconnect/restart transitions. Reusing frontend statuses
+is smaller, but cannot provide global unattended event history. Running rows
+currently show phase names; the full design's progress treatment and final
+artboard fidelity remain in the Activity follow-up.
+
 Protocol 13 supplies node-scoped latest-start inspection and Starting/Failed
 detail views (ADR 164). Queue intent follows one node/receipt and is revoked by
 Escape/navigation/failure; a successful receipt and a running VM observation
@@ -302,8 +321,8 @@ QA cleanup remains required under `tmp/stepqa`. Kernel evidence confirmed an
 OOM kill when full lint/compile and the nested guest overlapped in this 3.8 GiB
 VM. Keep heavy gates and QEMU sequential. Lima metadata now lives on a 64 MiB
 project-rooted tmpfs; regular disk/ISO files remain on the share via symlinks.
-The VM is stopped, with protocol-13 daemon/TUI and the two QA tmpfs mounts
-retained for further qualification. Remove them, the backing files and all
+The VM, QA daemon and TUIs are stopped; the two QA tmpfs mounts and stopped
+VM metadata/disk remain for further qualification. Remove them, the backing files and all
 helpers/evidence before final completion. Four stale socket entries under
 `tmp/stepqa/l-virtiofs-old/qa-steps` (`serial.sock`, `serialv.sock`, `serialp.sock`,
 `qmp.sock`) return EOPNOTSUPP for guest lookup/unlink/rename, including root and
@@ -313,7 +332,7 @@ prevents recurrence, but cannot erase the old host entries and requires explicit
 mount teardown; do not report the old QA tree as cleaned.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
-raw attach qualification and shell window/tmux modes; shared Activity messages;
+raw attach qualification and shell window/tmux modes; native Activity event producers;
 final lifecycle/fleet/preview and Metrics artboard qualification; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test

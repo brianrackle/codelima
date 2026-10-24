@@ -1,5 +1,21 @@
 # Patterns
 
+## Shared notification history
+
+Publish general messages with client-generated idempotency IDs and daemon
+timestamps/sequences. Commit private atomic records before acknowledging them.
+Bound bytes, count and age; preserve corruption evidence and surface degraded
+message reads without hiding independent lifecycle cancellation controls.
+Project request/completion rows from canonical receipts rather than duplicating
+their output into a second journal. Treat origin as provenance, not mutation
+identity, and omit unknown legacy provenance.
+
+Keep unacknowledged frontend messages visibly local. Overlay an acknowledgement
+until a snapshot from the same journal epoch covers its sequence; absence from
+one history page is not evidence that a message has not been committed. Fence
+late replies, retry the same ID after a lost acknowledgement, and bound the
+pending queue. Do not write journal failures back into the journal (ADR 165).
+
 ## Durable operation admission
 
 Persist an idempotent admission receipt before launching slow work on a

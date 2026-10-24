@@ -15,12 +15,12 @@ func testActivityApp(t *testing.T, width, height int) *vaxisTUIApp {
 	a, _ := newTestManager(t, width, height)
 	a.view = tuiViewActivity
 	now := time.Now()
-	a.activity.page = NodeOperationsPage{
+	a.activity.page = ActivityPage{
 		Running: []NodeOperation{{ID: "active", NodeID: a.state.selectedEntry().node.ID, NodeSlug: "other-window", Request: NodeOperationRequest{Kind: "start"}, State: "running", CreatedAt: now.Add(-time.Minute)}},
-		History: []NodeOperation{
-			{ID: "failed", NodeSlug: "failed-node", Request: NodeOperationRequest{Kind: "retry"}, State: "failed", Error: "bootstrap exit 23", CreatedAt: now.Add(-2 * time.Minute)},
-			{ID: "canceled", NodeSlug: "canceled-node", Request: NodeOperationRequest{Kind: "start"}, State: "canceled", CreatedAt: now.Add(-3 * time.Minute)},
-			{ID: "success", NodeSlug: "ready-node", Request: NodeOperationRequest{Kind: "stop"}, State: "succeeded", CreatedAt: now.Add(-4 * time.Minute)},
+		History: []ActivityRecord{
+			{ID: "failed", OperationID: "failed", NodeSlug: "failed-node", Text: "retry · failed · bootstrap exit 23", Level: slog.LevelError, Time: now.Add(-2 * time.Minute)},
+			{ID: "canceled", OperationID: "canceled", NodeSlug: "canceled-node", Text: "start · canceled", Level: slog.LevelWarn, Time: now.Add(-3 * time.Minute)},
+			{ID: "success", OperationID: "success", NodeSlug: "ready-node", Text: "stop · succeeded", Success: true, Time: now.Add(-4 * time.Minute)},
 		},
 	}
 	a.activity.loaded = true
@@ -40,7 +40,7 @@ func TestTUIActivitySharedRecordsRenderAndSelectAcrossRefresh(t *testing.T) {
 				}
 			}
 			page := a.activity.page
-			page.History = append([]NodeOperation{{ID: "new", State: "succeeded", CreatedAt: time.Now()}}, page.History...)
+			page.History = append([]ActivityRecord{{ID: "new", Success: true, Time: time.Now()}}, page.History...)
 			a.activity.serial = 2
 			a.applyActivityData(tuiActivityDataEvent{serial: 1})
 			if len(a.activity.page.History) != 3 {
@@ -52,7 +52,7 @@ func TestTUIActivitySharedRecordsRenderAndSelectAcrossRefresh(t *testing.T) {
 			}
 			a.activity.selected = "active"
 			page.Running = nil
-			page.History = append([]NodeOperation{{ID: "active", State: "succeeded", CreatedAt: time.Now()}}, page.History...)
+			page.History = append([]ActivityRecord{{ID: "active", Success: true, Time: time.Now()}}, page.History...)
 			a.applyActivityData(tuiActivityDataEvent{serial: 2, page: page})
 			if a.activity.selected != "active" || len(a.activity.page.Running) != 0 {
 				t.Fatal("completion lost selection or retained busy badge")

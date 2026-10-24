@@ -25,6 +25,7 @@ var (
 )
 
 type NodeOperationRequest struct {
+	Origin string           `json:"origin,omitempty"`
 	ID     string           `json:"id"`
 	Kind   string           `json:"kind"`
 	Node   string           `json:"node,omitempty"`
@@ -81,6 +82,7 @@ func newNodeOperations(service *Service) (*nodeOperations, error) {
 	localService.daemonClient = nil
 	localService.operationConnect = nil
 	localService.operationPhase = nil
+	localService.operationReceipt = nil
 	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation)}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return nil, err
@@ -156,6 +158,9 @@ func cloneNodeOperation(record NodeOperation) NodeOperation {
 }
 
 func (m *nodeOperations) normalize(request NodeOperationRequest) (NodeOperationRequest, Node, []string, error) {
+	if request.Origin != "" && request.Origin != "tui" && request.Origin != "cli" {
+		return request, Node{}, nil, invalidArgument("operation origin must be tui or cli", nil)
+	}
 	if (request.Kind != "create" && request.Create != nil) || (request.Kind != "clone" && request.Clone != nil) {
 		return request, Node{}, nil, invalidArgument("operation inputs do not match its kind", nil)
 	}
@@ -261,7 +266,9 @@ func (m *nodeOperations) repeatedRequestLocked(request NodeOperationRequest) (No
 	if previous == nil || operationExpired(previous.record, m.service.now()) {
 		return NodeOperation{}, false, nil
 	}
-	if !reflect.DeepEqual(previous.record.Request, request) {
+	prior := previous.record.Request
+	prior.Origin, request.Origin = "", ""
+	if !reflect.DeepEqual(prior, request) {
 		return NodeOperation{}, true, preconditionFailed("operation id already belongs to another request", nil)
 	}
 	return cloneNodeOperation(previous.record), true, nil
@@ -429,7 +436,7 @@ func (m *nodeOperations) List() []NodeOperation {
 			// Listing is a summary projection. Do not serialize and clone every
 			// retained command/output body on each frontend's polling tick.
 			record := operation.record
-			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind}
+			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind, Origin: record.Request.Origin}
 			record.Result = nil
 			record.Output, record.OutputPartial = nil, ""
 			record.Phases = nil

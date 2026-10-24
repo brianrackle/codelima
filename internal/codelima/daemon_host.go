@@ -75,6 +75,9 @@ type daemonTerminalCache struct {
 // persist takes persistMu and then mu through list. No path holds mu while
 // taking persistMu, and no path holds either while taking updateGate.
 type daemonHost struct {
+	activityMu            sync.Mutex
+	activity              *activityJournal
+	activityErr           error
 	operationsMu          sync.Mutex
 	operations            *nodeOperations
 	operationsErr         error
@@ -233,6 +236,8 @@ func (e *daemonTerminalEntry) markSnapshotStale() {
 
 func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
 	switch method {
+	case "activity.append", "activity.list":
+		return h.handleActivity(method, raw)
 	case "operation.submit", "operation.get", "operation.list", "operation.latest", "operation.cancel":
 		return h.handleNodeOperation(ctx, method, raw)
 	case "daemon.update":

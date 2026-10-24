@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 13 adds node-scoped
-	// latest-start inspection for lifecycle detail views.
-	ProtocolVersion               = 13
+	// whenever a wire shape this protocol carries changes; 14 adds shared
+	// Activity message writes and merged receipt/message history.
+	ProtocolVersion               = 14
 	SessionVersion                = 2
 	HandoffVersion                = 5
 	PreviousChunkedHandoffVersion = 4

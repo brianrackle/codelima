@@ -428,13 +428,18 @@ running failed VM, `l` opens the failed attempt's output, and `r` retries the
 recorded suffix. `e` opens the source environment and `E` the source template;
 those edits affect future nodes, while this node retains its frozen commands.
 
-Press `4` for shared operation history. Select an operation with the arrows;
+Press `4` for shared Activity history. Select a record with the arrows;
 `Enter` opens its node and `K` requests cancellation. Canceling start or retry
 also stops the VM. `f` cycles all/warnings/errors, `/` filters the current
 history page, and `y` copies the selected record. Use `[`/`]` for newer/older
-pages and `g` to return to newest. Operation receipts are retained for seven
-days. Messages labeled “this window” are local diagnostics and are not yet
-shared or retained after exit.
+pages and `g` to return to newest. Lifecycle requests and completions share
+history with notifications from every TUI. New requests identify CLI/TUI origin;
+older receipts omit unknown origin. Operation receipts are retained for seven
+days. General messages retain up to seven days or 10,000 entries, whichever
+limit comes first; each message is limited to 4 KiB. They survive daemon restart.
+Messages labeled “this window” await persistence and may be lost on exit or
+when this window's 200-entry queue fills. Delivery retries on reconnection.
+Footer notices expire after six seconds; their history remains in Activity.
 
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even
