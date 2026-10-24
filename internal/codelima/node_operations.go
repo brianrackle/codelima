@@ -34,22 +34,23 @@ type NodeOperationRequest struct {
 }
 
 type NodeOperation struct {
-	ID            string               `json:"id"`
-	Request       NodeOperationRequest `json:"request"`
-	NodeID        string               `json:"node_id,omitempty"`
-	NodeSlug      string               `json:"node_slug,omitempty"`
-	State         string               `json:"state"`
-	CreatedAt     time.Time            `json:"created_at"`
-	FinishedAt    *time.Time           `json:"finished_at,omitempty"`
-	Error         string               `json:"error,omitempty"`
-	ErrorCode     int                  `json:"error_code,omitempty"`
-	ErrorCategory string               `json:"error_category,omitempty"`
-	Result        *NodeOperationResult `json:"result,omitempty"`
-	Output        []string             `json:"output,omitempty"`
-	OutputStart   uint64               `json:"output_start,omitempty"`
-	OutputPartial string               `json:"output_partial,omitempty"`
-	CurrentPhase  string               `json:"current_phase,omitempty"`
-	Phases        []NodeOperationPhase `json:"phases,omitempty"`
+	Progress      *NodeOperationProgress `json:"progress,omitempty"`
+	ID            string                 `json:"id"`
+	Request       NodeOperationRequest   `json:"request"`
+	NodeID        string                 `json:"node_id,omitempty"`
+	NodeSlug      string                 `json:"node_slug,omitempty"`
+	State         string                 `json:"state"`
+	CreatedAt     time.Time              `json:"created_at"`
+	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	ErrorCode     int                    `json:"error_code,omitempty"`
+	ErrorCategory string                 `json:"error_category,omitempty"`
+	Result        *NodeOperationResult   `json:"result,omitempty"`
+	Output        []string               `json:"output,omitempty"`
+	OutputStart   uint64                 `json:"output_start,omitempty"`
+	OutputPartial string                 `json:"output_partial,omitempty"`
+	CurrentPhase  string                 `json:"current_phase,omitempty"`
+	Phases        []NodeOperationPhase   `json:"phases,omitempty"`
 }
 
 type NodeOperationResult struct {
@@ -436,6 +437,7 @@ func (m *nodeOperations) List() []NodeOperation {
 			// Listing is a summary projection. Do not serialize and clone every
 			// retained command/output body on each frontend's polling tick.
 			record := operation.record
+			record.Progress = summarizeNodeOperationProgress(record)
 			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind, Origin: record.Request.Origin}
 			record.Result = nil
 			record.Output, record.OutputPartial = nil, ""

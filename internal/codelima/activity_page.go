@@ -50,6 +50,9 @@ func activityOperationRecord(op NodeOperation, requested bool) ActivityRecord {
 		if op.Error != "" {
 			r.Text += " · " + op.Error
 		}
+		if op.FinishedAt != nil && !op.CreatedAt.IsZero() && !op.FinishedAt.Before(op.CreatedAt) {
+			r.Text += " · " + op.FinishedAt.Sub(op.CreatedAt).Truncate(time.Second).String()
+		}
 	}
 	r.Text = plainLogText(r.Text)
 	return r

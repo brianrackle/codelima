@@ -49,6 +49,8 @@ type tuiActivityRow struct {
 	level                  slog.Level
 	operation              bool
 	success                bool
+	kind, state            string
+	progress               *NodeOperationProgress
 }
 
 type tuiActivityMouseRow struct {
@@ -114,6 +116,7 @@ func (a *vaxisTUIApp) applyActivityData(event tuiActivityDataEvent) {
 
 func activityOperationRow(op NodeOperation) tuiActivityRow {
 	row := activityRecordRow(activityOperationRecord(op, false))
+	row.kind, row.state, row.progress = op.Request.Kind, op.State, op.Progress
 	if op.CurrentPhase != "" {
 		row.text += " · " + plainLogText(op.CurrentPhase)
 	}

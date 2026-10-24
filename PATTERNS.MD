@@ -50,6 +50,11 @@ one node/operation pair; revoke it on navigation, cancellation or failure and
 consume it once only after both the receipt and live node prove readiness.
 New boot failures take precedence over older bootstrap evidence (ADR 164).
 
+Project bounded progress from authoritative phase records before removing full
+phase/output bodies from list responses. Count succeeded and skipped boundaries;
+do not turn elapsed time into an estimated percentage. Keep missing evidence
+explicit and let renderers consume the summary without per-row I/O (ADR 166).
+
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
 outside producer writes and flush before the terminal receipt. Keep a global

@@ -1506,7 +1506,7 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 			if step.Kind != "bootstrap" {
 				continue
 			}
-			if err := s.advanceOperationPhase("bootstrap", fmt.Sprintf("step %d/%d · %s", index+1, bootstrapTotal, step.Command), false); err != nil {
+			if err := s.advanceOperationPhase("bootstrap", fmt.Sprintf("step %d/%d · %s · %s", index+1, bootstrapTotal, coalesce(step.SourceName, step.SourceKind), step.Command), false); err != nil {
 				return Node{}, err
 			}
 			if err := s.runRecordedBootstrapStep(ctx, node, &bootstrap, index); err != nil {

@@ -17,7 +17,7 @@ sampler for macOS arm64 and amd64; native macOS readings require manual QA.
 `make test-metrics` covers bounded history, incremental reads, telemetry parsing,
 process CPU deltas/PID reuse, shared probe caching and cancellation, protocol
 frame size, navigation fencing, pause/sort/copy controls and responsive plots.
-The current daemon protocol is 14 (ADR 165); Metrics and inventory trends were
+The current daemon protocol is 15 (ADR 166); Metrics and inventory trends were
 introduced in protocols 9 and 10 (ADRs 155–156).
 The focused suite also checks CPU trend retention/epoch reset, stale refreshes
 and both process rankings during pause. Live guest qualification
@@ -68,6 +68,9 @@ snapshot watermarks and footer expiration. Protocol 14 adds `activity.append`
 and `activity.list`, and optional operation origin; keep the exact handshake
 and update-only compatibility path. Verify two real TUIs and a daemon restart
 using QA.md before qualifying the shared Activity surface.
+Protocol 15 adds a bounded observed-progress summary to operation lists. The
+same focused checks cover completed/skipped phase counts, legacy missing data,
+compact two-line selection geometry, wide columns and observed durations.
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's

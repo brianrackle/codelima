@@ -239,3 +239,17 @@ The corruption fixture was restored/removed, both TUIs and the daemon stopped,
 and all 87 disposable message records removed. Slice scratch evidence is cleaned;
 the stopped reusable guest/mounts and earlier qualification state remain under
 the existing TODO cleanup ledger.
+
+Protocol 15 adds bounded measured progress to operation list summaries (ADR 166).
+Activity renders current phase, step/source/command, completed/skipped phase
+counts and elapsed time in wide columns or compact two-line rows. Legacy phase
+absence stays explicit; completion durations require an observed finish.
+Full verify, race, integration and gopls checks pass. Live checks at 150×38 and
+80×24 confirmed Boot at 1/7, Bootstrap at 4/7 with step 2/3/source detail,
+second-line mouse selection, cancellation and receipt selection after completion.
+The displayed 6m24s matches the recorded timestamps, and Lima reported Stopped.
+The original node/bootstrap bytes are restored; the TUI and daemon are stopped,
+and this slice's message, receipt and scratch evidence are removed. The reusable
+guest and earlier cleanup state remain in TODO. Native daemon event producers remain required,
+with startup ownership, update quiescing and restored-bell baselines documented
+in TODO rather than introducing writes before the daemon holds its lock.

@@ -599,6 +599,12 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   with arrows and mouse, filter with `/`, paste text containing global shortcut
   digits, cycle severity with `f`, and copy a failure with `y`. Refresh must
   preserve the selected receipt as it completes or newer records arrive.
+  Running rows must show current phase/source/step detail and a measured phase
+  fraction/bar. Verify compact two-line rows remain selectable by either line,
+  and scrolling follows the selected operation when several are running. The
+  fraction includes skipped phases but is not a time estimate. Legacy receipts
+  without phases show unavailable progress. Completed durations must match
+  observed receipt times; interruption must not invent a finish.
 - Press `K` on a running start/retry. Wait for cancellation to finish and confirm
   Lima reports the VM stopped and allocation is released. A stop failure must
   remain visible as failure. Reopen and confirm the receipt and output remain.

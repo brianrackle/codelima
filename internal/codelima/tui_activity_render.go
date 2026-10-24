@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"go.rockorager.dev/vaxis"
@@ -21,7 +22,11 @@ func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
 		title += "  / " + s.query
 	}
 	tuiLine(win.New(2, 2, width-4, 1), 0, title, theme.mint)
-	runningHeight := min(max(5, len(running)+3), max(5, height/3))
+	runningRows := len(running)
+	if width-6 < 118 {
+		runningRows *= 2
+	}
+	runningHeight := min(max(5, runningRows+3), max(5, height/3))
 	runningBox := border.All(win.New(1, 4, width-2, runningHeight), theme.border)
 	tuiLine(runningBox, 0, fmt.Sprintf("Running · %d · daemon owned; continues after quit", len(running)), theme.muted)
 	if len(running) == 0 {
@@ -76,16 +81,21 @@ func (a *vaxisTUIApp) drawActivityRows(win vaxis.Window, rows []tuiActivityRow, 
 	if height <= 0 || width <= 0 {
 		return
 	}
+	rowHeight := 1
+	if running && width < 118 && height >= 2 {
+		rowHeight = 2
+	}
+	visible := max(1, height/rowHeight)
 	selected := slices.IndexFunc(rows, func(row tuiActivityRow) bool { return row.id == a.activity.selected })
 	if selected >= 0 {
 		if selected < *scroll {
 			*scroll = selected
-		} else if selected >= *scroll+height {
-			*scroll = selected - height + 1
+		} else if selected >= *scroll+visible {
+			*scroll = selected - visible + 1
 		}
 	}
-	*scroll = max(0, min(*scroll, len(rows)-height))
-	for i := *scroll; i < min(len(rows), *scroll+height); i++ {
+	*scroll = max(0, min(*scroll, len(rows)-visible))
+	for i := *scroll; i < min(len(rows), *scroll+visible); i++ {
 		row := rows[i]
 		style, icon := theme.text, "i"
 		if row.success {
@@ -99,15 +109,60 @@ func (a *vaxisTUIApp) drawActivityRows(win vaxis.Window, rows []tuiActivityRow, 
 		stamp := row.at.Local().Format("15:04:05")
 		if running {
 			icon, style = "◐", theme.amber
-			stamp = time.Since(row.at).Truncate(time.Second).String()
 		}
 		if row.id == a.activity.selected {
 			style.Background = theme.selected.Background
 			style.Attribute |= vaxis.AttrBold
 		}
 		line := stamp + "  " + icon + "  " + plainLogText(row.node) + "  " + row.text
-		tuiLine(win, i-*scroll, line, style)
-		a.activity.mouseRows = append(a.activity.mouseRows, tuiActivityMouseRow{id: row.id, rect: tuiRect{col: col, row: top + i - *scroll, width: width, height: 1}})
+		y := (i - *scroll) * rowHeight
+		if running {
+			drawActivityRunningRow(win.New(0, y, width, rowHeight), row, style)
+		} else {
+			tuiLine(win, y, line, style)
+		}
+		a.activity.mouseRows = append(a.activity.mouseRows, tuiActivityMouseRow{id: row.id, rect: tuiRect{col: col, row: top + y, width: width, height: rowHeight}})
+	}
+}
+
+func drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, style vaxis.Style) {
+	width, height := win.Size()
+	elapsed := "—"
+	if !row.at.IsZero() {
+		elapsed = max(time.Duration(0), time.Since(row.at)).Truncate(time.Second).String()
+	}
+	phase, detail, count, bar := "", "", "progress unavailable", ""
+	if p := row.progress; p != nil && p.Total > 0 {
+		phase, detail = p.Phase, p.Detail
+		completed := max(0, min(p.Completed, p.Total))
+		count = fmt.Sprintf("%d/%d phases", completed, p.Total)
+		filled := 12 * completed / p.Total
+		bar = strings.Repeat("█", filled) + strings.Repeat("░", 12-filled)
+	}
+	if row.state == "canceling" {
+		phase = "canceling"
+	}
+	if width >= 118 {
+		tuiLine(win.New(0, 0, 21, 1), 0, "◐ "+plainLogText(row.node), style)
+		tuiLine(win.New(22, 0, 9, 1), 0, plainLogText(row.kind), style)
+		tuiLine(win.New(32, 0, width-74, 1), 0, strings.TrimSpace(phase+" · "+detail), style)
+		if bar == "" {
+			tuiLine(win.New(width-40, 0, 29, 1), 0, count, style)
+		} else {
+			tuiLine(win.New(width-40, 0, 12, 1), 0, bar, style)
+			tuiLine(win.New(width-26, 0, 15, 1), 0, count, style)
+		}
+		tuiLine(win.New(width-10, 0, 10, 1), 0, elapsed, style)
+		return
+	}
+	tuiLine(win.New(0, 0, width-9, 1), 0, "◐ "+plainLogText(row.node)+"  "+row.kind+" · "+phase, style)
+	tuiLine(win.New(width-8, 0, 8, 1), 0, elapsed, style)
+	if height >= 2 {
+		if bar == "" {
+			tuiLine(win, 1, count, style)
+		} else {
+			tuiLine(win, 1, bar+"  "+count+" · "+detail, style)
+		}
 	}
 }
 

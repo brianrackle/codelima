@@ -440,6 +440,11 @@ limit comes first; each message is limited to 4 KiB. They survive daemon restart
 Messages labeled “this window” await persistence and may be lost on exit or
 when this window's 200-entry queue fills. Delivery retries on reconnection.
 Footer notices expire after six seconds; their history remains in Activity.
+Running rows show current phase/step text and completed/total phases. The bar
+counts observed phase boundaries, including skipped work; it does not predict
+time remaining. Compact terminals put progress on a second line. Older receipts
+without phase evidence show “progress unavailable”. Finished rows show duration
+only when an actual finish time was recorded.
 
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even

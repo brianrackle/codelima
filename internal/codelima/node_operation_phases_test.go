@@ -93,7 +93,7 @@ func TestNodeOperationsPhasesTrackFailureRetryAndCompletedStarts(t *testing.T) {
 	boot := operationPhaseForTest(t, failed, "boot")
 	bootstrap := operationPhaseForTest(t, failed, "bootstrap")
 	validation := operationPhaseForTest(t, failed, "validation")
-	if boot.State != "succeeded" || boot.StartedAt == nil || boot.FinishedAt == nil || bootstrap.State != "failed" || bootstrap.Detail != "step 2/3 · step-second" || bootstrap.FinishedAt == nil || validation.State != "pending" || validation.StartedAt != nil {
+	if boot.State != "succeeded" || boot.StartedAt == nil || boot.FinishedAt == nil || bootstrap.State != "failed" || bootstrap.Detail != "step 2/3 · source unrecorded · step-second" || bootstrap.FinishedAt == nil || validation.State != "pending" || validation.StartedAt != nil {
 		t.Fatal("phase evidence does not match the failed command", failed.Phases)
 	}
 	steps, err := s.store.LoadBootstrapState(node.ID)

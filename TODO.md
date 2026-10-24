@@ -293,9 +293,35 @@ routes, capacity transitions and daemon-update events remain: hook observed
 state transitions into the journal with stable event IDs and bounded summaries.
 This captures events without an open TUI, but requires deduplication at each
 producer and tests for reconnect/restart transitions. Reusing frontend statuses
-is smaller, but cannot provide global unattended event history. Running rows
-currently show phase names; the full design's progress treatment and final
-artboard fidelity remain in the Activity follow-up.
+is smaller, but cannot provide global unattended event history. Protocol 15 now
+projects observed phase counts/current detail for running rows (ADR 166). Full
+verify, race, integration and gopls checks pass. Live 150×38 and 80×24 checks
+confirmed Boot at 1/7, Bootstrap at 4/7 with step 2/3 and the frozen source,
+second-line mouse selection, cancellation, and selection retained on completion.
+The displayed 6m24s matches the receipt's observed duration; Lima confirmed the
+VM stopped. The node/bootstrap fixture was restored byte-for-byte, the TUI and
+daemon stopped, and this slice's message, receipt and scratch evidence removed.
+The reusable guest and earlier cleanup debt remain under the existing ledger.
+Final artboard fidelity remains in the Activity follow-up.
+
+Native producer inspection found a startup ownership constraint: `runDaemon`
+starts forwarding before `Server.Run` owns the daemon process lock. Direct
+journal callbacks from the constructor/forwarder would permit writes before
+single-writer ownership. Add a server-ready lifecycle hook (or a bounded queue
+that flushes only after ownership), emit outside forwarding/renderer locks,
+and stop/drain producers across the existing update barrier. This captures
+unattended events safely but adds explicit producer lifecycle and delivery
+state. Sampling only in TUI/RPC handlers is simpler but misses unattended
+transitions and is insufficient. Host allocation joining should be extracted
+from the current TUI helper for daemon reuse; do not duplicate its observed-VM
+semantics. Bell/notification producers also need a handoff baseline so restored
+metadata does not replay old notifications. Success of live update must be
+recorded by the committed successor, not the replaced predecessor. Also test
+failed handoff after the successor has opened its journal: the predecessor's
+cached journal must be reloaded before it resumes allocating sequences. The
+current rollback resumes the server without invalidating that cache; a dedicated
+handoff test should establish the reachable boundary and prevent stale sequence
+reuse. Reloading on rollback is bounded but adds a rare startup-sized read.
 
 Protocol 13 supplies node-scoped latest-start inspection and Starting/Failed
 detail views (ADR 164). Queue intent follows one node/receipt and is revoked by
