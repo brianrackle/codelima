@@ -114,6 +114,11 @@ func (t *virtioFSReclaimTicker) Snapshot() virtioFSReclaimSnapshot {
 func (t *virtioFSReclaimTicker) runOnce(ctx context.Context) {
 	t.runMu.Lock()
 	defer t.runMu.Unlock()
+	// Cancellation and a buffered timer tick can both be ready. The select
+	// may pick the tick, but shutdown must not invoke another reclaim pass.
+	if ctx.Err() != nil {
+		return
+	}
 
 	startedAt := t.now().UTC()
 	reclaimedNodes, err := t.reclaim(ctx)

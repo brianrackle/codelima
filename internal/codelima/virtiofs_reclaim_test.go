@@ -126,6 +126,20 @@ func TestVirtioFSReclaimTickerCloseCancelsActiveReclaim(t *testing.T) {
 	}
 }
 
+func TestVirtioFSReclaimTickerSkipsQueuedPassAfterCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ticker := newVirtioFSReclaimTicker(func(context.Context) (int, error) {
+		t.Fatal("a queued tick invoked reclaim after cancellation")
+		return 0, nil
+	}, time.Millisecond)
+	ticker.runOnce(ctx)
+	if !ticker.Snapshot().LastRunAt.IsZero() {
+		t.Fatal("skipped pass replaced the last real outcome")
+	}
+}
+
 // The workaround exists for Apple Virtualization's VirtioFS share, so the
 // platform gate — not a sampler probing the host — decides whether the ticker
 // is constructed at all.
