@@ -77,6 +77,7 @@ type nodeOperations struct {
 func newNodeOperations(service *Service) (*nodeOperations, error) {
 	localService := *service
 	localService.daemonClient = nil
+	localService.operationConnect = nil
 	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation)}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return nil, err

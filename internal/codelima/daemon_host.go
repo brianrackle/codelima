@@ -1396,6 +1396,13 @@ func recoverDaemonBeforeStart(ctx context.Context, home string) error {
 	})
 	terminalCount := 0
 	if dialErr == nil {
+		if identity.Protocol >= 11 {
+			_ = client.Close()
+			// A responsive operation-capable daemon may admit new work at any
+			// time. Inspect-then-stop would race admission and abandon it. The
+			// explicit live update path owns the atomic operation barrier.
+			return preconditionFailed("a daemon is already running; use codelima daemon update to replace it without interrupting lifecycle work", map[string]any{"pid": identity.PID, "protocol": identity.Protocol})
+		}
 		var status daemon.Status
 		_ = client.Call(ctx, "daemon.status", nil, &status)
 		terminalCount = status.TerminalCount

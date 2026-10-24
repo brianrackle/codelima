@@ -107,6 +107,18 @@ daemon/TUI remain under `tmp/stepqa` for that work.
 Live error filtering/copy and newer/older navigation over 55 receipts passed.
 Focused tests, full verify, race and integration pass for this checkpoint.
 
+CLI lifecycle admission now shares those daemon receipts (ADR 162). It resolves
+create directories before submission, sends progress to stderr, preserves
+result stdout and supplies receipt inspection after an interrupted wait.
+`operation list/show/cancel` provide terminal access to shared history and
+cancellation. Startup protects a responsive operation-owning daemon and asks
+for explicit update. Focused socket tests, full verify, race and integration
+pass. Live checks covered relative-path creation, JSON separation, a killed
+caller and Ctrl+C, continued work visible in Activity, explicit cancellation,
+history cursors, missing IDs and enabled/disabled autostart with local help. The extra
+test guest and runtime override were removed. Shared messages, phase/boot
+output and lifecycle detail views remain open.
+
 ## Implementation sequence
 
 1. Fleet projection, typed navigation, adaptive geometry and reusable theme/panels.

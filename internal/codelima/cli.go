@@ -61,6 +61,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	// TUI mode swaps this for a file sink via enableFileLogging (ADR 59).
 	level := parseLogLevel(options.LogLevel)
 	service := NewService(cfg, nil, stdin, stdout, stderr)
+	configureCLIOperations(service, rest)
 	service.SetLogger(newTextLogger(stderr, level), level)
 	result, err := dispatch(ctx, service, rest)
 	if err != nil {

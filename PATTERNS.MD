@@ -13,6 +13,14 @@ transferred safely (ADR 161).
 Runtime mutation decisions and their success checks must bypass observation
 caches. An old stopped sample cannot prove that a canceled boot left no VM.
 
+Connect CLI mutation paths lazily after parsing. Resolve caller-relative inputs
+before crossing a process boundary and send progress to stderr when stdout
+owns a result envelope. A lost admission response may hide a committed action:
+preserve the client-generated receipt ID and offer inspection before retry.
+Keep daemon execution copies free of frontend connection hooks. Startup must
+not replace a responsive operation-owning daemon; use the update admission
+gate rather than a check-then-stop sequence (ADR 162).
+
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
 outside producer writes and flush before the terminal receipt. Keep a global

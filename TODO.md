@@ -236,9 +236,26 @@ supporting files remain under `tmp/stepqa` for lifecycle progress checks.
 General message persistence must also consolidate window-local lifecycle
 notifications with the daemon receipt to avoid duplicate failure rows.
 
+CLI lifecycle commands now use lazy daemon admission (ADR 162), resolve create
+directories in the caller and send progress to stderr. Inspection/list/cancel
+commands expose the retained receipt; a lost wait or ambiguous submission
+returns its ID and inspection guidance. Responsive operation-capable daemons
+require explicit update instead of automatic startup replacement. SDK service
+calls remain inline. Focused socket tests, full verify, race and integration
+pass. Live CLI checks confirmed caller-relative creation, clean JSON stdout,
+stderr progress, hard-disconnect and SIGINT survival, receipt inspection,
+pagination, typed missing-receipt errors and explicit cancellation to stopped.
+Activity displayed the surviving CLI operation at 80×24. Enabled autostart
+started a fresh daemon; disabled autostart refused mutation while help remained
+local. Both temporary homes were removed. The extra disposable guest and
+temporary runtime override were removed. Phase-level progress, boot output, shared
+general messages and Starting/Failed/queued attach remain required follow-up.
+The shared path gives consistent ownership across frontends at the cost of
+requiring a compatible daemon for CLI mutations and explicit cancellation.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
-raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
-and progress/retry/cancel; final fleet/preview and Metrics qualification; dynamic
+raw attach qualification and shell window/tmux modes; phase-level lifecycle
+progress, Starting/Failed/queued attach and shared messages; final fleet/preview and Metrics qualification; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
 runs; complete documentation, all automated gates and manual QA, then clean

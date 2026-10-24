@@ -72,12 +72,47 @@ var cliGroups = []cliGroup{
 	{Name: "environment", Summary: "manage environments (reusable bootstrap command sets)", JoinUnknownArgs: true},
 	{Name: "configuration", Summary: "manage node configurations (image, resources, environments)"},
 	{Name: "node", Summary: "manage sandbox nodes bound to host directories"},
+	{Name: "operation", Summary: "inspect or cancel daemon-owned lifecycle work", Default: "list"},
 	{Name: "shell", Summary: "open an interactive shell in a node"},
 	{Name: "daemon", Summary: "manage the background daemon that owns terminal runtimes"},
 	{Name: "terminal", Summary: "interact with daemon-owned terminals"},
 }
 
 var cliCommands = []*cliCommand{
+	{
+		Group: "operation", Name: "list", Summary: "list running operations and retained history",
+		Flags: func(fs *flag.FlagSet) {
+			fs.String("before", "", "history cursor from the previous page's next field")
+			fs.Uint("limit", 50, "maximum history entries (1–100); running work is always included")
+		},
+		Run: func(ctx context.Context, service *Service, _ string, fs *flag.FlagSet, _ []string) (any, error) {
+			limit := flagUint(fs, "limit")
+			if limit < 1 || limit > 100 {
+				return nil, invalidArgument("operation page limit must be between 1 and 100", nil)
+			}
+			var page NodeOperationsPage
+			err := service.callOperationCLI(ctx, "operation.list", map[string]any{"before": flagString(fs, "before"), "limit": limit}, &page)
+			return page, err
+		},
+	},
+	{
+		Group: "operation", Name: "show", Summary: "show a full receipt and its retained output",
+		Positional: "id", MinArgs: 1,
+		Run: func(ctx context.Context, service *Service, id string, _ *flag.FlagSet, _ []string) (any, error) {
+			var record NodeOperation
+			err := service.callOperationCLI(ctx, "operation.get", map[string]string{"id": id}, &record)
+			return record, err
+		},
+	},
+	{
+		Group: "operation", Name: "cancel", Summary: "request cancellation; start/retry also stop the VM",
+		Positional: "id", MinArgs: 1,
+		Run: func(ctx context.Context, service *Service, id string, _ *flag.FlagSet, _ []string) (any, error) {
+			var record NodeOperation
+			err := service.callOperationCLI(ctx, "operation.cancel", map[string]string{"id": id}, &record)
+			return record, err
+		},
+	},
 	{
 		Group:   "doctor",
 		Summary: "run health checks against the local installation",

@@ -390,10 +390,28 @@ after successful bootstrap it only revalidates the agent. Canceled attempts
 and old failures without step records require ordinary start. `s` stops a VM
 that remains running after bootstrap failure.
 
-Lifecycle actions launched from the TUI run in the daemon and continue when
-that window closes. Finish lifecycle operations before updating the daemon;
+Lifecycle actions launched from the TUI or CLI (`node create`, `start`, `retry`,
+`stop`, `clone`, `delete`) run in the daemon and continue when the caller exits.
+CLI progress goes to stderr; stdout retains the command's result format.
+The CLI honors daemon autostart; with it disabled, run `codelima daemon start`
+first. A responsive daemon with a different version requires explicit
+`codelima daemon update`. Finish lifecycle operations before updating the daemon;
 an explicit daemon shutdown interrupts them without automatically replaying
 partially executed commands when the daemon restarts.
+
+Inspect and explicitly cancel work from any terminal:
+
+```sh
+codelima operation list --limit 20
+codelima operation show OPERATION_ID
+codelima operation cancel OPERATION_ID
+codelima --json operation list --before CURSOR_FROM_PREVIOUS_NEXT_FIELD
+```
+
+Cancel requests return a receipt; use `show` to confirm cleanup has finished.
+If a CLI loses its connection or stops waiting, its error includes the receipt
+ID. Inspect that ID before retrying: a lost response does not prove the action
+failed. Direct Go SDK services retain their existing inline execution behavior.
 
 Press `4` for shared operation history. Select an operation with the arrows;
 `Enter` opens its node and `K` requests cancellation. Canceling start or retry

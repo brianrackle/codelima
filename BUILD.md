@@ -42,8 +42,10 @@ clone inheritance, JSON/YAML round trips, CLI/TUI retry and failed-VM stopping
 `make test-node-operations` checks independent execution lifetime, per-node
 conflicts, duplicate admission, cancel-and-stop, restart recovery, private
 history, bounded pagination/output and the daemon update barrier (ADR 161).
-It includes real socket disconnect/reconnect and Activity cancellation,
-responsive rendering, filtering, copy and stable selection. Run the shared
+It includes real socket disconnect/reconnect, Activity cancellation and
+responsive rendering, filtering, copy and stable selection. CLI coverage adds
+directory resolution, stderr progress, receipt inspection/cancellation and
+protection of responsive daemons during startup recovery (ADR 162). Run the shared
 operation procedure in QA.md for live TUI exit and actual VM cleanup as well.
 Stop regressions cover stale cached observations in both directions and reject
 an unconfirmed shutdown. History ordering uses observed completion times.

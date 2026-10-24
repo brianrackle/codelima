@@ -583,6 +583,13 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   by a second window. Quitting must not cancel the runtime command.
 - Try a conflicting request by node ID and slug. Both must be refused with an
   explanation while the original operation continues.
+- Start work from the CLI, interrupt only its wait, and inspect the returned
+  receipt ID with `operation show`. Confirm Activity shows the same work and
+  `operation cancel` finishes cleanup. Check `--json` stdout is one result
+  envelope while progress uses stderr. Create from a relative directory and
+  confirm the node records the caller's absolute directory. Exercise list
+  cursors and missing receipt errors. With daemon autostart disabled, mutation
+  must fail with start guidance rather than execute inline; help stays local.
 - In Activity, inspect 150×38 and 80×24 layouts, select running/history rows
   with arrows and mouse, filter with `/`, paste text containing global shortcut
   digits, cycle severity with `f`, and copy a failure with `y`. Refresh must

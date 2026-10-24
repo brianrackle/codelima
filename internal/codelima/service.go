@@ -21,20 +21,21 @@ import (
 )
 
 type Service struct {
-	cfg             Config
-	store           *Store
-	sandbox         SandboxClient
-	tui             TUIRunner
-	stdin           io.Reader
-	stdout          io.Writer
-	stderr          io.Writer
-	operationOutput io.Writer
-	now             func() time.Time
-	ready           *serviceReadiness
-	logger          *slog.Logger
-	logLevel        slog.Level
-	daemonClient    *daemonclient.Client
-	localTerminals  bool
+	cfg              Config
+	store            *Store
+	sandbox          SandboxClient
+	tui              TUIRunner
+	stdin            io.Reader
+	stdout           io.Writer
+	stderr           io.Writer
+	operationOutput  io.Writer
+	now              func() time.Time
+	ready            *serviceReadiness
+	logger           *slog.Logger
+	logLevel         slog.Level
+	daemonClient     *daemonclient.Client
+	operationConnect func(context.Context) (*daemonclient.Client, error)
+	localTerminals   bool
 	// hostAuth builds the collector that reads the host's credentials. It is a
 	// field so tests can point the import at a temp HOME instead of the real
 	// one; nothing else may substitute it.
@@ -861,7 +862,7 @@ func pathWithinRoot(rootPath, targetPath string) bool {
 }
 
 func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
-	if s.daemonClient != nil {
+	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "create", Create: &input})
 	}
 	s.log().Debug("operation started", "op", "node.create", "configuration", input.Configuration, "directory", input.Directory)
@@ -1296,7 +1297,7 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 	if resume {
 		op = "node.retry"
 	}
-	if s.daemonClient != nil {
+	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: strings.TrimPrefix(op, "node."), Node: value})
 	}
 	s.log().Debug("operation started", "op", op, "node", value)
@@ -1551,7 +1552,7 @@ func (s *Service) ensureNodeHostPortsAvailable(ctx context.Context, node Node) e
 }
 
 func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error) {
-	if s.daemonClient != nil {
+	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "stop", Node: value})
 	}
 	s.log().Debug("operation started", "op", "node.stop", "node", value)
@@ -1653,7 +1654,7 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 const nodeCloneSourceRestartTimeout = limaCommandTimeout + 2*time.Minute
 
 func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
-	if s.daemonClient != nil {
+	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "clone", Clone: &input})
 	}
 	s.log().Debug("operation started", "op", "node.clone", "source", input.SourceNode)
@@ -1874,7 +1875,7 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 }
 
 func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
-	if s.daemonClient != nil {
+	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "delete", Node: value})
 	}
 	if err := s.ensureReady(ctx, true); err != nil {

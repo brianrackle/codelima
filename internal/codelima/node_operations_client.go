@@ -2,9 +2,12 @@ package codelima
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
 func awaitNodeOperation(ctx context.Context, record NodeOperation, get func(string) (NodeOperation, error)) (NodeOperation, error) {
@@ -30,27 +33,55 @@ func awaitNodeOperation(ctx context.Context, record NodeOperation, get func(stri
 	}
 }
 
-// TUI services carry a daemon client. The same public lifecycle methods then
-// submit work and await a receipt; canceling the view only ends this wait.
-// Daemon/SDK services have no client and execute the existing service path.
+// TUI services carry a daemon client; CLI services connect lazily. Both submit
+// work and await a receipt; canceling the caller only ends this wait.
+// Daemon/SDK services have neither and execute the existing service path.
 func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperationRequest) (Node, error) {
+	if request.Create != nil {
+		input := *request.Create
+		directory, err := s.resolveNodeDirectoryPath(input.Directory)
+		if err != nil {
+			return Node{}, err
+		}
+		input.Directory = directory
+		request.Create = &input
+	}
+	client, writer := s.daemonClient, s.stdout
+	if client == nil {
+		var err error
+		client, err = s.operationConnect(ctx)
+		if err != nil {
+			return Node{}, err
+		}
+		defer func() { _ = client.Close() }()
+		// CLI result envelopes own stdout. Progress belongs on stderr; a TUI
+		// supplies its own progress writer with its already-connected service.
+		writer = s.stderr
+	}
 	request.ID = newID()
 	var record NodeOperation
-	if err := s.daemonClient.Call(ctx, "operation.submit", request, &record); err != nil {
-		return Node{}, err
+	if err := client.Call(ctx, "operation.submit", request, &record); err != nil {
+		var rpcErr *daemon.RPCError
+		if errors.As(err, &rpcErr) {
+			return Node{}, fromDaemonError(err)
+		}
+		return Node{}, operationWaitError(request.ID, "admission was not confirmed", err)
 	}
-	output := nodeOperationPrinter{writer: s.stdout}
+	output := nodeOperationPrinter{writer: writer}
 	output.write(record)
 	record, err := awaitNodeOperation(ctx, record, func(id string) (NodeOperation, error) {
 		var updated NodeOperation
-		err := s.daemonClient.Call(ctx, "operation.get", map[string]string{"id": id}, &updated)
+		err := client.Call(ctx, "operation.get", map[string]string{"id": id}, &updated)
 		if err == nil {
 			output.write(updated)
 		}
 		return updated, err
 	})
 	if err != nil {
-		return Node{}, err
+		if record.State == "running" || record.State == "canceling" {
+			return Node{}, operationWaitError(record.ID, "stopped waiting for operation", err)
+		}
+		return Node{}, fromDaemonError(err)
 	}
 	node, err := s.store.NodeByID(record.NodeID)
 	if err != nil {
@@ -60,6 +91,12 @@ func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperation
 		return Node{}, err
 	}
 	return node, nil
+}
+
+// A lost response is not evidence that work failed or never started. Retain
+// the client-generated id even when admission itself may have succeeded.
+func operationWaitError(id, message string, err error) error {
+	return dependencyUnavailable(fmt.Sprintf("%s %s; inspect with codelima operation show %s before retrying", message, id, id), err, map[string]any{"operation_id": id})
 }
 
 type nodeOperationPrinter struct {
