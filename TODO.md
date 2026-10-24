@@ -2,6 +2,50 @@
 
 ## Open Work
 
+### 57. Implement the retrieved major-version TUI design
+
+Source access resolved on 2026-10-24. The user's interactive Claude Code
+session could read the artifact with its `Artifact` tool; the headless
+sessions used during earlier attempts did not expose that tool. Forking the
+working interactive session retrieved all 27 project files (26 artboards and
+`canvas.json`) from version `1792822420-f77f` of
+`https://claude.ai/code/artifact/b9713b7b-d554-4985-9e41-d54248d0ac30`.
+They are under `tmp/design/source/project/`, with sizes and SHA-256 hashes in
+`tmp/design/source-manifest.md`; all canvas-indexed artboards are present and
+the local hashes match the manifest. The published DC runtime is also saved.
+The editor supplies `support.js`, which is not a published file; no image
+assets or imported components are used. Fonts are external Google Fonts.
+
+Problem: the requested redesign has not been implemented. The reference is a
+VM manager first: a fleet table, five global views, node details and lifecycle
+states, configuration/environment editing, forwarding and operations views,
+system controls, palette/help, shell launching and optional embedded terminals.
+`canvas.json` contains the interaction requirements; `NavMap.dc.html` and
+`Kit.dc.html` define navigation, colors and states. The complete 26-artboard
+scope must be implemented, not reduced to restyling the existing sidebar.
+
+Suggested solution: preserve the retrieved reference for implementation,
+read every artboard and its notes, then implement it using the existing
+Go/vaxis components and service boundaries. Add meaningful regression tests,
+run all required checks and QA.md flows (including platform qualifications),
+visually inspect and interact with the running new TUI, update numbered ADRs,
+README, BUILD, patterns and roadmap as applicable, and clean verification
+artifacts. The initial worktree was clean at `1029f58`, so there were no
+outstanding changes to commit before starting. The implementation goal was
+paused at the user's request; retrieving the files resolves its access issue.
+
+Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified
+Lima 2.1.0 installation allowed the existing TUI to run in an isolated home.
+Its empty node screen, configuration menu, create-node form, Escape
+cancellation and resizing were inspected through a live tmux session and
+rendered screen capture. The disposable home, daemon and tmux sessions were
+cleaned. These checks verify the existing implementation, not the redesign.
+
+Advantages: the exact design files and interaction requirements are now
+available, preserving the requested fidelity. Disadvantages: this is a broad
+new interface with backend work as well as rendering changes; full native QA
+still needs supported hosts.
+
 ### 56. Investigate executable fixture startup on shared filesystems
 
 Problem: a local Linux arm64 release-verification run at `948ccea` failed in
