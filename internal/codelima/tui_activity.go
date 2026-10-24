@@ -13,6 +13,8 @@ import (
 )
 
 type tuiActivityState struct {
+	nativeEpoch                  string
+	nativeThrough                uint64
 	page                         ActivityPage
 	loaded, inFlight             bool
 	serial                       uint64

@@ -60,6 +60,13 @@ its Activity cache under the update barrier before resuming listeners. Reload
 successor-committed records and reset the epoch before allocating another
 sequence; a process-local cache is not authoritative across ownership (ADR 167).
 
+Publish small typed runtime projections after releasing runtime locks. Compare
+observed transitions into a bounded queue, retain IDs across persistence retries,
+and start its writer only after process ownership. Gate writes against live
+handoff and retire a process that cannot recover ownership. Broadcast committed
+records to frontend footers without sending them back through the outbox
+(ADR 168). Share the observed allocation helper with host capacity rendering.
+
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
 outside producer writes and flush before the terminal receipt. Keep a global

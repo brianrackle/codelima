@@ -640,6 +640,17 @@ For shared lifecycle operations, use an isolated home and disposable guest:
 - Confirm daemon update refuses while lifecycle work is active. Explicitly
   stop/restart the disposable daemon during a blocked operation: the recovered
   receipt must say interrupted, with unknown finish time and no automatic replay.
+- With no TUI open, start a guest HTTP listener and verify Activity later shows
+  the route and localhost claim once. Leave it steady across several scans;
+  pause/unreach the guest until the route degrades, then restore it and confirm
+  one degradation and restoration. Stop the listener and confirm removal and
+  claim release. Repeat a shared-port ownership change, including the newest
+  listener on 1455. Observe a native warning while another TUI view is open:
+  the footer expires after six seconds and history contains one shared record.
+  With observed global allocation above host capacity, confirm one warning;
+  stop the excess allocation and confirm recovery. Missing observations must
+  not invent recovery. Restart the daemon and confirm committed history remains.
+  Clean guest listeners, logs, test resource changes and new journal records.
 - Remove all disposable nodes, homes, daemons, terminals and verification files.
 
 For recorded bootstrap steps and explicit retry, use one disposable guest:

@@ -75,6 +75,7 @@ type daemonTerminalCache struct {
 // persist takes persistMu and then mu through list. No path holds mu while
 // taking persistMu, and no path holds either while taking updateGate.
 type daemonHost struct {
+	activityEvents        *daemonActivityEvents
 	activityMu            sync.Mutex
 	activity              *activityJournal
 	activityErr           error
@@ -94,9 +95,9 @@ type daemonHost struct {
 	// update on the write side, so the handoff manifest is always the complete
 	// tab set.
 	updateGate sync.RWMutex
-	// replaced records that a live update committed. From that moment the tab
-	// set belongs to the successor daemon: this daemon must neither rewrite
-	// session.json nor accept a mutation it could never hand over.
+	// replaced retires this host after a committed update or failure to regain
+	// process ownership on rollback. It must neither rewrite shared state nor
+	// accept mutations once another process may own that state.
 	replaced atomic.Bool
 	// serving records that the daemon server is accepting clients, which is the
 	// point from which broadcasting is both meaningful and safe.
@@ -130,6 +131,10 @@ func newDaemonHost(service *Service) *daemonHost {
 	}
 	if runtime, ok := service.sandbox.(LimaSSHRuntime); ok {
 		host.forwarder = newDynamicForwarder(service, runtime)
+	}
+	host.activityEvents = newDaemonActivityEvents(host)
+	if host.forwarder != nil {
+		host.forwarder.activityObserver = host.activityEvents.observeForwarding
 	}
 	if observer, ok := service.sandbox.(LimaObservationRuntime); ok {
 		host.observer = observer
@@ -573,7 +578,7 @@ func (h *daemonHost) enterTerminalMutation() error {
 		h.updateGate.RUnlock()
 		return daemon.Error(
 			"PreconditionFailed",
-			"daemon was replaced by a live update; retry against the new daemon",
+			"daemon no longer owns its state; reconnect to the current daemon",
 			ExitPreconditionFailed,
 			map[string]any{"daemon_replaced": true},
 		)
@@ -1009,6 +1014,7 @@ func (h *daemonHost) Close() error {
 	if h.forwarder != nil {
 		closeErr = errors.Join(closeErr, h.forwarder.Close())
 	}
+	h.activityEvents.Close()
 	if h.observer != nil {
 		closeErr = errors.Join(closeErr, h.observer.StopObservation())
 	}
@@ -1309,6 +1315,7 @@ func runDaemon(ctx context.Context, service *Service) error {
 	// internal budget rather than a blanket request deadline.
 	server := daemon.NewServer(daemon.Config{
 		Home: service.cfg.MetadataRoot, Version: Version, Handler: host, Logger: service.log(),
+		Ready: host.startActivityEvents,
 	})
 	host.wireServerLinks(server)
 	// A fresh daemon publishes from the moment it is wired: it has no adopted
@@ -1497,6 +1504,7 @@ func (h *daemonHost) wireServerLinks(server *daemon.Server) {
 // them.
 func (h *daemonHost) markServing() {
 	h.serving.Store(true)
+	h.activityEvents.notify()
 	h.mu.RLock()
 	entries := make([]*daemonTerminalEntry, 0, len(h.terminals))
 	for _, entry := range h.terminals {
@@ -1642,7 +1650,14 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 		}
 		if prepared {
 			h.invalidateActivityJournal()
-			_ = h.resumeReplacement()
+			if resumeErr := h.resumeReplacement(); resumeErr != nil {
+				// Permanently retire this process when ownership could not be
+				// recovered. Existing clients and background workers must not
+				// write state that may now belong to another daemon.
+				h.replaced.Store(true)
+				cause = errors.Join(cause, fmt.Errorf("recover daemon ownership: %w", resumeErr))
+				h.stopServer()
+			}
 		}
 		for _, item := range quiesced {
 			if item.state.PTY != nil {
@@ -1953,6 +1968,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	// goroutine observe a partially wired host.
 	server := daemon.NewServer(daemon.Config{
 		Home: service.cfg.MetadataRoot, Version: Version, Handler: host, Logger: service.log(),
+		Ready: host.startActivityEvents,
 	})
 	host.wireServerLinks(server)
 	imported, err := host.adoptHandoffTerminals(manifest, fdsByID, adopt)
@@ -2014,12 +2030,13 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, pingErr := daemonclient.Ping(ctx, service.cfg.MetadataRoot, Version); pingErr == nil {
-			// The server is answering, so the adopted terminals may publish.
-			host.markServing()
 			if err := peer.WriteJSON(daemon.HandoffMessage{Type: "committed", PID: os.Getpid()}, nil); err != nil {
 				server.Stop()
 				return err
 			}
+			// Publish native transitions only after the committed response was
+			// sent, so a failed importer cannot announce successful recovery.
+			host.markServing()
 			host.startVirtioFSReclaimTicker(ctx)
 			return <-done
 		}

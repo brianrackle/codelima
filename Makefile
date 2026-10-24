@@ -224,7 +224,7 @@ test-terminal-attach: init
 .PHONY: test-activity
 test-activity: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
-	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(ActivityJournal|ActivityPage|TUIActivity)' -count=1
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(ActivityJournal|ActivityPage|ActivityNative|TUIActivity)' -count=1
 
 test-node-operations: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'

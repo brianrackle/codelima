@@ -3,9 +3,37 @@ package codelima
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
+
+type tuiNativeActivityEvent activityMessageAck
+
+func (a *vaxisTUIApp) applyNativeActivity(event tuiNativeActivityEvent) {
+	message := event.Message
+	if event.Epoch == "" || message.Sequence == 0 || message.Time.IsZero() {
+		return
+	}
+	if _, err := normalizeActivityMessage(message.activityMessageRequest); err != nil {
+		return
+	}
+	s := &a.activity
+	if s.nativeEpoch == event.Epoch && message.Sequence <= s.nativeThrough {
+		return
+	}
+	s.nativeEpoch, s.nativeThrough = event.Epoch, message.Sequence
+	if message.Level >= slog.LevelWarn {
+		// This record is already durable. A footer notice must never append it
+		// again through the frontend's local message outbox.
+		text := message.Text
+		if message.NodeSlug != "" {
+			text = message.NodeSlug + ": " + text
+		}
+		a.setFooterStatus(message.Level, text)
+	}
+	a.startActivityLoad(true)
+}
 
 type tuiActivityDelivery struct {
 	serial     uint64

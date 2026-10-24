@@ -442,6 +442,16 @@ when this window's 200-entry queue fills. Delivery retries on reconnection.
 Footer notices expire after six seconds; their history remains in Activity.
 If a live daemon update rolls back, Activity reloads messages already accepted
 by the replacement before recording new ones.
+The daemon also records route additions/removals, degraded/restored forwarding,
+localhost ownership changes, and host CPU/memory overcommit and recovery while
+no TUI is open. Capacity follows observed VMs across all directories; unknown
+observations cannot imply recovery. Native warnings and errors appear in the
+footer for six seconds. Unchanged observations do not repeat notices.
+Capacity notices follow the daemon's runtime observations, so a delayed runtime
+refresh can delay the notice even when a VM has already started or stopped.
+Up to 256 native events can await persistence in memory; retries keep their IDs.
+A full queue omits newer events and later records the omitted count. Pending
+events can be lost on daemon exit; committed events follow normal retention.
 Running rows show current phase/step text and completed/total phases. The bar
 counts observed phase boundaries, including skipped work; it does not predict
 time remaining. Compact terminals put progress on a second line. Older receipts

@@ -12,6 +12,9 @@ import (
 // method classification in dispatch.go was unified to remove: a typo on either
 // side is silently "an event nobody listens for".
 const (
+	// EventActivityMessage carries the parent package's activityMessageAck,
+	// sharing its exact journal record and epoch with activity.append.
+	EventActivityMessage       = "activity.message"
 	EventDaemonHeartbeat       = "daemon.heartbeat"
 	EventDaemonShutdown        = "daemon.shutdown"
 	EventDaemonUpdateStarting  = "daemon.update_starting"

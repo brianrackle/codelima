@@ -363,6 +363,10 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		return
 	}
 	switch event.Event {
+	case daemon.EventActivityMessage:
+		if message, ok := daemon.DecodeEventData[activityMessageAck](event.Data); ok {
+			s.postEvent(tuiNativeActivityEvent(message))
+		}
 	case daemon.EventTerminalDirty:
 		if dirty, ok := daemon.DecodeEventData[daemon.TerminalDirtyEvent](event.Data); ok && dirty.TerminalID != "" {
 			s.postEvent(tuiDaemonTerminalDirtyEvent(dirty))

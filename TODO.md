@@ -288,12 +288,11 @@ labels, reconnect/restart persistence, and graceful corrupt-journal reporting.
 A twenty-second outage produced one outage and one recovery after a regression
 fixed repeated retry notifications. Corruption was restored, both TUIs and the
 QA daemon stopped, and all 87 disposable journal records were removed. This replaces the earlier
-window-only message limitation. Native producers for route ownership/degraded
-routes, capacity transitions and daemon-update events remain: hook observed
-state transitions into the journal with stable event IDs and bounded summaries.
-This captures events without an open TUI, but requires deduplication at each
-producer and tests for reconnect/restart transitions. Reusing frontend statuses
-is smaller, but cannot provide global unattended event history. Protocol 15 now
+window-only message limitation. ADR 168 supplies native route and capacity
+producers; terminal notifications and committed daemon-update events remain.
+These need stable event IDs, bounded summaries and restored-state baselines to
+capture unattended events without replaying old metadata. Reusing frontend
+statuses is smaller, but cannot provide global unattended history. Protocol 15 now
 projects observed phase counts/current detail for running rows (ADR 166). Full
 verify, race, integration and gopls checks pass. Live 150×38 and 80×24 checks
 confirmed Boot at 1/7, Bootstrap at 4/7 with step 2/3 and the frozen source,
@@ -305,16 +304,12 @@ The reusable guest and earlier cleanup debt remain under the existing ledger.
 Final artboard fidelity remains in the Activity follow-up.
 
 Native producer inspection found a startup ownership constraint: `runDaemon`
-starts forwarding before `Server.Run` owns the daemon process lock. Direct
-journal callbacks from the constructor/forwarder would permit writes before
-single-writer ownership. Add a server-ready lifecycle hook (or a bounded queue
-that flushes only after ownership), emit outside forwarding/renderer locks,
-and stop/drain producers across the existing update barrier. This captures
+starts forwarding before `Server.Run` owns the daemon process lock. ADR 168
+adds a server-ready lifecycle hook, a bounded queue that flushes under ownership,
+callbacks outside forwarding locks, and stop/drain through the update barrier.
+It shares observed host allocation semantics with the TUI. This captures
 unattended events safely but adds explicit producer lifecycle and delivery
-state. Sampling only in TUI/RPC handlers is simpler but misses unattended
-transitions and is insufficient. Host allocation joining should be extracted
-from the current TUI helper for daemon reuse; do not duplicate its observed-VM
-semantics. Bell/notification producers also need a handoff baseline so restored
+state. Bell/notification producers still need a handoff baseline so restored
 metadata does not replay old notifications. Success of live update must be
 recorded by the committed successor, not the replaced predecessor. A failed
 handoff previously resumed the predecessor without invalidating its journal
@@ -328,11 +323,36 @@ Live fault injection through `daemon update` confirmed the recovered epoch,
 retry identity and sequences 1/2/3; all three records survived restart and
 appeared in Activity. The disposable daemon/TUI, home and slice scratch files
 are removed. Reloading on rollback is bounded but adds a rare startup-sized read.
-The producer ownership work must also handle a failed `ResumeAfterReplacement`
-explicitly: the current rollback ignores that error, so it needs a fail-closed
-path before background journal writers are introduced. Review other retained
-mutable caches at this boundary as well. This prevents writes without recovered
-ownership, but requires coordinated teardown and preservation of recovery state.
+ADR 168 also retires the predecessor when `ResumeAfterReplacement` fails,
+rejecting writes and shutting down without rewriting shared session state.
+Review other retained mutable caches at this boundary as well. Invalidating
+such caches preserves successor writes but adds reload work after rollback;
+retaining them is faster but risks restoring stale state.
+
+ADR 168 supplies the server-owned Ready boundary, bounded native
+writer, typed route/owner transitions, shared observed allocation calculation,
+capacity warnings/recovery and committed footer notifications (protocol 16).
+Rollback now retires the predecessor if ownership cannot resume. Focused tests,
+full verify, race, integration and gopls pass. Live checks at 150×38 and 80×24
+confirmed unattended CPU overcommit, route addition/localhost ownership,
+degradation with HTTP 502, restoration with HTTP 200, removal/release, and CPU
+recovery after the guest stopped. The warning footer included the node and
+expired after six seconds; Enter opened the owning node. All eight native
+records survived daemon restart with unchanged IDs, sequences and timestamps.
+Both lifecycle receipts succeeded; the stop CLI waiter exited 143, so completion
+was verified from the receipt and Lima's Stopped observation. The original node,
+bootstrap and Lima configuration bytes are restored. The guest, TUI and daemon
+are stopped; the two receipts, ten messages, guest HTTP files and slice scratch
+artifacts are removed. Shared-port ownership transitions have automated coverage;
+two-real-guest ownership handover remains in the Ports qualification below.
+One pre-restart Activity capture omitted the completed stop row although the
+receipt had finished; it appeared after restart. Reproduce periodic refresh
+with a controlled receipt before changing code. Fixing a proven stale projection
+would preserve live history, but changing polling speculatively risks extra
+traffic and races. Terminal bell/notification
+and committed-update producers still need the baselines/ownership behavior above;
+they should reuse this queue instead of separate frontend publishers. That keeps
+one delivery path, but requires preserving terminal identity and navigation intent.
 
 Protocol 13 supplies node-scoped latest-start inspection and Starting/Failed
 detail views (ADR 164). Queue intent follows one node/receipt and is revoked by

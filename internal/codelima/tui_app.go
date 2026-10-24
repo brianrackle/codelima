@@ -511,6 +511,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		}
 		a.searchTick()
 		return false, nil
+	case tuiNativeActivityEvent:
+		a.applyNativeActivity(event)
+		a.draw()
+		return false, nil
 	case tuiRefreshTickEvent:
 		a.reapCompletedOperations()
 		a.startDataRefresh("")

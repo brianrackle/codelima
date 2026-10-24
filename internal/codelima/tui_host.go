@@ -20,24 +20,9 @@ type tuiHostSummary struct {
 // Allocation is global and follows the VM observation. In particular, a
 // bootstrap failure does not mean the VM released its configured resources.
 func summarizeTUIHost(capacity hostinfo.Snapshot, nodes []Node) tuiHostSummary {
-	host := tuiHostSummary{Capacity: capacity, AllocationsKnown: true}
-	for _, node := range nodes {
-		if node.DeletedAt != nil {
-			continue
-		}
-		observation := node.LastRuntimeObservation
-		if observation == nil {
-			host.UnknownNodes++
-			continue
-		}
-		if !observation.Exists || (observation.Status != ObservationRunning && observation.Status != ObservationInstalling) {
-			continue
-		}
-		host.Nodes = append(host.Nodes, node)
-		host.AllocatedCPUs += uint64(node.VCPUs)
-		host.AllocatedMemoryBytes += uint64(node.MemoryMiB) << 20
-	}
-	return host
+	a := summarizeHostAllocations(nodes)
+	return tuiHostSummary{Capacity: capacity, AllocationsKnown: true, Nodes: a.Nodes,
+		AllocatedCPUs: a.AllocatedCPUs, AllocatedMemoryBytes: a.AllocatedMemoryBytes, UnknownNodes: a.UnknownNodes}
 }
 
 // Load once globally, then scope only the fleet. All I/O runs before publishing

@@ -1,6 +1,7 @@
 package codelima
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -8,6 +9,47 @@ import (
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
+
+func TestActivityNativeRollbackRetiresDaemonWhenOwnershipCannotResume(t *testing.T) {
+	harness := newUpdateHandoffHarness(t)
+	harness.host.resumeReplacement = func() error { return errors.New("another owner holds the lock") }
+	stopped := make(chan struct{}, 1)
+	harness.host.stopServer = func() { stopped <- struct{}{} }
+	done := harness.startUpdate()
+	peer, token := harness.dialSuccessor(t)
+	harness.receiveHandoff(t, peer, token)
+	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "ready"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	message, fds, err := peer.ReadMessage()
+	daemon.CloseHandoffFDs(fds)
+	if err != nil || message.Type != "commit" {
+		t.Fatal(message, err)
+	}
+	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: "injected failure"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "recover daemon ownership") {
+			t.Fatal("lost ownership was hidden", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("rollback did not finish")
+	}
+	select {
+	case <-stopped:
+	default:
+		t.Fatal("daemon kept serving after losing ownership")
+	}
+	if err := harness.host.enterTerminalMutation(); err == nil {
+		harness.host.leaveTerminalMutation()
+		t.Fatal("retired daemon admitted another mutation")
+	}
+	if _, err := harness.host.handleActivity("activity.list", nil); err == nil {
+		t.Fatal("retired daemon reopened the shared Activity journal")
+	}
+}
 
 // A successor can accept Activity writes after it acquires the server lock but
 // before the predecessor receives the committed acknowledgement. If that

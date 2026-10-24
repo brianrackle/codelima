@@ -172,3 +172,30 @@ func TestTUIActivityReconnectReportsOneOutageRatherThanEveryRetry(t *testing.T) 
 		t.Fatal("a later outage was hidden")
 	}
 }
+
+func TestTUIActivityNativeWarningUsesFooterWithoutRepublishing(t *testing.T) {
+	a := testActivityApp(t, 80, 24)
+	message := activityMessageAck{Epoch: "journal", Message: ActivityMessage{activityMessageRequest: activityMessageRequest{ID: newID(), Source: "ports", NodeID: newID(), NodeSlug: "web", Level: slog.LevelWarn, Text: "route :3000 unavailable"}, Sequence: 2, Time: time.Now()}}
+	store := &tuiSessionStore{postEvent: func(event vaxis.Event) { _, _ = a.handleEvent(event) }}
+	store.handleDaemonEvent(daemon.Event{Event: daemon.EventActivityMessage, Data: message})
+	if a.status != "web: "+message.Message.Text || a.statusLevel != slog.LevelWarn || a.messages.Len() != 0 {
+		t.Fatal("native warning was lost or appended again by the frontend", a.status, a.messages.Entries())
+	}
+	stamp := time.Now().Add(-7 * time.Second)
+	a.statusAt = stamp
+	store.handleDaemonEvent(daemon.Event{Event: daemon.EventActivityMessage, Data: message})
+	if !a.statusAt.Equal(stamp) {
+		t.Fatal("duplicate native event extended the footer notice")
+	}
+	message.Message.Sequence++
+	message.Message.Level, message.Message.Text = slog.LevelInfo, "route added"
+	store.handleDaemonEvent(daemon.Event{Event: daemon.EventActivityMessage, Data: message})
+	if !a.statusAt.Equal(stamp) {
+		t.Fatal("routine native event replaced a warning")
+	}
+	message.Epoch, message.Message.Sequence, message.Message.Level = "recovered-journal", 1, slog.LevelWarn
+	store.handleDaemonEvent(daemon.Event{Event: daemon.EventActivityMessage, Data: message})
+	if a.statusAt.Equal(stamp) || a.messages.Len() != 0 {
+		t.Fatal("journal epoch change lost the warning or republished it")
+	}
+}

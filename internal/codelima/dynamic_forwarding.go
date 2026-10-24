@@ -687,11 +687,12 @@ func (s *forwardingNodeState) health() string {
 }
 
 type dynamicForwarder struct {
-	service  *Service
-	factory  forwardingPeerFactory
-	interval time.Duration
-	listen   func(string, string) (net.Listener, error)
-	logger   *slog.Logger
+	activityObserver func(forwardingActivitySnapshot)
+	service          *Service
+	factory          forwardingPeerFactory
+	interval         time.Duration
+	listen           func(string, string) (net.Listener, error)
+	logger           *slog.Logger
 	// now is injectable so grace windows and claim memory are testable.
 	now func() time.Time
 
@@ -823,6 +824,7 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 	f.mu.Lock()
 	f.lastPoll = f.nowUTC()
 	f.mu.Unlock()
+	f.publishActivity()
 }
 
 func (f *dynamicForwarder) ensurePrepared(ctx context.Context) bool {

@@ -64,6 +64,9 @@ type Config struct {
 	OutboundMaxFrames int
 	OutboundMaxBytes  int
 	HeartbeatInterval time.Duration
+	// Ready runs once after exclusive process ownership and private listeners
+	// are established, before accepting clients. Its workers must stop with ctx.
+	Ready func(context.Context)
 }
 
 type Server struct {
@@ -275,6 +278,9 @@ func (s *Server) Run(ctx context.Context) error {
 	defer s.cleanup()
 	s.baseCtx, s.baseCancel = context.WithCancel(ctx)
 	defer s.baseCancel()
+	if s.cfg.Ready != nil {
+		s.cfg.Ready(s.baseCtx)
+	}
 	s.accepting.Store(true)
 	s.wg.Add(3)
 	go s.acceptLoop(s.request, false)

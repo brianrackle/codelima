@@ -264,3 +264,20 @@ injection confirmed the recovered epoch,
 retry identity and sequences 1/2/3. All three records survived restart and
 appeared in Activity. The disposable daemon/TUI, home and slice scratch files
 are removed. Native producers and final design qualification remain open.
+
+Protocol 16 / ADR 168 adds native route/localhost-owner transitions and global
+CPU/memory allocation warnings/recovery, a bounded persistence worker started
+under daemon ownership, and committed warning delivery to frontend footers.
+Focused tests, full verify, race, integration and gopls pass, including forwarding
+callbacks outside locks, no-TUI persistence, retry/overflow behavior and
+ownership-loss retirement. Live 150×38/80×24 checks confirmed unattended CPU
+overcommit, route addition/ownership, degradation with HTTP 502, recovery with
+HTTP 200, removal/release and CPU recovery after shutdown. Warning footers show
+the node, expire after six seconds, and Activity opens the owning node. All
+eight native records survived daemon restart unchanged. The start/stop receipts
+succeeded; the interrupted stop CLI waiter was checked against the durable
+receipt and Lima's Stopped state. Original fixture bytes are restored, the TUI
+and daemon stopped, and slice records, HTTP files and scratch evidence removed.
+Two-guest ownership qualification and a possible stale completion capture remain
+explicit follow-ups in TODO. Native terminal bells/notifications,
+committed daemon-update events and final Activity fidelity still remain.

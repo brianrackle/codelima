@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 15 adds bounded
-	// observed progress to operation summaries used by Activity.
-	ProtocolVersion               = 15
+	// whenever a wire shape this protocol carries changes; 16 adds committed
+	// native Activity notifications with journal epoch and sequence.
+	ProtocolVersion               = 16
 	SessionVersion                = 2
 	HandoffVersion                = 5
 	PreviousChunkedHandoffVersion = 4
