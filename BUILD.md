@@ -17,7 +17,8 @@ sampler for macOS arm64 and amd64; native macOS readings require manual QA.
 `make test-metrics` covers bounded history, incremental reads, telemetry parsing,
 process CPU deltas/PID reuse, shared probe caching and cancellation, protocol
 frame size, navigation fencing, pause/sort/copy controls and responsive plots.
-Protocol 10 is required for Metrics and inventory trends (ADRs 155–156).
+The current daemon protocol is 11 (ADR 161); Metrics and inventory trends were
+introduced in protocols 9 and 10 (ADRs 155–156).
 The focused suite also checks CPU trend retention/epoch reset, stale refreshes
 and both process rankings during pause. Live guest qualification
 must compare procfs readings and exercise the new Metrics flow in QA.md.
@@ -37,6 +38,15 @@ Spec terminal procedure in QA.md before qualifying this surface.
 failure/cancellation/interruption, explicit suffix retry, legacy metadata,
 clone inheritance, JSON/YAML round trips, CLI/TUI retry and failed-VM stopping
 (ADR 160). Run the real guest failure/retry procedure in QA.md as well.
+
+`make test-node-operations` checks independent execution lifetime, per-node
+conflicts, duplicate admission, cancel-and-stop, restart recovery, private
+history, bounded pagination/output and the daemon update barrier (ADR 161).
+It includes real socket disconnect/reconnect and Activity cancellation,
+responsive rendering, filtering, copy and stable selection. Run the shared
+operation procedure in QA.md for live TUI exit and actual VM cleanup as well.
+Stop regressions cover stale cached observations in both directions and reject
+an unconfirmed shutdown. History ordering uses observed completion times.
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's

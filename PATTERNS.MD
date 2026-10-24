@@ -1,5 +1,24 @@
 # Patterns
 
+## Durable operation admission
+
+Persist an idempotent admission receipt before launching slow work on a
+daemon-owned context. Resolve resource identity before arbitration, then keep
+runtime execution outside manager and metadata locks. End only a caller's wait
+when its connection closes. Explicit cancellation and daemon shutdown have
+different causes: cancellation may owe VM cleanup, while shutdown records an
+interruption. Recover history without replaying uncertain side effects. Gate
+live replacement against active operations until their ownership can be
+transferred safely (ADR 161).
+Runtime mutation decisions and their success checks must bypass observation
+caches. An old stopped sample cannot prove that a canceled boot left no VM.
+
+Retain bounded output with absolute line sequences so polling clients neither
+duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
+outside producer writes and flush before the terminal receipt. Keep a global
+frontend projection independent of view navigation; fence page replies with a
+request serial, identify selection by receipt ID, and cancel stale page loads.
+
 ## Execution evidence and explicit retry
 
 Freeze command provenance at creation. Persist a unique running attempt before

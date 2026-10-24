@@ -21,19 +21,20 @@ import (
 )
 
 type Service struct {
-	cfg            Config
-	store          *Store
-	sandbox        SandboxClient
-	tui            TUIRunner
-	stdin          io.Reader
-	stdout         io.Writer
-	stderr         io.Writer
-	now            func() time.Time
-	ready          *serviceReadiness
-	logger         *slog.Logger
-	logLevel       slog.Level
-	daemonClient   *daemonclient.Client
-	localTerminals bool
+	cfg             Config
+	store           *Store
+	sandbox         SandboxClient
+	tui             TUIRunner
+	stdin           io.Reader
+	stdout          io.Writer
+	stderr          io.Writer
+	operationOutput io.Writer
+	now             func() time.Time
+	ready           *serviceReadiness
+	logger          *slog.Logger
+	logLevel        slog.Level
+	daemonClient    *daemonclient.Client
+	localTerminals  bool
 	// hostAuth builds the collector that reads the host's credentials. It is a
 	// field so tests can point the import at a temp HOME instead of the real
 	// one; nothing else may substitute it.
@@ -49,23 +50,23 @@ type serviceReadiness struct {
 }
 
 type NodeCreateInput struct {
-	Configuration string
-	Directory     string
-	Slug          string
-	Runtime       string
-	Provider      string
-	WorkspaceMode string
-	Ports         []string
+	Configuration string   `json:"configuration"`
+	Directory     string   `json:"directory"`
+	Slug          string   `json:"slug"`
+	Runtime       string   `json:"runtime,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	WorkspaceMode string   `json:"workspace_mode,omitempty"`
+	Ports         []string `json:"ports,omitempty"`
 	// ImportHostAuth overrides the settings default for this node only. A nil
 	// pointer is "no opinion" — the CLI flag and the TUI toggle are opt-outs
 	// layered over settings.yaml, and only an explicit answer should win over
 	// what the operator configured.
-	ImportHostAuth *bool
+	ImportHostAuth *bool `json:"import_host_auth,omitempty"`
 }
 
 type NodeCloneInput struct {
-	SourceNode string
-	NodeSlug   string
+	SourceNode string `json:"source_node"`
+	NodeSlug   string `json:"node_slug"`
 }
 
 func NewService(cfg Config, sandbox SandboxClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
@@ -860,6 +861,9 @@ func pathWithinRoot(rootPath, targetPath string) bool {
 }
 
 func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
+	if s.daemonClient != nil {
+		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "create", Create: &input})
+	}
 	s.log().Debug("operation started", "op", "node.create", "configuration", input.Configuration, "directory", input.Directory)
 	defer s.logOperation("node.create", s.now(), &err)
 
@@ -1292,6 +1296,9 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 	if resume {
 		op = "node.retry"
 	}
+	if s.daemonClient != nil {
+		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: strings.TrimPrefix(op, "node."), Node: value})
+	}
 	s.log().Debug("operation started", "op", op, "node", value)
 	defer s.logOperation(op, s.now(), &err)
 
@@ -1544,6 +1551,9 @@ func (s *Service) ensureNodeHostPortsAvailable(ctx context.Context, node Node) e
 }
 
 func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error) {
+	if s.daemonClient != nil {
+		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "stop", Node: value})
+	}
 	s.log().Debug("operation started", "op", "node.stop", "node", value)
 	defer s.logOperation("node.stop", s.now(), &err)
 
@@ -1584,12 +1594,14 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 		return Node{}, err
 	}
 
-	node, err = s.reconcileNode(ctx, node)
+	// A cached stopped observation may predate a canceled boot. It cannot
+	// justify skipping the stop that cancellation owes the caller.
+	node, err = s.reconcileNodeUncached(ctx, node)
 	if err != nil {
 		return Node{}, err
 	}
 
-	if node.LastRuntimeObservation != nil && node.LastRuntimeObservation.Status != ObservationRunning {
+	if observation := node.LastRuntimeObservation; observation != nil && (!observation.Exists || observation.Status == ObservationStopped) {
 		node.Status = NodeStatusStopped
 		node.UpdatedAt = s.now()
 		if err := s.withLocks(ctx, nil, []string{node.ID}, func() error {
@@ -1608,6 +1620,13 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 	if err := s.sandbox.Stop(ctx, node); err != nil {
 		return Node{}, err
 	}
+	node, err = s.reconcileNodeUncached(ctx, node)
+	if err != nil {
+		return Node{}, err
+	}
+	if observation := node.LastRuntimeObservation; observation != nil && observation.Exists && observation.Status != ObservationStopped {
+		return Node{}, externalCommandFailed("runtime did not confirm that the VM stopped", nil, map[string]any{"node_id": node.ID, "runtime_status": observation.Status})
+	}
 
 	node.Status = NodeStatusStopped
 	node.UpdatedAt = s.now()
@@ -1620,14 +1639,10 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 		return Node{}, err
 	}
 
-	result, err := s.reconcileNodePersisted(ctx, node)
-	if err != nil {
+	if err := s.hydrateConfigurationSlug(&node); err != nil {
 		return Node{}, err
 	}
-	if err := s.hydrateConfigurationSlug(&result); err != nil {
-		return Node{}, err
-	}
-	return result, nil
+	return node, nil
 }
 
 // nodeCloneSourceRestartTimeout bounds the deferred restart of a clone's source
@@ -1638,6 +1653,9 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 const nodeCloneSourceRestartTimeout = limaCommandTimeout + 2*time.Minute
 
 func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
+	if s.daemonClient != nil {
+		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "clone", Clone: &input})
+	}
 	s.log().Debug("operation started", "op", "node.clone", "source", input.SourceNode)
 	defer s.logOperation("node.clone", s.now(), &err)
 
@@ -1856,6 +1874,9 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 }
 
 func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
+	if s.daemonClient != nil {
+		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "delete", Node: value})
+	}
 	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}

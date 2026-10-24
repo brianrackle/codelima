@@ -612,6 +612,35 @@ func TestNodeStartIgnoresStaleRuntimeCacheWhenDecidingToBoot(t *testing.T) {
 	}
 }
 
+func TestNodeStopUsesFreshRuntimeBeforeAndAfterStopping(t *testing.T) {
+	for _, cached := range []ObservationStatus{ObservationStopped, ObservationRunning} {
+		t.Run(string(cached), func(t *testing.T) {
+			service, workspace := newTestService(t)
+			node, err := service.NodeCreate(context.Background(), NodeCreateInput{Directory: workspace, Slug: "stop-cache"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := service.sandbox.(*fakeSandbox)
+			fake.mu.Lock()
+			fake.observations[node.SandboxName] = RuntimeObservation{Name: node.SandboxName, Exists: true, Status: ObservationRunning}
+			fake.staleObservations = map[string]RuntimeObservation{node.SandboxName: {Name: node.SandboxName, Exists: true, Status: cached}}
+			fake.mu.Unlock()
+			stopped, err := service.NodeStop(context.Background(), node.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if !containsCall(fake.calls, "stop "+node.SandboxName) || fake.observations[node.SandboxName].Status != ObservationStopped {
+				t.Fatal("stop trusted stale runtime cache and left VM running", fake.calls)
+			}
+			if stopped.LastRuntimeObservation == nil || stopped.LastRuntimeObservation.Status != ObservationStopped {
+				t.Fatal("stop returned stale state after runtime mutation", stopped.LastRuntimeObservation)
+			}
+		})
+	}
+}
+
 func TestNodeStartUsesConfiguredWorkspaceSeedPrepareCommand(t *testing.T) {
 	t.Parallel()
 

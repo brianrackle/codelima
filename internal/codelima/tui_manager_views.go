@@ -44,6 +44,7 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	a.managerGeneration++
 	a.cancelSpecLoad()
 	a.startSpecLoad()
+	a.startActivityLoad(a.view == tuiViewActivity)
 	if a.logsVisible() {
 		a.cancelLogsLoad()
 		a.startLogsLoad(true)
@@ -231,35 +232,5 @@ func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {
 	}
 	if row == 2 {
 		tuiLine(inner, 2, "No published ports configured.", theme.dim)
-	}
-}
-
-func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
-	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "Activity", theme.mint)
-	inner := border.All(win.New(1, 4, width-2, height-7), theme.border)
-	row := 0
-	for _, id := range a.operationOrder {
-		if operation := a.operations[id]; operation != nil {
-			tuiLine(inner, row, "◐ "+operation.Title, theme.amber)
-			row++
-		}
-	}
-	if row == 0 {
-		tuiLine(inner, row, "No operations running in this window.", theme.dim)
-		row++
-	}
-	row++
-	entries := a.messages.Entries()
-	for i := len(entries) - 1 - a.detailScroll; i >= 0 && row < height-9; i-- {
-		entry := entries[i]
-		style := theme.text
-		if entry.Level >= slog.LevelError {
-			style = theme.coral
-		} else if entry.Level >= slog.LevelWarn {
-			style = theme.amber
-		}
-		tuiLine(inner, row, entry.Time.Format("15:04:05")+"  "+entry.Level.String()+"  "+entry.Text, style)
-		row++
 	}
 }

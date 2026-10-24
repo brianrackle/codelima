@@ -176,6 +176,9 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 	tuiLine(bar.New(0, 0, 9, 1), 0, a.headerLogoText(), logo)
 	col := 10
 	views := []string{"1 Nodes", "2 Templates", "3 Ports", "4 Activity", "5 System"}
+	if count := len(a.activity.page.Running); count > 0 {
+		views[tuiViewActivity] += fmt.Sprintf(" ◐%d", count)
+	}
 	a.viewRegions = nil
 	for i, label := range views {
 		style := theme.chrome
@@ -184,9 +187,10 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 			style.Foreground = theme.mint.Foreground
 		}
 		label = " " + label + " "
-		tuiLine(bar.New(col, 0, len(label), 1), 0, label, style)
-		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: len(label), height: 1})
-		col += len(label)
+		cells := renderedTextWidth(a.vx, label)
+		tuiLine(bar.New(col, 0, cells, 1), 0, label, style)
+		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: cells, height: 1})
+		col += cells
 	}
 	right := width
 	if width >= 140 && !a.host.Capacity.ObservedAt.IsZero() {
@@ -510,7 +514,10 @@ func (a *vaxisTUIApp) managerFooter() string {
 	case tuiViewPorts:
 		return "Esc nodes · : commands · ? help · q quit"
 	case tuiViewActivity:
-		return "↑↓ scroll · Esc nodes · : commands · ? help · q quit"
+		if a.activity.input != nil {
+			return "Enter keep filter · Esc cancel · [] pages search older history"
+		}
+		return "↑↓ move · ⏎ open · K cancel · f level · / filter · y copy · [] pages · g top"
 	case tuiViewSystem:
 		return "Tab panel · ↑↓ move · Enter edit · C check · R repair · Esc nodes · ? help"
 	}

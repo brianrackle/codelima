@@ -77,7 +77,7 @@ func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 		a.handleSearchKey(key)
 		return false
 	}
-	if a.handleLogsSearchKey(key) {
+	if a.handleLogsSearchKey(key) || a.handleActivitySearchKey(key) {
 		return false
 	}
 	// Pasted text is terminal payload, never a TUI shortcut. Vaxis emits one
@@ -264,7 +264,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 			}
 		}
 	}
-	if a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) {
+	if a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) || a.handleActivityMouse(mouse) {
 		return
 	}
 	if a.view == tuiViewSystem && mouse.EventType == vaxis.EventPress {

@@ -15,6 +15,7 @@ import (
 )
 
 func (a *vaxisTUIApp) switchView(view tuiView) {
+	a.activity.input, a.activity.pendingNode = nil, ""
 	a.view, a.nodeDetail, a.detailScroll = view, false, 0
 	a.state.focusTree()
 	a.state.treePaneMode = tuiTreePaneModeInfo
@@ -41,7 +42,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	defer a.cancelHiddenLogsLoad()
 	defer a.cancelHiddenSpecLoad()
 	a.refreshFleet()
-	if a.handleLogsSearchKey(key) {
+	if a.handleLogsSearchKey(key) || a.handleActivitySearchKey(key) {
 		return false
 	}
 	if a.filterInput != nil {
@@ -96,7 +97,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		return false
 	}
 	a.claimShortcutKey(key)
-	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) {
+	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) || a.handleActivityKey(key) {
 		return false
 	}
 	var err error
@@ -247,6 +248,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 }
 
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
+	if a.view == tuiViewActivity {
+		a.moveActivitySelection(delta)
+		return
+	}
 	if a.specVisible() {
 		a.moveSpecSelection(delta)
 		return

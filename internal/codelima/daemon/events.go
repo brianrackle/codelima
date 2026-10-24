@@ -19,6 +19,7 @@ const (
 	EventDaemonUpdateCommitted = "daemon.update_committed"
 	EventInputRevoked          = "input.revoked"
 	EventNodeStatusChanged     = "node.status_changed"
+	EventNodeOperationChanged  = "node.operation_changed"
 	EventNodeUsageChanged      = "node.usage_changed"
 	EventTargetTabsChanged     = "target.tabs_changed"
 	EventTerminalClipboard     = "terminal.clipboard"

@@ -390,6 +390,19 @@ after successful bootstrap it only revalidates the agent. Canceled attempts
 and old failures without step records require ordinary start. `s` stops a VM
 that remains running after bootstrap failure.
 
+Lifecycle actions launched from the TUI run in the daemon and continue when
+that window closes. Finish lifecycle operations before updating the daemon;
+an explicit daemon shutdown interrupts them without automatically replaying
+partially executed commands when the daemon restarts.
+
+Press `4` for shared operation history. Select an operation with the arrows;
+`Enter` opens its node and `K` requests cancellation. Canceling start or retry
+also stops the VM. `f` cycles all/warnings/errors, `/` filters the current
+history page, and `y` copies the selected record. Use `[`/`]` for newer/older
+pages and `g` to return to newest. Operation receipts are retained for seven
+days. Messages labeled “this window” are local diagnostics and are not yet
+shared or retained after exit.
+
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even
 when the fleet is scoped or filtered. A failed node still counts while its VM

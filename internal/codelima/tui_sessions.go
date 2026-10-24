@@ -380,7 +380,7 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		}
 	case daemon.EventTargetTabsChanged:
 		s.postEvent(vaxis.Redraw{})
-	case daemon.EventNodeStatusChanged:
+	case daemon.EventNodeStatusChanged, daemon.EventNodeOperationChanged:
 		// A redraw alone would render the same stale list: the node records
 		// live in the daemon, so the change is only visible after a reload.
 		// This is the push that lets the fallback poll run at 10s.

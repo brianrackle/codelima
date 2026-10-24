@@ -57,6 +57,7 @@ type vaxisTUIApp struct {
 	metrics            tuiMetricsState
 	logs               tuiLogsState
 	spec               tuiSpecState
+	activity           tuiActivityState
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
 	systemScroll       [tuiSystemPanelCount]int
@@ -430,6 +431,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyMetricsData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiActivityDataEvent:
+		a.applyActivityData(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiActivityCancelEvent:
+		a.finishActivityCancel(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiLogsDataEvent:
 		a.applyLogsData(event)
 		a.requestRedraw()
@@ -439,6 +448,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:
+		a.startActivityLoad(false)
 		a.startMetricsLoad()
 		a.startLogsLoad(false)
 		a.startSpecLoad()
@@ -489,6 +499,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.startDataRefresh("")
 		return false, nil
 	case tuiNodesChangedEvent:
+		a.startActivityLoad(true)
 		// The daemon pushed a node lifecycle change. Reload now instead of
 		// waiting out the fallback ticker; the load runs off the loop and the
 		// draw happens when tuiRefreshCompleteEvent lands. This does the tick's
@@ -617,6 +628,9 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
 		switch {
+		case a.view == tuiViewActivity && a.activity.input != nil:
+			a.updateActivityInput(event)
+			a.draw()
 		case a.logsVisible() && a.logs.input != nil:
 			a.updateLogsSearchInput(event)
 			a.draw()
@@ -840,6 +854,7 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		a.host = *event.Host
 	}
 	if event.Err != nil {
+		a.activity.pendingNode = ""
 		// Auto-refresh errors were previously swallowed silently; surface them at
 		// the log seam (warn, not per-tick success) without disturbing the UI,
 		// and retain them in the message ring at their true level so a failed
@@ -857,6 +872,7 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		a.service.log().Warn("tui node reload failed", "error", err.Error())
 		a.setStatus(slog.LevelError, err.Error())
 	}
+	a.finishActivityNodeJump()
 }
 
 // startDaemonInputTakeover reclaims terminal input ownership for this window.

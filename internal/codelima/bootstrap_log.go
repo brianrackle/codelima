@@ -47,7 +47,10 @@ func (s *Service) runLoggedGuestCommand(ctx context.Context, node Node, command,
 	if err != nil {
 		return fmt.Errorf("open bootstrap output: %w", err)
 	}
-	output := bootstrapLogWriter{writer: writer}
+	var output io.Writer = bootstrapLogWriter{writer: writer}
+	if s.operationOutput != nil {
+		output = io.MultiWriter(output, s.operationOutput)
+	}
 	started := s.now()
 	if _, err = fmt.Fprintf(output, "\n## %s · %s\n$ %s\n", started.Format(time.RFC3339Nano), phase, command); err != nil {
 		_ = writer.Close()

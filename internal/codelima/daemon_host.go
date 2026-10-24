@@ -75,6 +75,10 @@ type daemonTerminalCache struct {
 // persist takes persistMu and then mu through list. No path holds mu while
 // taking persistMu, and no path holds either while taking updateGate.
 type daemonHost struct {
+	operationsMu          sync.Mutex
+	operations            *nodeOperations
+	operationsErr         error
+	operationsClosed      bool
 	rawAttachments        map[string]daemonRawAttachment
 	service               *Service
 	forwarder             *dynamicForwarder
@@ -229,6 +233,8 @@ func (e *daemonTerminalEntry) markSnapshotStale() {
 
 func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
 	switch method {
+	case "operation.submit", "operation.get", "operation.list", "operation.cancel":
+		return h.handleNodeOperation(ctx, method, raw)
 	case "daemon.update":
 		var params struct {
 			Path string `json:"path"`
@@ -286,13 +292,7 @@ func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, me
 		if err := json.Unmarshal(raw, &params); err != nil || strings.TrimSpace(params.Node) == "" {
 			return nil, daemon.Error("InvalidArgument", "node is required", ExitInvalidArgument, nil)
 		}
-		var result Node
-		var err error
-		if method == "node.start" {
-			result, err = h.service.NodeStart(ctx, params.Node)
-		} else {
-			result, err = h.service.NodeStop(ctx, params.Node)
-		}
+		result, err := h.runLegacyNodeOperation(ctx, strings.TrimPrefix(method, "node."), params.Node)
 		if err == nil {
 			h.broadcast(daemon.EventNodeStatusChanged, result)
 		}
@@ -997,6 +997,7 @@ func (h *daemonHost) Close() error {
 	// no-op, because the successor daemon owns those tabs and already wrote
 	// them.
 	closeErr := h.persist()
+	closeErr = errors.Join(closeErr, h.closeNodeOperations())
 	if h.virtioFSReclaimTicker != nil {
 		h.virtioFSReclaimTicker.Close()
 	}
@@ -1602,6 +1603,9 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	// dispatched terminal.open can add a tab after either was captured.
 	h.updateGate.Lock()
 	defer h.updateGate.Unlock()
+	if h.activeNodeOperations() {
+		return nil, daemon.Error("PreconditionFailed", "lifecycle operations are still running; finish or cancel them before updating the daemon", ExitPreconditionFailed, nil)
+	}
 	if h.replaced.Load() {
 		return nil, daemon.Error(
 			"PreconditionFailed",

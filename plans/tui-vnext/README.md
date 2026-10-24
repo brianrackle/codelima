@@ -28,7 +28,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operation history, cancel/filter/copy/navigation; shared messages and final qualification remain |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -89,6 +89,24 @@ state remain under `tmp/stepqa` while lifecycle qualification continues. Startin
 Failed views, operation ownership and final native/artboard qualification remain open.
 The disposable Spec fixture, TUI, daemon, tmux/socket and screenshots were cleaned.
 
+Protocol 11 adds daemon-owned operations with private seven-day receipts,
+bounded output/history pages, identity-based arbitration and cancellation
+(ADR 161). Activity projects shared operation history with stable selection,
+severity/search, clipboard, mouse, pagination and cross-scope node navigation.
+Socket tests cover requester exit and cancellation by another frontend. Live
+150×38/80×24 checks confirmed quit/reopen survival, conflicts, update refusal
+and Activity controls. A real canceled boot exposed a cached stop decision;
+uncached pre/post observations and regression tests fix it. Repeated
+cancellation stayed active through Lima's shutdown fallback until the guest
+stopped and allocation released. Restart retained a blocked operation as
+interrupted without finish time or replay. Injected commands and the extra
+scope were cleaned, and original node metadata restored. Shared general
+messages, phase/boot output, CLI admission, Starting/Failed and final artboard
+qualification remain open. The reusable stopped guest and protocol-11
+daemon/TUI remain under `tmp/stepqa` for that work.
+Live error filtering/copy and newer/older navigation over 55 receipts passed.
+Focused tests, full verify, race and integration pass for this checkpoint.
+
 ## Implementation sequence
 
 1. Fleet projection, typed navigation, adaptive geometry and reusable theme/panels.
@@ -124,7 +142,7 @@ and tmux launch, shifted default choices, scrolling, Enter and mouse activation
 color, with the disposable daemon/home cleaned. Verify, race and integration
 checks pass; external-window and guest-session qualification remain open.
 Current limitations include published-port-only Ports,
-window-local Activity, incomplete final visual qualification,
+window-local general messages alongside shared operation history, incomplete final visual qualification,
 and existing forms inside the new modal geometry. These are implementation
 stages, not reductions of the accepted scope. See TODO #57.
 

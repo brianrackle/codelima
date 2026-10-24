@@ -576,6 +576,32 @@ For Spec, use an isolated node and editable template:
   clipboard. A missing/malformed YAML file must leave frozen values readable.
 - Stop and remove the disposable TUI, daemon, node, VM and all fixture files.
 
+For shared lifecycle operations, use an isolated home and disposable guest:
+
+- Start or retry from the TUI, quit while work is active, and reopen. Verify
+  the same receipt remains running in Activity and its header count is shared
+  by a second window. Quitting must not cancel the runtime command.
+- Try a conflicting request by node ID and slug. Both must be refused with an
+  explanation while the original operation continues.
+- In Activity, inspect 150×38 and 80×24 layouts, select running/history rows
+  with arrows and mouse, filter with `/`, paste text containing global shortcut
+  digits, cycle severity with `f`, and copy a failure with `y`. Refresh must
+  preserve the selected receipt as it completes or newer records arrive.
+- Press `K` on a running start/retry. Wait for cancellation to finish and confirm
+  Lima reports the VM stopped and allocation is released. A stop failure must
+  remain visible as failure. Reopen and confirm the receipt and output remain.
+- Use `Enter` to open an operation's node outside the current directory scope.
+  It must select that identity without opening a terminal. Deleted nodes retain
+  history and produce an explicit unavailable message.
+- Browse older history with `]`, newer with `[`, and newest with `g`. Records
+  must not duplicate across pages, active work must remain visible, and
+  expired cursors must offer reload. Local diagnostics must be identified as
+  belonging to this window rather than claimed to survive restart.
+- Confirm daemon update refuses while lifecycle work is active. Explicitly
+  stop/restart the disposable daemon during a blocked operation: the recovered
+  receipt must say interrupted, with unknown finish time and no automatic replay.
+- Remove all disposable nodes, homes, daemons, terminals and verification files.
+
 For recorded bootstrap steps and explicit retry, use one disposable guest:
 
 - Freeze three short environment commands: the first appends a counter and

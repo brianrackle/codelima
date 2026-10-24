@@ -202,6 +202,40 @@ change operation ownership or provide seven-day Activity history. This
 separation keeps retry compatible with existing callers at the cost of a
 second runtime/RPC change. Final native/artboard qualification remains open.
 
+The operation manager now has daemon RPC admission/get/list/cancel (protocol
+11), TUI-facing service routing, private seven-day receipts, bounded history
+pages, per-node conflicts, idempotency, cancel-and-stop and conservative restart
+recovery (ADR 161). Active operations prevent live daemon replacement. Focused
+RPC/manager tests and the initial complete unit suite pass; final validation
+is ongoing. Bounded live bootstrap/validation output and shared Activity now
+have automated coverage, including real-socket caller disconnect, reconnection
+and cancellation from a second frontend. Activity supports identity-preserving
+selection, pagination, search/severity, copy, mouse selection and node navigation.
+Required next work: capture boot output and phase progress, wire CLI lifecycle
+admission, persist general Activity messages, integrate Starting/Failed and
+queued attach, and finish lifecycle qualification
+with the disposable guest. A daemon-owned manager removes frontend lifetime
+coupling; it adds storage/RPC lifecycle responsibilities that must be qualified
+before release. The QA daemon and TUI now use protocol 11. Live checks verified
+quit/reopen survival, shared busy counts, ID/slug conflicts, update refusal
+while active, wide/compact history, filter/paste, mouse selection, clipboard and
+navigation from another directory scope without opening a terminal. The first
+real cancellation exposed a cached-stop decision: a stale stopped sample
+skipped VM shutdown. Stop now reads uncached state before and after mutation,
+with regressions for both stale directions and unconfirmed stops. Repeated
+cancellation stayed canceling through Lima's three-minute shutdown fallback
+and finished only after Stopped, with allocation released. A blocked runtime
+command was interrupted by daemon shutdown and stayed interrupted after
+restart, with no finish time or replay; its counter remained one. The injected
+command and temporary scope were removed, and original node metadata restored.
+History orders completed operations by observed finish time and avoids copying
+retained output into every list poll. Live error filtering/copy and two-page
+navigation over 55 real receipts passed; pages contained no duplicates.
+Focused, full verification, race and integration pass. The stopped guest, QA daemon/TUI and
+supporting files remain under `tmp/stepqa` for lifecycle progress checks.
+General message persistence must also consolidate window-local lifecycle
+notifications with the daemon receipt to avoid duplicate failure rows.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
 and progress/retry/cancel; final fleet/preview and Metrics qualification; dynamic

@@ -623,6 +623,24 @@ func (a *vaxisTUIApp) operationDisplayStatus(entry tuiTreeEntry) string {
 	if !entry.valid() {
 		return ""
 	}
+	for _, operation := range a.activity.page.Running {
+		if operation.NodeID != entry.node.ID {
+			continue
+		}
+		if operation.State == "canceling" {
+			return "canceling"
+		}
+		switch operation.Request.Kind {
+		case "start", "retry":
+			return "starting"
+		case "stop":
+			return "stopping"
+		case "delete":
+			return "deleting"
+		case "clone":
+			return "cloning"
+		}
+	}
 
 	entryKey := entry.key()
 	for _, operationID := range a.operationOrder {
