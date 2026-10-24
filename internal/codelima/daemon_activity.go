@@ -16,6 +16,15 @@ func (h *daemonHost) activityJournal() (*activityJournal, error) {
 	return h.activity, h.activityErr
 }
 
+// invalidateActivityJournal runs under the exclusive update barrier, after the
+// successor has stopped. The next access reloads disk under recovered daemon
+// ownership and gets a new epoch, including any successor-acknowledged writes.
+func (h *daemonHost) invalidateActivityJournal() {
+	h.activityMu.Lock()
+	defer h.activityMu.Unlock()
+	h.activity, h.activityErr = nil, nil
+}
+
 func (h *daemonHost) handleActivity(method string, raw json.RawMessage) (any, error) {
 	// Initialization and retention can write even on a list request. Serialize
 	// all journal access against a daemon replacement's single-writer boundary.

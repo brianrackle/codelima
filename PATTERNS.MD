@@ -55,6 +55,11 @@ phase/output bodies from list responses. Count succeeded and skipped boundaries;
 do not turn elapsed time into an estimated percentage. Keep missing evidence
 explicit and let renderers consume the summary without per-row I/O (ADR 166).
 
+When a failed daemon handoff returns ownership to a previous process, invalidate
+its Activity cache under the update barrier before resuming listeners. Reload
+successor-committed records and reset the epoch before allocating another
+sequence; a process-local cache is not authoritative across ownership (ADR 167).
+
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence
 outside producer writes and flush before the terminal receipt. Keep a global

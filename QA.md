@@ -631,6 +631,12 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   In a disposable home only, corrupt a message JSON and restart; Activity must
   report unavailable messages while still showing operation history and
   cancellation controls. Remove the corrupt fixture before continuing.
+- In a disposable daemon with no terminals, inject a failed handoff after a
+  test successor acquires ownership and writes one valid Activity record.
+  Confirm the predecessor resumes, its Activity epoch changes, retrying the
+  successor's message ID returns the same record, and a new message receives
+  the following sequence. Restart once and verify all messages remain readable.
+  Remove the test successor, disposable home and records after stopping it.
 - Confirm daemon update refuses while lifecycle work is active. Explicitly
   stop/restart the disposable daemon during a blocked operation: the recovered
   receipt must say interrupted, with unknown finish time and no automatic replay.

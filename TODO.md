@@ -316,12 +316,23 @@ transitions and is insufficient. Host allocation joining should be extracted
 from the current TUI helper for daemon reuse; do not duplicate its observed-VM
 semantics. Bell/notification producers also need a handoff baseline so restored
 metadata does not replay old notifications. Success of live update must be
-recorded by the committed successor, not the replaced predecessor. Also test
-failed handoff after the successor has opened its journal: the predecessor's
-cached journal must be reloaded before it resumes allocating sequences. The
-current rollback resumes the server without invalidating that cache; a dedicated
-handoff test should establish the reachable boundary and prevent stale sequence
-reuse. Reloading on rollback is bounded but adds a rare startup-sized read.
+recorded by the committed successor, not the replaced predecessor. A failed
+handoff previously resumed the predecessor without invalidating its journal
+cache after successor writes. ADR 167
+now invalidates it after the successor stops and before listeners resume; the
+handoff regression reproduced the stale epoch and now preserves acknowledged
+records, retry identity and sequence continuity. Full verify, race, integration
+and gopls pass (the first race invocation exited 143 without a test failure;
+the isolated rerun completed successfully).
+Live fault injection through `daemon update` confirmed the recovered epoch,
+retry identity and sequences 1/2/3; all three records survived restart and
+appeared in Activity. The disposable daemon/TUI, home and slice scratch files
+are removed. Reloading on rollback is bounded but adds a rare startup-sized read.
+The producer ownership work must also handle a failed `ResumeAfterReplacement`
+explicitly: the current rollback ignores that error, so it needs a fail-closed
+path before background journal writers are introduced. Review other retained
+mutable caches at this boundary as well. This prevents writes without recovered
+ownership, but requires coordinated teardown and preservation of recovery state.
 
 Protocol 13 supplies node-scoped latest-start inspection and Starting/Failed
 detail views (ADR 164). Queue intent follows one node/receipt and is revoked by

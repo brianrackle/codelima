@@ -440,6 +440,8 @@ limit comes first; each message is limited to 4 KiB. They survive daemon restart
 Messages labeled “this window” await persistence and may be lost on exit or
 when this window's 200-entry queue fills. Delivery retries on reconnection.
 Footer notices expire after six seconds; their history remains in Activity.
+If a live daemon update rolls back, Activity reloads messages already accepted
+by the replacement before recording new ones.
 Running rows show current phase/step text and completed/total phases. The bar
 counts observed phase boundaries, including skipped work; it does not predict
 time remaining. Compact terminals put progress on a second line. Older receipts

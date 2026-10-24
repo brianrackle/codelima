@@ -71,6 +71,9 @@ using QA.md before qualifying the shared Activity surface.
 Protocol 15 adds a bounded observed-progress summary to operation lists. The
 same focused checks cover completed/skipped phase counts, legacy missing data,
 compact two-line selection geometry, wide columns and observed durations.
+The Activity suite also drives a failed handoff after a successor journal write
+and checks cache invalidation, retry identity, sequence continuity and reopening
+the resulting journal (ADR 167).
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's

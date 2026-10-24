@@ -1641,6 +1641,7 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 			_, _ = process.Wait()
 		}
 		if prepared {
+			h.invalidateActivityJournal()
 			_ = h.resumeReplacement()
 		}
 		for _, item := range quiesced {

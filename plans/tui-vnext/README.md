@@ -253,3 +253,14 @@ and this slice's message, receipt and scratch evidence are removed. The reusable
 guest and earlier cleanup state remain in TODO. Native daemon event producers remain required,
 with startup ownership, update quiescing and restored-bell baselines documented
 in TODO rather than introducing writes before the daemon holds its lock.
+
+The Activity handoff regression reproduced a stale cache when a successor wrote
+a message before the final acknowledgment failed. ADR 167 invalidates that cache
+under the update barrier before the predecessor resumes. Focused checks now
+preserve the message, idempotent retry and sequence continuity. Full verify,
+race, integration and gopls pass; the first race invocation exited 143 without
+a test failure, and the isolated rerun completed. Live `daemon update` fault
+injection confirmed the recovered epoch,
+retry identity and sequences 1/2/3. All three records survived restart and
+appeared in Activity. The disposable daemon/TUI, home and slice scratch files
+are removed. Native producers and final design qualification remain open.
