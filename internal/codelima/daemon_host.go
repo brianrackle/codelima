@@ -75,6 +75,7 @@ type daemonTerminalCache struct {
 // persist takes persistMu and then mu through list. No path holds mu while
 // taking persistMu, and no path holds either while taking updateGate.
 type daemonHost struct {
+	rawAttachments        map[string]daemonRawAttachment
 	service               *Service
 	forwarder             *dynamicForwarder
 	observer              LimaObservationRuntime
@@ -226,7 +227,7 @@ func (e *daemonTerminalEntry) markSnapshotStale() {
 	e.requestSnapshot()
 }
 
-func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
+func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
 	switch method {
 	case "daemon.update":
 		var params struct {
@@ -271,6 +272,8 @@ func (h *daemonHost) Handle(ctx context.Context, _ daemon.ClientContext, method 
 			h.broadcast(daemon.EventNodeStatusChanged, result)
 		}
 		return result, toDaemonError(err)
+	case "terminal.attach", "terminal.attach_read", "terminal.detach":
+		return h.handleRawAttachment(ctx, client, method, raw)
 	case "terminal.list":
 		return h.list(), nil
 	case "terminal.open":

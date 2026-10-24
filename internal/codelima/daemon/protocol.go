@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 7 adds metadata
-	// to terminal dirty events for background tab labels and bell alerts.
-	ProtocolVersion               = 7
+	// whenever a wire shape this protocol carries changes; 8 adds raw terminal
+	// attachment with acknowledged output cursors and exclusive query replies.
+	ProtocolVersion               = 8
 	SessionVersion                = 2
 	HandoffVersion                = 5
 	PreviousChunkedHandoffVersion = 4

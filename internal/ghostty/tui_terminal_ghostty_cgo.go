@@ -128,6 +128,7 @@ func loadGhosttyVT() error {
 }
 
 type ghosttyTUITerminal struct {
+	boundary      terminalstate.VTBoundary
 	targetKey     string
 	postEvent     func(vaxis.Event)
 	term          C.GhosttyBridgeTerminal
@@ -1108,6 +1109,7 @@ func (t *ghosttyTUITerminal) ingestPTYEvent(data []byte, eventID uint64) {
 
 	t.responseEventID = eventID
 	t.responseOrdinal = 0
+	t.boundary.Feed(data)
 	if os.Getenv("CODELIMA_TEST_GHOSTTY_HANG_OPERATION") == "output" {
 		C.codelima_test_ghostty_hang_forever()
 	}
@@ -1169,7 +1171,7 @@ func (t *ghosttyTUITerminal) drainEffectsLockedRaw() {
 		switch effect.kind {
 		case C.GHOSTTY_BRIDGE_EFFECT_CLIPBOARD:
 			if len(text) <= terminalMaxPasteBytes && utf8.ValidString(text) && t.postEvent != nil {
-				t.postEvent(tuiClipboardEvent{TargetKey: t.targetKey, Text: text})
+				t.postEvent(tuiClipboardEvent{TargetKey: t.targetKey, Text: text, EventID: t.responseEventID})
 			}
 		case C.GHOSTTY_BRIDGE_EFFECT_TITLE:
 			t.metadata.Title = text
@@ -1329,7 +1331,8 @@ func (t *ghosttyTUITerminal) checkpointLocked() (terminalCheckpointState, error)
 		return terminalCheckpointState{}, fmt.Errorf("checkpoint terminal: pixel geometry unavailable: %d", int(result))
 	}
 	return terminalCheckpointState{
-		Data: C.GoBytes(unsafe.Pointer(data), C.int(length)), Generation: t.generation,
+		Boundary: t.boundary,
+		Data:     C.GoBytes(unsafe.Pointer(data), C.int(length)), Generation: t.generation,
 		Cols: t.cols, Rows: t.rows, ViewportOffset: scrollbar.offset, Focused: t.focused, Metadata: t.metadata,
 		Colors:    terminalstate.CloneColors(t.defaultColors),
 		CellWidth: int(cellWidth), CellHeight: int(cellHeight),
@@ -1356,6 +1359,7 @@ func (t *ghosttyTUITerminal) restoreCheckpointLocked(state terminalCheckpointSta
 		return fmt.Errorf("restore terminal checkpoint: native result %d", int(result))
 	}
 	t.cols, t.rows = state.Cols, state.Rows
+	t.boundary = state.Boundary
 	t.generation, t.focused, t.metadata = state.Generation, state.Focused, state.Metadata
 	t.nativeErr = nil
 	t.cachedFrameRows = nil
@@ -1503,9 +1507,18 @@ const maxTerminalReadBytes = 4 * 1024 * 1024
 func (t *ghosttyTUITerminal) formatLockedRaw(source ReadSource, format ReadFormat) (string, error) {
 	var data *C.uint8_t
 	var length C.size_t
-	//nolint:gocritic // cgo-generated pointer-safety expression.
-	result := C.ghostty_bridge_terminal_format(t.term, C.bool(source == ReadRecent), C.bool(format == ReadANSI),
-		C.size_t(maxTerminalReadBytes), &data, &length)
+	var result C.GhosttyResult
+	if format == terminalstate.ReadAttachANSI {
+		if !t.boundary.Ground() {
+			return "", terminalstate.ErrIncompleteVT
+		}
+		//nolint:gocritic // cgo-generated pointer-safety expression.
+		result = C.ghostty_bridge_terminal_attach(t.term, C.size_t(maxTerminalReadBytes), &data, &length)
+	} else {
+		//nolint:gocritic // cgo-generated pointer-safety expression.
+		result = C.ghostty_bridge_terminal_format(t.term, C.bool(source == ReadRecent), C.bool(format == ReadANSI),
+			C.size_t(maxTerminalReadBytes), &data, &length)
+	}
 	if data != nil {
 		defer C.ghostty_bridge_free(unsafe.Pointer(data))
 	}

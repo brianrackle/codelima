@@ -374,6 +374,10 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 		if state, ok := daemon.DecodeEventData[daemon.TerminalState](event.Data); ok && state.TerminalID != "" {
 			s.postEvent(tuiDaemonTerminalDirtyEvent{TerminalID: state.TerminalID})
 		}
+	case daemon.EventTerminalCreated:
+		if state, ok := daemon.DecodeEventData[daemon.TerminalState](event.Data); ok && state.TerminalID != "" {
+			s.postCompletion(tuiDaemonTerminalCreatedEvent(state))
+		}
 	case daemon.EventTargetTabsChanged:
 		s.postEvent(vaxis.Redraw{})
 	case daemon.EventNodeStatusChanged:
@@ -718,6 +722,18 @@ func (s *tuiSessionStore) applyOpenedDaemonTab(event tuiDaemonTerminalOpenedEven
 	if event.Err != nil {
 		s.setSessionError(event.TargetKey, event.Err)
 		return "", event.Err
+	}
+	return s.installDaemonTab(event)
+}
+
+func (s *tuiSessionStore) installDaemonTab(event tuiDaemonTerminalOpenedEvent) (string, error) {
+	for key, session := range s.sessions {
+		if string(session.terminalID) == event.State.TerminalID {
+			if session.target != event.TargetKey {
+				return "", fmt.Errorf("terminal id belongs to another target")
+			}
+			return key, nil
+		}
 	}
 
 	key := event.State.TabID

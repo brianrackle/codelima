@@ -293,6 +293,22 @@ func (s *rendererWorkerServer) handle(frame rendererWorkerFrame) (any, error) {
 		err := s.journalOrder.push(rendererJournalEvent{ID: params.EventID, FirstID: params.FirstID, Type: "resize", Cols: params.Cols, Rows: params.Rows, CellWidth: params.CellWidth, CellHeight: params.CellHeight}, s.applyJournalEvent)
 		s.journalGap.Store(s.journalOrder.hasGap())
 		return map[string]bool{"applied": err == nil}, err
+	case "attach_state":
+		var params rendererCheckpointParams
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			return nil, err
+		}
+		if s.journalOrder.hasGap() || s.journalOrder.applied < params.Through {
+			return rendererAttachState{}, nil
+		}
+		state := s.terminal.ReadVisible(terminalstate.ReadAttachANSI)
+		if errors.Is(state.Err, terminalstate.ErrIncompleteVT) {
+			return rendererAttachState{}, nil
+		}
+		if state.Err != nil {
+			return nil, state.Err
+		}
+		return rendererAttachState{Ready: true, Data: []byte(state.Text), Through: s.journalOrder.applied}, nil
 	case "checkpoint":
 		var params rendererCheckpointParams
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
@@ -497,6 +513,7 @@ func (s *rendererWorkerServer) postEvent(event vaxis.Event) {
 		return
 	case tuiClipboardEvent:
 		frame.Event = "clipboard"
+		frame.EventID = value.EventID
 		frame.Result, _ = json.Marshal(value.Text)
 	case tuiTerminalErrorEvent:
 		frame.Event = "error"

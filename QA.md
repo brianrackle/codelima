@@ -423,6 +423,25 @@ On a node with an IPv6-capable HTTP test server, repeat the request on an unused
 
 ## Flow 7: path-scoped fleet manager
 
+Raw shell attachment checks (ADR 151):
+
+1. Select a ready node, press `x`, type a command and confirm the outer terminal
+   receives the shell directly. Press Ctrl+] and confirm the same manager view
+   and selection return. Reattach and confirm shell variables and PID survive.
+2. In `X`, choose the host shell; run a host command and detach. Choose embedded
+   explicitly and verify F6 remains its only reserved key.
+3. From another terminal, list sessions and run `codelima terminal attach ID`.
+   Confirm a competing raw attach is rejected and disconnect releases the lease.
+4. Run a full-screen app, resize, use Option/Alt arrows and bracketed paste,
+   detach and reattach. Verify cursor, mouse, keyboard and scroll modes restore.
+   A pasted Ctrl+] must reach the guest instead of detaching.
+5. Check a terminal query and OSC 52 copy while attached; each should take
+   effect once. Repeat with the native renderer active after detach.
+6. Type `exit`; verify final output appears and the manager returns without
+   claiming the ended session is running. Interrupt the client or stop/update
+   the daemon and confirm the host terminal is usable afterward.
+
+
 
 The major-version frontend uses the reference in
 `plans/tui-vnext/reference/`. Begin with these manager checks. The remaining

@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	rendererCheckpointVersion        = 1
+	rendererCheckpointVersion        = 2
 	rendererCheckpointMaxHeaderBytes = 64 << 10
 )
 

@@ -54,7 +54,7 @@ func ClassifyMethod(method string) DeliveryClass {
 		return ClassReplaceable
 	case "input.takeover":
 		return ClassOwnership
-	case "terminal.open", "terminal.close", "terminal.move", "terminal.restart_renderer":
+	case "terminal.open", "terminal.close", "terminal.move", "terminal.restart_renderer", "terminal.attach", "terminal.attach_read", "terminal.detach":
 		return ClassControl
 	case "node.start", "node.stop", "daemon.update":
 		return ClassLifecycle
@@ -83,7 +83,7 @@ func MutatingInputMethod(method string) bool {
 func SeatArbitratedMethod(method string) bool {
 	// Inspection owns shared viewport/selection/search state but its gestures
 	// must remain ordered: never coalesce a press or release as latest-value.
-	return ClassifyMethod(method) == ClassReplaceable || method == "terminal.interact"
+	return ClassifyMethod(method) == ClassReplaceable || method == "terminal.interact" || method == "terminal.attach" || method == "terminal.attach_read"
 }
 
 // maxLanesPerConnection bounds per-terminal lane growth in each class. A real

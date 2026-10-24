@@ -200,6 +200,8 @@ void ghostty_bridge_test_log(const uint8_t* message, size_t len);
 
 /* Returned bytes are owned by the caller and released with bridge_free.
  * recent includes at most 2000 history rows plus the current visible area. */
+GhosttyResult ghostty_bridge_terminal_attach(GhosttyBridgeTerminal term,
+	size_t max_bytes, uint8_t** out, size_t* out_len);
 GhosttyResult ghostty_bridge_terminal_format(GhosttyBridgeTerminal term, bool recent, bool ansi,
 	size_t max_bytes, uint8_t** out, size_t* out_len);
 GhosttyResult ghostty_bridge_terminal_paste(GhosttyBridgeTerminal term, const uint8_t* data,

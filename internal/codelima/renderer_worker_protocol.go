@@ -28,7 +28,8 @@ const rendererInputEventBit = uint64(1) << 63
 // daemon.SnapshotCell. A worker that predates versioning sends no version at
 // all, which decodes as 0 and is rejected as a mismatch -- exactly the intent.
 // Version 3 adds native checkpoint envelopes and contiguous journal watermarks.
-const rendererWorkerProtocolVersion = 3
+// Version 4 adds coherent ANSI attachment capture and clipboard output IDs.
+const rendererWorkerProtocolVersion = 4
 
 // errRendererProtocolMismatch marks a version disagreement between this binary
 // and the renderer worker beside it. It is deliberately distinct from every
@@ -178,6 +179,12 @@ const (
 type rendererReadParams struct {
 	Source string `json:"source,omitempty"`
 	Format string `json:"format,omitempty"`
+}
+
+type rendererAttachState struct {
+	Ready   bool   `json:"ready"`
+	Data    []byte `json:"data,omitempty"`
+	Through uint64 `json:"through"`
 }
 
 func rendererReadRequest(source ReadSource, format ReadFormat) rendererReadParams {

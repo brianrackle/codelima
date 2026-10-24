@@ -38,7 +38,7 @@ func TestTerminalLaunchSpecNodeShell(t *testing.T) {
 		t.Fatalf("TerminalLaunchSpec(NodeShell) error = %v", err)
 	}
 
-	wantArgv := []string{wantExe, "--home", service.cfg.MetadataRoot, "shell", "node-abc"}
+	wantArgv := []string{wantExe, "--home", service.cfg.MetadataRoot, "terminal", "run-node-shell", "node-abc"}
 	if !reflect.DeepEqual(spec.Argv, wantArgv) {
 		t.Fatalf("node argv = %#v, want %#v", spec.Argv, wantArgv)
 	}

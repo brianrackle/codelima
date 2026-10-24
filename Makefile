@@ -177,6 +177,10 @@ test: init
 test-tui-input: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '$(TUI_INPUT_TEST_FILTER)' -count=1
 
+.PHONY: test-terminal-attach
+test-terminal-attach: init
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima ./internal/ghostty ./internal/terminalstate -run 'Test(Raw|GhosttyAttach|VTBoundary)' -count=1 -timeout=60s
+
 .PHONY: test-tui-manager
 test-tui-manager: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUI(Fleet|Manager|Resize|Shortcut|Tab|FocusToggle)|PushedReload|TerminalTab)' -count=1

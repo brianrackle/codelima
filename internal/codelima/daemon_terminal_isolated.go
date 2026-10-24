@@ -100,11 +100,12 @@ type isolatedDaemonTerminal struct {
 	handoffPTY            *os.File
 	handoffRecovery       []byte
 
-	journal    *rendererJournal
-	renderer   *rendererSupervisor
-	cache      atomic.Pointer[isolatedTerminalCache]
-	cacheEpoch atomic.Uint64
-	variants   isolatedReadVariants
+	journal       *rendererJournal
+	rawAttachment rawAttachmentGate
+	renderer      *rendererSupervisor
+	cache         atomic.Pointer[isolatedTerminalCache]
+	cacheEpoch    atomic.Uint64
+	variants      isolatedReadVariants
 	// readFetches counts on-demand variant round-trips to the renderer. It is
 	// test observability for the "nothing is rendered until a read asks" rule.
 	readFetches atomic.Uint64
@@ -134,6 +135,7 @@ func newIsolatedDaemonTerminalWithOptions(
 		responses: make(map[rendererResponseKey]struct{}),
 	}
 	terminal.journal.AppendResize(terminal.cols, terminal.rows)
+	terminal.rawAttachment.write = terminal.SendInput
 	return terminal
 }
 
@@ -717,7 +719,7 @@ func (t *isolatedDaemonTerminal) applyRendererPTYWrite(
 		delete(t.responses, oldest)
 	}
 	t.responseMu.Unlock()
-	t.SendInput(data)
+	t.rawAttachment.response(eventID, data)
 }
 
 func (t *isolatedDaemonTerminal) handleRendererEvent(_ uint64, frame rendererWorkerFrame) {
@@ -725,7 +727,9 @@ func (t *isolatedDaemonTerminal) handleRendererEvent(_ uint64, frame rendererWor
 	case "clipboard":
 		var text string
 		if json.Unmarshal(frame.Result, &text) == nil && t.postEvent != nil {
-			t.postEvent(tuiClipboardEvent{TargetKey: t.targetKey, Text: text})
+			t.rawAttachment.effect(frame.EventID, []byte(text), func(data []byte) {
+				t.postEvent(tuiClipboardEvent{TargetKey: t.targetKey, Text: string(data)})
+			})
 		}
 	case "error":
 		t.postTerminalError(errors.New(frame.Error))

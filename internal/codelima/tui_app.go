@@ -49,6 +49,7 @@ type vaxisTUIApp struct {
 	environmentsView  bool
 	detailScroll      int
 	launchScope       string
+	rawShellPending   bool
 	// shortcutKeys consumes followups of one-shot shortcuts and keys that
 	// changed input context. It belongs to the UI event loop.
 	shortcutKeys      map[rune]struct{}
@@ -388,6 +389,17 @@ func loadTUINodes(ctx context.Context, service *Service, workspaceRoot string) (
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case tuiDaemonTerminalCreatedEvent:
+		if err := a.installCreatedDaemonTab(event); err != nil {
+			a.setStatus(slog.LevelError, err.Error())
+		}
+		a.refreshFleet()
+		a.draw()
+		return false, nil
+	case tuiRawShellReadyEvent:
+		a.finishRawShell(event)
+		a.draw()
+		return false, nil
 	case tuiManagerDataEvent:
 		a.applyManagerData(event)
 		a.draw()

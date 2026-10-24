@@ -77,7 +77,7 @@ In the TUI:
 2. Press `s` to start it.
 3. Select the node and press `x` to open its shell.
 4. Run your agent with the freedom it needs.
-5. Press `F6` to return from the embedded shell to the manager.
+5. Press `Ctrl+]` to detach back to the manager; the session keeps running.
 
 ```sh
 codex --yolo
@@ -320,7 +320,13 @@ show `—`. Metric sorts place unavailable readings last and temporarily flatten
 directory groups. Batch actions include marked nodes hidden by the filter and
 show one confirmation; deleting a batch requires its node count.
 
-The embedded Shell tab reserves **F6 only** while the shell has focus. All
+`x` attaches the node's daemon session directly to your terminal and suspends
+the manager. `Ctrl+]` detaches; `exit` ends the session. `codelima shell NODE`
+uses the same managed shell, and `codelima terminal attach TERMINAL_ID` resumes
+a specific session from `codelima terminal list`. Supplying a command after
+`codelima shell NODE` runs that command through the existing execution path.
+
+Choose `X` then `e` to opt into the embedded Shell tab. It reserves **F6 only** while the shell has focus. All
 other keys, including Option/Alt arrows, reach the shell. Press F6 to return
 to TUI focus, then use `[` / `]` to switch tabs, `t` for a guest tab, `T` for a
 host tab, `w` to close, or `F7` to search. Tab creation/closing and focus changes
@@ -334,7 +340,7 @@ muted defaults disappear when an explicit value is typed.
 
 The major-version implementation is still in progress. The
 [delivery ledger](plans/tui-vnext/README.md) records incomplete design surfaces
-and runtime contracts, including raw shell attachment and durable activity.
+and runtime contracts, including shell window/tmux launch and durable activity.
 
 Host and guest terminals are tabs on the same node. Ordinary guest tabs are
 named `shell` and host tabs `host`, without numbers. Common shell titles such

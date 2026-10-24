@@ -615,3 +615,14 @@ Native interaction tests also check that releasing without a selection is a
 quiet no-op and that word-selection copying still works.
 Real macOS and SSH clipboard qualification remains in
 QA.md; offline tests do not establish outer-terminal permission behavior.
+
+### Raw terminal attachment (major-version work)
+
+`make test-terminal-attach` runs the native ANSI export, VT boundary, lease,
+input parser and real-PTY/socket regressions. `make verify` additionally checks
+the production binaries, all Go packages, lint and formatting. Daemon protocol
+8 and renderer protocol 4 must ship together; checkpoint envelope 2 adds the
+VT boundary state, and older envelopes use journal recovery. Native Ghostty
+remains pinned to the existing revision. Rebuild both binaries with `make build`
+before manual attachment checks. The new TUI and runtime scope remains tracked
+in `plans/tui-vnext/README.md` and TODO #57.

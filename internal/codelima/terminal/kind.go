@@ -4,7 +4,7 @@ package terminal
 // for the single shell-launch contract (Service.TerminalLaunchSpec): a
 // NodeHostShell is an interactive login shell rooted at the node's host
 // directory, while a NodeShell re-enters the codelima binary as
-// `codelima shell <node>` so that every managed terminal enters the VM through
+// `codelima terminal run-node-shell <node>` so that every managed terminal enters the VM through
 // CodeLima — the invariant TMUX_PLAN and AGENT_MONITORING_PLAN both depend on.
 // Room is deliberately left for a future AgentShell (IMPROVEMENT_PLAN Part E,
 // Track 1 §1.1).

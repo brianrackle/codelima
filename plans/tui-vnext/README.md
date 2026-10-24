@@ -76,7 +76,14 @@ capture their request state and reject stale replies with regression coverage.
 Runtime contracts and artboard
 interaction completion remain open; no artboard is marked delivered yet.
 
-Current limitations include embedded-only shell launch, published-port-only
-Ports, window-local Activity, current-sample-only Metrics, basic event Logs,
+Raw attachment is wired to `x`, interactive `codelima shell` and `terminal attach`;
+native export and real-PTY tests cover detach/survival, reattach, final output
+and exclusive query replies (ADR 151). A real host shell retained its PID and
+variables across detach/reattach; resize, `vi` suspension, existing-session
+selection, exit counts and manager restoration were exercised visually. The
+verification home, daemon, sessions and files were cleaned. Guest lifecycle,
+remaining terminal modes and full shell choices still need qualification.
+Current limitations include published-port-only Ports,
+window-local Activity, current-sample-only Metrics, basic event Logs,
 and existing forms inside the new modal geometry. These are implementation
 stages, not reductions of the accepted scope. See TODO #57.

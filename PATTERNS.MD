@@ -1,5 +1,17 @@
 # Patterns
 
+## Physical terminal attachment
+
+Capture present terminal state at a contiguous output watermark, then stream
+only newer bytes. Never replay historical terminal queries or clipboard effects
+into a physical terminal. Keep native response/effect ownership separate from
+PTY lifetime; acknowledge delivered output before discarding the native fallback.
+Tie attachment leases to physical connection lifetime and bound all held data.
+Preserve the retired runtime long enough to drain its final output. Save and
+restore outer-terminal termios on every return path. Tests should use real PTYs
+and daemon sockets to verify detach, reattach, query ownership and process exit
+in addition to parser and lease unit tests (ADR 151).
+
 ## Fleet projection and navigation reads
 
 Keep durable identity separate from rendered row position. Fleet selection and

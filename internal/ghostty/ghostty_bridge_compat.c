@@ -1165,6 +1165,43 @@ static GhosttyResult ghostty_bridge_selection(GhosttyBridgeTerminal term, Ghostt
 	return ghostty_terminal_grid_ref(term->terminal, end, &selection->end);
 }
 
+GhosttyResult ghostty_bridge_terminal_attach(GhosttyBridgeTerminal term,
+	size_t max_bytes, uint8_t** out, size_t* out_len) {
+	if (out != NULL) *out = NULL;
+	if (out_len != NULL) *out_len = 0;
+	if (term == NULL || out == NULL || out_len == NULL || max_bytes == 0) return GHOSTTY_INVALID_VALUE;
+	GhosttyFormatterTerminalOptions options = GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalOptions);
+	options.emit = GHOSTTY_FORMATTER_FORMAT_VT;
+	options.trim = true;
+	options.extra = GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalExtra);
+	options.extra.modes = true;
+	options.extra.scrolling_region = true;
+	options.extra.tabstops = true;
+	options.extra.keyboard = true;
+	options.extra.screen = GHOSTTY_INIT_SIZED(GhosttyFormatterScreenExtra);
+	options.extra.screen.cursor = true;
+	options.extra.screen.style = true;
+	options.extra.screen.hyperlink = true;
+	options.extra.screen.protection = true;
+	options.extra.screen.kitty_keyboard = true;
+	options.extra.screen.charsets = true;
+	GhosttyFormatter formatter = NULL;
+	GhosttyResult result = ghostty_formatter_terminal_new(NULL, &formatter, term->terminal, options);
+	if (result != GHOSTTY_SUCCESS) return result;
+	struct ghostty_bridge_bytes bytes = {.limit = max_bytes};
+	GhosttyWriter writer = {.write = ghostty_bridge_bytes_write, .userdata = &bytes};
+	result = ghostty_formatter_format(formatter, writer);
+	ghostty_formatter_free(formatter);
+	if (bytes.error != GHOSTTY_SUCCESS) result = bytes.error;
+	if (result != GHOSTTY_SUCCESS) {
+		free(bytes.data);
+		return result;
+	}
+	*out = bytes.data;
+	*out_len = bytes.len;
+	return GHOSTTY_SUCCESS;
+}
+
 GhosttyResult ghostty_bridge_terminal_format(GhosttyBridgeTerminal term, bool recent, bool ansi,
 	size_t max_bytes, uint8_t** out, size_t* out_len) {
 	if (out != NULL) *out = NULL;

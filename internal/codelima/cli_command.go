@@ -517,6 +517,23 @@ var cliCommands = []*cliCommand{
 		},
 	},
 	{
+		Group: "terminal", Name: "attach", Summary: "attach a daemon-owned session; Ctrl+] detaches without ending it",
+		Positional: "terminal-id", MinArgs: 1,
+		Run: func(ctx context.Context, service *Service, terminalID string, _ *flag.FlagSet, _ []string) (any, error) {
+			return withDaemonClient(ctx, service, true, func(client *daemonclient.Client) (any, error) {
+				_, err := attachDaemonTerminal(ctx, client, terminalID)
+				return nil, err
+			})
+		},
+	},
+	{
+		Group: "terminal", Name: "run-node-shell", Hidden: true,
+		Summary: "run the guest transport inside a managed PTY (internal)", Positional: "node", MinArgs: 1,
+		Run: func(ctx context.Context, service *Service, node string, _ *flag.FlagSet, _ []string) (any, error) {
+			return nil, service.shellDirect(ctx, node, nil)
+		},
+	},
+	{
 		Group:      "terminal",
 		Name:       "close",
 		Summary:    "close a daemon-owned terminal",

@@ -25,6 +25,7 @@ import (
 type ClientContext struct {
 	ID         string
 	InputOwner bool
+	Done       <-chan struct{}
 }
 
 type Handler interface {
@@ -205,6 +206,7 @@ func (c *snapshotBodyCache) evictLocked() {
 }
 
 type clientConn struct {
+	done                 <-chan struct{}
 	id                   string
 	clientInstanceID     string
 	connectionID         uint64
@@ -678,6 +680,7 @@ func (s *Server) serveConn(conn net.Conn, eventSocket bool) {
 		clientInstanceID = randomToken()
 	}
 	client := &clientConn{
+		done:                 connCtx.Done(),
 		id:                   strconv.FormatUint(connectionID, 10),
 		clientInstanceID:     clientInstanceID,
 		connectionID:         connectionID,
@@ -1099,7 +1102,7 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 	if SeatArbitratedMethod(request.Method) && !owner {
 		return nil, Error("PreconditionFailed", "client is observe-only; request input.takeover first", CodePreconditionFailed, map[string]any{"client_id": client.id})
 	}
-	return s.cfg.Handler.Handle(ctx, ClientContext{ID: client.id, InputOwner: owner}, request.Method, request.Params)
+	return s.cfg.Handler.Handle(ctx, ClientContext{ID: client.id, InputOwner: owner, Done: client.done}, request.Method, request.Params)
 }
 
 func (s *Server) synchronizationSnapshot(ctx context.Context) (any, error) {

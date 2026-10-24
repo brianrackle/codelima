@@ -200,7 +200,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	case key.MatchString("X"):
 		a.openShellChooser()
 	case key.MatchString("x"):
-		err = a.openEmbeddedShell(false)
+		err = a.startRawShell(false, false, "")
 	case a.nodeDetail && a.detailTab == tuiDetailShell:
 		switch {
 		case key.MatchString("t"):
@@ -299,13 +299,32 @@ func (a *vaxisTUIApp) openEmbeddedShell(host bool) error {
 }
 
 func (a *vaxisTUIApp) openShellChooser() {
-	a.overlay = &tuiMenu{Title: "Open shell · " + a.state.selectedEntry().node.Slug,
-		Description: []string{"Sessions belong to this node. F6 returns from an embedded shell to the manager."},
+	menu := &tuiMenu{Title: "Open shell · " + a.state.selectedEntry().node.Slug,
+		Description: []string{"Ctrl+] detaches from an attached shell; the session keeps running.", "F6 returns from an embedded shell to the manager."},
 		Entries: []tuiMenuEntry{
+			{Key: 'a', Label: "Attach here", Action: func() error { return a.startRawShell(false, false, "") }},
+			{Key: 'n', Label: "New guest shell · attach here", Action: func() error { return a.startRawShell(false, true, "") }},
+			{Key: 'h', Label: "Host shell in node directory", Action: func() error { return a.startRawShell(true, false, "") }},
 			{Key: 'e', Label: "Embedded guest shell", Action: func() error { return a.openEmbeddedShell(false) }},
-			{Key: 'h', Label: "Host shell in node directory", Action: func() error { return a.openEmbeddedShell(true) }},
 		},
 	}
+	if a.sessions != nil {
+		for index, key := range a.sessions.TargetSessionKeys(a.state.selectedEntry().key()) {
+			session := a.sessions.sessions[key]
+			if session == nil {
+				continue
+			}
+			id, host := string(session.terminalID), session.shellKind == terminal.NodeHostShell
+			label := coalesce(session.label, session.shellKind.String())
+			shortcut := rune(0)
+			if index < 9 {
+				shortcut = rune('1' + index)
+			}
+			menu.Entries = append(menu.Entries, tuiMenuEntry{Key: shortcut, Label: "Existing · " + label + " · " + id,
+				Action: func() error { return a.startRawShell(host, false, id) }})
+		}
+	}
+	a.overlay = menu
 }
 
 func (a *vaxisTUIApp) openCloneEnvironmentDialog(environment EnvironmentConfig) {

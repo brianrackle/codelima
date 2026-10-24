@@ -62,6 +62,8 @@ type tuiDaemonTerminalOpenedEvent struct {
 	Err       error
 }
 
+type tuiDaemonTerminalCreatedEvent daemon.TerminalState
+
 // tuiDaemonInputReclaimedEvent reports the outcome of the input.takeover issued
 // when this window regained focus.
 type tuiDaemonInputReclaimedEvent struct {

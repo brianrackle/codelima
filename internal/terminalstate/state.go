@@ -24,6 +24,9 @@ type ReadFormat int
 const (
 	ReadText ReadFormat = iota
 	ReadANSI
+	// ReadAttachANSI exports the active screen and input/output modes, without
+	// historical side effects or terminal queries. It requires a VT boundary.
+	ReadAttachANSI
 )
 
 type ReadResult struct {
@@ -57,16 +60,17 @@ type SnapshotResult struct {
 // CheckpointState combines the native FINISH stream with application-owned
 // observations that the native format intentionally does not preserve.
 type CheckpointState struct {
-	CellWidth      int      `json:"cell_width,omitempty"`
-	CellHeight     int      `json:"cell_height,omitempty"`
-	Data           []byte   `json:"data"`
-	Generation     uint64   `json:"generation"`
-	Cols           int      `json:"cols"`
-	Rows           int      `json:"rows"`
-	ViewportOffset int      `json:"viewport_offset"`
-	Focused        bool     `json:"focused"`
-	Metadata       Metadata `json:"metadata"`
-	Colors         *Colors  `json:"colors,omitempty"`
+	Boundary       VTBoundary `json:"boundary,omitempty"`
+	CellWidth      int        `json:"cell_width,omitempty"`
+	CellHeight     int        `json:"cell_height,omitempty"`
+	Data           []byte     `json:"data"`
+	Generation     uint64     `json:"generation"`
+	Cols           int        `json:"cols"`
+	Rows           int        `json:"rows"`
+	ViewportOffset int        `json:"viewport_offset"`
+	Focused        bool       `json:"focused"`
+	Metadata       Metadata   `json:"metadata"`
+	Colors         *Colors    `json:"colors,omitempty"`
 }
 
 const CheckpointMaxBytes = 16 << 20
@@ -75,6 +79,7 @@ const TermEnv = "xterm-256color"
 var (
 	ErrClosed         = errors.New("terminal runtime closed")
 	ErrSnapshotFailed = errors.New("terminal snapshot unavailable")
+	ErrIncompleteVT   = errors.New("terminal output ends in an incomplete VT sequence; retry attachment")
 )
 
 type RuntimeState int
@@ -108,6 +113,7 @@ type ErrorEvent struct {
 type ClipboardEvent struct {
 	TargetKey string
 	Text      string
+	EventID   uint64
 }
 
 // Terminal is the presentation/session contract, independent of its engine.

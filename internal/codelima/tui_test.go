@@ -1744,7 +1744,8 @@ func TestTUISessionStoreStartsNodeShellWithServiceResolvedExecutable(t *testing.
 		wantExe,
 		"--home",
 		service.cfg.MetadataRoot,
-		"shell",
+		"terminal",
+		"run-node-shell",
 		"node-root",
 	}
 	if !reflect.DeepEqual(terminal.startCmd.Args, wantArgs) {

@@ -1892,8 +1892,8 @@ func (s *Service) NodeLogs(ctx context.Context, value string) ([]Event, error) {
 }
 
 // Shell is CodeLima's single user-surface entry into a guest: it backs the
-// `codelima shell` verb and, through TerminalLaunchSpec re-entering the binary
-// as `codelima shell <nodeID>`, every managed guest terminal.
+// `codelima shell` verb. Interactive calls attach a daemon session; the managed
+// runtime itself uses shellDirect through the hidden run-node-shell command.
 //
 // It runs as the Lima login user, interactive or not. That is the guest's
 // native identity — the one agents, imported credentials, and the workspace
@@ -1901,6 +1901,16 @@ func (s *Service) NodeLogs(ctx context.Context, value string) ([]Event, error) {
 // caller who wants root types `sudo` inside the session, exactly as they would
 // anywhere else (ADR 129).
 func (s *Service) Shell(ctx context.Context, value string, command []string) error {
+	command = normalizeShellCommand(command)
+	if len(command) == 0 && !s.localTerminals {
+		return s.attachNodeShell(ctx, value)
+	}
+	return s.shellDirect(ctx, value, command)
+}
+
+// shellDirect is the guest transport used inside a daemon-owned PTY. Keeping
+// it separate prevents the managed process from attaching back to itself.
+func (s *Service) shellDirect(ctx context.Context, value string, command []string) error {
 	if err := s.EnsureReady(ctx, false); err != nil {
 		return err
 	}
@@ -1910,7 +1920,6 @@ func (s *Service) Shell(ctx context.Context, value string, command []string) err
 		return err
 	}
 
-	command = normalizeShellCommand(command)
 	workdir := s.nodeGuestWorkspacePath(node)
 	interactive := len(command) == 0
 	if interactive {
@@ -1939,7 +1948,7 @@ type LaunchSpec struct {
 // sole place a managed-terminal command is assembled; front ends spawn only
 // what it returns (IMPROVEMENT_PLAN Part F §2.2).
 //
-//   - NodeShell re-enters the codelima binary as `codelima shell <nodeID>`,
+//   - NodeShell re-enters the binary as `codelima terminal run-node-shell <nodeID>`,
 //     where nodeID is target.ID, so the child re-enters the VM through CodeLima
 //     rather than a raw runtime shell. The codelima executable is resolved here
 //     in the Service (os.Executable + resolveCodelimaExecutablePath), not taken
@@ -1964,7 +1973,7 @@ func (s *Service) TerminalLaunchSpec(target terminal.TargetKey, kind terminal.Te
 			return LaunchSpec{}, dependencyUnavailable("could not resolve the codelima executable to launch a node shell", err, nil)
 		}
 		return LaunchSpec{
-			Argv: []string{executable, "--home", s.cfg.MetadataRoot, "shell", nodeID},
+			Argv: []string{executable, "--home", s.cfg.MetadataRoot, "terminal", "run-node-shell", nodeID},
 			Env:  os.Environ(),
 		}, nil
 	case terminal.NodeHostShell:

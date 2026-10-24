@@ -51,8 +51,25 @@ dirty-cancel confirmation. The disposable daemon, tmux session and home were
 stopped and removed. Initial views
 are partial: do not treat their presence as completed artboards.
 
-Remaining required work: complete visual fidelity and interactions for all 26 boards; implement raw
-attach/detach and shell window/tmux modes; daemon-owned persistent operations
+Raw attachment is integrated (ADR 151). Native export and real-PTY
+regressions pass for current screen/modes, split sequences, Ctrl+] detach,
+session survival, reconnect, final output drainage and host-only query replies.
+The TUI `x`, CLI interactive shell and `terminal attach` entry points are wired.
+Full verify and race gates passed; a final rerun covers output cancellation and
+session event adoption. Live host-shell verification covered unchanged PID and
+variables across detach/reattach, 150×38 to 80×24 resize, `vi` suspension/resume,
+existing-session selection, session exit/count updates and manager restoration.
+The disposable daemon, tmux session, files and home were stopped and removed.
+The chooser lists existing sessions; keyboard scrolling for long lists remains.
+Complete shell window/tmux choices and settings next.
+Also qualify initial retained graphics, scrolling regions/origin/wrap modes,
+clipboard handling, resize, disconnect/update and outer-terminal restoration.
+These are required follow-ups, not completed design scope. The suggested
+approach retains native snapshot export plus an acknowledged journal tail;
+it avoids historical side effects but requires explicit mode and lease tests.
+
+Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
+raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
 and progress/retry/cancel; one-hour metrics and on-demand processes; dynamic
 forwarding route presentation/pinning; settings/key mappings; comprehensive
 form validation/dirty cancellation, template restoration and environment test
