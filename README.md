@@ -347,6 +347,22 @@ exceed 100%. The first sample shows `—` until a second reading is available.
 The table shows the top 64 processes and retains both CPU and memory leaders
 so sorting remains accurate while paused.
 
+In node detail, `l` opens Logs. `[`/`]` choose Events, Bootstrap, Lima or
+Serial; `f` toggles follow, `w` wraps long lines, and `L` cycles severity.
+Arrows and the mouse wheel scroll; `g` goes to the top and `G` resumes at the
+end. `/` searches literal text without regard to case and pauses follow.
+Enter keeps the search, Esc cancels editing, and `n`/`N` move between matching
+lines. `y` sends the selected full line to the host clipboard. `o` suspends the
+TUI and opens the original file in `$PAGER` (default `less`); for example,
+`PAGER='less -S' ./bin/codelima` keeps long lines unwrapped in the pager.
+
+Logs reads the current file's last 2 MiB, up to 5,000 lines, and labels clipped
+history. Bootstrap and validation output is retained in private
+`nodes/<id>/bootstrap.log` files, with a 4 MiB cap plus one `.1` generation.
+The Bootstrap source fills on the next bootstrap or validation run; output
+from earlier versions cannot be reconstructed. Missing files are shown
+explicitly. Reading logs does not start a guest.
+
 At 140 columns and wider, the header shows the host model, logical CPUs and
 memory. The allocation summary includes CodeLima VMs in every directory, even
 when the fleet is scoped or filtered. A failed node still counts while its VM

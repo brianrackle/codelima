@@ -36,10 +36,16 @@ type tuiManagerDataEvent struct {
 // replace another node's logs or clear a newer loading/error state.
 func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	a.cancelHiddenMetricsLoad()
+	a.cancelHiddenLogsLoad()
 	if a.service == nil {
 		return
 	}
 	a.managerGeneration++
+	if a.logsVisible() {
+		a.cancelLogsLoad()
+		a.startLogsLoad(true)
+		return
+	}
 	if a.metricsVisible() {
 		a.startMetricsLoad()
 		return
@@ -76,7 +82,7 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 				data.doctor, data.err = a.service.Doctor(ctx, repair)
 			}
 		case tuiViewNodes:
-			if detail && nodeID != "" && (tab == tuiDetailLogs || tab == tuiDetailOverview) {
+			if detail && nodeID != "" && tab == tuiDetailOverview {
 				data.logNodeID = nodeID
 				data.logs, data.err = a.service.NodeLogs(ctx, nodeID)
 			}
@@ -153,24 +159,7 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 	case tuiDetailMetrics:
 		a.drawNodeMetrics(body, theme)
 	case tuiDetailLogs:
-		inner := border.All(body, theme.border)
-		tuiLine(inner, 0, "Events", theme.muted)
-		_, available := inner.Size()
-		if a.managerData.loading {
-			tuiLine(inner, 2, "Loading events…", theme.dim)
-		} else if a.managerData.logNodeID == record.Node.ID {
-			logs := a.managerData.logs
-			start := max(0, len(logs)-max(0, available-2)-a.detailScroll)
-			for i, event := range logs[start:] {
-				if i >= available-2 {
-					break
-				}
-				tuiLine(inner, i+2, event.Timestamp.Format("15:04:05")+"  "+event.Type+"  "+event.Message, theme.text)
-			}
-			if len(logs) == 0 {
-				tuiLine(inner, 2, "No events recorded for this node.", theme.dim)
-			}
-		}
+		a.drawNodeLogs(body, theme)
 	case tuiDetailSpec:
 		inner := border.All(body, theme.border)
 		node := record.Node

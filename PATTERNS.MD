@@ -489,6 +489,13 @@ suspends the manager; embedded terminal mode is explicit. Preserve selection
 by node identity across refresh and detach. A VM becoming ready updates its
 available actions without changing focus or creating a terminal.
 
+Diagnostic file views read bounded local tails outside the event loop, without
+runtime preparation. Fence completions by both navigation generation and
+request serial, cancel on pause or navigation, and keep record identity across
+wrapped screen rows. Text inputs own paste and numbers before global keys.
+Strip terminal controls before drawing logs, and invoke external tools with
+literal argument vectors while the TUI is suspended (ADR 157).
+
 Dialogs, selectors and menus occupy centered overlays and scroll the focused
 control into view. `Tab`/`Up`/`Down` move between dialog fields, text inputs
 receive `Left` and `Right` for cursor movement, and `Right` chooses only when

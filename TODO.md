@@ -122,6 +122,34 @@ sorting with disjoint leader sets, remain required. Reuse the existing QA
 fixture and compare retained data across windows; this validates the final
 presentation while requiring another real guest run on a suitable host.
 
+Logs now has Events/Bootstrap/Lima/Serial local tails, follow/pause, severity,
+literal case-insensitive search, grapheme wrapping, matching-line navigation,
+mouse selection, clipboard and external paging. Bootstrap/validation stdout
+and stderr are captured privately with bounded rotation (ADR 157). Focused
+tests cover failed NodeStart persistence/events/output, control stripping,
+Unicode joiners, rotation failure, stale requests and input ownership. Full
+verify, race and CLI integration checks pass. An isolated terminal fixture
+exercised wide/80×24 rendering, all sources, source mouse clicks, severity,
+search, wrapping, follow growth/pause/resume, pager restoration and clipboard
+delivery. The terminal check used diagnostic fixture files, not a newly
+failed guest bootstrap. Required follow-up: run QA.md's failed-bootstrap flow
+on a real guest and finish exact-artboard/native presentation qualification.
+Using the same disposable guest as the remaining lifecycle checks reduces
+setup cost and validates actual transport output; it requires another guest
+boot and must not be substituted with these local fixture checks.
+
+The final Logs resize check exposed a separate renderer defect: Vaxis reserves
+six fallback cells for `👩🏽‍💻`, while tmux 3.6 reports four; `👩‍🚀` reserves four
+but tmux reports two. Contiguous writes then leave stale text or shift following
+content. Before qualifying Logs, fix fallback multi-codepoint rendering to
+clear its reserved span and explicitly reposition following output (while
+keeping negotiated Unicode/explicit-width paths unchanged), add renderer
+regressions, and repeat the live wrap/resize/search check. This keeps terminal
+graphemes intact and repairs other manager text too, at the cost of extra
+cursor movement for ambiguous fallback clusters. The isolated `tmp/logqa`
+terminal, daemon and files are temporarily retained for that immediate fix;
+clean all of them after verification.
+
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
 raw attach qualification and shell window/tmux modes; daemon-owned persistent operations
 and progress/retry/cancel; final fleet/preview and Metrics qualification; dynamic

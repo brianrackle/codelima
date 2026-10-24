@@ -193,6 +193,10 @@ test-terminal-attach: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima ./internal/ghostty ./internal/terminalstate -run 'Test(Raw|GhosttyAttach|VTBoundary)' -count=1 -timeout=60s
 
 .PHONY: test-host-capacity test-manager-settings test-metrics
+.PHONY: test-node-logs
+test-node-logs: init
+	$(GO) test ./internal/codelima -run 'Test(NodeLog|BootstrapLog|TUI.*Logs)' -count=1
+
 test-metrics: init
 	$(GO) test ./internal/codelima ./internal/codelima/daemon -run 'Test(NodeMetrics|ForwarderMetrics|TUI.*Metrics)' -count=1
 

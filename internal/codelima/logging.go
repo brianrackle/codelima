@@ -83,13 +83,18 @@ type rotatingLogWriter struct {
 	maxBytes int64
 	file     *os.File
 	size     int64
+	mode     os.FileMode
 }
 
 func newRotatingLogWriter(path string, maxBytes int64) (*rotatingLogWriter, error) {
+	return newRotatingLogWriterMode(path, maxBytes, 0o644)
+}
+
+func newRotatingLogWriterMode(path string, maxBytes int64, mode os.FileMode) (*rotatingLogWriter, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	w := &rotatingLogWriter{path: path, maxBytes: maxBytes}
+	w := &rotatingLogWriter{path: path, maxBytes: maxBytes, mode: mode}
 	if err := w.open(); err != nil {
 		return nil, err
 	}
@@ -97,9 +102,19 @@ func newRotatingLogWriter(path string, maxBytes int64) (*rotatingLogWriter, erro
 }
 
 func (w *rotatingLogWriter) open() error {
-	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	mode := w.mode
+	if mode == 0 {
+		mode = 0o644
+	}
+	file, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, mode)
 	if err != nil {
 		return err
+	}
+	if mode == 0o600 {
+		if err := file.Chmod(mode); err != nil {
+			_ = file.Close()
+			return err
+		}
 	}
 	info, err := file.Stat()
 	if err != nil {
@@ -112,6 +127,10 @@ func (w *rotatingLogWriter) open() error {
 }
 
 func (w *rotatingLogWriter) Write(p []byte) (int, error) {
+	return w.write(p, false)
+}
+
+func (w *rotatingLogWriter) write(p []byte, strict bool) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -121,7 +140,9 @@ func (w *rotatingLogWriter) Write(p []byte) (int, error) {
 	if w.maxBytes > 0 && w.size > 0 && w.size+int64(len(p)) > w.maxBytes {
 		// Best-effort: if rotation fails we keep writing to the current file
 		// rather than dropping the log line.
-		_ = w.rotate()
+		if err := w.rotate(); err != nil && (strict || w.file == nil) {
+			return 0, err
+		}
 	}
 	n, err := w.file.Write(p)
 	w.size += int64(n)

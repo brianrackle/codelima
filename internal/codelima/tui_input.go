@@ -77,6 +77,9 @@ func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 		a.handleSearchKey(key)
 		return false
 	}
+	if a.handleLogsSearchKey(key) {
+		return false
+	}
 	// Pasted text is terminal payload, never a TUI shortcut. Vaxis emits one
 	// EventPaste key per decoded input sequence between PasteStart/PasteEnd.
 	if key.EventType == vaxis.EventPaste {
@@ -230,6 +233,7 @@ func (a *vaxisTUIApp) confirmNodeStop(node Node) bool {
 
 func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 	defer a.cancelHiddenMetricsLoad()
+	defer a.cancelHiddenLogsLoad()
 	if a.overlay != nil {
 		a.updateOverlay(mouse)
 		return
@@ -252,6 +256,9 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 				return
 			}
 		}
+	}
+	if a.handleLogsMouse(mouse) {
+		return
 	}
 	if a.view == tuiViewSystem && mouse.EventType == vaxis.EventPress {
 		for panel, rect := range a.systemRects {

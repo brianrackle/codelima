@@ -159,6 +159,8 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "Tab / Shift-Tab", hint: "Cycle detail tabs or templates/environments"},
 		{label: "+ − / Space", hint: "Metrics: 1m / 5m / 15m / 1h window; pause samples"},
 		{label: "p / y", hint: "Metrics: sort processes by CPU or memory / copy selected PID"},
+		{label: "[ ] / f / w / L", hint: "Logs: source / follow / wrap / severity"},
+		{label: "/ / n N / g G / y / o", hint: "Logs: search / matches / top-end / copy line / PAGER"},
 		{label: "F6", hint: "Embedded shell focus; every other key reaches the shell while focused"},
 		{label: "[ ] / t / T / w", hint: "Shell tabs / new guest / new host / close (TUI focus only)"},
 		{label: "F7", hint: "Search embedded terminal (TUI focus only)"},

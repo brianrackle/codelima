@@ -489,6 +489,12 @@ func (a *vaxisTUIApp) managerFooter() string {
 	if a.metricsVisible() {
 		return "+ − window · p sort · Space pause · y PID · Tab view · x shell · Esc nodes"
 	}
+	if a.logsVisible() {
+		if a.logs.input != nil {
+			return "Enter keep search · Esc cancel · search pauses follow"
+		}
+		return "[] source · f follow · / search · w wrap · L level · Tab view · Esc nodes"
+	}
 	if a.nodeDetail {
 		return "Tab/Shift-Tab view · x shell · s start/stop · l logs · Esc nodes · : commands · ? help"
 	}

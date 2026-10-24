@@ -528,6 +528,29 @@ For Metrics, use a disposable running Linux guest:
 - Run `make test-metrics`; caching, bounded payloads, canceled waits, PID reuse
   and rejection of stale responses are automated checks.
 
+For Logs, use an isolated node with events and bootstrap output:
+
+- Open `l` at 150×38, then resize to 80×24. Cycle all four sources with `[`/`]`
+  and mouse clicks. Confirm the path, follow/wrap/severity state and content
+  stay readable; sources without files show an explicit empty state.
+- While following, append a diagnostic line and confirm it appears. Scroll
+  up, append another line and confirm the view stays frozen. `f` and `G`
+  resume follow; `g` selects the first retained line.
+- Search for text containing digits and paste key-shaped text. Neither may
+  change views or open actions. Enter keeps the query; `n`/`N` select matching
+  lines and Esc cancels an edited query. Check matching text is highlighted.
+- Cycle severity with `L`. Wrap a long Unicode line with `w`, scroll through
+  its continuations, click one and use `y`; the clipboard request must contain
+  the complete selected record. Repeat at both sizes.
+- Set `PAGER='less -S'`, press `o`, inspect the source and quit the pager.
+  The manager must resume with its selection intact and follow paused.
+- Start a disposable node whose bootstrap prints distinct stdout/stderr
+  markers and then fails. Confirm both streams, the command and failure are
+  retained in Bootstrap, private mode 0600, and the failed lifecycle event
+  remains in Events. Reading all sources after stopping the node must not
+  restart it. Automated tests cover the retention cap and rotation failures.
+- Clean all disposable nodes, metadata, daemons, terminal sessions and files.
+
 Run in a real terminal:
 
 ```sh

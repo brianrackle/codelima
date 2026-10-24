@@ -1418,7 +1418,7 @@ func (s *Service) NodeStart(ctx context.Context, value string) (_ Node, err erro
 
 	}
 
-	if err := s.runGuestCommand(ctx, node, bootstrap.ValidationCommand); err != nil {
+	if err := s.runLoggedGuestCommand(ctx, node, bootstrap.ValidationCommand, "validation"); err != nil {
 		node.Status = NodeStatusFailed
 		node.UpdatedAt = s.now()
 		s.recordNodeStartRollback(node, bootstrap, Event{Timestamp: s.now(), Type: "node.start.failed", Fields: map[string]any{"validation_command": bootstrap.ValidationCommand, "error": err.Error()}})
@@ -2177,7 +2177,7 @@ func (s *Service) runBootstrapGuestCommand(ctx context.Context, node Node, comma
 
 	bootstrapCtx, cancel := context.WithTimeout(ctx, bootstrapGuestCommandTimeout)
 	defer cancel()
-	return s.runGuestCommand(bootstrapCtx, node, command)
+	return s.runLoggedGuestCommand(bootstrapCtx, node, command, "bootstrap")
 }
 
 // runGuestCommand runs one service-issued provisioning command — a frozen
@@ -2189,6 +2189,10 @@ func (s *Service) runBootstrapGuestCommand(ctx context.Context, node Node, comma
 // login user themselves for the parts that must be user-owned, reading it out
 // of `SUDO_USER`, which is exactly what this root wrap supplies (ADR 116).
 func (s *Service) runGuestCommand(ctx context.Context, node Node, command string) error {
+	return s.runGuestCommandWithStreams(ctx, node, command, ShellStreams{})
+}
+
+func (s *Service) runGuestCommandWithStreams(ctx context.Context, node Node, command string, streams ShellStreams) error {
 	if strings.TrimSpace(command) == "" {
 		return nil
 	}
@@ -2201,7 +2205,7 @@ func (s *Service) runGuestCommand(ctx context.Context, node Node, command string
 		// shellQuote is the same helper the adjacent seeding path uses.
 		script = "cd " + shellQuote(workdir) + " && " + command
 	}
-	return s.sandbox.Shell(ctx, node, guestRootUser, []string{"sh", "-lc", script}, workdir, false, ShellStreams{})
+	return s.sandbox.Shell(ctx, node, guestRootUser, []string{"sh", "-lc", script}, workdir, false, streams)
 }
 
 func (s *Service) reclaimMountedNodeFilesystemCaches(ctx context.Context) (int, error) {

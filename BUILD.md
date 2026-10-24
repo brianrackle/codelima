@@ -22,6 +22,12 @@ The focused suite also checks CPU trend retention/epoch reset, stale refreshes
 and both process rankings during pause. Live guest qualification
 must compare procfs readings and exercise the new Metrics flow in QA.md.
 
+`make test-node-logs` covers bounded local tails, structured severity, terminal
+control removal, special-file rejection, private bootstrap output rotation,
+failure preservation, search/paste ownership, follow, stale replies, wrapping,
+mouse selection, clipboard and pager argument parsing (ADR 157). Run the
+Logs procedure in QA.md in a terminal as well as these automated checks.
+
 The exact reference sources are retained in `plans/tui-vnext/reference/` with
 provenance and hashes in `SOURCE.md`; they are implementation references and
 are not runtime assets or inputs to the native release package.

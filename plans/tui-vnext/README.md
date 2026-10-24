@@ -17,7 +17,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
-| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded local sources, capture and controls; fallback emoji rendering defect and real failed-bootstrap/native qualification open |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -55,6 +55,19 @@ All example identities, metrics and timestamps in those files are reference data
 - Prior baseline `make verify` passed on Linux/aarch64; baseline TUI menus and resize were exercised. These do not qualify the redesign.
 - Design files retrieved through an interactive Claude Code Artifact session; all 27 indexed files and manifest hashes verified.
 
+Logs now reads four bounded local sources without runtime preparation and
+captures bootstrap/validation output in private rotating files (ADR 157).
+Follow, severity, search, wrap, line navigation, copy and pager controls have
+automated coverage, including stale completions, paste ownership, Unicode
+graphemes and failed bootstrap state/output. Full verify, race and integration
+checks pass. Live terminal checks with isolated diagnostic fixtures covered
+150×38/80×24 layouts, source selection, following/pausing/appending, search,
+severity, wrapping, clipboard delivery and pager restoration. The final joined
+emoji wrap/resize check exposed a fallback cell-width renderer defect; it is
+recorded with a concrete fix and retained reproduction in TODO #57. Actual failed
+guest-bootstrap output and final native/artboard qualification remain open
+in QA.md and TODO #57.
+
 ## Implementation sequence
 
 1. Fleet projection, typed navigation, adaptive geometry and reusable theme/panels.
@@ -90,7 +103,7 @@ and tmux launch, shifted default choices, scrolling, Enter and mouse activation
 color, with the disposable daemon/home cleaned. Verify, race and integration
 checks pass; external-window and guest-session qualification remain open.
 Current limitations include published-port-only Ports,
-window-local Activity, incomplete final visual qualification, basic event Logs,
+window-local Activity, incomplete final visual qualification,
 and existing forms inside the new modal geometry. These are implementation
 stages, not reductions of the accepted scope. See TODO #57.
 

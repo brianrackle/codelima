@@ -55,6 +55,7 @@ type vaxisTUIApp struct {
 	systemPanel        int
 	settingIndex       int
 	metrics            tuiMetricsState
+	logs               tuiLogsState
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
 	systemScroll       [tuiSystemPanelCount]int
@@ -297,6 +298,8 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // host-terminal restoration (vx.Close) and auto-refresh cancellation deferred
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
+	defer a.cancelLogsLoad()
+	defer a.cancelMetricsLoad()
 	defer a.sessions.Close()
 	defer func() { a.graphics.close() }()
 	defer a.closeTerminalInspector()
@@ -425,8 +428,13 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyMetricsData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiLogsDataEvent:
+		a.applyLogsData(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiMetricsTickEvent:
 		a.startMetricsLoad()
+		a.startLogsLoad(false)
 		if a.metricsVisible() && !a.metrics.paused {
 			a.requestRedraw()
 		}
@@ -601,10 +609,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
-		if a.search != nil {
+		switch {
+		case a.logsVisible() && a.logs.input != nil:
+			a.updateLogsSearchInput(event)
+			a.draw()
+		case a.search != nil:
 			a.updateSearchInput(event)
 			a.draw()
-		} else {
+		default:
 			a.forwardTerminalEvent(event)
 		}
 	case vaxis.ColorThemeUpdate:
