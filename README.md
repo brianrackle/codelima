@@ -326,6 +326,10 @@ Identity shows the recorded host-auth import date, item count and categories
 when its event is available. Empty imports show zero items; missing receipts
 and inherited clone credentials are labeled explicitly. This records the
 completed import, not the credentials' current validity.
+The guest row reports its observed architecture and KVM access. `KVM yes` means
+the telemetry SSH user can read and write the guest's `/dev/kvm` device; it is
+separate from the configured nested-virtualization setting. Missing facts show
+`?`, and stale observations carry `last:`.
 In Sessions, `Enter` attaches the selected session, `t` creates a fresh guest
 shell, `T` creates a fresh host shell, and `K` confirms ending that exact
 session. Ctrl+] returns from attachment. Session age comes from the daemon;

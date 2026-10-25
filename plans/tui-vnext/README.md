@@ -15,7 +15,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
-| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); recorded auth-import date/count/categories (ADR 203); final artboard/native qualification remains |
+| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); recorded auth imports (ADR 203), observed guest architecture/KVM access and real clone-check provenance (ADR 204); final artboard/native qualification remains |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
@@ -37,6 +37,47 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+Guest-platform checkpoint (ADR 204), 2026-10-25: existing SSH telemetry now
+reports normalized guest architecture and KVM device access independently.
+Current snapshots copy the optional access value, carry it through push/poll,
+and clear it with telemetry. Overview distinguishes unknown, current and last
+observations from the configured nested-virtualization setting. Protocols are
+31/2/6/7. Focused tests exercise the real Linux command, malformed/absent fields,
+owner copies and clearing, and both Overview sizes. A failed `uname` initially
+concealed the independent KVM result; its regression failed before correction.
+Final `make verify` and metrics race checks passed (core 73.323s; focused race
+2.316s). The first full run hit an existing fake-Lima executable's transient
+virtiofs `text file busy` error; that exact test and the complete rerun passed.
+Go API inspection and gopls checks were clean.
+
+A disposable guest on a writable overlay reported `aarch64` and no accessible
+KVM device over real SSH. The running TUI showed `arm64 · KVM no` at 150×38 and
+80×24 truecolor. Pausing the owned daemon for seven seconds produced `last:`;
+resuming restored current readings, and stopping the source cleared them to
+unknown. The same sampling command in this VM, with the KVM group, reported
+the positive access case. This is device access, not proof of nested-VM boot:
+the initial KVM guest stalled during kernel initialization and was explicitly
+canceled/stopped. The existing TCG wrapper then completed the live checks.
+
+The TUI Clone action created a real stopped child with its parent's exact
+validation attempt/execution IDs. Overview showed the inherited marker. Starting
+the child recorded a new successful attempt under the child's own ID and removed
+the marker; the parent's parsed bootstrap record remained unchanged.
+The parent Overview displayed its actual child. A new global clone lookup is
+unnecessary because the supported Clone operation preserves the parent's
+directory and the underlying TUI scope filters only by directory.
+
+Both disposable guests were deleted through CodeLima. The owned frontend,
+daemon, QEMU/hostagent processes, tmux server and native tmpfs were stopped or
+removed; no owned process or instance directory remained. The original image's
+SHA-256 stayed `a717dba3fd2c2dfe699262623aa2c6b5147955ea4bca46c8da4dfae8ba42913c`.
+Four new inactive exact-content inputrc files were cleaned; older and active
+files were preserved. All stage stores, disks, captures and scratch were removed,
+including an unused default seed store created by an initial verification
+command whose privilege wrapper stripped the disposable-store environment.
+The separate host-side `tmp/countq/tmux` cleanup and native qualification remain
+open. This checkpoint does not claim the full 26-artboard design complete.
 
 Auth-import checkpoint (ADR 203), 2026-10-25: Overview projects the selected
 node's retained import event into date, item count and recognized categories.

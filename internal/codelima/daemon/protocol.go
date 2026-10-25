@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 30 adds recorded
-	// credential-import summaries to the selected-node evidence response.
-	ProtocolVersion                = 30
+	// whenever a wire shape this protocol carries changes; 31 adds observed
+	// guest architecture and KVM device access to current telemetry details.
+	ProtocolVersion                = 31
 	SessionVersion                 = 2
 	HandoffVersion                 = 7
 	PreviousActivityHandoffVersion = 6

@@ -15,6 +15,38 @@ type nodeUsageDetailsSample struct {
 	SampledAt time.Time
 }
 
+func parseGuestPlatform(fields []string, details *daemon.NodeUsageDetails) {
+	if fields[0] == "codelima-kvm" {
+		details.KVMAccessible = nil
+		if len(fields) == 2 && (fields[1] == "0" || fields[1] == "1") {
+			accessible := fields[1] == "1"
+			details.KVMAccessible = &accessible
+		}
+		return
+	}
+	details.Architecture = ""
+	if len(fields) != 2 || len(fields[1]) > 32 {
+		return
+	}
+	for _, ch := range fields[1] {
+		if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-') {
+			return
+		}
+	}
+	switch fields[1] {
+	case "aarch64":
+		details.Architecture = "arm64"
+	case "x86_64":
+		details.Architecture = "amd64"
+	case "armv6l", "armv7l":
+		details.Architecture = "arm"
+	case "i386", "i486", "i586", "i686":
+		details.Architecture = "386"
+	default:
+		details.Architecture = fields[1]
+	}
+}
+
 func parseGuestMemoryDetails(fields []string, details *daemon.NodeUsageDetails) {
 	if len(fields) != 5 {
 		return
@@ -49,6 +81,7 @@ func cloneNodeUsageDetails(source *daemon.NodeUsageDetails) *daemon.NodeUsageDet
 	copy.SwapUsedBytes = metricValueCopy(copy.SwapUsedBytes)
 	copy.SwapTotalBytes = metricValueCopy(copy.SwapTotalBytes)
 	copy.UptimeSeconds = metricValueCopy(copy.UptimeSeconds)
+	copy.KVMAccessible = metricValueCopy(copy.KVMAccessible)
 	return &copy
 }
 
@@ -70,7 +103,7 @@ func (f *dynamicForwarder) recordUsageDetailsLocked(nodeID string, observation f
 		details.CPUCores = append(details.CPUCores, core)
 	}
 	f.coreCounters[nodeID] = maps.Clone(observation.CPUCores)
-	if len(details.CPUCores) == 0 && details.MemoryAvailableBytes == nil && details.MemoryCachedBytes == nil && details.SwapTotalBytes == nil && details.UptimeSeconds == nil {
+	if len(details.CPUCores) == 0 && details.MemoryAvailableBytes == nil && details.MemoryCachedBytes == nil && details.SwapTotalBytes == nil && details.UptimeSeconds == nil && details.Architecture == "" && details.KVMAccessible == nil {
 		delete(f.usageDetails, nodeID)
 		return
 	}

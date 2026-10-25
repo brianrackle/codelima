@@ -85,7 +85,7 @@ responsive panels, stable session/route selection, captured end confirmation,
 daemon-derived session age, coalesced cross-client tab-order refresh, mouse
 links and stale/unknown observations
 (ADR 191). It includes the shared fleet/manager and bounded recent-evidence
-regressions. Ordinary/session/renderer/handoff protocols are 30/2/6/7.
+regressions. Ordinary/session/renderer/handoff protocols are 31/2/6/7.
 Run the Overview subsection of QA.md Flow 7 after the complete gates.
 
 `make test-empty-nodes` covers the first-run guide, actual defaults, scoped
@@ -118,13 +118,18 @@ Per-agent validation tests (ADR 190) cover real service execution records,
 failure/retry, pending suffixes, clones, legacy/edited records, configured
 profile checks, inert labels, read-only projection and responsive presentation.
 Use `FLEET_EVIDENCE_TEST_FLAGS=-race` for race checking. The current ordinary
-daemon protocol is **30**; update older daemons explicitly. Recorded auth-import
+daemon protocol is **31**; update older daemons explicitly. Recorded auth-import
 tests (ADR 203) cover bounded history, item categories, empty/malformed receipts,
 clone provenance, selected identity and wide/compact presentation. Session protocol 2
 is unchanged; renderer protocol 6 and handoff protocol 7 include retained prompt
 idle metadata. The importer still accepts handoff 6 and preserves its Activity
 queue and baselines. Run the fleet evidence/session flows in
 QA.md after the full verification gates.
+
+`make test-metrics METRICS_TEST_FLAGS=-race` also covers observed guest platform
+facts (ADR 204): the real Linux sampling command, independent invalid/unknown
+fields, immutable push/poll publication, clearing and Overview freshness. The
+existing telemetry connection supplies these facts; no new guest probe is added.
 
 `make test-prompt-idle` checks accepted raw/encoded/paste input, protocol-response
 exclusion, stale/working/unknown states, clock rollback, retained publication,

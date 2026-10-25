@@ -71,6 +71,8 @@ const (
 const (
 	guestPortScanCommand  = "cat /proc/net/tcp /proc/net/tcp6"
 	guestTelemetryCommand = `awk '/^cpu[0-9]* / { print }' /proc/stat
+printf 'codelima-arch %s\n' "$(uname -m 2>/dev/null)"
+if [ -c /dev/kvm ] && [ -r /dev/kvm ] && [ -w /dev/kvm ]; then printf 'codelima-kvm 1\n'; else printf 'codelima-kvm 0\n'; fi
 awk '/^MemTotal:/ { total=$2 } /^MemAvailable:/ { available=$2 } END { if (total != "" && available != "") printf "codelima-memory %s %s\n", total, available }' /proc/meminfo
 awk '/^MemAvailable:/ { a=$2 } /^Cached:/ { c=$2 } /^SwapTotal:/ { t=$2 } /^SwapFree:/ { f=$2 } END { if (a != "" && c != "" && t != "" && f != "") printf "codelima-memory-detail %s %s %s %s\n", a, c, t, f }' /proc/meminfo
 awk '{ printf "codelima-uptime %s\n", $1 }' /proc/uptime
@@ -378,6 +380,8 @@ func parseForwardingGuestObservation(data []byte) forwardingGuestObservation {
 			}
 		case "codelima-memory-detail":
 			parseGuestMemoryDetails(fields, &observation.Details)
+		case "codelima-arch", "codelima-kvm":
+			parseGuestPlatform(fields, &observation.Details)
 		case "codelima-uptime":
 			if len(fields) == 2 {
 				if value, err := strconv.ParseFloat(fields[1], 64); err == nil && !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 100*365*24*60*60 {

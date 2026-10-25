@@ -42,24 +42,36 @@ macOS VZ and the complete cross-view QA matrix. Compare every panel and action
 against the saved design on both supported hosts. Advantages: faithful
 cross-view presentation; disadvantages: additional native setup and QA time.
 These remain in the full #57 scope; unknown activity must not be inferred from titles.
-Remaining Overview evidence: the selected projection does not expose guest
-architecture/KVM availability;
-session kinds currently identify shell/host, and clone identity is scoped to
-the loaded fleet. Extend the bounded owners with recorded evidence and explicit
-agent-launch identity, and use a bounded global child lookup if all clones must
-be shown. Advantage: can reproduce those artboard details without inferring
+Remaining Overview evidence: session kinds currently identify shell/host.
+Extend the bounded owners with recorded evidence and explicit agent-launch
+identity if program-specific session kinds are required. Advantage: can reproduce
+those artboard details without inferring
 facts from titles or inventing receipts. Disadvantages: additional provider,
 storage/protocol work and native qualification. Keep current unknown states
 until that evidence exists.
+The prior global-clone lookup follow-up was unnecessary: Clone preserves the
+source's directory, and TUI scope filters only by that directory. Every live
+clone produced by the supported operation is therefore already in its parent's
+loaded scope; search and marks do not filter the underlying node list.
+Observed guest architecture and KVM device access now use current telemetry
+(ADR 204), with unknown/stale presentation independent of nested-virt settings.
+Native KVM qualification remains open: the disposable Ubuntu guest stopped
+advancing at kernel time 2.5s under nested KVM in this VM, while QEMU consumed
+one CPU continuously. Its boot was canceled and its owned QEMU stopped before
+switching to the existing TCG fixture. Suggested follow-up: reproduce with a
+native host or supported kernel/firmware combination, then compare device access
+with actual nested-VM boot. Advantage: separates access from working virtualization;
+disadvantage: needs platform diagnosis outside the TUI implementation.
 Overview now projects the selected node's recorded auth-import date, count and
 categories (ADR 203), with explicit empty, missing and inherited states. Its
 bounded reader uses the existing 2 MiB event tail; older receipts outside that
 window remain unavailable rather than inferred from the completion flag.
-Final clone qualification must create inherited records through the Clone action
-and revalidate the child; this checkpoint exercised their presentation with
-metadata fixtures. Reuse a disposable stopped guest and compare parent/child
-step execution IDs. Advantage: verifies the complete interaction and provenance;
-disadvantage: additional guest/disk lifecycle and cleanup work.
+The recorded-check clone qualification now uses the real TUI Clone action and
+two disposable Linux/TCG guests (ADR 204 checkpoint). The child initially kept
+the parent's successful validation attempt and execution-node ID and displayed
+the inherited marker. Its first start recorded a distinct successful attempt
+under the child's own ID; the parent bootstrap record stayed unchanged. The
+parent Overview also displayed the actual child in the same directory scope.
 
 ADR 187 verification passed full unit/race/CLI integration, final verification,
 focused race and gopls checks. Isolated wide/compact TUI checks exercised retained

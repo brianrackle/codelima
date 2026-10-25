@@ -58,6 +58,11 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   item count and categories, with explicit empty/unavailable/inherited states
   (ADR 203). Full design/native qualification remains in TODO #57.
 
+- Observed guest platform [complete locally]: guest architecture and KVM device
+  access use the existing telemetry stream with explicit unknown/stale values
+  in Overview (ADR 204). Linux/TCG and actual clone-validation provenance checks
+  passed; native KVM qualification remains in TODO #57.
+
 - Contextual key help [partially complete]: grouped read-only help, current-view
   ordering, responsive columns, global search and keyboard/mouse navigation are
   implemented (ADR 192). Configurable bindings (roadmap #9) and final native

@@ -145,7 +145,7 @@ func (a *vaxisTUIApp) drawOverviewIdentity(win vaxis.Window, record tuiFleetReco
 	fields := [][2]string{
 		{"status", status}, {"template", template},
 		{"image", n.Image}, {"directory", n.DirectoryPath}, {"workspace", a.fleetWorkspaceLabel(n)},
-		{"lima", n.SandboxName}, {"runtime", a.fleetRuntimeLabel(n)}, {"agents", ""}, {"checks", note},
+		{"lima", n.SandboxName}, {"runtime", a.fleetRuntimeLabel(n)}, {"guest", a.fleetGuestPlatformLabel(n)}, {"agents", ""}, {"checks", note},
 		{"host auth", a.fleetAuthLabel(n)}, {"items", authItems}, {"clones", cloneLabel}, {"created", created}, {"id", n.ID},
 	}
 	// Agent pairs wrap as a unit. Render rows against the parent clip so the

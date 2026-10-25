@@ -81,6 +81,30 @@ func (a *vaxisTUIApp) fleetAuthLabel(node Node) string {
 	return "done · receipt unavailable"
 }
 
+func (a *vaxisTUIApp) fleetGuestPlatformLabel(node Node) string {
+	arch, kvm := "arch ?", "KVM ?"
+	o := node.LastRuntimeObservation
+	if o == nil || o.UsageDetails == nil {
+		return arch + " · " + kvm
+	}
+	d := o.UsageDetails
+	if d.Architecture != "" {
+		arch = d.Architecture
+	}
+	if d.KVMAccessible != nil {
+		kvm = "KVM no"
+		if *d.KVMAccessible {
+			kvm = "KVM yes"
+		}
+	}
+	label := arch + " · " + kvm
+	now := time.Now()
+	if (d.Architecture != "" || d.KVMAccessible != nil) && (a.daemonDisconnected || o.Status != ObservationRunning || o.ResourceUsageSampledAt == nil || o.ResourceUsageSampledAt.After(now) || now.Sub(*o.ResourceUsageSampledAt) > 5*time.Second) {
+		label = "last: " + label
+	}
+	return label
+}
+
 func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
 	node := record.Node
 	statusCell, statusStyle := a.fleetCell(record, tuiFleetSortStatus, false, 30, theme)

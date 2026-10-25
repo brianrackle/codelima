@@ -8,6 +8,11 @@ type CPUCoreUsage struct {
 }
 
 type NodeUsageDetails struct {
+	// Platform facts are sampled in the guest through the telemetry SSH user.
+	// KVMAccessible means /dev/kvm is a readable/writable character device;
+	// it does not assert that a nested VM has successfully booted.
+	Architecture         string         `json:"architecture,omitempty"`
+	KVMAccessible        *bool          `json:"kvm_accessible,omitempty"`
 	CPUCores             []CPUCoreUsage `json:"cpu_cores,omitempty"`
 	MemoryAvailableBytes *uint64        `json:"memory_available_bytes,omitempty"`
 	MemoryCachedBytes    *uint64        `json:"memory_cached_bytes,omitempty"`

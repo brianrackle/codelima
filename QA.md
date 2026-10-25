@@ -560,6 +560,10 @@ Overview panels (ADR 191), in the disposable home:
    left and Sessions/Ports/Recent events on the right. Compare configured and
    observed resource values with Metrics, agent checks with Spec, and routes
    with Ports. Missing observations must not become zeros or success claims.
+   Compare the guest architecture with `uname -m` and KVM access with a readable,
+   writable `/dev/kvm` character device under the telemetry SSH user. The runtime's
+   nested setting must remain independent. Stop/disconnect the guest and confirm
+   the row becomes explicitly stale or unknown instead of retaining a live claim.
    Compare the host-auth date/count/categories with its `node.auth.imported`
    event. Check an empty import and a missing receipt, and a clone with no local
    receipt: they must show zero/none, unavailable and inherited respectively.

@@ -1025,3 +1025,8 @@ through the bounded nonblocking diagnostic reader. Return only exact recognized
 artifact categories, count and timestamp; omit paths, reasons and contents.
 Missing or malformed newer evidence must not revive an older success. A clone's
 parent history is not proof of the cloned disk's receipt.
+
+Guest platform facts (ADR 204) belong to the existing current telemetry sample.
+Keep unknown distinct from false, copy pointer fields at ownership boundaries,
+and clear them with the sample. Device accessibility and configured nested
+virtualization describe different facts; never infer one from the other.

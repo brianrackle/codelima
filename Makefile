@@ -300,8 +300,9 @@ test-node-spec: init
 test-node-logs: init
 	$(GO) test ./internal/codelima -run 'Test(NodeLog|BootstrapLog|TUI.*Logs)' -count=1
 
+METRICS_TEST_FLAGS ?=
 test-metrics: init
-	$(GO) test ./internal/codelima ./internal/codelima/daemon -run 'Test(NodeMetrics|ForwarderMetrics|TUI.*Metrics)' -count=1
+	$(GO) test $(METRICS_TEST_FLAGS) ./internal/codelima ./internal/codelima/daemon -run 'Test(NodeMetrics|ForwarderMetrics|TUI.*Metrics|TUIOverviewGuestPlatform)' -count=1
 
 test-host-capacity: init
 	$(GO) test ./internal/hostinfo ./internal/codelima -run 'Test(ReadVolume|ReadMissingVolume|LinuxMemory|LinuxCPU|LinuxVolume|TUIHost|TUIManagerSettings)' -count=1
