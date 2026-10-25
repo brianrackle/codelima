@@ -330,9 +330,14 @@ test-embedded-shell: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(EMBEDDED_SHELL_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIEmbedded|TUIManager|TUIResize|TUIHostTerminal|TUIDrawActiveHost|TUITerminalTab|TUIShortcut|TUIHandleKeyOption|TUIFocusToggle|TUIHandleKeyF6|TUIBackgroundNodeOperation|TUIDrawTerminal)' -count=1 -timeout=120s
 
-.PHONY: test-node-confirmations test-clone
+.PHONY: test-node-confirmations test-clone test-node-batch
 NODE_CONFIRMATION_TEST_FLAGS ?=
 CLONE_TEST_FLAGS ?=
+NODE_BATCH_TEST_FLAGS ?=
+test-node-batch: init
+	@mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(NODE_BATCH_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(NodeBatch|TUIBatch|LimaIdentity|TUIManagerPalette.*Batch|TUINodeRestart)' -count=1 -timeout=120s
+
 test-clone: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(CLONE_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(NodeClone|NodeOperations(Clone|CreateStart)|TUIClone)' -count=1 -timeout=120s

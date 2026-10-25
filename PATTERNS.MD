@@ -942,3 +942,30 @@ first startup phase. Return the committed node on a later startup failure.
 Reuse captured-node reviews for clone inputs. Load all names off the UI loop,
 apply only to the same live review, preserve edits and let the service arbitrate
 final uniqueness. The checkbox belongs to this request, not global settings.
+
+## Admit a complete batch before running its members (ADR 198)
+
+Persist an ordered root receipt containing captured node IDs/names, action kinds
+and preallocated child receipt IDs. Validate and reserve the entire set before
+acknowledging admission. Persist each ordinary child receipt before executing it;
+reuse its phase, output, cancellation and failure behavior. A failed member does
+not prevent later members from running. Bound per-batch and global concurrency.
+
+The root owns its context independently of the client; child contexts inherit
+root cancellation but can also be canceled separately. Keep queued targets
+reserved. On recovery, project completed child receipts into the root and mark
+uncertain/unstarted work interrupted instead of replaying destructive actions.
+Keep bounded member identities in active summaries for queued fleet evidence;
+completed history summaries expose counts, with full outcomes loaded on demand.
+
+An unfinished deletion is retryable only after a fresh, revision-matched
+observation confirms that its claim is unowned and no batch still reserves it.
+Offer a new explicit deletion review; let the service recover durable lifecycle
+markers under its existing locks. Keep form validation visible across redraws
+and non-editing input events, clearing it only when the field value changes.
+
+When a provider has shared first-use initialization, gate only that initialization
+under its resolved home. Let the provider create its own files, release the gate
+once complete validated evidence exists, and allow long VM boots to overlap.
+Use a persistent cross-process lock inode and context-aware waiting; never hold
+a global metadata lock across the provider command or overwrite provider keys.

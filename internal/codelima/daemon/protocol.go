@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 28 adds optional
-	// daemon-owned clone-and-start so older daemons cannot silently omit boot.
-	ProtocolVersion                = 28
+	// whenever a wire shape this protocol carries changes; 29 adds daemon-owned
+	// parallel batches with captured membership and per-target results.
+	ProtocolVersion                = 29
 	SessionVersion                 = 2
 	HandoffVersion                 = 7
 	PreviousActivityHandoffVersion = 6

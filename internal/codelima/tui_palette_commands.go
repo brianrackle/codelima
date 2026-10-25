@@ -109,13 +109,17 @@ func (a *vaxisTUIApp) paletteNodeAction(id string, action tuiActionID) (tuiTreeE
 	}
 	entry := tuiTreeEntry{node: node}
 	actions := a.paletteNodeActions(node)
-	if len(actions) == 0 || action != tuiActionNodeRestart && !slices.ContainsFunc(actions, func(spec tuiActionSpec) bool { return spec.ID == action }) {
+	restart := action == tuiActionNodeRestart && !a.fleetDeleteRetryable(node)
+	if len(actions) == 0 || !restart && !slices.ContainsFunc(actions, func(spec tuiActionSpec) bool { return spec.ID == action }) {
 		return tuiTreeEntry{}, fmt.Errorf("%s is no longer available for %s (%s)", strings.TrimPrefix(string(action), "node."), node.Slug, a.fleetStatus(node))
 	}
 	return entry, a.ensureActionNotConflicting(tuiActionSpec{ID: action}, entry)
 }
 
 func (a *vaxisTUIApp) paletteNodeActions(node Node) []tuiActionSpec {
+	if a.fleetDeleteRetryable(node) {
+		return []tuiActionSpec{{ID: tuiActionNodeDelete, Label: "Review incomplete deletion", Hotkey: 'd'}}
+	}
 	// Receipt-backed failure can outlive provisioning metadata after an
 	// interrupted start. Mirror the existing failed view's Retry meaning.
 	if a.fleetReceiptFailed(node) {

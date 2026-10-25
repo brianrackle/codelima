@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -43,6 +44,10 @@ func activityOperationRecord(op NodeOperation, requested bool) ActivityRecord {
 		kind += " + start"
 	}
 	r := ActivityRecord{ID: op.ID, OperationID: op.ID, NodeID: op.NodeID, NodeSlug: op.NodeSlug, Source: op.Request.Origin, Time: nodeOperationHistoryTime(op), Text: kind + " · " + op.State, Success: op.State == "succeeded"}
+	if op.Batch != nil {
+		kind = fmt.Sprintf("batch · %d nodes", op.Batch.Total)
+		r.Text, r.Action = kind+" · "+op.State+" · "+op.Batch.summary(), activityOpenOperation
+	}
 	if op.EnvironmentTest != nil {
 		kind = "test " + boundedOperationText(op.EnvironmentTest.EnvironmentSlug, 256)
 		r.Text, r.Action = kind+" · "+op.State, activityOpenOperation

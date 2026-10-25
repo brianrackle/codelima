@@ -162,11 +162,15 @@ func (d *tuiNodeConfirmation) activate(id string) (bool, error) {
 }
 
 func (d *tuiNodeConfirmation) readable() bool {
-	if d.tooSmall {
+	return tuiReviewReadable(d.app, d.tooSmall)
+}
+
+func tuiReviewReadable(app *vaxisTUIApp, tooSmall bool) bool {
+	if tooSmall {
 		return false
 	}
-	if d.app.vx != nil {
-		width, height := d.app.vx.Window().Size()
+	if app.vx != nil {
+		width, height := app.vx.Window().Size()
 		// The manager skips overlays below its global minimum. Also reserve
 		// its four-row margin and the border around ten usable review rows.
 		return width >= tuiMinWidth && height >= max(tuiMinHeight, 16)

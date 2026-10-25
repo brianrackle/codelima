@@ -46,14 +46,40 @@ func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperation
 		input.Directory = directory
 		request.Create = &input
 	}
+	record, err := s.daemonOperation(ctx, request)
+	if err != nil {
+		return Node{}, err
+	}
+	node, err := s.store.NodeByID(record.NodeID)
+	if err != nil {
+		return Node{}, err
+	}
+	if err := s.hydrateConfigurationSlug(&node); err != nil {
+		return Node{}, err
+	}
+	return node, nil
+}
+
+// NodeBatch submits captured targets to the daemon and waits for their retained
+// results. Canceling ctx only stops waiting; the operation receipt identifies
+// accepted work. A partial failure returns both its receipt and an error.
+func (s *Service) NodeBatch(ctx context.Context, targets []NodeBatchTarget) (NodeOperation, error) {
+	return s.daemonOperation(ctx, NodeOperationRequest{Kind: "batch", Batch: targets})
+}
+
+func (s *Service) daemonOperation(ctx context.Context, request NodeOperationRequest) (NodeOperation, error) {
 	client, writer := s.daemonClient, s.stdout
 	request.Origin = "tui"
 	if client == nil {
 		request.Origin = "cli"
 		var err error
-		client, err = s.operationConnect(ctx)
+		connect := s.operationConnect
+		if connect == nil {
+			connect = s.connectOperationDaemon
+		}
+		client, err = connect(ctx)
 		if err != nil {
-			return Node{}, err
+			return NodeOperation{}, err
 		}
 		defer func() { _ = client.Close() }()
 		// CLI result envelopes own stdout. Progress belongs on stderr; a TUI
@@ -65,9 +91,9 @@ func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperation
 	if err := client.Call(ctx, "operation.submit", request, &record); err != nil {
 		var rpcErr *daemon.RPCError
 		if errors.As(err, &rpcErr) {
-			return Node{}, fromDaemonError(err)
+			return NodeOperation{}, fromDaemonError(err)
 		}
-		return Node{}, operationWaitError(request.ID, "admission was not confirmed", err)
+		return NodeOperation{}, operationWaitError(request.ID, "admission was not confirmed", err)
 	}
 	if s.operationReceipt != nil {
 		s.operationReceipt(record.ID)
@@ -84,18 +110,11 @@ func (s *Service) daemonNodeOperation(ctx context.Context, request NodeOperation
 	})
 	if err != nil {
 		if record.State == "running" || record.State == "canceling" {
-			return Node{}, operationWaitError(record.ID, "stopped waiting for operation", err)
+			return record, operationWaitError(record.ID, "stopped waiting for operation", err)
 		}
-		return Node{}, fromDaemonError(err)
+		return record, fromDaemonError(err)
 	}
-	node, err := s.store.NodeByID(record.NodeID)
-	if err != nil {
-		return Node{}, err
-	}
-	if err := s.hydrateConfigurationSlug(&node); err != nil {
-		return Node{}, err
-	}
-	return node, nil
+	return record, nil
 }
 
 // A lost response is not evidence that work failed or never started. Retain

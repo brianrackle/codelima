@@ -87,6 +87,12 @@ func (a *vaxisTUIApp) fleetPhase(nodeID string) string {
 		}
 		return strings.TrimSpace(text)
 	}
+	if member, reserved := a.batchReservation(nodeID); reserved {
+		return member.Kind + " · " + member.State + " · batch reservation"
+	}
+	if node, err := a.managerNode(nodeID); err == nil && a.fleetDeleteRetryable(node) {
+		return "Delete incomplete · d review deletion"
+	}
 	return ""
 }
 

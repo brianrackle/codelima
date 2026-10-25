@@ -680,6 +680,35 @@ Single-node confirmations (ADR 196):
    refuse submission. Clean all disposable guests, shells, nodes, metadata,
    screenshots, processes, mounts and temporary test inputs after verification.
 
+Parallel batch review and execution (ADR 198):
+
+1. Mark disposable nodes, hide a target with a filter, and review start/stop,
+   restart and delete at 150×38 truecolor and 80×24 ANSI. Every captured target
+   remains reachable by scrolling. Check guest/host impact and observed resource
+   release. Selection/filter changes cannot enlarge the review.
+2. For deletion, incorrect or space-padded counts must fail. Paste the exact
+   count without submitting, then cancel. Repeat/release/pasted shortcuts and
+   60×14/40×10 screens must not admit work. Restore size and use mouse/keyboard.
+3. Start two real stopped guests as one batch. Quit the requester after admission
+   and observe both child receipts progressing concurrently from another TUI.
+   Activity opens the root's per-target results; each child keeps ordinary logs.
+   Stop them as one batch and verify overlapping execution, guest shutdown and
+   a surviving host shell's identity/state. Confirm resource release afterward.
+4. Inspect partial failure with one deliberately unavailable disposable runtime
+   target and one healthy target. The healthy action must still finish. Cancel
+   a batch during startup; pending work must not start and active startup cleanup
+   must finish. Automated gates additionally cover more-than-four queuing,
+   global capacity, child-only cancellation and interrupted recovery.
+   For a failed deletion, fix the provider fault and use `d` on the now-unclaimed
+   `delete incomplete` target to review deletion again. Stale evidence and any
+   remaining batch reservation must still refuse retry. An invalid count's
+   validation message must survive idle redraws and clear when the input changes.
+5. Delete only disposable targets using the exact count. Check the retained root
+   and child outcomes after node deletion. Confirm the review warns that both
+   guest and host sessions end, and that the deleted node's host session closes
+   while its host workspace files remain. Remove all owned guests, terminals,
+   daemon/frontends, stores, captures, overlays, mounts and temporary artifacts.
+
 Clone review and optional startup (ADR 197):
 
 1. With a disposable stopped node, open `c` at 150×38 truecolor and 80×24 ANSI.

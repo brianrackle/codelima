@@ -364,9 +364,10 @@ For example, search `start api`, `status: failed`, or `Logs bootstrap`.
 Per-node commands retain their target even if the fleet selection changes.
 Unavailable results require a new selection or query. `start all in` reviews
 the directory's captured targets, resumes failed bootstrap steps with Retry
-and starts stopped/created nodes sequentially; unrelated marks are preserved.
-The queue stops at the first error and later submissions depend on the frontend
-remaining open. Memory warnings describe cached allocation, not free OS memory.
+and starts stopped/created nodes in a daemon-owned batch; unrelated marks are
+preserved. Up to four targets run in parallel. Other targets continue after a
+failure or frontend exit. Memory warnings describe cached allocation, not free
+OS memory.
 
 Press `?` for contextual key help. The current view leads the columns; compact
 terminals show one group at a time. Tab/Shift-Tab or Left/Right changes groups;
@@ -546,8 +547,23 @@ confirmation listing every target. Detail actions apply only to the open node.
 `codelima node restart NODE` explicitly stops and starts under one lifecycle
 claim. It confirms shutdown before booting, preserves completed bootstrap, and
 reruns incomplete setup. Restart uses the stop-confirmation preference because
-guest sessions end. Each admitted restart continues after its caller exits;
-keep a bulk-action window open until its sequential queue finishes.
+guest sessions end. Each admitted restart continues after its caller exits.
+
+Marked start/stop, restart and delete actions review the complete captured list,
+including hidden marks. Bulk deletion requires typing the exact target count.
+Stop and restart end guest sessions while host shells continue; deletion ends
+both guest and host sessions belonging to each deleted node.
+The daemon admits all targets together, reserves them through batch completion,
+and runs up to four at once within its global limit of sixteen lifecycle
+operations. A batch accepts up to 64 targets. Queued targets and running phases
+appear in fleet rows; Activity retains individual receipts and a batch summary.
+Open the batch to inspect every outcome or press K to cancel its remaining work.
+Canceling a running child's receipt affects only that node. Completed work is kept;
+canceling startup stops that VM. After daemon interruption, completed outcomes
+remain and uncertain/unstarted targets are marked interrupted for explicit review.
+An unfinished deletion shows `delete incomplete` once fresh daemon evidence
+confirms its owner has released the node. Fix the reported provider problem and
+press `d` to review deletion again; active or stale ownership still blocks retry.
 
 Lifecycle actions launched from the TUI or CLI (`node create`, `start`, `retry`,
 `restart`, `stop`, `clone`, `delete`) run in the daemon and continue when the caller exits.

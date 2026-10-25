@@ -12,7 +12,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail (ADR 188); prompt idle timing (ADR 189); per-agent recorded validation (ADR 190); final qualification remains |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); batch queue and final qualification remain |
+| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); final artboard/native qualification remains |
@@ -23,7 +23,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions, VM inspection and readiness-gated ports verified; final artboard qualification remains |
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
-| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: delete/stop (ADR 196) and clone/start (ADR 197) passed automated and live Linux/TCG qualification; durable batches and final native/artboard qualification remain |
+| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: delete/stop (ADR 196) and clone/start (ADR 197) passed automated and live Linux/TCG qualification; durable batch review, partial outcomes and cancellation verified (ADR 198); no-frontend terminal teardown audit and final native/artboard qualification remain |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
@@ -37,6 +37,78 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+ADR 198 checkpoint, 2026-10-25: marked and directory palette actions now admit
+one captured batch to the daemon. Up to four ordinary children execute
+concurrently within the global sixteen-worker limit. Queued targets remain
+reserved, failure does not stop siblings, root/child cancellation has explicit
+scope, and recovery retains completed outcomes without replaying uncertain
+work. The responsive review includes exact bulk-delete counts, current identity
+and action checks, session/resource evidence, scrolling, mouse and size guards.
+Fleet rows expose reservations; Activity opens retained per-target outcomes and
+counts progress in nodes. Ordinary/session/renderer/handoff versions are **29/2/6/7**.
+
+The final focused race suite passed (6.825s), covering atomic admission, captured
+identity, requester disconnect with queued work, partial failures, root/child
+cancellation, global limits, recovery, bounded summaries, review guards,
+validation retention, released-delete recovery and session-impact wording.
+Final formatting, lint, unit and Vaxis checks passed (core unit 92.805s).
+The build encountered a transient Git VCS-status error; normal Git queries
+succeeded, and `make build test-race test-integration` then passed with VCS
+stamping enabled (core race 125.380s, CLI integration 17.736s, exit 0).
+Earlier complete gate runs also passed; an incomplete interrupted race run was
+not counted. Targeted `gopls` found no errors in the changed logic; the shared
+dialog file retained its existing modernization suggestions. `go doc` covered
+cancellation and SSH public-key parsing.
+
+Live checks used an isolated 448 MiB `tmp/bq` tmpfs, separate metadata/Lima
+homes, two real 1-vCPU/768-MiB Linux/TCG guests and a later stopped deletion
+fixture. Wide 150×38 truecolor and compact 80×24 ANSI start/stop/restart/delete
+reviews were inspected. Hidden marked targets stayed captured; wrong or
+space-padded deletion counts, pasted counts and unreadable 60×14/40×10 screens
+did not admit work. Esc discarded reviews; scrolling, mouse and keyboard
+submission worked. Stopped targets correctly showed zero resource release.
+
+The first fresh-home start exposed Lima 2.1's SSH-key initialization race: one
+child failed while its sibling reached ready, with both outcomes retained after
+requester exit. The provider initialization gate now protects only key creation.
+Both starts in another fresh Lima home then succeeded with overlapping execution
+and an unchanged shared key after their requester exited. Another frontend
+observed their child phases and root outcomes.
+
+The stop batch's two operations overlapped for about 32 seconds. Both guest
+sessions ended, allocation returned to zero, and host terminal/PID 2385335 and
+its exported state survived. A new startup batch was canceled through Activity
+while both QEMU processes were live. Its root remained canceling during Lima's
+180-second shutdown wait, then retained two canceled outcomes with both VMs
+stopped. An injected provider deletion failure for alpha still allowed beta's
+deletion; Activity retained both outcomes after beta disappeared.
+
+Regression-first fixes address findings from these runs. Form errors now survive
+non-editing events and clear when the field changes. Fresh revision-matched,
+unclaimed evidence with no reservation exposes a new deletion review for an
+incomplete deletion; the frontend never rewrites lifecycle state. The rebuilt
+TUI retried alpha successfully. Deletion was also found to close node-owned host
+sessions, so its review now distinguishes this from stop/restart host survival.
+A final mouse-confirmed deletion of a stopped fixture verified the corrected
+warning, host terminal/PID closure, preserved host workspace marker, and retained
+root/child outcomes after every node was deleted. These deletion checks had a
+frontend present; the no-frontend teardown audit remains explicitly in TODO #57.
+
+Cleanup removed all three node fixtures and every owned VM, terminal, frontend,
+daemon and tmux server. A privileged read-only command/environment audit found
+no fixture survivors. The baseline disk SHA256 remained
+`a717dba3fd2c2dfe699262623aa2c6b5147955ea4bca46c8da4dfae8ba42913c`.
+Unmounting/removing `tmp/bq` discarded its metadata, overlays, captures, scripts
+and sockets. Two empty directories from an early failed browser capture were
+removed. Cleanup removed 98 new inactive exact-content INPUTRC files, preserving
+1,015 older files and the active reference; Go/integration scratch was removed.
+Existing baseline shells, tmux and the 64/16-MiB mounts remained intact. Owned
+logs and gate runners were removed after recording this evidence.
+
+The full design remains incomplete. TODO #57 retains the no-frontend teardown
+audit, singular count wording, the previously observed transient startup header
+corruption, Attached presentation and final whole-design/native qualification.
 
 ADR 197 checkpoint, 2026-10-25: the clone review suggests a globally available
 name, preserves edits during asynchronous name loading, shows observed source

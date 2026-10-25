@@ -608,6 +608,12 @@ func (a *vaxisTUIApp) operationDisplayStatus(entry tuiTreeEntry) string {
 		}
 	}
 
+	if member, reserved := a.batchReservation(entry.node.ID); reserved {
+		if member.State == "queued" {
+			return "queued"
+		}
+		return "batch reserved"
+	}
 	entryKey := entry.key()
 	for _, operationID := range a.operationOrder {
 		operation := a.operations[operationID]

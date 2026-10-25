@@ -225,6 +225,9 @@ func drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, theme tuiTheme
 		phase, detail = p.Phase, p.Detail
 		completed := max(0, min(p.Completed, p.Total))
 		count = fmt.Sprintf("%d/%d phases", completed, p.Total)
+		if row.kind == "batch" {
+			count = fmt.Sprintf("%d/%d nodes", completed, p.Total)
+		}
 		filled := 12 * completed / p.Total
 		bar = strings.Repeat("█", filled) + strings.Repeat("░", 12-filled)
 	}
@@ -240,7 +243,7 @@ func drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, theme tuiTheme
 			tuiLine(win.New(width-54, 0, 24, 1), 0, count, theme.dim)
 		} else {
 			tuiLine(win.New(width-54, 0, 12, 1), 0, bar, theme.amber)
-			tuiLine(win.New(width-40, 0, 10, 1), 0, count, theme.dim)
+			tuiLine(win.New(width-40, 0, 12, 1), 0, count, theme.dim)
 		}
 		tuiLine(win.New(width-28, 0, 8, 1), 0, elapsed, theme.amber)
 		tuiLine(win.New(width-18, 0, 18, 1), 0, "⏎ open · K cancel", theme.dim)

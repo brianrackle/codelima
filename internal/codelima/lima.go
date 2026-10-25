@@ -676,7 +676,10 @@ func (c *LimaClient) Start(ctx context.Context, node Node) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.runCommandsWithOutput(ctx, limaCommandTimeout, "start Lima instance", commands, map[string]any{"sandbox_name": node.SandboxName}, c.Stdout); err != nil {
+	if err := c.withIdentityInitialization(ctx, func() error {
+		_, err := c.runCommandsWithOutput(ctx, limaCommandTimeout, "start Lima instance", commands, map[string]any{"sandbox_name": node.SandboxName}, c.Stdout)
+		return err
+	}); err != nil {
 		return err
 	}
 	return c.verifyObservation(ctx, node.SandboxName, ObservationRunning)

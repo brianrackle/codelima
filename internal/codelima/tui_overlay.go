@@ -247,8 +247,12 @@ func (d *tuiDialog) updateInput(event vaxis.Event) {
 	if len(d.Fields) == 0 || d.Fields[d.FieldIndex].Input == nil {
 		return
 	}
-	d.Error = ""
-	d.Fields[d.FieldIndex].Input.Update(event)
+	input := d.Fields[d.FieldIndex].Input
+	before := input.String()
+	input.Update(event)
+	if input.String() != before {
+		d.Error = ""
+	}
 }
 
 func (d *tuiDialog) submit() (done bool, err error) {

@@ -580,6 +580,7 @@ func TestCustomizedRuntimeCommandsKeepTheShellTransport(t *testing.T) {
 	shellLog := installNoisyHostShell(t, home)
 
 	client := NewLimaClient(home)
+	client.LimaHome = filepath.Join(home, "lima")
 	client.Binary = binary
 	client.nestedVirtualizationProbe = func() bool { return false }
 	// A settings.yaml override that only a shell can run: the chained second

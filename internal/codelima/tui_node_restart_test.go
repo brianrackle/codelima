@@ -23,13 +23,15 @@ func TestTUINodeRestartMarksTakePriorityOverFailedSelection(t *testing.T) {
 		a.fleet.marks[node.ID] = true
 	}
 	a.handleKey(vaxis.Key{Keycode: 'r', Text: "r"})
-	d, ok := a.overlay.(*tuiDialog)
-	if !ok || !strings.Contains(strings.ToLower(d.Title), "restart") {
+	d, ok := a.overlay.(*tuiBatchReview)
+	if !ok || !strings.Contains(strings.ToLower(d.dialog.Title), "restart") {
 		t.Fatal("marked restart was lost to selected failed-node retry", a.overlay, a.status)
 	}
+	a.draw()
+	screen := renderedScreenText(t, a.vx, 80, 24)
 	for _, node := range a.state.nodes {
-		if !strings.Contains(strings.Join(d.Description, " "), node.Slug) {
-			t.Fatal("batch confirmation omitted a marked node", d.Description)
+		if !strings.Contains(screen, node.Slug) {
+			t.Fatal("batch confirmation omitted a marked node", screen)
 		}
 	}
 	if len(sessions.opened) != 0 {
@@ -113,7 +115,7 @@ func TestTUINodeRestartBatchRunsEveryMarkedNode(t *testing.T) {
 		}
 	}
 	a, sessions := newTestManager(t, 80, 24)
-	a.service = s
+	a.service = batchTestFrontend(t, s)
 	a.state, err = newTUIState(nodes, sessions)
 	if err != nil {
 		t.Fatal(err)
@@ -123,8 +125,8 @@ func TestTUINodeRestartBatchRunsEveryMarkedNode(t *testing.T) {
 	fake := s.sandbox.(*fakeSandbox)
 	fake.calls = nil
 	a.handleKey(vaxis.Key{Keycode: 'r', Text: "r"})
-	d, ok := a.overlay.(*tuiDialog)
-	if !ok || len(fake.calls) != 0 {
+	d := a.activeDialog()
+	if d == nil || len(fake.calls) != 0 {
 		t.Fatal("bulk restart ran before one confirmation", a.overlay, fake.calls)
 	}
 	if err := d.OnSubmit(nil); err != nil {

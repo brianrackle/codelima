@@ -68,6 +68,9 @@ func (a *vaxisTUIApp) refreshFleet() {
 }
 
 func (a *vaxisTUIApp) fleetStatus(node Node) string {
+	if a.fleetDeleteRetryable(node) {
+		return "delete incomplete"
+	}
 	if a.fleetReceiptFailed(node) {
 		return "failed"
 	}
@@ -128,7 +131,9 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	_, palette := a.overlay.(*tuiPalette)
 	_, shellChooser := a.overlay.(*tuiShellChooser)
 	_, nodeConfirmation := a.overlay.(*tuiNodeConfirmation)
-	if a.visibleCreateForm() != nil || keyHelp || palette || shellChooser || nodeConfirmation {
+	_, batchReview := a.overlay.(*tuiBatchReview)
+	_, operationOutput := a.overlay.(*tuiOperationOutputView)
+	if a.visibleCreateForm() != nil || keyHelp || palette || shellChooser || nodeConfirmation || batchReview || operationOutput {
 		theme = theme.dimmed()
 	}
 	a.fleetMouseRows = nil

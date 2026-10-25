@@ -134,7 +134,7 @@ func TestTUIManagerPaletteDirectoryBatchCapturesMembersAndRetriesSuffix(t *testi
 		t.Fatal(err)
 	}
 	a, sessions := newTestManager(t, 80, 24)
-	a.service = s
+	a.service = batchTestFrontend(t, s)
 	a.state, err = newTUIState([]Node{first, second}, sessions)
 	if err != nil {
 		t.Fatal(err)

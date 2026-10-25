@@ -158,6 +158,9 @@ func (a *vaxisTUIApp) postCompletion(event vaxis.Event) {
 // type is showing. Dialog flows and tests use these instead of per-type
 // fields.
 func (a *vaxisTUIApp) activeDialog() *tuiDialog {
+	if review, ok := a.overlay.(*tuiBatchReview); ok {
+		return review.dialog
+	}
 	if review, ok := a.overlay.(*tuiNodeConfirmation); ok {
 		return review.dialog
 	}

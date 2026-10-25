@@ -1,7 +1,6 @@
 package codelima
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,8 +9,6 @@ import (
 
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/textinput"
-
-	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 func (a *vaxisTUIApp) switchView(view tuiView) {
@@ -445,35 +442,11 @@ func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
 	if len(targets) == 1 && len(a.fleet.marks) == 0 {
 		return a.performAction(tuiActionSpec{ID: action})
 	}
-	verb := strings.TrimPrefix(string(action), "node.")
-	expected := strconv.Itoa(len(targets))
-	labels, keys := make([]string, 0, len(targets)), make([]string, 0, len(targets))
+	plan := make([]tuiPaletteNodePlan, 0, len(targets))
 	for _, record := range targets {
-		labels = append(labels, record.Node.Slug)
-		keys = append(keys, terminal.NodeTarget(record.Node.ID).String())
+		plan = append(plan, tuiPaletteNodePlan{record.Node.ID, action})
 	}
-	if action == tuiActionNodeRestart {
-		labels = append(labels, "Restart ends guest sessions on these nodes, then starts each VM.", "Completed bootstrap is kept; failed setup is rerun from the beginning.")
-	}
-	fields := []tuiDialogField{}
-	if action == tuiActionNodeDelete {
-		fields = append(fields, newTUIInputField("confirm", "Type "+expected+" to delete these nodes", "", true))
-	}
-	a.overlay = newTUIDialog(fmt.Sprintf("%s %d nodes", verb, len(targets)), verb, labels, fields, func(values map[string]string) error {
-		if action == tuiActionNodeDelete && values["confirm"] != expected {
-			return fmt.Errorf("type %s to confirm deletion", expected)
-		}
-		return a.startOperation(tuiOperationRequest{Title: fmt.Sprintf("%s %d nodes", verb, len(targets)), ResourceKeys: keys, EntryKeys: keys,
-			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-				for _, record := range targets {
-					_, err := runTUINodeAction(ctx, service, action, record.Node.ID)
-					if err != nil {
-						return tuiOperationResult{}, fmt.Errorf("%s %s: %w", verb, record.Node.Slug, err)
-					}
-				}
-				return tuiOperationResult{ReloadData: true, Status: fmt.Sprintf("%s completed for %d nodes", verb, len(targets)), Apply: func(a *vaxisTUIApp) error { a.fleet.clearMarks(); return nil }}, nil
-			},
-		})
-	})
-	return nil
+	verb := strings.TrimPrefix(string(action), "node.")
+	verb = strings.ToUpper(verb[:1]) + verb[1:]
+	return a.openBatchReview(fmt.Sprintf("%s %d nodes?", verb, len(targets)), plan, true)
 }

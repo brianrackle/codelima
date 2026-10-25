@@ -11,6 +11,9 @@ type NodeOperationProgress struct {
 }
 
 func summarizeNodeOperationProgress(record NodeOperation) *NodeOperationProgress {
+	if b := record.Batch; b != nil {
+		return &NodeOperationProgress{Total: b.Total, Completed: b.Total - b.Queued - b.Running, Phase: "Batch", Detail: b.summary()}
+	}
 	if len(record.Phases) == 0 {
 		return nil
 	}

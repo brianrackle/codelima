@@ -126,7 +126,10 @@ func (v *tuiOperationOutputView) FooterHint() string {
 	return hint + " · Esc close"
 }
 
-func (v *tuiOperationOutputView) Draw(win vaxis.Window, header, muted, errorStyle vaxis.Style) {
+func (v *tuiOperationOutputView) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
+	theme := v.app.managerTheme().modal()
+	tuiFill(win, theme.raised)
+	header, muted, errorStyle := theme.mint, theme.muted, theme.coral
 	body := border.All(win, muted)
 	w, h := body.Size()
 	r := v.record
@@ -161,6 +164,16 @@ func (v *tuiOperationOutputView) Draw(win vaxis.Window, header, muted, errorStyl
 	}
 	tuiLine(body, 2, plainLogText(phase), muted)
 	lines := slices.Clone(r.Output)
+	if r.Batch != nil {
+		lines = append([]string{r.Batch.summary(), ""}, lines...)
+		for _, member := range r.Batch.Members {
+			line := member.NodeSlug + " · " + member.Kind + " · " + member.State
+			if member.Error != "" {
+				line += " · " + member.Error
+			}
+			lines = append(lines, line)
+		}
+	}
 	if r.OutputPartial != "" {
 		lines = append(lines, r.OutputPartial)
 	}

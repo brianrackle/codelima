@@ -25,13 +25,14 @@ var (
 )
 
 type NodeOperationRequest struct {
-	Environment string           `json:"environment,omitempty"`
-	Origin      string           `json:"origin,omitempty"`
-	ID          string           `json:"id"`
-	Kind        string           `json:"kind"`
-	Node        string           `json:"node,omitempty"`
-	Create      *NodeCreateInput `json:"create,omitempty"`
-	Clone       *NodeCloneInput  `json:"clone,omitempty"`
+	Environment string            `json:"environment,omitempty"`
+	Origin      string            `json:"origin,omitempty"`
+	ID          string            `json:"id"`
+	Kind        string            `json:"kind"`
+	Node        string            `json:"node,omitempty"`
+	Create      *NodeCreateInput  `json:"create,omitempty"`
+	Clone       *NodeCloneInput   `json:"clone,omitempty"`
+	Batch       []NodeBatchTarget `json:"batch,omitempty"`
 }
 
 func (r NodeOperationRequest) startsNode() bool {
@@ -39,6 +40,8 @@ func (r NodeOperationRequest) startsNode() bool {
 }
 
 type NodeOperation struct {
+	Batch           *NodeBatchState        `json:"batch,omitempty"`
+	BatchID         string                 `json:"batch_id,omitempty"`
 	EnvironmentTest *EnvironmentTestState  `json:"environment_test,omitempty"`
 	Progress        *NodeOperationProgress `json:"progress,omitempty"`
 	ID              string                 `json:"id"`
@@ -147,6 +150,9 @@ func newNodeOperations(service *Service, onChange func()) (*nodeOperations, erro
 		m.records[id] = &runningNodeOperation{record: record}
 	}
 	var recovery []*runningNodeOperation
+	if err := m.recoverBatches(); err != nil {
+		return nil, err
+	}
 	for _, operation := range m.records {
 		test := operation.record.EnvironmentTest
 		if test == nil || !test.CleanupPending {
@@ -216,10 +222,12 @@ func (m *nodeOperations) normalize(request NodeOperationRequest) (NodeOperationR
 	if request.Origin != "" && request.Origin != "tui" && request.Origin != "cli" {
 		return request, Node{}, nil, invalidArgument("operation origin must be tui or cli", nil)
 	}
-	if (request.Kind != "create" && request.Create != nil) || (request.Kind != "clone" && request.Clone != nil) || (request.Kind != "test-environment" && request.Environment != "") {
+	if (request.Kind != "create" && request.Create != nil) || (request.Kind != "clone" && request.Clone != nil) || (request.Kind != "batch" && request.Batch != nil) || (request.Kind != "test-environment" && request.Environment != "") {
 		return request, Node{}, nil, invalidArgument("operation inputs do not match its kind", nil)
 	}
 	switch request.Kind {
+	case "batch":
+		return request, Node{}, nil, nil
 	case "test-environment":
 		if request.Environment == "" || request.Node != "" {
 			return request, Node{}, nil, invalidArgument("environment is required and real nodes cannot be test targets", nil)
@@ -280,6 +288,14 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 		return NodeOperation{}, err
 	}
 	var environmentTest *EnvironmentTestState
+	var batch *NodeBatchState
+	if request.Kind == "batch" {
+		batch, keys, err = m.prepareBatch(request)
+		if err != nil {
+			return NodeOperation{}, err
+		}
+		node.Slug = fmt.Sprintf("%d nodes", batch.Total)
+	}
 	if request.Kind == "test-environment" {
 		environmentTest, err = m.service.prepareEnvironmentTest(ctx, request.Environment)
 		if err != nil {
@@ -310,15 +326,18 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 		if other.cancel == nil {
 			continue
 		}
-		active++
+		if other.record.BatchID == "" {
+			active++
+		}
 		if operationConflicts(other.keys, keys) {
 			return NodeOperation{}, preconditionFailed("node already has an active "+other.record.Request.Kind+" operation", map[string]any{"operation_id": other.record.ID})
 		}
 	}
-	if active >= 16 {
+	if active >= nodeOperationLimit || request.Kind != "batch" && m.executingCountLocked() >= nodeOperationLimit {
 		return NodeOperation{}, preconditionFailed("16 lifecycle operations are already running", nil)
 	}
 	record := NodeOperation{ID: request.ID, Request: request, NodeID: node.ID, NodeSlug: node.Slug, State: "running", CreatedAt: m.service.now(), EnvironmentTest: environmentTest}
+	record.Batch = batch
 	record.Phases = initialNodeOperationPhases(request.Kind)
 	if (request.Kind == "create" || request.Kind == "clone") && request.startsNode() {
 		record.Phases = append(record.Phases, initialNodeOperationPhases("start")...)
@@ -377,6 +396,10 @@ func (m *nodeOperations) pruneLocked() error {
 
 func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperation) {
 	defer m.workers.Done()
+	if operation.record.Batch != nil {
+		m.runBatch(ctx, operation)
+		return
+	}
 	if operation.record.Request.Kind == "test-environment" {
 		m.runEnvironmentTest(ctx, operation, false)
 		return
@@ -555,6 +578,7 @@ func (m *nodeOperations) List() []NodeOperation {
 			// retained command/output body on each frontend's polling tick.
 			record := operation.record
 			record.Progress = summarizeNodeOperationProgress(record)
+			record.Batch = batchSummary(record)
 			createStart := record.Request.Kind == "create" && record.Request.startsNode()
 			cloneStart := record.Request.Kind == "clone" && record.Request.startsNode()
 			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind, Origin: record.Request.Origin}

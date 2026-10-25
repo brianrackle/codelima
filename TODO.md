@@ -95,23 +95,48 @@ INPUTRC references before cleanup. Advantages: reproducible isolation and no
 home pollution; disadvantages: shell signal/exec portability and additional
 termination-path tests. Do not repurpose HOME or delete active/user-owned files.
 
-Bulk queue lifetime remains a separate problem: the current frontend submits
-marked nodes sequentially, so closing it prevents later submissions and the first
-failure ends the queue. Individual admitted operations continue in the daemon.
-Suggested solution: persist the complete ordered batch, its admission and each
-target's result in the daemon, with explicit partial failure/cancellation and
-conflict behavior. Advantages: caller-independent batches and reviewable progress.
-Disadvantages: a broader operation contract, rollback/partial-success rules and
-additional compatibility/QA work. Preserve this in the full redesign scope.
+Parallel batch ownership (ADR 198) is implemented: atomic captured membership,
+four children per batch, sixteen lifecycle operations globally, retained partial
+outcomes, root/child cancellation and interruption recovery. The shared review
+revalidates targets, requires exact deletion counts and shows queued fleet
+evidence and retained Activity outcomes. Focused and full automated checks,
+along with live Linux/TCG checks, are recorded in the design ledger;
+the owned `tmp/bq` fixture and test scratch have been removed. Advantages: caller-independent
+queued work and inspectable per-node outcomes. Disadvantages: reservations stay
+held until batch completion, and uncertain interrupted work needs a new review.
+The full redesign/native qualification remains in scope.
+
+The first live fresh-home parallel start reproduced Lima 2.1's shared SSH-key
+generation race: one child failed while its sibling continued booting. A provider
+identity initialization gate is implemented and regression-tested. Both fresh-home
+boots then completed concurrently with the same intact shared key, and the first
+batch retained its partial outcomes. Live deletion also verified explicit review
+after a released failure, persistent count errors and truthful host-session impact.
 
 ### 57. Implement the retrieved major-version TUI design
+
+Batch teardown follow-up (ADR 198 source audit): the live deletion checks ran
+with a frontend present, and node-owned host terminals closed when stale targets
+were pruned. Audit deletion with every frontend gone; the daemon operation owner
+currently broadcasts changes while `PruneStaleSessions` lives in the frontend.
+If that leaves an orphan host terminal, make target teardown daemon-owned and
+test ordering against deletion failure, caller exit and daemon replacement.
+Advantages: the session-impact promise remains true without a frontend.
+Disadvantages: terminal teardown must respect daemon ownership and replacement
+barriers without closing sessions for a failed deletion. This untested path is
+not covered by the completed foreground-deletion checks.
+
+Presentation follow-up: one marked target currently says `Delete 1 nodes?`, and
+the fleet similarly says `1 nodes`. Use shared singular/plural count formatting
+and cover one/multiple targets in final artboard checks. Advantage: consistent
+user-facing wording; disadvantage: several existing count labels need review.
 
 Confirmation work (ADR 196): single-node delete/stop review, exact-name gating,
 captured attachment, guest/host impact and host-tab preservation are implemented;
 automated and live Linux/TCG qualification passed, with cleanup recorded in the
-design ledger. The Dialogs artboard remains
-partial. Implement the durable
-parallel batch owner described above and its per-node review/outcomes. Advantages:
+design ledger. The Dialogs artboard remains partial. Durable parallel batch
+ownership and per-node review/outcomes are implemented and tested (ADR 198);
+finish the teardown audit above and final whole-design/native qualification. Advantages:
 clone/start and every batch member survive frontend exit, with truthful progress.
 Disadvantages: admission, cancellation, source restoration, partial failure and
 recovery require lifecycle tests beyond modal presentation. Historical last-up
@@ -164,8 +189,8 @@ Palette checkpoint (ADR 193): grouped results, counts, matching spans, frontend
 session recents, context hints, captured per-node commands and revalidated
 confirmations are implemented. Directory Start/Retry reviews capture membership
 and retain unrelated marks. Automated and live qualification is recorded in the
-design ledger; final whole-design/native qualification and the durable batch
-queue described above remain open. Session history intentionally ends on exit;
+design ledger; directory actions now use the durable batch owner (ADR 198).
+Final whole-design/native qualification remains open. Session history intentionally ends on exit;
 the source does not require a persisted recent-command store.
 
 Shell chooser checkpoint (ADR 194): grouped new/existing sessions, launcher

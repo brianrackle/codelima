@@ -71,7 +71,7 @@ func (t tuiTheme) status(status string) (string, vaxis.Style) {
 		return "◌", t.dim
 	case "failed", "broken":
 		return "✕", t.coral
-	case "deleting", "terminated":
+	case "deleting", "terminated", "delete incomplete":
 		return "⊘", t.coral
 	default:
 		return "?", t.dim

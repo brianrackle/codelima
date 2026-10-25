@@ -1,12 +1,9 @@
 package codelima
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"strings"
-
-	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 type tuiPaletteNodePlan struct {
@@ -81,36 +78,5 @@ func (a *vaxisTUIApp) paletteBatchCommands() []tuiPaletteCommand {
 // A directory or marked-set command always opens a review, even for one node.
 // The review captures membership and action kinds; additions cannot enlarge it.
 func (a *vaxisTUIApp) reviewPaletteBatch(title string, plan []tuiPaletteNodePlan) error {
-	plan = slices.Clone(plan)
-	keys := make([]string, 0, len(plan))
-	lines := make([]string, 0, len(plan)+2)
-	for _, target := range plan {
-		entry, err := a.paletteNodeAction(target.id, target.action)
-		if err != nil {
-			return err
-		}
-		keys = append(keys, terminal.NodeTarget(target.id).String())
-		lines = append(lines, strings.TrimPrefix(string(target.action), "node.")+" "+entry.node.Slug+" · "+a.fleetStatus(entry.node))
-	}
-	lines = append(lines, "Only these captured nodes will run. Existing marks are preserved.", "Starts run sequentially; failed nodes resume their failed bootstrap step.")
-	if slices.ContainsFunc(plan, func(p tuiPaletteNodePlan) bool { return p.action == tuiActionNodeRestart }) {
-		lines[len(lines)-1] = "Restart ends guest sessions. Completed bootstrap is kept; failed setup reruns."
-	}
-	a.overlay = newTUIDialog(title, "Run", lines, nil, func(map[string]string) error {
-		// Validate the whole review before starting its first operation.
-		for _, target := range plan {
-			if _, err := a.paletteNodeAction(target.id, target.action); err != nil {
-				return err
-			}
-		}
-		return a.startOperation(tuiOperationRequest{Title: title, ResourceKeys: keys, EntryKeys: keys, Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-			for _, target := range plan {
-				if _, err := runTUINodeAction(ctx, service, target.action, target.id); err != nil {
-					return tuiOperationResult{}, fmt.Errorf("%s %s: %w", target.action, target.id, err)
-				}
-			}
-			return tuiOperationResult{ReloadData: true, Status: fmt.Sprintf("Completed %d node actions", len(plan))}, nil
-		}})
-	})
-	return nil
+	return a.openBatchReview(title, plan, false)
 }
