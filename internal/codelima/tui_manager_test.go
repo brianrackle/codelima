@@ -99,6 +99,7 @@ func TestTUIManagerResponsiveTableAndPreview(t *testing.T) {
 
 func TestTUIManagerShellInterceptsOnlyF6(t *testing.T) {
 	app, _ := newTestManager(t, 100, 30)
+	enableTestEmbeddedShell(app)
 	if err := app.openEmbeddedShell(false); err != nil {
 		t.Fatal(err)
 	}

@@ -59,6 +59,10 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   implemented (ADR 192). Configurable bindings (roadmap #9) and final native
   design qualification remain in TODO #57.
 
+- Embedded shell [partially complete]: opt-in Shell detail, shared framed
+  viewport geometry, active-tab overflow, exact mouse targets and current route
+  context are implemented (ADR 195). Live host/guest and input qualification is
+  recorded in the design ledger; final native and whole-design checks remain.
 - Shell chooser [partially complete]: grouped fresh/existing sessions, launcher
   availability, stable numbered/mouse identities, saved defaults and explicit
   embedded opt-in are implemented (ADR 194). Final native/artboard qualification

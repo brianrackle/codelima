@@ -114,6 +114,7 @@ func (a *vaxisTUIApp) selectFleetNode() {
 
 func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	width, height := window.Size()
+	a.normalizeEmbeddedShellMode()
 	theme := a.managerTheme()
 	tuiFill(window, theme.text)
 	if a.sessions != nil {
@@ -258,6 +259,20 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 		}
 		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: cells, height: 1})
 		col += cells
+	}
+	if a.nodeDetail && a.detailTab == tuiDetailShell {
+		label := "shell.mode: embedded · ● daemon"
+		if a.daemonDisconnected {
+			label = "shell.mode: embedded · ○ reconnecting"
+		} else if a.service == nil || a.service.daemonClient == nil {
+			label = "shell.mode: embedded · ○ local"
+		}
+		if width < 100 {
+			label = strings.TrimPrefix(label, "shell.mode: ")
+		}
+		cells := min(renderedTextWidth(a.vx, label), max(0, width-col-1))
+		tuiLine(bar.New(width-cells, 0, cells, 1), 0, label, theme.chrome)
+		return
 	}
 	if width < 100 {
 		connection := "●"
@@ -567,7 +582,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 		return "n new · 2 templates · 5 doctor · 0 scope · R re-check · : commands · ? help"
 	}
 	if a.state.focus == tuiFocusTerminal {
-		return "Shell receives all keys · F6 return to TUI"
+		return "F6 back to TUI · all other keys, including Alt+←/→, reach the shell"
 	}
 	if a.filterInput != nil {
 		return "status: template: dir: port: · Enter apply · Esc cancel"

@@ -255,13 +255,6 @@ type tuiRect struct {
 	height int
 }
 
-type tuiBodyLayout struct {
-	treeVisible bool
-	treeWidth   int
-	termCol     int
-	termWidth   int
-}
-
 func (r tuiRect) contains(col, row int) bool {
 	if r.width <= 0 || r.height <= 0 {
 		return false
@@ -274,35 +267,6 @@ func (r tuiRect) translateMouse(mouse vaxis.Mouse) vaxis.Mouse {
 	mouse.Col -= r.col
 	mouse.Row -= r.row
 	return mouse
-}
-
-func layoutTUIBody(width int, focus tuiFocus) tuiBodyLayout {
-	if focus == tuiFocusTerminal {
-		return tuiBodyLayout{
-			treeVisible: false,
-			treeWidth:   0,
-			termCol:     0,
-			termWidth:   width,
-		}
-	}
-
-	treeWidth := width / 3
-	if treeWidth < 28 {
-		treeWidth = 28
-	}
-	if treeWidth > 40 {
-		treeWidth = 40
-	}
-	if treeWidth > width-24 {
-		treeWidth = width - 24
-	}
-
-	return tuiBodyLayout{
-		treeVisible: true,
-		treeWidth:   treeWidth,
-		termCol:     treeWidth + 1,
-		termWidth:   width - treeWidth - 1,
-	}
 }
 
 func (a *vaxisTUIApp) renderedHyperlinkAt(col, row int) (string, bool) {
@@ -462,24 +426,13 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 	activeKey := a.state.activeSessionKey()
 	segments := make([]vaxis.Segment, 0, len(keys)*2)
 	for _, key := range keys {
-		session, ok := a.sessions.Session(key)
+		label, ok := a.terminalTabLabelForKey(key)
 		if !ok {
 			continue
 		}
 		if len(segments) > 0 {
 			segments = append(segments, vaxis.Segment{Text: " ", Style: inactiveStyle})
 		}
-		metadata := a.terminalMetadata(key)
-		if metadata.BellCount < session.acknowledgedBells {
-			session.acknowledgedBells = 0
-		}
-		if key == activeKey && a.sessions.windowFocused.Load() && !a.rightPaneShowsInfo() && !a.rightPaneOverrideActive() {
-			session.acknowledgedBells = metadata.BellCount
-		}
-		if metadata.BellCount <= session.acknowledgedBells {
-			metadata.BellCount = 0
-		}
-		label := terminalTabLabel(session, metadata)
 		if key == activeKey {
 			segments = append(segments, vaxis.Segment{Text: "[" + label + "]", Style: activeStyle})
 			continue
@@ -487,6 +440,24 @@ func (a *vaxisTUIApp) terminalTabSegments(activeStyle, inactiveStyle vaxis.Style
 		segments = append(segments, vaxis.Segment{Text: label, Style: inactiveStyle})
 	}
 	return segments
+}
+
+func (a *vaxisTUIApp) terminalTabLabelForKey(key string) (string, bool) {
+	session, ok := a.sessions.Session(key)
+	if !ok {
+		return "", false
+	}
+	metadata := a.terminalMetadata(key)
+	if metadata.BellCount < session.acknowledgedBells {
+		session.acknowledgedBells = 0
+	}
+	if key == a.state.activeSessionKey() && a.sessions.windowFocused.Load() && !a.rightPaneShowsInfo() && !a.rightPaneOverrideActive() {
+		session.acknowledgedBells = metadata.BellCount
+	}
+	if metadata.BellCount <= session.acknowledgedBells {
+		metadata.BellCount = 0
+	}
+	return terminalTabLabel(session, metadata), true
 }
 
 func terminalTabLabel(session *tuiSession, metadata TerminalMetadata) string {
@@ -565,6 +536,9 @@ func (a *vaxisTUIApp) draw() {
 	width, height := window.Size()
 	a.treeContentRect = tuiRect{}
 	a.terminalBodyRect = tuiRect{}
+	a.detailTargets = nil
+	a.nodeBackRect = tuiRect{}
+	a.embedded.clearTargets()
 	a.linkRegions = nil
 	if width < 60 || height < 14 {
 		window.Println(0, vaxis.Segment{Text: "CodeLima TUI requires at least 60x14 terminal cells."})
@@ -578,37 +552,15 @@ func (a *vaxisTUIApp) draw() {
 	a.vx.Render()
 }
 
-func tuiEmbeddedTerminalSize(width int, height int, focus tuiFocus) (cols, rows int) {
-	return tuiTerminalPaneBodySize(width, height, focus)
+// tuiEmbeddedTerminalSize is shared by initial session sizing and later resizes.
+// The manager header, identity, detail tabs, session strip, frame and footers
+// reserve thirteen rows and four columns; focus never changes that geometry.
+func tuiEmbeddedTerminalSize(width int, height int, _ tuiFocus) (cols, rows int) {
+	return max(0, width-4), max(0, height-13)
 }
 
-func (a *vaxisTUIApp) activeTerminalSize(width int, height int, _ tuiFocus) (cols, rows int) {
-	return max(0, width-2), max(0, height-9)
-}
-
-func tuiTerminalPaneBodySize(width int, height int, focus tuiFocus) (cols, rows int) {
-	if width <= 0 || height <= 0 {
-		return 0, 0
-	}
-
-	bodyTop := 1
-	bodyHeight := height - bodyTop - 1
-	if bodyHeight <= 0 {
-		return 0, 0
-	}
-
-	layout := layoutTUIBody(width, focus)
-	termWidth, termHeight := layout.termWidth, bodyHeight
-
-	rows = termHeight
-	if termHeight > 2 {
-		rows = termHeight - 2
-	}
-
-	if termWidth <= 0 || rows <= 0 {
-		return 0, 0
-	}
-	return termWidth, rows
+func (a *vaxisTUIApp) activeTerminalSize(width int, height int, focus tuiFocus) (cols, rows int) {
+	return tuiEmbeddedTerminalSize(width, height, focus)
 }
 
 func tuiSelectedStyle() vaxis.Style {

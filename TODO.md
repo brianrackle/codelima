@@ -144,10 +144,23 @@ remain: exercise the same controls on each supported native terminal. Advantage:
 qualifies launcher and keyboard behavior beyond this Linux VM. Disadvantage:
 requires platform-specific interactive environments. Session agent identity
 continues to depend on the recorded agent/session provenance work below; titles
-are not a reliable substitute. The Attached and Embedded artboards still need
-their dedicated presentation passes; reuse existing raw-attach and terminal
-owners to preserve process/focus behavior, at the cost of cross-mode regressions.
-These overlay checkpoints do not complete the full design.
+are not a reliable substitute. These checkpoints do not complete the full design.
+
+Embedded checkpoint (ADR 195): explicit opt-in visibility, a framed shared
+viewport, active-tab overflow, observed route context and identity-checked mouse
+controls are implemented. Focus, first/last mouse cells, search/copy, real guest
+and host shells, mode changes and disconnected controls are qualified in the
+ledger. Final native-terminal and whole-design qualification remains; exercise
+these controls in each supported native terminal. Advantage: validates input,
+clipboard and rendering beyond this VM. Disadvantage: needs those environments.
+
+The Attached artboard still needs its dedicated presentation pass. Preserve the
+raw VT relay and real-terminal ownership while adding node/session/detach
+context. Investigate terminal-native status areas and an attach-banner fallback,
+then qualify full-screen applications, resets, mouse/query replies and resize.
+Advantage: preserves the source's no-embedded-emulator contract. Disadvantage:
+a persistent portable header cannot simply be painted over raw terminal output;
+its fidelity and fallback require an explicit decision before completion.
 
 Source access resolved on 2026-10-24. The user's interactive Claude Code
 session could read the artifact with its `Artifact` tool; the headless

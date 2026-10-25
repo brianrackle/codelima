@@ -38,6 +38,9 @@ func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
 	if tab == tuiDetailMetrics && a.nodeStarting() {
 		tab = tuiDetailOverview
 	}
+	if tab == tuiDetailShell && !a.embeddedShellEnabled() {
+		tab = tuiDetailOverview
+	}
 	a.view, a.nodeDetail, a.detailTab, a.detailScroll = tuiViewNodes, true, tab, 0
 	a.state.focusTree()
 	a.state.treePaneMode = tuiTreePaneModeInfo
@@ -182,7 +185,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			a.switchRecipeKind(!a.environmentsView)
 		case a.nodeDetail:
 			delta, count := 1, 4
-			if len(a.state.sessions.TargetSessionKeys(a.state.selectedEntry().key())) > 0 {
+			if a.embeddedShellEnabled() {
 				count = 5
 			}
 			if key.Modifiers&vaxis.ModShift != 0 {
@@ -403,6 +406,9 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 }
 
 func (a *vaxisTUIApp) openEmbeddedShell(host bool) error {
+	if !a.embeddedShellEnabled() {
+		return fmt.Errorf("embedded terminal is off; enable Settings › shell.mode")
+	}
 	var err error
 	if host {
 		err = a.openHostTerminalTab()

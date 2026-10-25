@@ -51,6 +51,7 @@ func TestTUIFocusToggleKeyLifecycle(t *testing.T) {
 						t.Fatal(err)
 					}
 					app := &vaxisTUIApp{ctx: ctx, service: service, state: state, sessions: sessions}
+					enableTestEmbeddedShell(app)
 					dispatch := func(key vaxis.Key) {
 						t.Helper()
 						if route == "handleKey" {

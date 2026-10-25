@@ -324,6 +324,12 @@ test-shell-chooser: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(SHELL_CHOOSER_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIManager(Shell|Palette|Menu)|TUIRaw|ManagedGuest|Shell|ResolveRawShell)' -count=1 -timeout=120s
 
+.PHONY: test-embedded-shell
+EMBEDDED_SHELL_TEST_FLAGS ?=
+test-embedded-shell: init
+	@mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(EMBEDDED_SHELL_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIEmbedded|TUIManager|TUIResize|TUIHostTerminal|TUIDrawActiveHost|TUITerminalTab|TUIShortcut|TUIHandleKeyOption|TUIFocusToggle|TUIHandleKeyF6|TUIBackgroundNodeOperation|TUIDrawTerminal)' -count=1 -timeout=120s
+
 .PHONY: test-fleet-evidence
 .PHONY: test-overview
 OVERVIEW_TEST_FLAGS ?=

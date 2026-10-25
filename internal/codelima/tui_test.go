@@ -646,7 +646,7 @@ func TestTUIDrawOmitsRedundantTerminalChrome(t *testing.T) {
 	}
 }
 
-func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
+func TestTUIDrawTerminalKeepsFrameOutsideContent(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -677,6 +677,7 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 		termEnv:  tuiEmbeddedTermEnv,
 	})
 
+	enableTestEmbeddedShell(app)
 	app.nodeDetail, app.detailTab = true, tuiDetailShell
 	app.draw()
 
@@ -684,8 +685,8 @@ func TestTUIDrawTerminalUsesFullWidthWithoutSideBorders(t *testing.T) {
 	if got := renderedCellGrapheme(t, vx, rect.col, rect.row); got != "s" {
 		t.Fatalf("expected terminal content to start at the left edge of the pane, got %q", got)
 	}
-	if got := renderedCellGrapheme(t, vx, rect.col, rect.row-1); got != "[" {
-		t.Fatalf("expected titled pane chrome at the top edge, got %q", got)
+	if got := renderedCellGrapheme(t, vx, rect.col, rect.row-1); got != "─" {
+		t.Fatalf("expected the frame outside terminal content, got %q", got)
 	}
 }
 
@@ -851,53 +852,17 @@ func segmentsText(segments []vaxis.Segment) string {
 	return text.String()
 }
 
-func TestLayoutTUIBodySplitsTreeAndTerminalWhenCollapsed(t *testing.T) {
+func TestTUITerminalPaneSizeUsesEmbeddedFrameGeometry(t *testing.T) {
 	t.Parallel()
-
-	layout := layoutTUIBody(120, tuiFocusTree)
-	if !layout.treeVisible {
-		t.Fatalf("expected tree to stay visible when terminal is not expanded")
-	}
-	if layout.treeWidth != 40 {
-		t.Fatalf("expected clamped tree width 40, got %d", layout.treeWidth)
-	}
-	if layout.termCol != 41 {
-		t.Fatalf("expected terminal column 41, got %d", layout.termCol)
-	}
-	if layout.termWidth != 79 {
-		t.Fatalf("expected terminal width 79, got %d", layout.termWidth)
-	}
-}
-
-func TestLayoutTUIBodyHidesTreeWhenTerminalFocused(t *testing.T) {
-	t.Parallel()
-
-	layout := layoutTUIBody(120, tuiFocusTerminal)
-	if layout.treeVisible {
-		t.Fatalf("expected tree to be hidden when terminal is focused")
-	}
-	if layout.treeWidth != 0 {
-		t.Fatalf("expected hidden tree width 0, got %d", layout.treeWidth)
-	}
-	if layout.termCol != 0 {
-		t.Fatalf("expected terminal to start at column 0, got %d", layout.termCol)
-	}
-	if layout.termWidth != 120 {
-		t.Fatalf("expected terminal to expand to full width, got %d", layout.termWidth)
-	}
-}
-
-func TestTUITerminalPaneSizeUsesSinglePaneGeometry(t *testing.T) {
-	t.Parallel()
-
-	cols, rows := tuiTerminalPaneBodySize(120, 24, tuiFocusTerminal)
-	if cols != 120 || rows != 20 {
-		t.Fatalf("expected full terminal size 120x20, got %dx%d", cols, rows)
-	}
-
-	cols, rows = tuiTerminalPaneBodySize(120, 24, tuiFocusTree)
-	if cols != 79 || rows != 20 {
-		t.Fatalf("expected right-pane terminal size 79x20, got %dx%d", cols, rows)
+	for _, focus := range []tuiFocus{tuiFocusTerminal, tuiFocusTree} {
+		cols, rows := tuiEmbeddedTerminalSize(120, 24, focus)
+		if cols != 116 || rows != 11 {
+			t.Fatalf("expected framed terminal size 116x11, got %dx%d", cols, rows)
+		}
+		cols, rows = tuiEmbeddedTerminalSize(2, 10, focus)
+		if cols != 0 || rows != 0 {
+			t.Fatalf("undersized terminal returned invalid geometry %dx%d", cols, rows)
+		}
 	}
 }
 
@@ -2059,7 +2024,7 @@ func TestTUIStateSelectsCreatedNodeWithoutOpeningShellSession(t *testing.T) {
 	}
 }
 
-func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
+func TestTUIHandleKeyF6OpensEmbeddedShellDetail(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2081,6 +2046,7 @@ func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
 		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 	}, newFakeTUITerminal())
 
+	enableTestEmbeddedShell(app)
 	quit := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
 	if quit {
 		t.Fatalf("expected F6 to toggle terminal view, not quit")
@@ -2088,12 +2054,12 @@ func TestTUIHandleKeyF6TogglesFocusToTerminalAndHidesTree(t *testing.T) {
 	if app.state.focus != tuiFocusTerminal {
 		t.Fatalf("expected F6 to focus the terminal, got %q", app.state.focus)
 	}
-	if layout := layoutTUIBody(120, app.state.focus); layout.treeVisible {
-		t.Fatalf("expected terminal focus to hide the tree")
+	if !app.nodeDetail || app.detailTab != tuiDetailShell {
+		t.Fatal("expected terminal focus to open embedded Shell detail")
 	}
 }
 
-func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
+func TestTUIHandleKeyF6ReturnsManagerFocusWithinShellDetail(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -2113,6 +2079,8 @@ func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
 		state:    state,
 		sessions: newTUISessionStore(ctx, service, func(vaxis.Event) {}),
 	}
+	enableTestEmbeddedShell(app)
+	app.nodeDetail, app.detailTab = true, tuiDetailShell
 	putTestSession(app.sessions, nodeTargetKey("node-root"), &tuiSession{
 		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 	}, newFakeTUITerminal())
@@ -2124,8 +2092,8 @@ func TestTUIHandleKeyF6TogglesFocusBackToTreeAndShowsTree(t *testing.T) {
 	if app.state.focus != tuiFocusTree {
 		t.Fatalf("expected F6 to return focus to the tree, got %q", app.state.focus)
 	}
-	if layout := layoutTUIBody(120, app.state.focus); !layout.treeVisible {
-		t.Fatalf("expected tree focus to show the tree")
+	if !app.nodeDetail || app.detailTab != tuiDetailShell {
+		t.Fatal("expected manager focus to retain embedded Shell detail")
 	}
 }
 
@@ -2375,6 +2343,7 @@ func TestTUIDrawActiveHostTerminalTabRendersRedHeader(t *testing.T) {
 	if err := app.openHostTerminalTab(); err != nil {
 		t.Fatal(err)
 	}
+	enableTestEmbeddedShell(app)
 	app.nodeDetail, app.detailTab = true, tuiDetailShell
 	app.draw()
 
@@ -2385,7 +2354,7 @@ func TestTUIDrawActiveHostTerminalTabRendersRedHeader(t *testing.T) {
 	if got := renderedCellStyle(t, vx, 0, 0).Foreground; got != vaxis.ColorRed {
 		t.Fatalf("expected header to be red while a host terminal tab is active, got %#v", got)
 	}
-	if got := app.terminalBodyRect.row; got != 6 {
+	if got := app.terminalBodyRect.row; got != 8 {
 		t.Fatalf("expected terminal body to start below the normal top bar, got row %d", got)
 	}
 }
@@ -3891,6 +3860,7 @@ func TestTUIBackgroundNodeOperationDoesNotBlockNavigationOrTerminalFocus(t *test
 		t.Fatalf("expected selection to move to child-node, got %q", got)
 	}
 
+	enableTestEmbeddedShell(app)
 	quit := app.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
 	if quit {
 		t.Fatalf("expected Alt+` to keep the app running")

@@ -904,3 +904,13 @@ per frontend; diagnostic and log workers remain independent. Post results onto
 the event loop, fence shutdown completions, and retain saved evidence paths
 without replacing a different foreground view. Closing an evidence view does
 not cancel its capture; quitting the frontend does (ADR 181).
+
+## Framed terminal viewport and session-strip identity
+
+Keep terminal decoration outside the child window handed to the renderer.
+Share initial and resize dimensions (`tuiEmbeddedTerminalSize`) and derive the
+mouse rectangle from that child's actual origin and size. Focus changes must
+not change dimensions or create another terminal owner. Keep the active session
+visible by identity, with metadata and bell acknowledgement shared across tab
+presentations. Capture node/session/terminal IDs in mouse targets and revalidate
+them on click; an ended target must never select its replacement (ADR 195).

@@ -34,9 +34,73 @@ All example identities, metrics and timestamps in those files are reference data
 | [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping and final native qualification remain |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Grouped new/existing sessions, availability, captured attachment and saved defaults | Partial: dedicated responsive chooser and stable session shortcuts (ADR 194); live guest/host/window/tmux/embedded checks pass; final native/whole-design qualification remains |
 | [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+ADR 195 checkpoint, 2026-10-25: Shell detail is now explicitly gated by embedded
+mode, including its empty state. The themed session strip keeps the active tab
+visible through overflow and resizing. Host accents, titles, progress and bell
+acknowledgement share existing session metadata. The framed terminal reserves
+its own content rectangle; startup, resize and pointer translation use the same
+geometry. Focus controls sit outside guest cells. Mouse tabs retain node/session/
+terminal identities, while detail tabs and the Nodes breadcrumb are clickable.
+Known daemon disconnection refuses new guest and host launches. The footer
+advertises only current, authorized, ready live routes. Protocols remain 27/2/6/7.
+
+The focused race target passed (14.954s), including the opt-in, empty-state,
+overflow, resize, closed-target mouse, disconnected launch, forwarding freshness,
+manager, focus/key lifecycle, host and background-operation regressions. Existing
+fixtures now explicitly enable embedded mode where they test its behavior.
+`go doc` checked the window and canonical node-target APIs; `gopls` reported no
+errors after replacing an accidental production reference to a test helper.
+Both production binaries built successfully before live verification.
+
+The rebuilt application was visually inspected and operated at 150×38 and
+80×24 in truecolor/ANSI. Thirteen host tabs exercised overflow, active identity,
+mouse arrows and keyboard navigation; mouse creation added a fourteenth. Resize
+through 60×14 and the 40×10 minimum-size notice retained the selected session.
+The live focus label, detail tabs and breadcrumb worked. After switching between
+frontends, an explicit host focus report reclaimed the existing resize lease;
+the shell then reported the exact 146×25 content area. A raw mouse-reporting
+program received (1,1) and (146,25) at the first/last framed cells. Clearing its
+screen did not erase the frame. A raw keyboard program received Alt-left/right,
+F7 and ordinary action characters unchanged; F6 returned to the TUI without
+entering the payload. Search found two expected matches, and a drag copied the
+exact selected string through OSC 52 into the isolated tmux clipboard. An
+inactive host tab displayed actual OSC title/progress (42%) and an unread bell.
+
+Settings opt-out hid Shell and refused F6. Opting in again preserved all 14
+session IDs; host PID 2225032 retained its variable. The disposable guest reached
+running with completed bootstrap in 4m53s. Its embedded shell (PID 3198) accepted
+commands, retained its variable and reported 25 rows/146 columns. A real HTTP
+server on guest port 5173 appeared as the observed forwarded address; an HTTP
+request through that address succeeded. Stopping the service removed the live
+route. Suspending only the fixture daemon suppressed stale forwarding, dimmed
+both launch controls and refused their actions. Recovery retained the same
+15 sessions. After the guest stopped, the empty view explained guest
+unavailability; a new host shell still ran in the exact node directory and
+exited cleanly.
+
+All owned terminals, guest, daemon and frontends were stopped. A command and
+environment process audit found no remaining fixture processes. The read-only
+base image hash was unchanged; the owned 256 MiB tmpfs was unmounted, removing
+its overlay, metadata, screenshots, clipboard state and verification scripts.
+Interactive Claude Code in this VM again read the live artifact with its
+Artifact tool (HTTP 200, 49 files); its canvas matched the retained version.
+The Claude session exited normally and its project-local scratch was removed.
+Full `make verify test-race test-integration` passed with exit 0 after cleanup:
+core unit 86.083s, core race 116.810s and CLI integration 17.685s, plus formatting,
+lint, Vaxis checks and both builds. Lint identified a now-unused split-pane
+layout helper; it and its obsolete layout-only assertions were removed, with
+current detail/focus and framed-geometry tests retained. Final `gopls` reported
+only existing modernization suggestions. The final owned-process audit was
+empty. Removed 39 new inactive exact INPUTRC files; preserved 1015
+older/active/other files. No new Lima cache files were found. Test work directories
+and all 12 stage logs were removed; existing baseline cleanup debt is unchanged.
+
+The Attached artboard's presentation and the full native/whole-design QA matrix
+remain open in TODO #57. This checkpoint does not complete the full design.
 
 ADR 194 checkpoint, 2026-10-25: the dedicated shell chooser now separates new
 sessions from exact existing attachments, shows launcher/readiness availability,

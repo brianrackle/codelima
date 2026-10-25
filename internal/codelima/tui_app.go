@@ -127,6 +127,10 @@ type vaxisTUIApp struct {
 	clipboardPush     func(string) error
 	treeContentRect   tuiRect
 	terminalBodyRect  tuiRect
+	embedded          tuiEmbeddedShellState
+	detailTargets     []tuiDetailTarget
+	detailNodeID      string
+	nodeBackRect      tuiRect
 	// drawPasses counts full-screen rebuilds. It is owned by the event loop
 	// like every other field here; only the redraw-coalescing test reads it.
 	drawPasses int
@@ -1149,6 +1153,9 @@ func (a *vaxisTUIApp) terminalContextEntry() tuiTreeEntry {
 }
 
 func (a *vaxisTUIApp) openTerminalTab() error {
+	if a.daemonDisconnected {
+		return fmt.Errorf("daemon disconnected; wait for reconnection before opening a shell")
+	}
 	entry := a.terminalContextEntry()
 	if !entry.valid() {
 		return fmt.Errorf("select a node to open a terminal tab")
@@ -1164,6 +1171,9 @@ func (a *vaxisTUIApp) openTerminalTab() error {
 }
 
 func (a *vaxisTUIApp) openHostTerminalTab() error {
+	if a.daemonDisconnected {
+		return fmt.Errorf("daemon disconnected; wait for reconnection before opening a shell")
+	}
 	entry := a.terminalContextEntry()
 	if _, err := a.state.openHostTerminalTabEntry(entry); err != nil {
 		return err

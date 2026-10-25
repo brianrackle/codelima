@@ -717,6 +717,14 @@ host tab, `w` to close, or `F7` to search. Tab creation/closing and focus change
 act once per press; navigation and text editing repeat while held. Releases
 from a focus-changing key cannot act on the newly opened form or shell.
 
+The Shell detail is visible only in embedded mode, even when no sessions are
+open. Its session strip keeps the active tab visible when resized; host tabs
+have coral accents. Click a session, the guest/host creation controls, the focus
+label, another detail tab or the Nodes breadcrumb to navigate. The focus label
+sits outside the terminal content. Forwarding status reflects current route
+observations and explicitly reports unavailable or stale data. Switching away
+from embedded mode hides Shell and returns to Overview without closing sessions.
+
 Inside forms, use `Tab`, `Up`, and `Down` to move between fields, `Enter` or
 `Right` to open choices, `Ctrl+s` to submit, and `Esc` to cancel. The Create
 Node form proposes the current directory and its slug-safe leaf name. These

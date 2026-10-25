@@ -25,6 +25,7 @@ func TestTUIResizeUpdatesScreenAndTerminalTogether(t *testing.T) {
 			vx := newRenderTestVaxis(t, 100, 24)
 			t.Cleanup(vx.Close)
 			app := &vaxisTUIApp{ctx: ctx, service: service, state: state, sessions: sessions, vx: vx}
+			enableTestEmbeddedShell(app)
 			switch mode {
 			case "tree":
 				state.focus = tuiFocusTree

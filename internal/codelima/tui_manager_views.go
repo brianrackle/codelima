@@ -150,11 +150,17 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 	if a.state.focus == tuiFocusTerminal {
 		a.detailTab = tuiDetailShell
 	}
-	tuiLine(win.New(2, 2, width-4, 1), 0, "‹ Nodes / "+record.Node.Slug+"  ·  "+record.Status, theme.mint)
+	if a.detailTab == tuiDetailShell {
+		a.drawEmbeddedIdentity(win.New(2, 2, width-4, 1), record, theme)
+	} else {
+		tuiLine(win.New(2, 2, width-4, 1), 0, "‹ Nodes / "+record.Node.Slug+"  ·  "+record.Status, theme.mint)
+	}
 	tabs := []string{"Overview", "Metrics", "Logs", "Spec"}
-	if len(a.state.sessions.TargetSessionKeys(a.state.selectedEntry().key())) > 0 || a.detailTab == tuiDetailShell {
+	if a.embeddedShellEnabled() {
 		tabs = append(tabs, "Shell")
 	}
+	a.detailNodeID = record.Node.ID
+	a.nodeBackRect = tuiRect{col: 2, row: 2, width: 7, height: 1}
 	col := 2
 	for i, name := range tabs {
 		style := theme.muted
@@ -171,6 +177,7 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 		} else {
 			tuiLine(win.New(col, 3, cells, 1), 0, " "+name+" ", style)
 		}
+		a.detailTargets = append(a.detailTargets, tuiDetailTarget{rect: tuiRect{col: col, row: 3, width: min(cells, width-col), height: 1}, tab: tuiDetailTab(i)})
 		col += cells
 	}
 	body := win.New(1, 5, width-2, height-8)
@@ -191,14 +198,6 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 	case tuiDetailSpec:
 		a.drawNodeSpec(body, theme)
 	case tuiDetailShell:
-		body.PrintTruncate(0, a.terminalTabSegments(theme.selected, theme.muted)...)
-		surface := body.New(0, 1, width-2, max(0, height-9))
-		col, row := surface.Origin()
-		cols, rows := surface.Size()
-		a.terminalBodyRect = tuiRect{col: col, row: row, width: cols, height: rows}
-		if a.sessions != nil {
-			a.sessions.SetPreferredTerminalSize(cols, rows)
-		}
-		a.drawTerminalSurface(surface, tuiTreeEntry{node: record.Node}, theme.mint, theme.muted, theme.coral)
+		a.drawEmbeddedShell(body, record, theme)
 	}
 }

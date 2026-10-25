@@ -650,6 +650,29 @@ System daemon controls (ADR 181), in an isolated metadata home:
 7. Close fixture terminals/TUIs, stop the daemon and remove all diagnostic
    bundles, metadata, tmux state, screenshots, mounts and verification scripts.
 
+Embedded shell (ADR 195):
+
+1. With `shell.mode=attach`, existing raw sessions must not expose Shell detail;
+   F6 must explain the embedded opt-in. Enable embedded in Settings and inspect
+   Shell with zero sessions. A stopped/starting node permits host shells and
+   explains guest unavailability.
+2. At 150×38 and 80×24 in truecolor and ANSI, open enough host/guest sessions to
+   overflow the strip. Select them with `[`/`]`, mouse tabs and overflow arrows.
+   Verify observed titles/progress/bells, host coral accents and active identity
+   through resizing to 60×14, 40×10 and back. Click guest/host creation, focus,
+   detail tabs and the Nodes breadcrumb. A stale closed-session click must refuse.
+3. Run commands in each shell and verify F6 returns to TUI focus. Every other
+   key, including Alt arrows, must reach the shell while focused. Check mouse
+   selection/copy, search and application mouse coordinates at the terminal's
+   first/last content cells. No border/focus text may erase terminal output.
+4. Start a guest HTTP service and check the actual forwarded address. Stop it
+   and briefly disconnect only the fixture daemon; stale/unavailable routes
+   must not appear live and neither new-shell control may launch offline.
+5. Change mode away from embedded and back. Shell hides and focus returns to
+   Overview; re-entering preserves existing session IDs and shell variables.
+   Close all owned sessions, stop the guest/daemon/frontends and remove the
+   fixture, screenshots, mounts and verification-only state.
+
 Settings and shell choices (ADRs 152, 194):
 
 1. Open System, cycle Tab to Settings, and change shell mode with Enter. Quit and
