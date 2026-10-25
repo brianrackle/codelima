@@ -768,6 +768,17 @@ codelima node create \
   --port 15432:5432
 ```
 
+The daemon opens published TCP mappings after bootstrap and validation succeed,
+and relays them over the guest tunnel. Keep the daemon running while using these
+ports. A daemon restart or update ends existing TCP connections; clients can
+reconnect afterward. A published TCP mapping reserves its host port, so HTTP
+hostname multiplexing on the same port reports a conflict.
+
+Existing running nodes created with static Lima mappings keep those mappings.
+An explicit `codelima node stop NODE` followed by `codelima node start NODE`
+migrates them to daemon forwarding while preserving `HOST:GUEST` values. Until
+that migration, their static mappings do not wait for bootstrap readiness.
+
 Run `codelima --help` for the complete command surface and
 `codelima <group> <command> --help` for command flags. Put global flags before
 the command or path:

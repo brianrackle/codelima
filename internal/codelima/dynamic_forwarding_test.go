@@ -814,7 +814,7 @@ func TestDynamicForwarderRetriesTransportPreparationWithoutBlockingDaemon(t *tes
 
 func saveForwardingTestNode(t *testing.T, service *Service, sandboxName string) Node {
 	t.Helper()
-	node := Node{ID: newID(), Slug: sandboxName, DirectoryPath: t.TempDir(), SandboxName: sandboxName, Status: "created", LifecycleState: "created", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	node := Node{ID: newID(), Slug: sandboxName, DirectoryPath: t.TempDir(), SandboxName: sandboxName, Status: NodeStatusRunning, BootstrapCompleted: true, DaemonPortForwarding: true, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	if err := service.store.SaveNode(node, BootstrapState{}); err != nil {
 		t.Fatalf("SaveNode() error = %v", err)
 	}

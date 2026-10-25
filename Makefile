@@ -242,6 +242,13 @@ test-system-daemon: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima ./internal/codelima/daemon ./internal/diagnosticskill -run '^Test(DiagnoseTerminal|DaemonOverview|DaemonStop|DaemonControl|DaemonUpdate|DaemonDiagnostics|TUISystemDaemon|TUIDaemonControl)' -count=1 -timeout=90s
 
+.PHONY: test-ports
+PORTS_TEST_FILTER ?= ^Test(PublishedTCP|ForwardingReadiness|DynamicForward|RenderLimaTemplate|LimaForwarding|NodeForwarding)
+PORTS_TEST_FLAGS ?=
+test-ports: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(PORTS_TEST_FLAGS) ./internal/codelima -run '$(PORTS_TEST_FILTER)' -count=1 -timeout=120s
+
 test-system-doctor: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUIDoctor|TUIHost|TUIManagerSettings)' -count=1 -timeout=90s

@@ -646,23 +646,12 @@ func renderLimaTemplate(template []byte, node Node, goos, goarch string, nestedV
 	}
 	settings["mounts"] = mounts
 
-	validatedPorts, err := validatePorts(node.Ports)
-	if err != nil {
+	if _, err := validatePorts(node.Ports); err != nil {
 		return nil, err
 	}
-	portForwards := make([]any, 0, len(validatedPorts)+1)
-	for _, value := range validatedPorts {
-		parts := strings.Split(value, ":")
-		hostPort, _ := strconv.Atoi(parts[0])
-		guestPort, _ := strconv.Atoi(parts[1])
-		portForwards = append(portForwards, map[string]any{
-			"guestPort": guestPort, "hostPort": hostPort, "hostIP": "127.0.0.1", "proto": "tcp", "static": true,
-		})
-	}
-	portForwards = append(portForwards, map[string]any{
+	settings["portForwards"] = []any{map[string]any{
 		"guestIP": "0.0.0.0", "guestIPMustBeZero": false, "guestPortRange": []int{1, 65535}, "proto": "any", "ignore": true,
-	})
-	settings["portForwards"] = portForwards
+	}}
 
 	data, err := yaml.Marshal(settings)
 	if err != nil {

@@ -49,5 +49,16 @@ func (f *dynamicForwarder) overview() daemon.ForwardingOverview {
 			result.LapsedRoutes++
 		}
 	}
+	for port, server := range f.tcpServers {
+		// An overlapping HTTP route is already counted, although its listener
+		// is unavailable because raw TCP reserves the whole host port.
+		if f.servers[port] == nil {
+			result.Ports++
+		}
+		result.Listeners += len(server.listeners)
+		if f.publishedTCPStatusLocked(server) != "serving" && f.servers[port] == nil {
+			result.DegradedPorts++
+		}
+	}
 	return result
 }

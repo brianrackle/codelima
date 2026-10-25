@@ -402,14 +402,10 @@ audio:
 		t.Fatalf("ssh = %#v", sshSettings)
 	}
 	portForwards := rendered["portForwards"].([]any)
-	if len(portForwards) != 3 {
+	if len(portForwards) != 1 {
 		t.Fatalf("portForwards = %#v", portForwards)
 	}
-	first := portForwards[0].(map[string]any)
-	last := portForwards[2].(map[string]any)
-	if first["hostPort"] != 8080 || first["guestPort"] != 80 || first["static"] != true {
-		t.Fatalf("first port forward = %#v", first)
-	}
+	last := portForwards[0].(map[string]any)
 	if last["ignore"] != true || last["proto"] != "any" {
 		t.Fatalf("ignore-all rule = %#v", last)
 	}

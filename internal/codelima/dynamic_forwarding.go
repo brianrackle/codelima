@@ -720,6 +720,7 @@ type dynamicForwarder struct {
 	discovered     map[dynamicRouteKey]routeDiscoveryMemory
 	known          map[string]bool
 	servers        map[int]*dynamicPortServer
+	tcpServers     map[int]*publishedTCPServer
 	cpu            map[string]nodeCPUUsageSample
 	resources      map[string]nodeResourceUsageSample
 	counters       map[string]guestCPUCounters
@@ -820,6 +821,7 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 		targets = f.syncMembership(nodes, now)
 	}
 	f.reconcileTargets(ctx, targets)
+	f.reconcileTCPServers()
 	f.reconcileServers()
 	f.mu.Lock()
 	f.lastPoll = f.nowUTC()
@@ -906,6 +908,9 @@ func (f *dynamicForwarder) syncMembership(nodes []Node, now time.Time) []Node {
 			continue
 		}
 		state.node = node
+		if !applicationRoutesReady(node) {
+			f.removeNodeRoutesLocked(id, now)
+		}
 		if _, isRunning := running[id]; isRunning {
 			state.notRunningSince = time.Time{}
 			continue
@@ -1326,6 +1331,10 @@ func (f *dynamicForwarder) applyScanResult(node Node, peer forwardingPeer, ports
 	f.mu.Lock()
 	if state := f.nodes[node.ID]; state != nil {
 		state.noteHealthy(now)
+		node = state.node
+	}
+	if !applicationRoutesReady(node) {
+		ports = nil
 	}
 	for _, port := range ports {
 		key := dynamicRouteKey{node: strings.ToLower(node.SandboxName), port: port}
@@ -1470,6 +1479,10 @@ func (f *dynamicForwarder) reconcileServers() {
 		}
 	}
 	for port := range wanted {
+		if f.tcpServers[port] != nil {
+			f.servers[port] = &dynamicPortServer{port: port, status: "conflicted", lastErr: "host port reserved by a published TCP mapping"}
+			continue
+		}
 		if current := f.servers[port]; current != nil && current.status == "serving" {
 			continue
 		}
@@ -1721,8 +1734,9 @@ func (f *dynamicForwarder) Snapshot() map[string]any {
 
 	snapshot := map[string]any{
 		"enabled": true, "authorized": f.prepared, "routes": routes, "ports": ports,
-		"nodes": nodes, "peers": connected, "last_error": f.lastErr, "last_poll_at": f.lastPoll,
-		"degraded": f.inventoryErr != "" || anyLapsedRoute(f.routes),
+		"published_tcp": f.publishedTCPSnapshotLocked(),
+		"nodes":         nodes, "peers": connected, "last_error": f.lastErr, "last_poll_at": f.lastPoll,
+		"degraded": f.inventoryErr != "" || anyLapsedRoute(f.routes) || f.publishedTCPDegradedLocked(),
 	}
 	if !f.lastErrAt.IsZero() {
 		snapshot["last_error_at"] = f.lastErrAt
@@ -1752,6 +1766,8 @@ func (f *dynamicForwarder) Close() error {
 	f.wg.Wait()
 	f.mu.Lock()
 	servers := f.servers
+	tcpServers := f.tcpServers
+	f.tcpServers = nil
 	retired := make([]retiredPeer, 0, len(f.nodes))
 	for _, state := range f.nodes {
 		if state.peer != nil || state.monitor != nil {
@@ -1769,6 +1785,9 @@ func (f *dynamicForwarder) Close() error {
 	f.routes = map[dynamicRouteKey]*dynamicForwardingRoute{}
 	f.mu.Unlock()
 	var closeErr error
+	for _, server := range tcpServers {
+		server.close()
+	}
 	for _, server := range servers {
 		if server.server != nil {
 			closeErr = errors.Join(closeErr, server.server.Close())

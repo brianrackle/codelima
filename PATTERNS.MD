@@ -381,7 +381,15 @@ filesystem so a host workspace mount is not confused with VM-disk consumption.
 Reject malformed, overflowing, or used-greater-than-total values independently
 so one missing metric does not disrupt listener discovery or the other metrics.
 
-Explicit `HOST:GUEST` ports remain an advanced raw-TCP escape hatch selected at node creation. They are validated and frozen in the rendered Lima instance template.
+Explicit `HOST:GUEST` ports remain an advanced raw-TCP escape hatch selected at
+node creation and frozen in node metadata. The daemon owns their listeners and
+uses the same guest tunnel as discovery (ADR 182). Gate application routes on
+bootstrap/lifecycle readiness without gating probes. Close listeners and cancel
+dials outside the forwarder mutex; track and drain accepted connections, preserve
+TCP half-close, and never close a shared peer from an individual relay. Reserve
+the whole host port for TCP and report overlapping HTTP routes as conflicted.
+Legacy Lima forwarding migrates through noninteractive `limactl edit` before
+booting a stopped node; never stop a running node merely to change ownership.
 
 ## Pressure-triggered host integration recovery
 

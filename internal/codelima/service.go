@@ -1076,6 +1076,7 @@ func (s *Service) createReservedNode(ctx context.Context, node Node, bootstrap B
 		return Node{}, createErr
 	}
 	cleanupInstance = true
+	_, node.DaemonPortForwarding = s.sandbox.(ApplicationForwardingRuntime)
 
 	if err := s.withLocks(ctx, []lockKey{lockNodes}, []string{node.ID}, func() error {
 		if err := s.store.SaveNode(node, bootstrap); err != nil {
@@ -1421,6 +1422,16 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 		if err := s.ensureNodeHostPortsAvailable(ctx, node); err != nil {
 			s.restoreNodeStatus(node.ID, previousStatus)
 			return Node{}, err
+		}
+		if runtime, ok := s.sandbox.(ApplicationForwardingRuntime); ok {
+			if err := runtime.PrepareApplicationForwarding(ctx, node); err != nil {
+				s.restoreNodeStatus(node.ID, previousStatus)
+				return Node{}, err
+			}
+			node.DaemonPortForwarding = true
+			if err := s.withLocks(ctx, nil, []string{node.ID}, func() error { return s.store.SaveNode(node, bootstrap) }); err != nil {
+				return Node{}, err
+			}
 		}
 		s.logRuntime("start", node.ID)
 		bootService := s
@@ -1854,30 +1865,31 @@ func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNod
 		}
 
 		cloneTarget = Node{
-			ID:                 newID(),
-			Slug:               childNodeSlug,
-			ConfigurationID:    sourceNode.ConfigurationID,
-			ConfigurationSlug:  sourceNode.ConfigurationSlug,
-			DirectoryPath:      sourceNode.DirectoryPath,
-			ParentNodeID:       sourceNode.ID,
-			Runtime:            RuntimeVM,
-			Provider:           ProviderLima,
-			SandboxName:        sandboxName,
-			Image:              sourceNode.Image,
-			VCPUs:              sourceNode.VCPUs,
-			MemoryMiB:          sourceNode.MemoryMiB,
-			DiskMiB:            sourceNode.DiskMiB,
-			Environments:       append([]string(nil), sourceNode.Environments...),
-			Ports:              append([]string(nil), sourceNode.Ports...),
-			Status:             NodeStatusCreated,
-			AgentProfileName:   sourceNode.AgentProfileName,
-			RuntimeCommands:    sourceNode.RuntimeCommands,
-			BootstrapCommands:  append([]string(nil), sourceNode.BootstrapCommands...),
-			WorkspaceMode:      nodeWorkspaceMode(sourceNode),
-			GuestWorkspacePath: sourceNode.GuestWorkspacePath,
-			WorkspaceMountPath: sourceNode.WorkspaceMountPath,
-			WorkspaceSeeded:    sourceNode.WorkspaceSeeded,
-			ImportHostAuth:     sourceNode.ImportHostAuth,
+			ID:                   newID(),
+			Slug:                 childNodeSlug,
+			ConfigurationID:      sourceNode.ConfigurationID,
+			ConfigurationSlug:    sourceNode.ConfigurationSlug,
+			DirectoryPath:        sourceNode.DirectoryPath,
+			ParentNodeID:         sourceNode.ID,
+			Runtime:              RuntimeVM,
+			Provider:             ProviderLima,
+			SandboxName:          sandboxName,
+			Image:                sourceNode.Image,
+			VCPUs:                sourceNode.VCPUs,
+			MemoryMiB:            sourceNode.MemoryMiB,
+			DiskMiB:              sourceNode.DiskMiB,
+			Environments:         append([]string(nil), sourceNode.Environments...),
+			Ports:                append([]string(nil), sourceNode.Ports...),
+			DaemonPortForwarding: sourceNode.DaemonPortForwarding,
+			Status:               NodeStatusCreated,
+			AgentProfileName:     sourceNode.AgentProfileName,
+			RuntimeCommands:      sourceNode.RuntimeCommands,
+			BootstrapCommands:    append([]string(nil), sourceNode.BootstrapCommands...),
+			WorkspaceMode:        nodeWorkspaceMode(sourceNode),
+			GuestWorkspacePath:   sourceNode.GuestWorkspacePath,
+			WorkspaceMountPath:   sourceNode.WorkspaceMountPath,
+			WorkspaceSeeded:      sourceNode.WorkspaceSeeded,
+			ImportHostAuth:       sourceNode.ImportHostAuth,
 			// A clone copies the source's disk, so whatever the source imported
 			// is already inside the image the child boots from. Inheriting the
 			// completed marker is therefore the only correct answer: re-running

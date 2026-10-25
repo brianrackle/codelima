@@ -421,6 +421,28 @@ Verify generic `localhost`, `127.0.0.1`, and the second node's explicit hostname
 
 On a node with an IPv6-capable HTTP test server, repeat the request on an unused port with the guest server bound only to `::1`. Verify `http://localhost:{port}`, `http://127.0.0.1:{port}`, and `http://{node}.localhost:{port}` return the service response instead of a 502. The daemon log should show neither address failing after the successful IPv6 fallback.
 
+### Published TCP readiness and migration (ADR 182)
+
+Use a disposable node with `--port 15432:5432`. During bootstrap, start a guest
+loopback TCP service on 5432 and pause before the final validation succeeds.
+Verify neither host loopback accepts connections to 15432, while node telemetry
+continues. After readiness, send binary data and half-close the host write side;
+verify the service can return its complete response after receiving EOF.
+Check `daemon snapshot` under `published_tcp` for the actual host/guest mapping.
+
+Exercise a failed bootstrap/retry, an occupied IPv6 host port (no partial IPv4
+bind), release/recovery, lost guest tunnel, confirmed stop and daemon restart.
+During a degraded tunnel the host listener remains reserved; new TCP connections
+close until recovery. Stop and restart end established connections. A discovered
+HTTP route overlapping 15432 must report conflict, never claim named routing.
+
+For migration, use an isolated pre-change node with a static Lima mapping.
+While it is running, verify ordinary refresh and `node start` neither edit its
+Lima configuration nor restart it. Stop and start explicitly; verify only
+application forwarding rules change, `daemon_port_forwarding` persists as true,
+the frozen HOST:GUEST mapping remains, and routing now follows readiness.
+Remove the disposable node, processes, logs and metadata after verification.
+
 ## Flow 7: path-scoped fleet manager
 
 Raw shell attachment checks (ADR 151):

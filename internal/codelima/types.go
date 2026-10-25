@@ -134,30 +134,34 @@ type RuntimeObservation struct {
 }
 
 type Node struct {
-	ID                 string                  `json:"id" yaml:"id"`
-	Slug               string                  `json:"slug" yaml:"slug"`
-	ConfigurationID    string                  `json:"configuration_id" yaml:"configuration_id"`
-	ConfigurationSlug  string                  `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
-	DirectoryPath      string                  `json:"directory_path" yaml:"directory_path"`
-	ParentNodeID       string                  `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
-	Runtime            string                  `json:"runtime" yaml:"runtime"`
-	Provider           string                  `json:"provider" yaml:"provider"`
-	SandboxName        string                  `json:"sandbox_name" yaml:"sandbox_name"`
-	Image              string                  `json:"image" yaml:"image"`
-	VCPUs              uint8                   `json:"vcpus" yaml:"vcpus"`
-	MemoryMiB          uint32                  `json:"memory_mib" yaml:"memory_mib"`
-	DiskMiB            uint32                  `json:"disk_mib" yaml:"disk_mib"`
-	Environments       []string                `json:"environments" yaml:"environments"`
-	Ports              []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
-	Status             NodeStatus              `json:"status" yaml:"status"`
-	LifecycleState     NodeStatus              `json:"-" yaml:"-"`
-	AgentProfileName   string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
-	RuntimeCommands    RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
-	BootstrapCommands  []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
-	WorkspaceMode      string                  `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
-	GuestWorkspacePath string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
-	WorkspaceMountPath string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
-	WorkspaceSeeded    bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
+	ID                string   `json:"id" yaml:"id"`
+	Slug              string   `json:"slug" yaml:"slug"`
+	ConfigurationID   string   `json:"configuration_id" yaml:"configuration_id"`
+	ConfigurationSlug string   `json:"configuration_slug,omitempty" yaml:"configuration_slug,omitempty"`
+	DirectoryPath     string   `json:"directory_path" yaml:"directory_path"`
+	ParentNodeID      string   `json:"parent_node_id,omitempty" yaml:"parent_node_id,omitempty"`
+	Runtime           string   `json:"runtime" yaml:"runtime"`
+	Provider          string   `json:"provider" yaml:"provider"`
+	SandboxName       string   `json:"sandbox_name" yaml:"sandbox_name"`
+	Image             string   `json:"image" yaml:"image"`
+	VCPUs             uint8    `json:"vcpus" yaml:"vcpus"`
+	MemoryMiB         uint32   `json:"memory_mib" yaml:"memory_mib"`
+	DiskMiB           uint32   `json:"disk_mib" yaml:"disk_mib"`
+	Environments      []string `json:"environments" yaml:"environments"`
+	Ports             []string `json:"ports,omitempty" yaml:"ports,omitempty"`
+	// DaemonPortForwarding records that Lima's static application forwards
+	// have been removed. Legacy running instances retain their old mappings
+	// until an explicit stop/start migrates them.
+	DaemonPortForwarding bool                    `json:"daemon_port_forwarding" yaml:"daemon_port_forwarding"`
+	Status               NodeStatus              `json:"status" yaml:"status"`
+	LifecycleState       NodeStatus              `json:"-" yaml:"-"`
+	AgentProfileName     string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
+	RuntimeCommands      RuntimeCommandTemplates `json:"runtime_commands,omitempty" yaml:"runtime_commands,omitempty"`
+	BootstrapCommands    []string                `json:"bootstrap_commands" yaml:"bootstrap_commands"`
+	WorkspaceMode        string                  `json:"workspace_mode,omitempty" yaml:"workspace_mode,omitempty"`
+	GuestWorkspacePath   string                  `json:"guest_workspace_path,omitempty" yaml:"guest_workspace_path,omitempty"`
+	WorkspaceMountPath   string                  `json:"workspace_mount_path,omitempty" yaml:"workspace_mount_path,omitempty"`
+	WorkspaceSeeded      bool                    `json:"workspace_seeded" yaml:"workspace_seeded"`
 	// ImportHostAuth is the creation-time answer to the host credential import,
 	// frozen exactly like image and resources: changing the settings default
 	// later never revisits an existing node. A record written before the field
@@ -194,6 +198,7 @@ type nodeFileWire struct {
 	DiskMiB              uint32                  `json:"disk_mib" yaml:"disk_mib"`
 	Environments         []string                `json:"environments" yaml:"environments"`
 	Ports                []string                `json:"ports,omitempty" yaml:"ports,omitempty"`
+	DaemonPortForwarding bool                    `json:"daemon_port_forwarding" yaml:"daemon_port_forwarding"`
 	LifecycleState       NodeStatus              `json:"lifecycle_state,omitempty" yaml:"lifecycle_state,omitempty"`
 	Status               NodeStatus              `json:"status,omitempty" yaml:"status,omitempty"`
 	AgentProfileName     string                  `json:"agent_profile_name" yaml:"agent_profile_name"`
@@ -270,6 +275,7 @@ func newNodeFileWire(node Node) nodeFileWire {
 		DiskMiB:              node.DiskMiB,
 		Environments:         append([]string(nil), node.Environments...),
 		Ports:                append([]string(nil), node.Ports...),
+		DaemonPortForwarding: node.DaemonPortForwarding,
 		LifecycleState:       nodeLifecycleState(node),
 		AgentProfileName:     node.AgentProfileName,
 		RuntimeCommands:      node.RuntimeCommands,
@@ -315,6 +321,7 @@ func (w nodeFileWire) node() Node {
 		DiskMiB:              w.DiskMiB,
 		Environments:         append([]string(nil), w.Environments...),
 		Ports:                append([]string(nil), w.Ports...),
+		DaemonPortForwarding: w.DaemonPortForwarding,
 		Status:               status,
 		LifecycleState:       lifecycleState,
 		AgentProfileName:     w.AgentProfileName,

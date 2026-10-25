@@ -266,17 +266,31 @@ a full restart also passed: boot was measured, all three bootstrap attempt
 IDs stayed unchanged, and validation reached attempt 3. This completes the
 earlier ready-node stop/start check. The existing operation protocol supplies
 reusable evidence but requires a wire upgrade and additional atomic phase writes.
-The failed-node port claim needs an actual forwarding readiness gate before the
-UI can say ports are held until ready.
-Explicit `Node.Ports` mappings currently become static Lima forwards as soon as
-the VM boots; dynamic discovery also admits listeners on provisioning/failed
-VMs. The Ports delivery must gate application routes independently of telemetry
-and coordinate explicit mappings with daemon ownership before claiming all ports
-wait for readiness. Centralizing mappings gives consistent lifecycle/ownership
-control, but must preserve host-to-guest port remapping and existing templates.
-Gating only discovery is smaller, but leaves static mappings active and cannot
-satisfy the full design promise. Until that work lands, the Failed view omits
-the unsupported “not forwarded until ready” claim.
+Ports delivery is in progress (ADR 182): discovery now gates application routes
+on completed bootstrap/lifecycle readiness, while retaining probes. Published
+TCP has a daemon relay with remapping, half-close, dual-stack bind rollback,
+degraded retention and confirmed-stop cleanup. New templates disable Lima static
+forwards; stopped-node starts migrate legacy configurations and persist ownership.
+Running legacy nodes intentionally retain their mappings until stop/start.
+Full verify, race and integration checks passed (core 72.242s/99.238s;
+integration 22.296s). The final TCP summary/connection-lock adjustments passed
+the focused race suite (2.001s); final fmt-check, lint, build and gopls checks
+passed, and the rebuilt CLI ran locally. Gopls reported only existing
+modernization suggestions in service/types; the new routing files are clean.
+Lima 2.1 manually accepted and validated the migration expression on an isolated
+template, preserving resources/image/mounts; its scratch directory was removed.
+Real-guest qualification is still pending. Required follow-up: typed cached Ports RPC/UI, observed process
+labels, persistent bare-host pins/claim order, raw-TCP Activity/handoff identity,
+legacy/restart-required labels, compact controls, and real two-guest routing QA.
+This supplies enforceable readiness for managed nodes, at the cost of daemon
+dependency and connection interruption during daemon replacement. Do not mark
+the Ports screen or its lifecycle readiness copy complete until those remaining
+contracts and visual/manual checks are finished.
+
+The Failed view still omits the universal “not forwarded until ready” claim:
+running legacy static mappings remain an exception. The remaining UI work must
+read the persisted forwarding marker and explain stop/start migration rather
+than making that claim for every node.
 
 Protocol 14 now provides the bounded shared Activity journal and merged
 request/completion/message history (ADR 165). Two-client socket tests cover

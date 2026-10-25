@@ -9,6 +9,12 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-ports` covers readiness without suppressing guest probes, published
+TCP remapping and half-close, cancellation, bind conflicts and recovery,
+confirmed-stop cleanup, legacy ownership and pre-boot migration (ADR 182).
+Use `make test-ports PORTS_TEST_FLAGS=-race` for the focused race run.
+Full Ports presentation and real-guest qualification remain in TODO #57.
+
 `make test-host-capacity` checks native capacity parsing, read-only volume
 sampling, global allocation across directory scopes, stale-response rejection,
 responsive System panels and settings navigation. It also cross-compiles the
