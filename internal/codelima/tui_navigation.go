@@ -305,6 +305,8 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 		} else if a.environmentIndex < len(a.managerData.environments) {
 			environment := a.managerData.environments[a.environmentIndex]
 			switch {
+			case key.MatchString("t"):
+				return a.submitEnvironmentTest(environment)
 			case key.MatchString("e"), key.MatchString("Enter"):
 				e := a.openEnvironmentEditor(environment, false)
 				if key.MatchString("Enter") {

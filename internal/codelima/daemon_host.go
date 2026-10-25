@@ -1335,7 +1335,7 @@ func runDaemon(ctx context.Context, service *Service) error {
 	// internal budget rather than a blanket request deadline.
 	server := daemon.NewServer(daemon.Config{
 		Home: service.cfg.MetadataRoot, Version: Version, Handler: host, Logger: service.log(),
-		Ready: host.startActivityEvents,
+		Ready: host.startOwnedWorkers,
 	})
 	host.wireServerLinks(server)
 	// A fresh daemon publishes from the moment it is wired: it has no adopted
@@ -2091,6 +2091,9 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			// Publish native transitions only after the committed response was
 			// sent, so a failed importer cannot announce successful recovery.
 			host.markServing()
+			// Teardown recovery performs runtime mutations; wait until the
+			// importer is committed before allowing it to own those effects.
+			host.startOwnedWorkers(ctx)
 			host.activityEvents.enqueue(activityMessageRequest{
 				Source: "daemon", Level: slog.LevelInfo,
 				Action: activityOpenDaemon, Success: true,

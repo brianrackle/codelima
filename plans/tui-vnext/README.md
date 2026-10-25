@@ -26,7 +26,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
-| [Templates · environments](reference/Environments.dc.html) | ADR 176 ordered drafts, shared command editor, external editing and recorded execution | Partial; disposable test run, dependency warning and final qualification pending |
+| [Templates · environments](reference/Environments.dc.html) | ADRs 176–177 ordered drafts, external editing, execution evidence and daemon-owned disposable tests | Partial; disposable runs verified, dependency warning and final artboard/native qualification pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -472,6 +472,59 @@ daemon/TUI, tmux window, homes, scripts, screenshots and test scratch were
 removed, including tmp/recipes and tmp/.go-work. Integration scratch was removed
 by its Make target. The older stepqa fixture remains separate cleanup debt.
 
-The disposable environment test-run action, dependency heuristic, final
-artboard/native qualification and the complete QA matrix remain open in TODO
-#57. This checkpoint does not complete the major-version redesign.
+The dependency heuristic, final artboard/native qualification and the complete
+QA matrix remain open in TODO #57. This checkpoint does not complete the
+major-version redesign.
+
+## Disposable environment runs (ADR 177)
+
+The daemon admits a frozen environment/xsmall recipe before side effects,
+reserves a private test node and owns cleanup independently of execution
+cancellation. Cleanup recovery never reruns commands and does not expire with
+ordinary history. The TUI t action opens live output in Activity; retained
+output can be reopened after deletion and late replies cannot steal navigation.
+
+Live 150×38/80×24 checks covered keyboard/mouse admission, streaming, scrolling,
+closing/reopening output, TUI quit/reopen during boot, completed output after
+deletion, last-run provenance and rejection of an empty recipe without a VM.
+The final UI identifies running tests by environment and hides cancellation
+on completed receipts. The TEST RUN section explains the disposable VM.
+
+Four actual Ubuntu 24.04 guests used the current xsmall resources and a
+project-local ext4 loop volume because the shared filesystem does not support
+the required Unix sockets. Success printed UID 0 and the private guest path,
+kept the admitted command despite a source edit and completed one attempt.
+Injected deletion failure survived daemon restart, then cleanup preserved
+success without another command attempt. Failure printed its marker, exited
+23 and left the second step pending with zero attempts. TUI K canceled a
+sleeping command after its first marker; its final marker was never printed.
+Both runs deleted their VM and private workspace and retained output.
+
+Restart during early boot recovered cleanup without a frontend request and
+kept execution interrupted with zero command attempts. Lima's three-minute
+shutdown fallback stopped that guest; the bounded cleanup attempt timed out
+and retried. Another injected deletion failure after restart retained the
+original boot output and line offsets. Removing the fault allowed automatic
+cleanup to finish. The created-only guard node's metadata and host marker
+remained unchanged through all four runs. The first successful boot required
+a scoped repair of Lima's stale guest-agent SSH forward; failure and cancellation
+boots recovered that forward themselves. This is nested Linux/aarch64 software
+emulation evidence, not complete native-platform qualification.
+
+Regression tests reproduce and fix loss of retained output on a failed cleanup
+after restart, stale retry text after successful cleanup and completed-test
+footer actions. Final `make test-environment-runs`, `make verify`,
+`make test-race` and `make test-integration` pass after all code changes.
+`gopls check` found no errors, only modernization suggestions. The final build
+also recovered a fixture receipt made pending after its VM had already been
+deleted: output was unchanged, no VM or command was recreated, and corrected
+completion details were visually checked at both sizes. An earlier build
+received SIGTERM while manual QA was active; the separate build and complete
+final gates with manual processes stopped passed.
+
+The guard VM, all isolated metadata/definitions/workspaces/receipts,
+daemon/TUI, tmux server/socket, `.l` mount and loop device/backing file,
+temporary `tmp/stepqa/bin/limactl` fault wrapper, screenshots, scripts, logs,
+`tmp/et` and Go test scratch were removed. The older stepqa fixture remains
+separate cleanup debt. The dependency warning, final artboard/native
+qualification, complete redesign and full QA matrix remain open in TODO #57.

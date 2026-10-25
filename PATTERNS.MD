@@ -711,3 +711,20 @@ An external command editor operates on one command block in private owned
 scratch, then returns to an unsaved draft. Parse executable arguments without
 shell evaluation, bound the returned file and clean up on every outcome. Reuse
 the pager's foreground suspend/resume path. See ADR 176.
+
+## Disposable operation cleanup
+
+Admit a server-generated frozen plan and durable cleanup intent before creating
+a disposable resource. Keep execution cancellation separate from cleanup
+cancellation. Recover teardown only, never commands whose partial effects are
+unknown. Preserve the original outcome and persist successful cleanup with the
+terminal receipt in one write. Verify exact resource ownership before deletion;
+a previously deleted runtime name may have been reused. Pending cleanup must
+not expire with ordinary history retention. Resume output from the retained
+tail and line offsets so recovery diagnostics cannot discard earlier command
+evidence. See ADR 177.
+
+Expose retained operation output by receipt identity rather than requiring a
+live node. Fence async output replies by the visible viewer instance. An
+ambiguous admission acknowledgment retains its original request ID; a typed
+definitive rejection can release it for a new request.

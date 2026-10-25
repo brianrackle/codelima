@@ -19,6 +19,10 @@ type NodeOperationPhase struct {
 }
 
 func initialNodeOperationPhases(kind string) []NodeOperationPhase {
+	if kind == "test-environment" {
+		phases := append(initialNodeOperationPhases("create"), initialNodeOperationPhases("start")...)
+		return append(phases, NodeOperationPhase{ID: "cleanup", Label: "Delete test VM", State: "pending"})
+	}
 	if kind == "start" || kind == "retry" {
 		return []NodeOperationPhase{
 			{ID: "prepare", Label: "Prepare", State: "pending"},
@@ -58,7 +62,7 @@ func (e *nodeOperationProgressError) Unwrap() error { return e.err }
 func (m *nodeOperations) advancePhase(operation *runningNodeOperation, id, detail string, skipped bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if operation.record.State != "running" {
+	if operation.record.State != "running" && !(id == "cleanup" && operation.record.EnvironmentTest != nil && operation.record.State == "canceling") {
 		return context.Canceled
 	}
 	index := -1

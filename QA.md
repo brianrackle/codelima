@@ -575,8 +575,29 @@ For the recipe catalogs, use an isolated home and disposable definitions:
   Deleted nodes can supply history but cannot count as current usage, and
   inherited clone receipts cannot claim a new execution.
 - Remove all disposable nodes, definitions, processes and files. Run
-  `make test-recipes`. The disposable test-run action and its Activity/cleanup
-  flow remain part of the unfinished redesign tracked in TODO #57.
+  `make test-recipes`.
+
+For disposable environment tests, use a separate metadata/Lima home:
+
+- Create a saved environment that prints a unique marker, root UID and working
+  directory, then sleeps. Press t (and click its footer action) at 150×38 and
+  80×24. Activity must show streamed output. Close/reopen the output, scroll to
+  older lines and resume following. Quit/reopen the TUI while it runs; the same
+  receipt continues. Existing nodes and their host files must be unchanged.
+- Complete a successful test and run a command that fails before a second marker.
+  Verify the outcome and stop-on-failure behavior. The VM and private workspace
+  must be deleted; retained output and last-run provenance remain accessible.
+- Cancel a running command with K. Teardown must still finish. Restart the
+  daemon with a test in progress; recovery cleans the VM and reports interrupted
+  execution without running commands again. Where practical, inject a runtime
+  deletion failure, observe pending cleanup, restore the runtime and verify
+  cleanup resumes while preserving the original command outcome.
+- Check the generated Lima config has no workspace mount or published ports,
+  host-auth import is disabled and no agent bootstrap is installed. Test with
+  an empty environment and confirm a clear rejection without creating a VM.
+- Remove all test definitions, retained fixture metadata, daemon/TUI processes,
+  Lima volumes, sockets, screenshots and scratch. Run
+  `make test-environment-runs`, `make verify` and `make test-race`.
 
 For Metrics, use a disposable running Linux guest:
 

@@ -124,6 +124,14 @@ responsive list/detail navigation, environment drafts and external-editor
 scratch cleanup (ADR 176). Run full verification and the recipe catalog flows
 in `QA.md` when changing the metadata snapshot or completion events.
 
+`make test-environment-runs` covers disposable environment execution, cancellation,
+requester disconnect, retained output and cleanup recovery (ADR 177). Changes
+require full verification and race tests, plus the real VM flow in `QA.md`.
+Ordinary daemon protocol 19 adds test admission/receipts and Activity output
+navigation. Session 2, handoff 6 and renderer 5 are unchanged. Inspect Go APIs
+with `make go-doc GO_DOC_ARGS='context.WithCancelCause'` and symbols/diagnostics
+with `make gopls GOPLS_ARGS='check internal/codelima/environment_test_run.go'`.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool
@@ -758,7 +766,7 @@ QA.md; offline tests do not establish outer-terminal permission behavior.
 `make test-terminal-attach` runs the native ANSI export, VT boundary, lease,
 input parser and real-PTY/socket regressions. `make verify` additionally checks
 the production binaries, all Go packages, lint and formatting. Ship current
-daemon protocol 18 and renderer protocol 5 together; attachment was introduced
+daemon protocol 19 and renderer protocol 5 together; attachment was introduced
 in protocols 8/4. Checkpoint envelope 2 adds the
 VT boundary state, and older envelopes use journal recovery. Native Ghostty
 remains pinned to the existing revision. Rebuild both binaries with `make build`

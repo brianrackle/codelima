@@ -250,6 +250,9 @@ process; device permissions and user membership are unchanged. Use
 Pass fixture variables after `env` in KVM_ARGS so they cross the sudo boundary.
 
 Run `make verify` for formatting, lint, tests and a build. Run
+`make go-doc GO_DOC_ARGS='context.WithCancelCause'` to inspect a Go API, or
+`make gopls GOPLS_ARGS='check internal/codelima/environment_test_run.go'` for
+source diagnostics. Use
 `make test-tui-input` for focused shortcut and input-lifecycle regressions, and
 `make test-tui-resize` for window resizing and terminal geometry regressions. To
 check a downloaded archive for the current platform, place it and its matching manifest together
@@ -369,6 +372,15 @@ it from a draft. `E` opens the selected block in `$EDITOR` (default `vi`) and
 returns to the draft for review. Ctrl-S in the command editor applies its edits;
 Ctrl-S in the environment draft saves. `R` reviews shipped built-in commands.
 The last-run line uses recorded node execution, and says when none is available.
+
+Press `t` on a saved environment to test its commands on a disposable xsmall VM.
+Activity opens the live output; `K` cancels execution and still deletes the VM.
+Esc closes the output while the test continues. Reopen its Activity row later
+to read retained output, including after VM deletion. The test uses a private
+empty workspace, imports no host credentials and publishes no ports. Its image
+and resources come from the current xsmall configuration. Cleanup retries after
+runtime errors and resumes after daemon restart without rerunning commands.
+If admission is unconfirmed, `t` on the same environment retries that request.
 
 For example, `/status:running template:small dir:"acme api"` combines filters.
 Selection follows node identity through sorting and refreshes. Missing metrics

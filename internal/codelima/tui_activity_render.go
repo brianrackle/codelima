@@ -196,6 +196,8 @@ func drawActivityHistoryRow(win vaxis.Window, row tuiActivityRow, dates, selecte
 
 func activityRowActionHint(row tuiActivityRow) string {
 	switch row.action {
+	case activityOpenOperation:
+		return "⏎ output"
 	case activityOpenTerminal:
 		return "⏎ attach"
 	case activityOpenHost, activityOpenDaemon:

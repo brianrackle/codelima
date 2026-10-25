@@ -9,6 +9,15 @@ import (
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 )
 
+// Recovery starts only after the daemon owns its process lock. It does not
+// depend on a frontend opening Activity or sending another operation request.
+func (h *daemonHost) startOwnedWorkers(ctx context.Context) {
+	h.startActivityEvents(ctx)
+	if _, err := h.nodeOperations(); err != nil {
+		h.service.log().Error("operation recovery could not start", "error", err)
+	}
+}
+
 func (h *daemonHost) nodeOperations() (*nodeOperations, error) {
 	h.operationsMu.Lock()
 	defer h.operationsMu.Unlock()
@@ -16,10 +25,7 @@ func (h *daemonHost) nodeOperations() (*nodeOperations, error) {
 		return nil, errNodeOperationsClosed
 	}
 	if h.operations == nil && h.operationsErr == nil {
-		h.operations, h.operationsErr = newNodeOperations(h.service)
-		if h.operations != nil {
-			h.operations.onChange = func() { h.broadcast(daemon.EventNodeOperationChanged, nil) }
-		}
+		h.operations, h.operationsErr = newNodeOperations(h.service, func() { h.broadcast(daemon.EventNodeOperationChanged, nil) })
 	}
 	return h.operations, h.operationsErr
 }

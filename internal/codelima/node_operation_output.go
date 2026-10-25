@@ -37,6 +37,16 @@ type nodeOperationOutput struct {
 
 func newNodeOperationOutput(manager *nodeOperations, operation *runningNodeOperation) *nodeOperationOutput {
 	w := &nodeOperationOutput{manager: manager, operation: operation, stop: make(chan struct{}), done: make(chan struct{})}
+	// Cleanup can resume on a later daemon. Continue the retained stream and
+	// its line offsets so another failed attempt cannot erase command evidence.
+	manager.mu.Lock()
+	w.lines = append([]string(nil), operation.record.Output...)
+	w.partial = []byte(operation.record.OutputPartial)
+	w.next = operation.record.OutputStart + uint64(len(w.lines))
+	manager.mu.Unlock()
+	for _, line := range w.lines {
+		w.bytes += len(line)
+	}
 	go func() {
 		defer close(w.done)
 		tick := time.NewTicker(time.Second)

@@ -5,10 +5,11 @@ import "strings"
 type activityAction string
 
 const (
-	activityOpenTerminal activityAction = "terminal"
-	activityOpenHost     activityAction = "host"
-	activityOpenPorts    activityAction = "ports"
-	activityOpenDaemon   activityAction = "daemon"
+	activityOpenOperation activityAction = "operation"
+	activityOpenTerminal  activityAction = "terminal"
+	activityOpenHost      activityAction = "host"
+	activityOpenPorts     activityAction = "ports"
+	activityOpenDaemon    activityAction = "daemon"
 )
 
 func validateActivityAction(request activityMessageRequest) error {

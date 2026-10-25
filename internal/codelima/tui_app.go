@@ -463,6 +463,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyCreateAdmission(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiEnvironmentTestAdmissionEvent:
+		a.applyEnvironmentTestAdmission(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiOperationOutputEvent:
+		a.applyOperationOutput(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiCreateIntentEvent:
 		a.applyCreateIntent(event)
 		a.requestRedraw()
@@ -526,6 +534,9 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 			a.requestRedraw()
 		}
 		a.startActivityLoad(false)
+		if v, ok := a.overlay.(*tuiOperationOutputView); ok {
+			v.load()
+		}
 		a.startMetricsLoad()
 		a.startLogsLoad(false)
 		a.startSpecLoad()

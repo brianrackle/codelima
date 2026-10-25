@@ -187,6 +187,10 @@ test-package-artifact: init
 gopls: init
 	$(GOPLS) $(GOPLS_ARGS)
 
+.PHONY: go-doc
+go-doc: init
+	$(GO) doc $(GO_DOC_ARGS)
+
 tidy: init
 	$(GO) mod tidy
 
@@ -226,6 +230,11 @@ test-terminal-attach: init
 .PHONY: test-create-node
 .PHONY: test-template-editor
 .PHONY: test-recipes
+.PHONY: test-environment-runs
+test-environment-runs: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(EnvironmentTest|NodeOperationsEnvironment|TUIEnvironmentTest)' -count=1 -timeout=90s
+
 test-recipes: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUIRecipe|TUIEnvironmentEditor|NodeSpec|EnvironmentConfig)' -count=1

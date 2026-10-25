@@ -126,6 +126,9 @@ func (a *vaxisTUIApp) applyActivityData(event tuiActivityDataEvent) {
 func activityOperationRow(op NodeOperation) tuiActivityRow {
 	row := activityRecordRow(activityOperationRecord(op, false))
 	row.kind, row.state, row.progress = op.Request.Kind, op.State, op.Progress
+	if op.EnvironmentTest != nil {
+		row.kind, row.node = "test", op.EnvironmentTest.EnvironmentSlug
+	}
 	if op.CurrentPhase != "" {
 		row.text += " · " + plainLogText(op.CurrentPhase)
 	}
@@ -366,6 +369,9 @@ func (a *vaxisTUIApp) openActivityNode() {
 		return
 	}
 	switch row.action {
+	case activityOpenOperation:
+		a.openOperationOutput(strings.TrimSuffix(row.id, ":requested"), NodeOperation{})
+		return
 	case activityOpenTerminal:
 		a.startActivityTerminal(row)
 		return

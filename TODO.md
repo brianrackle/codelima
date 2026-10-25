@@ -554,15 +554,35 @@ The created-only node, custom definitions, daemon/TUI, tmux window, isolated
 homes, captures, scripts and test scratch were removed. No disposable resource
 from this catalog work remains; the older stepqa cleanup debt is unchanged.
 
-Implement the environment `t` test action as a daemon-owned disposable xsmall
-operation with streamed Activity output and durable cleanup of its exact node,
-workspace and temporary definitions on success, failure, cancellation and
-daemon recovery. Reuse operation receipts and frozen bootstrap provenance;
-avoid a frontend goroutine whose exit can leave a guest behind. This gives
-reliable lifecycle ownership and meaningful last-run evidence, but needs an
-explicit test recipe without unrelated agent validation, cleanup recovery and
-more lifecycle/VM qualification. Add the reference's dependency warning using
-an explainable static check, clearly distinguishing a heuristic from execution.
+ADR 177 implements the environment `t` action using a daemon-owned disposable
+xsmall VM, frozen commands and durable cleanup. It creates no temporary global
+definitions, mounts no host workspace, imports no host credentials and publishes
+no ports. Activity retains output after deletion. Live 150×38/80×24 checks now
+cover admission, streaming, TUI quit/reopen, frozen commands despite source
+edits, empty-recipe rejection, success, exit-23 failure and K cancellation
+during a sleeping command. A failed first step never started the second.
+Restart recovered both successful execution awaiting cleanup and interrupted
+early boot without replay. Deletion failure after restart preserves original
+output; removing the fault finishes teardown automatically. All four test VMs
+and workspaces were removed, and the guard node and host marker stayed unchanged.
+The first boot needed a scoped Lima guest-agent forward repair; the next two
+boots recovered that forward themselves. Early-boot cleanup used Lima's
+three-minute forced-shutdown fallback after a bounded retry. These are nested
+Linux/aarch64 checks; native-platform qualification remains open.
+
+Final regression fixes preserve output/line offsets across cleanup recovery,
+clear stale retry phase text after success and correct completed-output actions.
+Final focused checks, full verify, race and integration pass; gopls reports no
+errors. The final build also recovered a pending receipt for an already-deleted
+VM without recreating it or rerunning a command. Corrected output and completion
+details passed wide/compact visual inspection. The guard VM, isolated home,
+definitions, workspaces, retained fixture receipts, daemon/TUI, tmux, `.l` mount
+and loop volume, `tmp/et`, test scratch and temporary `tmp/stepqa/bin/limactl`
+fault wrapper have been removed. The older stepqa fixture remains separate
+cleanup debt. Durable teardown avoids
+orphaned guests but retains a reservation and consumes resources until runtime
+deletion succeeds. Add the reference's dependency warning using an explainable
+static check, clearly distinguishing a heuristic from execution.
 
 Finish native terminal and exact artboard qualification, including generic
 child-modal mouse/presentation. Global catalog metadata currently uses the

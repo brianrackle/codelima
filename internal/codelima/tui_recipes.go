@@ -89,6 +89,7 @@ type tuiRecipeControl struct {
 	index  int
 }
 type tuiRecipesState struct {
+	tests                          map[string]*tuiEnvironmentTestIntent
 	configurationID, environmentID string
 	details                        bool
 	listScroll                     [2]int

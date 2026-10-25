@@ -25,12 +25,13 @@ var (
 )
 
 type NodeOperationRequest struct {
-	Origin string           `json:"origin,omitempty"`
-	ID     string           `json:"id"`
-	Kind   string           `json:"kind"`
-	Node   string           `json:"node,omitempty"`
-	Create *NodeCreateInput `json:"create,omitempty"`
-	Clone  *NodeCloneInput  `json:"clone,omitempty"`
+	Environment string           `json:"environment,omitempty"`
+	Origin      string           `json:"origin,omitempty"`
+	ID          string           `json:"id"`
+	Kind        string           `json:"kind"`
+	Node        string           `json:"node,omitempty"`
+	Create      *NodeCreateInput `json:"create,omitempty"`
+	Clone       *NodeCloneInput  `json:"clone,omitempty"`
 }
 
 func (r NodeOperationRequest) startsNode() bool {
@@ -38,23 +39,24 @@ func (r NodeOperationRequest) startsNode() bool {
 }
 
 type NodeOperation struct {
-	Progress      *NodeOperationProgress `json:"progress,omitempty"`
-	ID            string                 `json:"id"`
-	Request       NodeOperationRequest   `json:"request"`
-	NodeID        string                 `json:"node_id,omitempty"`
-	NodeSlug      string                 `json:"node_slug,omitempty"`
-	State         string                 `json:"state"`
-	CreatedAt     time.Time              `json:"created_at"`
-	FinishedAt    *time.Time             `json:"finished_at,omitempty"`
-	Error         string                 `json:"error,omitempty"`
-	ErrorCode     int                    `json:"error_code,omitempty"`
-	ErrorCategory string                 `json:"error_category,omitempty"`
-	Result        *NodeOperationResult   `json:"result,omitempty"`
-	Output        []string               `json:"output,omitempty"`
-	OutputStart   uint64                 `json:"output_start,omitempty"`
-	OutputPartial string                 `json:"output_partial,omitempty"`
-	CurrentPhase  string                 `json:"current_phase,omitempty"`
-	Phases        []NodeOperationPhase   `json:"phases,omitempty"`
+	EnvironmentTest *EnvironmentTestState  `json:"environment_test,omitempty"`
+	Progress        *NodeOperationProgress `json:"progress,omitempty"`
+	ID              string                 `json:"id"`
+	Request         NodeOperationRequest   `json:"request"`
+	NodeID          string                 `json:"node_id,omitempty"`
+	NodeSlug        string                 `json:"node_slug,omitempty"`
+	State           string                 `json:"state"`
+	CreatedAt       time.Time              `json:"created_at"`
+	FinishedAt      *time.Time             `json:"finished_at,omitempty"`
+	Error           string                 `json:"error,omitempty"`
+	ErrorCode       int                    `json:"error_code,omitempty"`
+	ErrorCategory   string                 `json:"error_category,omitempty"`
+	Result          *NodeOperationResult   `json:"result,omitempty"`
+	Output          []string               `json:"output,omitempty"`
+	OutputStart     uint64                 `json:"output_start,omitempty"`
+	OutputPartial   string                 `json:"output_partial,omitempty"`
+	CurrentPhase    string                 `json:"current_phase,omitempty"`
+	Phases          []NodeOperationPhase   `json:"phases,omitempty"`
 }
 
 type NodeOperationResult struct {
@@ -73,22 +75,31 @@ type runningNodeOperation struct {
 // The daemon's process lock supplies single-writer ownership of these files;
 // service liveness tokens still arbitrate with direct CLI/SDK operations.
 type nodeOperations struct {
-	service  *Service
-	onChange func()
-	dir      string
-	mu       sync.Mutex
-	closed   bool
-	records  map[string]*runningNodeOperation
-	workers  sync.WaitGroup
+	cleanupCtx    context.Context
+	cancelCleanup context.CancelFunc
+	service       *Service
+	onChange      func()
+	dir           string
+	mu            sync.Mutex
+	closed        bool
+	records       map[string]*runningNodeOperation
+	workers       sync.WaitGroup
 }
 
-func newNodeOperations(service *Service) (*nodeOperations, error) {
+func newNodeOperations(service *Service, onChange func()) (*nodeOperations, error) {
 	localService := *service
 	localService.daemonClient = nil
 	localService.operationConnect = nil
 	localService.operationPhase = nil
 	localService.operationReceipt = nil
-	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation)}
+	cleanupCtx, cancelCleanup := context.WithCancel(context.Background())
+	loaded := false
+	defer func() {
+		if !loaded {
+			cancelCleanup()
+		}
+	}()
+	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation), cleanupCtx: cleanupCtx, cancelCleanup: cancelCleanup, onChange: onChange}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -128,10 +139,42 @@ func newNodeOperations(service *Service) (*nodeOperations, error) {
 		}
 		m.records[id] = &runningNodeOperation{record: record}
 	}
+	var recovery []*runningNodeOperation
+	for _, operation := range m.records {
+		test := operation.record.EnvironmentTest
+		if test == nil || !test.CleanupPending {
+			continue
+		}
+		if err := m.service.validateEnvironmentTestPlan(test.Plan); err != nil {
+			return nil, err
+		}
+		if operation.record.NodeID != test.Plan.Node.ID || operation.record.Request.Kind != "test-environment" {
+			return nil, errors.New("test cleanup receipt has inconsistent node ownership")
+		}
+		if test.Outcome == "" {
+			test.Outcome, test.Error = "interrupted", errNodeOperationsClosed.Error()
+		}
+		operation.record.State, operation.record.FinishedAt = "running", nil
+		if err := m.persist(operation.record); err != nil {
+			return nil, err
+		}
+		operation.keys = environmentTestKeys(test)
+		recovery = append(recovery, operation)
+	}
+	loaded = true
+	for _, operation := range recovery {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		operation.cancel = cancel
+		m.workers.Add(1)
+		go func() { defer m.workers.Done(); m.runEnvironmentTest(ctx, operation, true) }()
+	}
 	return m, nil
 }
 
 func operationExpired(record NodeOperation, now time.Time) bool {
+	if record.EnvironmentTest != nil && record.EnvironmentTest.CleanupPending {
+		return false
+	}
 	if record.State == "running" || record.State == "canceling" {
 		return false
 	}
@@ -166,10 +209,15 @@ func (m *nodeOperations) normalize(request NodeOperationRequest) (NodeOperationR
 	if request.Origin != "" && request.Origin != "tui" && request.Origin != "cli" {
 		return request, Node{}, nil, invalidArgument("operation origin must be tui or cli", nil)
 	}
-	if (request.Kind != "create" && request.Create != nil) || (request.Kind != "clone" && request.Clone != nil) {
+	if (request.Kind != "create" && request.Create != nil) || (request.Kind != "clone" && request.Clone != nil) || (request.Kind != "test-environment" && request.Environment != "") {
 		return request, Node{}, nil, invalidArgument("operation inputs do not match its kind", nil)
 	}
 	switch request.Kind {
+	case "test-environment":
+		if request.Environment == "" || request.Node != "" {
+			return request, Node{}, nil, invalidArgument("environment is required and real nodes cannot be test targets", nil)
+		}
+		return request, Node{}, nil, nil
 	case "start", "retry", "stop", "delete", "clone":
 		query := request.Node
 		if request.Kind == "clone" {
@@ -224,6 +272,15 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 	if err != nil {
 		return NodeOperation{}, err
 	}
+	var environmentTest *EnvironmentTestState
+	if request.Kind == "test-environment" {
+		environmentTest, err = m.service.prepareEnvironmentTest(ctx, request.Environment)
+		if err != nil {
+			return NodeOperation{}, err
+		}
+		node = environmentTest.Plan.Node
+		keys = environmentTestKeys(environmentTest)
+	}
 	m.mu.Lock()
 	changed := false
 	defer func() {
@@ -254,7 +311,7 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 	if active >= 16 {
 		return NodeOperation{}, preconditionFailed("16 lifecycle operations are already running", nil)
 	}
-	record := NodeOperation{ID: request.ID, Request: request, NodeID: node.ID, NodeSlug: node.Slug, State: "running", CreatedAt: m.service.now()}
+	record := NodeOperation{ID: request.ID, Request: request, NodeID: node.ID, NodeSlug: node.Slug, State: "running", CreatedAt: m.service.now(), EnvironmentTest: environmentTest}
 	record.Phases = initialNodeOperationPhases(request.Kind)
 	if request.Kind == "create" && request.startsNode() {
 		record.Phases = append(record.Phases, initialNodeOperationPhases("start")...)
@@ -313,6 +370,10 @@ func (m *nodeOperations) pruneLocked() error {
 
 func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperation) {
 	defer m.workers.Done()
+	if operation.record.Request.Kind == "test-environment" {
+		m.runEnvironmentTest(ctx, operation, false)
+		return
+	}
 	output := newNodeOperationOutput(m, operation)
 	request := operation.record.Request
 	service := m.service.withIO(m.service.stdout, m.service.stderr)
@@ -484,6 +545,11 @@ func (m *nodeOperations) List() []NodeOperation {
 			record.Result = nil
 			record.Output, record.OutputPartial = nil, ""
 			record.Phases = nil
+			if record.EnvironmentTest != nil {
+				summary := *record.EnvironmentTest
+				summary.Plan = nil
+				record.EnvironmentTest = &summary
+			}
 			record.NodeSlug = boundedOperationText(record.NodeSlug, 1024)
 			record.Error = boundedOperationText(record.Error, 4096)
 			if record.FinishedAt != nil {
@@ -619,6 +685,7 @@ func (m *nodeOperations) Cancel(id string) error {
 func (m *nodeOperations) Close(ctx context.Context) error {
 	m.mu.Lock()
 	m.closed = true
+	m.cancelCleanup()
 	for _, operation := range m.records {
 		if operation.cancel != nil {
 			operation.cancel(errNodeOperationsClosed)

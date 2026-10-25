@@ -38,6 +38,25 @@ func TestNodeOperationsOutputDeliveryHandlesFastCompletionAndTailRotation(t *tes
 	}
 }
 
+func TestNodeOperationsOutputResumesRetainedStream(t *testing.T) {
+	s, _ := newTestService(t)
+	ops := testNodeOperations(t, s)
+	op := &runningNodeOperation{record: NodeOperation{ID: newID(), State: "running", OutputStart: 123, Output: []string{"retained command output"}, OutputPartial: "part"}}
+	ops.records[op.record.ID] = op
+	output := newNodeOperationOutput(ops, op)
+	t.Cleanup(func() { _ = output.Close() })
+	if _, err := output.Write([]byte("ial\ncleanup diagnostic\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := output.Close(); err != nil {
+		t.Fatal(err)
+	}
+	record, err := ops.Get(op.record.ID)
+	if err != nil || record.OutputStart != 123 || record.OutputPartial != "" || strings.Join(record.Output, "\n") != "retained command output\npartial\ncleanup diagnostic" {
+		t.Fatal("resuming output lost retained bytes or reset client offsets", record, err)
+	}
+}
+
 func TestNodeOperationsHistoryOrdersByObservedCompletion(t *testing.T) {
 	s, _ := newTestService(t)
 	operations := testNodeOperations(t, s)
@@ -337,7 +356,7 @@ func (s gatedOperationSandbox) Shell(ctx context.Context, node Node, identity gu
 
 func testNodeOperations(t *testing.T, service *Service) *nodeOperations {
 	t.Helper()
-	operations, err := newNodeOperations(service)
+	operations, err := newNodeOperations(service, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

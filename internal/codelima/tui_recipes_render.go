@@ -242,6 +242,10 @@ func (a *vaxisTUIApp) recipeDetailRows(t tuiTheme) (string, []tuiRecipeDetailRow
 		add("last run   "+environmentRunText(run, a.managerData.recipes.incompleteRuns[e.ID] || a.managerData.err != nil), runStyle)
 		add("", t.dim)
 		add("Edits affect future nodes. Existing nodes keep frozen commands.", t.dim)
+		add("", t.dim)
+		add("TEST RUN", t.muted)
+		add("t tests these commands on a disposable xsmall VM; output in Activity.", t.dim)
+		add("The VM is deleted afterward. Real nodes are unaffected.", t.dim)
 		if _, ok := builtInEnvironment(e.Slug); ok {
 			add("R restores the shipped commands for review.", t.dim)
 		}
@@ -359,8 +363,9 @@ func (a *vaxisTUIApp) drawRecipeActions(win vaxis.Window, t tuiTheme) {
 	case !a.environmentsView:
 		items = append(items, [2]string{"N", "new node"})
 	case a.recipes.details:
-		items = [][2]string{{"e", "edit"}, {"o", "add"}, {"D", "remove"}, {"E", "$EDITOR"}, {"R", "restore"}, {"details", "details"}}
+		items = [][2]string{{"e", "edit"}, {"t", "test"}, {"o", "add"}, {"D", "remove"}, {"E", "$EDITOR"}, {"R", "restore"}, {"details", "details"}}
 	default:
+		items = slices.Insert(items, 1, [2]string{"t", "test"})
 		items = append(items, [2]string{"o", "add"}, [2]string{"D", "remove"}, [2]string{"E", "$EDITOR"})
 	}
 	w, _ := win.Size()

@@ -1032,6 +1032,12 @@ func (s *Service) createNode(ctx context.Context, input NodeCreateInput) (_ Node
 	}
 	defer token.release()
 
+	return s.createReservedNode(ctx, node, bootstrap)
+}
+
+// createReservedNode completes a node whose identity and incomplete reference
+// were already reserved under the node lock and are protected by a live token.
+func (s *Service) createReservedNode(ctx context.Context, node Node, bootstrap BootstrapState) (_ Node, err error) {
 	cleanupNodeDir := true
 	cleanupInstance := false
 	defer func() {
@@ -1959,6 +1965,10 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "delete", Node: value})
 	}
+	return s.deleteNode(ctx, value, true)
+}
+
+func (s *Service) deleteNode(ctx context.Context, value string, hydrateConfiguration bool) (Node, error) {
 	if err := s.ensureReady(ctx, true); err != nil {
 		return Node{}, err
 	}
@@ -2002,8 +2012,10 @@ func (s *Service) NodeDelete(ctx context.Context, value string) (Node, error) {
 	}); err != nil {
 		return Node{}, err
 	}
-	if err := s.hydrateConfigurationSlug(&node); err != nil {
-		return Node{}, err
+	if hydrateConfiguration {
+		if err := s.hydrateConfigurationSlug(&node); err != nil {
+			return Node{}, err
+		}
 	}
 
 	if err := s.sandbox.Delete(ctx, node); err != nil {
