@@ -417,6 +417,13 @@ available bytes. Runtime, mount and nesting settings come from the selected
 Lima instance's configuration; workspace access is shown only for its matching
 mount. Missing settings remain `?`. The preview also includes creation/auth
 state and the Lima instance name. Marked rows include reported working tasks.
+The preview and Overview show each agent's recorded validation separately:
+`✓` is a successful check, `?` is missing evidence, and `↳` marks a result
+inherited from another node. “Validated as login user” requires the built-in
+version checks to have actually run on this node. Custom profile checks are
+labeled separately. Results describe the recorded execution, not continuous
+agent health; stale results are labeled and stopped nodes retain their history.
+Open Spec to inspect the frozen commands and execution records.
 Missing samples remain blank; wide memory and disk cells
 show observed used/total GiB with gauges, and compact cells show percentages.
 At 80 columns inactive views use their number, leaving space for connectivity

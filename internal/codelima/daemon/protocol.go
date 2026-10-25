@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 26 adds daemon-owned
-	// prompt idle timing and explicit stale terminal activity.
-	ProtocolVersion                = 26
+	// whenever a wire shape this protocol carries changes; 27 adds bounded
+	// selected-node agent validation evidence.
+	ProtocolVersion                = 27
 	SessionVersion                 = 2
 	HandoffVersion                 = 7
 	PreviousActivityHandoffVersion = 6

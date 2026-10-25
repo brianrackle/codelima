@@ -700,6 +700,14 @@ effective instance configuration. Match workspace host and guest paths before
 showing access mode; absent capability fields remain unknown. Fence the result
 by node identity and metadata revision (ADR 188).
 
+Project agent validation from frozen command/attempt records, not an overall
+successful start or current environment definition. Recheck command coherence
+on a local copy, preserve newer pending checks and earlier failed prerequisites,
+and distinguish inherited execution. Recognize exact built-in version commands
+for login-user claims; arbitrary profile checks stay labeled as such. Keep the
+projection selected-node-only and read-only, with no commands/output on the
+fleet wire and no guest I/O in rendering (ADR 190).
+
 Retain aggregate metric history once in a bounded daemon-owned ring. Use an epoch and timestamp cursor for incremental frontend reads, deep-copy observations across ownership boundaries, and preserve missing intervals. Optional detail probes share the existing guest transport, use bounded output and deadlines, coalesce concurrent requests, and never affect route health. Fence frontend responses by request serial and navigation generation; stop requesting detail when its view is hidden or paused (ADR 155).
 
 Bounded presentation animations stay inside the UI event loop. Derive their frame from monotonic elapsed time so delayed events cannot rewind visible state, keep changing text cell-width stable, and stop their ticker as soon as the terminal state is reached. When only a small fixed region changes, update that region and use the normal Vaxis diff render instead of clearing and rebuilding terminal, tree, and overlay surfaces. Keep pure elapsed-time-to-frame behavior separate from the event producer so progression tests do not sleep.

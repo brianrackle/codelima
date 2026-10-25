@@ -28,12 +28,22 @@ ledger. ADR 188 adds selected runtime/mount/nesting configuration, CPU
 average/peak and memory history, creation/auth/Lima identity, workspace access
 and per-target working task labels. ADR 189 adds daemon-owned prompt idle timing
 with accepted-input resets, renderer recovery and live-update continuity.
-Remaining fleet work: complete multi-agent validation and final wide/compact
-native artboard qualification. Add explicit validation evidence to its owning
-cache, then project it without guest I/O in renderers. Advantages: faithful,
-truthful cross-view presentation. Disadvantages: additional observation
-contracts, retention/staleness rules and responsive/native QA. These remain
-in the full #57 scope; unknown activity must not be inferred from titles.
+ADR 190 projects separate recorded agent checks into the selected preview and
+Overview, including pending, failed, inherited, custom-profile and unknown
+results. Final verify/race/CLI integration, focused race, Go API and gopls checks
+pass. Real guest version-check failure/retry and wide/compact UI checks pass;
+the design ledger records fixture-only cases and the cleanup audit.
+Remaining fleet work: final wide/compact native artboard qualification and the
+complete Overview interaction/layout. Reuse the shared evidence and add the
+design's session/route selection, actions and resource layout. Advantages:
+faithful cross-view presentation; disadvantages: additional focus, responsive
+layout and native QA work. These remain in the full #57 scope; unknown activity
+must not be inferred from titles.
+Final clone qualification must create inherited records through the Clone action
+and revalidate the child; this checkpoint exercised their presentation with
+metadata fixtures. Reuse a disposable stopped guest and compare parent/child
+step execution IDs. Advantage: verifies the complete interaction and provenance;
+disadvantage: additional guest/disk lifecycle and cleanup work.
 
 ADR 187 verification passed full unit/race/CLI integration, final verification,
 focused race and gopls checks. Isolated wide/compact TUI checks exercised retained
@@ -65,6 +75,7 @@ Final full verify/race/CLI integration and focused race/gopls checks pass.
 Verification cleanup follow-up: forced shell termination in existing tests can
 leave `.codelima-inputrc.*` files in the user home. ADR 189's checkpoint removed
 46 inactive, exact-content test files; older accumulated files were preserved.
+ADR 190 removed another 45 inactive, exact-content files from its verification.
 Suggested solution: use an explicit project-rooted temporary inputrc directory
 for test launches, add cleanup on shell termination and have test owners remove
 their files even after forced termination. Audit older files against active

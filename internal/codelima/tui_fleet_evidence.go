@@ -28,7 +28,7 @@ type tuiFleetEvidenceEvent struct {
 }
 
 func (a *vaxisTUIApp) fleetEvidenceVisible() bool {
-	return a.view == tuiViewNodes && !a.nodeDetail && a.fleet != nil
+	return a.view == tuiViewNodes && (!a.nodeDetail || a.detailTab == tuiDetailOverview) && a.fleet != nil
 }
 
 func (a *vaxisTUIApp) fleetEvidenceRequest() fleetEvidenceRequest {
@@ -44,6 +44,10 @@ func (a *vaxisTUIApp) fleetEvidenceRequest() fleetEvidenceRequest {
 		}
 	}
 	add(a.fleet.selectedID)
+	if a.nodeDetail {
+		request.RecentNode = a.fleet.selectedID
+		return request
+	}
 	for _, row := range a.fleet.viewport(max(1, a.treeContentRect.height)) {
 		add(row.NodeID)
 	}

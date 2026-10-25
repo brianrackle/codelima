@@ -23,6 +23,8 @@ type fleetPreviewEvidence struct {
 	RuntimeError  string                   `json:"runtime_error,omitempty"`
 	MetricsEpoch  string                   `json:"metrics_epoch,omitempty"`
 	History       []daemon.NodeMetricPoint `json:"history,omitempty"`
+	AgentChecks   []fleetAgentCheck        `json:"agent_checks,omitempty"`
+	AgentError    string                   `json:"agent_error,omitempty"`
 }
 
 // Optional local inspection: no runtime preparation, command execution or guest
@@ -62,8 +64,17 @@ func (c *LimaClient) InspectConfiguration(node Node) (fleetRuntimeEvidence, erro
 	return result, nil
 }
 
-func (h *daemonHost) fleetPreview(node Node) *fleetPreviewEvidence {
+func (h *daemonHost) fleetPreview(node Node, claimed bool) *fleetPreviewEvidence {
 	p := &fleetPreviewEvidence{NodeID: node.ID, NodeUpdatedAt: node.UpdatedAt}
+	bootstrap, err := h.service.store.LoadBootstrapState(node.ID)
+	if err != nil {
+		p.AgentChecks, p.AgentError = configuredFleetAgentChecks(node), fleetEvidenceError(err)
+	} else {
+		p.AgentChecks = summarizeFleetAgentChecks(node, bootstrap, claimed, h.service.now())
+		if bootstrap.AgentProfileName != node.AgentProfileName {
+			p.AgentError = "bootstrap profile does not match node"
+		}
+	}
 	if inspector, ok := h.service.sandbox.(runtimeConfigurationInspector); ok {
 		config, err := inspector.InspectConfiguration(node)
 		if err != nil {

@@ -9,13 +9,13 @@ All example identities, metrics and timestamps in those files are reference data
 
 | Surface | Required behavior | Status |
 |---|---|---|
-| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail added (ADR 188); prompt idle timing retained by ADR 189; complete agent validation and final qualification remain |
+| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail (ADR 188); prompt idle timing (ADR 189); per-agent recorded validation (ADR 190); final qualification remains |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); batch queue and final qualification remain |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
-| [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: selected identity/runtime and per-agent recorded checks refresh at both widths (ADR 190); full resource/session/route layout, actions and final qualification remain |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
@@ -37,6 +37,43 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+ADR 190 checkpoint, 2026-10-25: the selected preview and Overview now project
+separate frozen agent checks, including failed/pending, inherited, missing and
+custom-profile evidence. Ordinary protocol 27 carries the bounded projection;
+session 2, renderer 6 and handoff 7 are unchanged. Overview refreshes its selected
+node at both widths and cancels loading on other detail tabs. Compact panels
+wrap agent/result pairs, preserving a result when a profile name is long.
+
+The focused race suite passed after the loader and wrapping regressions
+(5.490s). Final `make verify test-race test-integration` passed (core unit
+82.058s, race 112.998s, CLI integration 17.721s), including format, lint,
+Vaxis and both builds. Go API inspection and gopls passed.
+
+Two rebuilt Linux frontends were operated and visually inspected at 150×38
+and 80×24 against a disposable QEMU/TCG guest. The built-in Codex check failed
+with exit 127 while the later profile check and Claude check remained pending;
+the preview retained that failure. Real Codex 0.164.0 and Claude Code 2.1.310
+binaries then executed as the guest login user. TUI retry completed both
+bootstrap checks and the final profile validation with exit zero. Both views
+showed the separate results and login-user label. Isolated metadata fixtures
+covered legacy/missing records, custom profile checks, inherited checks, a
+locally revalidated agent, and selection between a real node and a metadata-only
+child. Overview updated while remaining open. Daemon suspension labeled stale
+checks in both clients; recovery and live update preserved the execution
+records. Tab navigation, resize and stopped-node retained results passed.
+A final isolated metadata check edited a frozen command without a matching
+execution record: the wide preview and compact Overview removed success,
+left the stored evidence unchanged, and restored the marks when matching
+records returned. Its rendered unknown state was visually inspected.
+
+All owned guest/TUI/daemon processes, overlays, fixtures, copied binaries,
+captures, stores and the tmpfs were removed. The existing backing image's
+checksum was unchanged. These Linux checks do not complete the full Overview
+resource/session/route design, the other remaining artboards or final native
+qualification; the full redesign remains incomplete.
+Cleanup also removed 45 inactive, exact-content inputrc files generated since
+the previous checkpoint; older files were preserved.
 
 ADR 189 checkpoint, 2026-10-25: the daemon publisher now retains prompt idle
 intervals using positive shell integration and accepted PTY input. Ordinary

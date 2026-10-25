@@ -36,8 +36,11 @@ interruption and live claims, independent recent history, response fencing,
 cancellation, incomplete sources and explicit terminal activity (ADR 187).
 It also checks selected CPU/memory history, runtime configuration, workspace
 mount matching and preview response identity (ADR 188).
+Per-agent validation tests (ADR 190) cover real service execution records,
+failure/retry, pending suffixes, clones, legacy/edited records, configured
+profile checks, inert labels, read-only projection and responsive presentation.
 Use `FLEET_EVIDENCE_TEST_FLAGS=-race` for race checking. The current ordinary
-daemon protocol is **26**; update older daemons explicitly. Session protocol 2
+daemon protocol is **27**; update older daemons explicitly. Session protocol 2
 is unchanged; renderer protocol 6 and handoff protocol 7 include retained prompt
 idle metadata. The importer still accepts handoff 6 and preserves its Activity
 queue and baselines. Run the fleet evidence/session flows in

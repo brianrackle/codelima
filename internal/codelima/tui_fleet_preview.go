@@ -81,29 +81,32 @@ func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, 
 			auth = "auth imported"
 		}
 	}
-	agent := coalesce(node.AgentProfileName, "—")
-	if evidence, ok := a.fleetEvidence.snapshot.Nodes[node.ID]; ok && evidence.NodeUpdatedAt.Equal(node.UpdatedAt) && !a.fleetEvidenceStale() && evidence.Start != nil && evidence.Start.State == "succeeded" && node.BootstrapCompleted && record.Status == "running" {
-		agent += " · checks passed"
-	}
+	agents, checkNote := a.fleetAgentCheckSegments(node, theme)
 	fields := [][2]string{
 		{"status", status}, {"template", fmt.Sprintf("%s · %d vCPU", node.ConfigurationSlug, node.VCPUs)},
 		{"resources", fmt.Sprintf("%s mem · %s disk", formatTUIResourceSize(node.MemoryMiB), formatTUIResourceSize(node.DiskMiB))},
 		{"image", node.Image}, {"directory", node.DirectoryPath}, {"workspace", a.fleetWorkspaceLabel(node)},
-		{"runtime", a.fleetRuntimeLabel(node)}, {"agents", agent}, {"created", created + " · " + auth}, {"lima", node.SandboxName},
+		{"runtime", a.fleetRuntimeLabel(node)}, {"agents", ""}, {"checks", checkNote}, {"created", created + " · " + auth}, {"lima", node.SandboxName},
 	}
 	width, height := win.Size()
+	row := 0
 	for i, field := range fields {
-		if i >= height {
+		if row >= height {
 			break
 		}
-		tuiLine(win.New(0, i, 10, 1), 0, field[0], theme.dim)
+		tuiLine(win.New(0, row, 10, 1), 0, field[0], theme.dim)
+		if field[0] == "agents" {
+			row += a.drawFleetAgentChecks(win.New(10, row, max(0, width-10), height-row), agents)
+			continue
+		}
 		style := theme.text
 		if i == 0 {
 			style = statusStyle
 		} else if i == 1 {
 			style = theme.violet
 		}
-		tuiLine(win.New(10, i, max(0, width-10), 1), 0, field[1], style)
+		tuiLine(win.New(10, row, max(0, width-10), 1), 0, field[1], style)
+		row++
 	}
 }
 

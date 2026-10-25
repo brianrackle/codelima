@@ -642,6 +642,17 @@ diagnostics; they do not replace those manual qualifications.
   files must show unknowns, never defaults inferred from this host. Compare
   creation/auth and Lima name with frozen node metadata. At 80×24 the preview
   disappears cleanly while selection and compact metrics remain intact.
+- Agent validation (ADR 190): use a disposable node with both built-in agent
+  checks. Compare its recorded steps with the separate results in the 150×38
+  preview and Overview, and the 80×24 Overview. A failed earlier agent check
+  must not disappear behind a pending final profile validation. Retry and
+  compare the successful zero-exit records. A clone must identify inherited
+  checks; a local check can replace only its corresponding inherited result.
+  Verify missing records and edited commands show unknowns, custom profile
+  checks do not claim login-user execution, and stale results are labeled.
+  Navigate between nodes without mixing evidence. Use isolated metadata
+  fixtures for malformed/legacy states; do not edit shared execution records.
+  Clean up every owned fixture, session, daemon, guest and capture.
 - With disposable marked sessions, emit an explicit working progress signal
   and verify its task label appears on the corresponding marked row, including
   when that target is hidden. A title alone must not count as working. Cancel

@@ -127,7 +127,7 @@ func (h *daemonHost) handleFleetEvidence(ctx context.Context, raw json.RawMessag
 		}
 		result.Nodes[id] = evidence
 		if id == request.RecentNode {
-			result.Preview = h.fleetPreview(node)
+			result.Preview = h.fleetPreview(node, evidence.ClaimState == "active")
 		}
 	}
 	if request.RecentNode != "" {

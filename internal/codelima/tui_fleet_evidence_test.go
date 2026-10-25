@@ -14,6 +14,31 @@ import (
 	"go.rockorager.dev/vaxis"
 )
 
+func TestTUIFleetEvidenceOverviewRequestsOnlySelectedNodeAtEveryWidth(t *testing.T) {
+	for _, width := range []int{80, 150} {
+		a, _ := newTestManager(t, width, 24)
+		a.nodeDetail, a.detailTab = true, tuiDetailOverview
+		a.fleet.marks[a.fleet.selectedID] = true
+		request := a.fleetEvidenceRequest()
+		if !a.fleetEvidenceVisible() || request.RecentNode != a.fleet.selectedID || len(request.Nodes) != 1 || request.Nodes[0] != a.fleet.selectedID {
+			t.Fatalf("Overview at %d did not request its selected preview: %+v", width, request)
+		}
+		a.fleetEvidence.serial = 4
+		a.applyFleetEvidence(tuiFleetEvidenceEvent{serial: 4, request: request, snapshot: fleetEvidenceSnapshot{RecentNode: request.RecentNode}})
+		if !a.fleetEvidence.loaded || a.fleetEvidenceStale() {
+			t.Fatal("Overview response was discarded")
+		}
+		a.detailTab = tuiDetailMetrics
+		if a.fleetEvidenceVisible() || len(a.fleetEvidenceRequest().Nodes) != 0 {
+			t.Fatal("hidden preview kept requesting evidence")
+		}
+		a.applyFleetEvidence(tuiFleetEvidenceEvent{serial: 4, request: request, err: errors.New("late failure")})
+		if a.fleetEvidence.err != nil {
+			t.Fatal("hidden Overview accepted a late response")
+		}
+	}
+}
+
 func TestTUIFleetEvidenceFencesSelectionAndKeepsRecentIndependent(t *testing.T) {
 	a, _ := newTestManager(t, 150, 38)
 	a.draw()
