@@ -343,6 +343,20 @@ navigation/attachment while accepted work continues. A rejected admission keeps
 the form editable; an unconfirmed reply offers Ctrl-S to retry the same request.
 Esc asks before discarding edits.
 
+In Templates (`2`), `n` creates from `small`, `e` edits and `c` clones into the
+same full editor. Type resource values such as `20G`, or use Left/Right to step
+through sizes. Enter opens installed image or agent-profile choices. Space
+toggles an environment; Shift-Up/Down changes its execution order. `F2` opens
+the complete resolved preview at compact sizes. Existing nodes keep their
+frozen settings when you save.
+
+Enter on Bootstrap opens command blocks. Each block can contain multiple lines;
+paste preserves line breaks and literal tabs (shown as `⇥`).
+Tab switches blocks, Ctrl-N adds one, Ctrl-X removes one and Alt-Up/Down changes
+their order. Ctrl-S returns command edits to the template; Ctrl-S in the template
+saves it. Esc asks before discarding edits. `R` on a built-in template loads its
+defaults into the editor for review and saving; `small` cannot be renamed.
+
 For example, `/status:running template:small dir:"acme api"` combines filters.
 Selection follows node identity through sorting and refreshes. Missing metrics
 show `—`. Metric sorts place unavailable readings last and temporarily flatten

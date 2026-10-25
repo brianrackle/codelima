@@ -23,6 +23,9 @@ type Model struct {
 	Prompt  vaxis.Style
 	// HideCursor tells the textinput not to draw the cursor
 	HideCursor bool
+	// PreserveTabs retains literal tabs as one editable character, displayed
+	// as ⇥. Set before loading content; the default still expands tabs.
+	PreserveTabs bool
 
 	// invisibleChar, if set, will be displayed instead of the pressed keys
 	invisibleChar vaxis.Character
@@ -43,9 +46,23 @@ func (m *Model) SetPrompt(s string) *Model {
 }
 
 func (m *Model) SetContent(s string) *Model {
-	m.content = vaxis.Characters(s)
+	m.content = m.characters(s)
 	m.cursor = len(m.content)
 	return m
+}
+
+func (m *Model) characters(s string) []vaxis.Character {
+	if !m.PreserveTabs {
+		return vaxis.Characters(s)
+	}
+	var chars []vaxis.Character
+	for i, part := range strings.Split(s, "\t") {
+		if i > 0 {
+			chars = append(chars, vaxis.Character{Grapheme: "\t", Width: 1})
+		}
+		chars = append(chars, vaxis.Characters(part)...)
+	}
+	return chars
 }
 
 // SetInvisibleChar will use the first character of s to be displayed in the
@@ -80,7 +97,7 @@ func (m *Model) String() string {
 func (m *Model) Update(msg vaxis.Event) {
 	switch msg := msg.(type) {
 	case vaxis.PasteEndEvent:
-		chars := vaxis.Characters(string(m.paste))
+		chars := m.characters(string(m.paste))
 		m.content = slices.Insert(m.content, m.cursor, chars...)
 		m.cursor += len(chars)
 		m.paste = []rune{}
@@ -205,7 +222,7 @@ func (m *Model) Update(msg vaxis.Event) {
 				return
 			}
 			if msg.Text != "" {
-				chars := vaxis.Characters(msg.Text)
+				chars := m.characters(msg.Text)
 				for _, char := range chars {
 					m.content = slices.Insert(m.content, m.cursor, char)
 					m.cursor += 1
@@ -261,6 +278,9 @@ func (m *Model) Draw(win vaxis.Window) {
 	}
 
 	for i, char := range m.content {
+		if char.Grapheme == "\t" {
+			char.Grapheme = "⇥"
+		}
 		if i < m.offset {
 			continue
 		}

@@ -22,10 +22,10 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Partial: real Lima phases/output, cancellation and queued attachment verified at both sizes; final artboard qualification remains |
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions and VM inspection verified at both sizes; readiness-gated ports and final artboard qualification remain |
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
-| [Create node · template picker](reference/TemplatePicker.dc.html) | ADR 174 filter/details/new-template return | Partial; full editor/final live fidelity pending |
+| [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · configurations](reference/Templates.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
 | [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
@@ -389,5 +389,44 @@ the receipt became canceled only with the VM stopped and both runtime processes
 gone. No terminal existed. All form QA nodes/templates, terminals, daemon/TUI,
 homes, logs and captures were removed; the ext4 volume was unmounted, its loop
 device released and its sparse image removed.
-The nested editor still needs the full TemplateEdit presentation and controls;
-remaining qualification and the older stepqa cleanup debt are in TODO #57.
+The shared editor follow-up is recorded below. Remaining qualification and the
+older stepqa cleanup debt are in TODO #57.
+
+## Shared template editor (ADR 175)
+
+Templates create/edit/clone, Spec and the nested create picker now share one
+draft. Resource steps and typed sizes, installed image/profile choices, ordered
+environment checks, per-command multiline buffers, resolved preview, global
+frozen-node counts and reviewable built-in defaults use service data. Definition
+loads and saves remain outside the input loop and completion events are fenced
+to the originating editor. Compact windows scroll to the focused field and F2
+exposes wrapped execution steps, impact and changes.
+
+Live terminal verification at 150×38 and 80×24 covered invalid/duplicate names,
+all resource steps and typed `20G`, installed image/profile choices, toggling and
+reordering environments, command add/remove/reorder/apply/discard, long preview
+scrolling, default-name protection and restore markers. Real bracketed paste
+exposed missing control-key line breaks and tab expansion; regression tests and
+the corrected live paste now preserve Unicode, LF and tabs byte-for-byte.
+Literal tabs are shown as ⇥ and preview line breaks as ↵.
+
+A real created-only node retained its original 1 CPU/1 GiB/8 GiB and command
+order after editing its template. The next created-only node received
+2 CPUs/20 GiB/10 GiB and exactly six previewed steps: custom profile install,
+two reordered environments, two direct command blocks and profile validation.
+Neither VM was started. A clone saved empty environment/direct-command lists,
+mouse resource controls and environment toggles worked, `small` was restored,
+and creating through the picker returned with the new template selected while
+retaining the node name and `5432:5432` port draft.
+
+`make verify`, `make test-race`, `make test-integration`,
+`make test-template-editor`, `make test-vaxis-fork` and
+`make test-vaxis-upstream` passed. The last target runs the vendored repository's
+required `mise run check`, including formatting, custom lint and tests.
+`gopls check` reported no errors (only modernization suggestions).
+Both disposable nodes and their Lima directories, three custom templates,
+two environments, custom profile, daemon/TUI, tmux window, isolated homes,
+screenshots, logs and project-local test scratch were removed. The prior stepqa
+fixture remains separately recorded cleanup debt. Final manager-board fidelity,
+generic child-modal mouse/presentation and native qualification remain open;
+this does not qualify the complete redesign or the complete QA matrix.

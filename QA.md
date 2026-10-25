@@ -523,6 +523,29 @@ manual qualification.
   press/repeat/release lifecycles in both the decoded and legacy protocols.
 - `make test-tui-manager` exercises these model, input and rendering contracts.
 
+For the template editor, use an isolated home and disposable definitions:
+
+- At 150×38 and 80×24, open Templates → new/edit/clone. Edit names, step all
+  resources with Left/Right and type `20G`. Check image/profile lists and return
+  without losing edits. Invalid and duplicate names must keep the editor open.
+- Toggle two environments, reorder with Shift-Up/Down and inspect the resolved
+  preview, including custom agent install/validation commands. F2 and scrolling
+  must expose the complete preview in a compact window.
+- Enter Bootstrap, paste a multiline command with Unicode and literal tabs, add a second block,
+  reorder, remove, apply and reopen. Lines within a block must remain one command.
+  Reopen and verify tabs and line breaks survive without changing shell content.
+  Cancel dirty edits with both keep and discard choices. Clear all environments
+  and commands and verify the saved arrays are empty.
+- Save an edited template used by a disposable node. The notice must report
+  its frozen-node count; inspect the existing node's unchanged resources and
+  commands, then create another node and compare its new frozen order to the
+  preview. Delete both nodes afterward.
+- Modify a built-in, verify its modified marker, press R, review restored
+  defaults and save. `small` must reject renaming. From the new-node picker,
+  create a template with the same editor and return with it selected, retaining
+  the node form's values. Remove disposable definitions, processes and files.
+- `make test-template-editor` checks these state and execution-boundary rules.
+
 For Metrics, use a disposable running Linux guest:
 
 - Open Enter → Metrics at 150×38, then resize to 80×24. Confirm CPU/memory

@@ -113,6 +113,12 @@ admission identity and template/directory navigation. Run `make verify` and
 `make test-race` after changes to its completion events. Its real guest QA must
 use a Lima volume with sufficient image space and working Unix sockets.
 
+`make test-template-editor` covers the shared template editor and multiline
+command blocks (ADR 175), including preview/frozen-node parity, ordered and empty
+selections, resource input, nested return, held-lock saves, Unicode paste and
+read-only Lima catalog cancellation. Completion-event changes also require
+`make verify` and `make test-race`; run the template editor flows in `QA.md`.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool
@@ -203,8 +209,8 @@ recipe works from a checkout without preinstalled Go or `pkg-config`.
 
 Vaxis is pinned to `v0.17.1` with a local replacement in `third_party/vaxis`.
 The complete upstream module, tests, and Apache-2.0 license are retained;
-`UPSTREAM.md` records the verified module checksums and narrow encoded-image
-API delta. `make test-vaxis-fork` runs its full module suite. Keep dependency
+`UPSTREAM.md` records the verified module checksums, encoded-image API and
+opt-in literal-tab input mode. `make test-vaxis-fork` runs its full module suite. Keep dependency
 changes in this reviewed copy, never in the Go module cache. The added API
 uploads already-encoded PNGs synchronously within a wire-byte budget, keeps
 multipart Kitty transfers serialized, and exposes exact-pixel/z-order placement

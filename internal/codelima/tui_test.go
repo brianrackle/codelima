@@ -3505,10 +3505,11 @@ func TestTUIConfigurationMenuCreatesReusableConfiguration(t *testing.T) {
 		t.Fatalf("expected configurations menu, got %#v", app.activeMenu())
 	}
 	chooseTUIMenuEntry(t, app, "Create Configuration")
-	if app.activeDialog() == nil || app.activeDialog().Title != "Create Configuration" {
-		t.Fatalf("expected create configuration dialog, got %#v", app.activeDialog())
+	if _, ok := app.overlay.(*tuiTemplateEditor); !ok {
+		t.Fatalf("expected shared template editor, got %T", app.overlay)
 	}
-	submitTUIDialog(t, app, map[string]string{"slug": "qa-recipe"})
+	app.activeDialog().SetFieldValue("slug", "qa-recipe")
+	app.updateOverlay(vaxis.Key{Keycode: 's', Modifiers: vaxis.ModCtrl})
 
 	created, err := service.ConfigurationShow(context.Background(), "qa-recipe")
 	if err != nil {
@@ -3517,8 +3518,8 @@ func TestTUIConfigurationMenuCreatesReusableConfiguration(t *testing.T) {
 	if created.VCPUs != DefaultVCPUs || created.MemoryMiB != DefaultMemoryMiB || created.DiskMiB != DefaultDiskMiB {
 		t.Fatalf("expected new configuration to copy default resources, got %#v", created)
 	}
-	if app.activeMenu() == nil || app.activeMenu().Title != "Configuration: qa-recipe" {
-		t.Fatalf("expected created configuration menu, got %#v", app.activeMenu())
+	if app.overlay != nil || !strings.Contains(app.status, "Saved template qa-recipe") {
+		t.Fatalf("expected template save to return to manager, got %T, %s", app.overlay, app.status)
 	}
 }
 

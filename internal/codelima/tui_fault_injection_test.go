@@ -315,16 +315,18 @@ func TestTUIDialogSubmitUnderHeldLockKeepsEventLoopResponsive(t *testing.T) {
 	app.messages = newTUIMessageLog(50)
 	app.openCreateConfigurationDialog()
 	app.activeDialog().SetFieldValue("slug", "locked-recipe")
+	editor := app.overlay.(*tuiTemplateEditor)
+	awaitAsyncTUIState(t, app, events, func() bool { return editor.loaded && !editor.loading }, "template definitions to load")
 
 	start := time.Now()
-	if quit, err := app.handleEvent(vaxis.Key{Keycode: vaxis.KeyEnter}); err != nil || quit {
+	if quit, err := app.handleEvent(vaxis.Key{Keycode: 's', Modifiers: vaxis.ModCtrl}); err != nil || quit {
 		t.Fatalf("handleEvent(dialog submit) = (%v, %v), want (false, nil)", quit, err)
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("dialog submit held the event loop for %s", elapsed)
 	}
-	if len(app.operations) != 1 {
-		t.Fatalf("dialog submit registered %d background operations, want 1", len(app.operations))
+	if !editor.pending {
+		t.Fatal("template save did not retain its pending worker")
 	}
 
 	// The loop is still live while the mutation waits on the flock.
@@ -337,7 +339,7 @@ func TestTUIDialogSubmitUnderHeldLockKeepsEventLoopResponsive(t *testing.T) {
 	}
 
 	release()
-	awaitQuiescentTUI(t, app, events, "blocked configuration create to finish")
+	awaitAsyncTUIState(t, app, events, func() bool { return !editor.pending && !app.managerData.loading }, "blocked configuration create to finish")
 	if _, err := service.ConfigurationShow(ctx, "locked-recipe"); err != nil {
 		t.Fatalf("ConfigurationShow(locked-recipe) error = %v", err)
 	}

@@ -154,6 +154,10 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 		// Reuse existing form/selector behavior inside a centered modal. The
 		// underlying manager retains both its selection and navigation state.
 		drawOverlay := func(overlay tuiOverlay) {
+			if full, ok := overlay.(interface{ FullScreen() bool }); ok && full.FullScreen() {
+				overlay.Draw(window.New(0, 1, width, height-2), theme.mint, theme.muted, theme.coral)
+				return
+			}
 			modalWidth, modalHeight := min(width-4, 96), height-4
 			if sized, ok := overlay.(interface{ PreferredSize() (int, int) }); ok {
 				preferredWidth, preferredHeight := sized.PreferredSize()
@@ -163,7 +167,9 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 			tuiFill(modal, theme.raised)
 			overlay.Draw(modal, theme.mint, theme.muted, theme.coral)
 		}
-		if parent := a.visibleCreateForm(); parent != nil && a.overlay != parent {
+		if editor := a.visibleTemplateEditor(); editor != nil && a.overlay != editor {
+			drawOverlay(editor)
+		} else if parent := a.visibleCreateForm(); parent != nil && a.overlay != parent {
 			drawOverlay(parent)
 		}
 		drawOverlay(a.overlay)
@@ -544,7 +550,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 	}
 	switch a.view {
 	case tuiViewTemplates:
-		return "↑↓ select · Tab configs/envs · n new · e edit · c clone · d delete · ? help"
+		return "↑↓ select · Tab configs/envs · n new · e edit · c clone · R restore · ? help"
 	case tuiViewPorts:
 		return "Esc nodes · : commands · ? help · q quit"
 	case tuiViewActivity:

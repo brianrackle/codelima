@@ -292,95 +292,13 @@ func (p *tuiTemplatePicker) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	tuiLine(body.New(1, h-1, w-2, 1), 0, "Capacity warnings never block selection · Enter choose · Esc back", t.dim)
 }
 
-type tuiTemplateCreateEditor struct {
-	dialog  *tuiDialog
-	picker  *tuiTemplatePicker
-	pending bool
-}
-type tuiTemplateCreatedEvent struct {
-	editor   *tuiTemplateCreateEditor
-	template Configuration
-	err      error
-}
-
-func (e *tuiTemplateCreateEditor) ParentOverlay() tuiOverlay { return e.picker }
-func (e *tuiTemplateCreateEditor) Draw(win vaxis.Window, header, muted, problem vaxis.Style) {
-	e.dialog.Draw(win, header, muted, problem)
-}
-func (e *tuiTemplateCreateEditor) FooterHint() string { return e.dialog.FooterHint() }
-func (e *tuiTemplateCreateEditor) Update(event vaxis.Event) (bool, error) {
-	if e.pending {
-		return false, nil
-	}
-	done, err := e.dialog.Update(event)
-	return done && !e.pending, err
-}
-
 func (p *tuiTemplatePicker) openNewTemplate() {
-	c, ok := p.form.template()
-	if !ok && len(p.form.templates) > 0 {
-		c = p.form.templates[0]
-	}
-	e := &tuiTemplateCreateEditor{picker: p}
-	e.dialog = newTUIDialog("New template", "Save", []string{"Changes apply to future nodes only. Comma-separated environments run in order."}, []tuiDialogField{
-		newTUIInputField("slug", "Name", "", true),
-		newTUIInputField("image", "Image", c.Image, true),
-		newTUIInputField("agent", "Agent", c.AgentProfileName, true),
-		newTUIInputField("vcpus", "vCPU", strconv.Itoa(int(c.VCPUs)), true),
-		newTUIInputField("memory", "Memory MiB", strconv.FormatUint(uint64(c.MemoryMiB), 10), true),
-		newTUIInputField("disk", "Disk MiB", strconv.FormatUint(uint64(c.DiskMiB), 10), true),
-		newTUIInputField("environments", "Environments", strings.Join(c.Environments, ","), false),
-	}, func(values map[string]string) error {
-		cpu, err := strconv.ParseUint(values["vcpus"], 10, 8)
-		if err != nil || cpu == 0 {
-			return fmt.Errorf("vCPU must be a positive integer")
-		}
-		memory, err := parseSizeMiB(values["memory"])
-		if err != nil {
-			return err
-		}
-		disk, err := parseSizeMiB(values["disk"])
-		if err != nil {
-			return err
-		}
-		image, agent, vcpus := values["image"], values["agent"], uint8(cpu)
-		input := ConfigurationCreateInput{Slug: values["slug"], Image: &image, AgentProfile: &agent, VCPUs: &vcpus, MemoryMiB: &memory, DiskMiB: &disk, Environments: parseCommaSeparatedValues(values["environments"]), BootstrapCommands: slices.Clone(c.BootstrapCommands)}
-		e.pending = true
-		ctx, cancel := p.form.workContext()
-		service := p.form.app.service
-		save := func() tuiTemplateCreatedEvent {
-			defer cancel()
-			template, err := service.ConfigurationCreate(ctx, input)
-			return tuiTemplateCreatedEvent{editor: e, template: template, err: err}
-		}
-		if p.form.app.postEvent == nil {
-			event := save()
-			p.form.app.applyTemplateCreated(event)
-			return event.err
-		} else {
-			go func() { p.form.app.postCompletion(save()) }()
-		}
-		return nil
+	p.form.app.openTemplateEditor(Configuration{}, true, p, func(c Configuration) {
+		p.form.dataSerial++
+		p.form.templates = append(p.form.templates, c)
+		p.selected, p.details = c.ID, false
+		p.filter.SetContent("")
 	})
-	p.form.app.overlay = e
-}
-
-func (a *vaxisTUIApp) applyTemplateCreated(event tuiTemplateCreatedEvent) {
-	e := event.editor
-	if a.overlay != e {
-		return
-	}
-	e.pending = false
-	if event.err != nil {
-		e.dialog.Error = event.err.Error()
-		return
-	}
-	p := e.picker
-	p.form.dataSerial++
-	p.form.templates = append(p.form.templates, event.template)
-	p.selected, p.details = event.template.ID, false
-	p.filter.SetContent("")
-	a.overlay = p
 }
 
 func modifiedBuiltInTemplate(c Configuration, cfg Config) bool {

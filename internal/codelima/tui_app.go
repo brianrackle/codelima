@@ -45,6 +45,7 @@ type vaxisTUIApp struct {
 	managerData        tuiManagerData
 	managerGeneration  uint64
 	templateIndex      int
+	templateSelectID   string
 	environmentIndex   int
 	environmentsView   bool
 	detailScroll       int
@@ -143,6 +144,9 @@ func (a *vaxisTUIApp) postCompletion(event vaxis.Event) {
 // type is showing. Dialog flows and tests use these instead of per-type
 // fields.
 func (a *vaxisTUIApp) activeDialog() *tuiDialog {
+	if editor, ok := a.overlay.(*tuiTemplateEditor); ok {
+		return editor.dialog
+	}
 	if form, ok := a.overlay.(*tuiCreateNodeForm); ok {
 		return form.dialog
 	}
@@ -462,8 +466,16 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyCreateDirectory(event)
 		a.requestRedraw()
 		return false, nil
-	case tuiTemplateCreatedEvent:
-		a.applyTemplateCreated(event)
+	case tuiTemplateEditorDataEvent:
+		a.applyTemplateEditorData(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiTemplateSavedEvent:
+		a.applyTemplateSaved(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiTemplateImagesEvent:
+		a.applyTemplateImages(event)
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsDataEvent:

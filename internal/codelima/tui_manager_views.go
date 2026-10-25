@@ -108,6 +108,15 @@ func (a *vaxisTUIApp) applyManagerData(event tuiManagerDataEvent) {
 		return
 	}
 	a.managerData = event.data
+	if a.templateSelectID != "" && event.view == tuiViewTemplates {
+		for i, c := range event.data.configurations {
+			if c.ID == a.templateSelectID {
+				a.templateIndex = i
+				a.templateSelectID = ""
+				break
+			}
+		}
+	}
 	if event.data.preferences != nil && event.preferenceRevision == a.preferenceRevision {
 		a.preferences = event.data.preferences
 	}
@@ -200,7 +209,7 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 
 func (a *vaxisTUIApp) drawTemplates(win vaxis.Window, theme tuiTheme) {
 	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "Templates   [Configs]   [Environments]   Tab switch", theme.mint)
+	tuiLine(win.New(2, 2, width-4, 1), 0, "Templates   [Configs]   [Environments]   Tab switch · • modified", theme.mint)
 	if a.environmentsView {
 		tuiLine(win.New(2, 2, width-4, 1), 0, "Templates   [Configs]   [Environments ✓]   Tab switch", theme.mint)
 	}
@@ -225,10 +234,17 @@ func (a *vaxisTUIApp) drawTemplates(win vaxis.Window, theme tuiTheme) {
 			if i == a.templateIndex {
 				style = theme.selected
 			}
-			tuiLine(inner, i+2, fmt.Sprintf("%-18s %-6d %-11s %-11s %s", configuration.Slug, configuration.VCPUs, formatTUIResourceSize(configuration.MemoryMiB), formatTUIResourceSize(configuration.DiskMiB), strings.Join(configuration.Environments, ", ")), style)
+			name := configuration.Slug
+			if name == DefaultConfigurationSlug {
+				name += " ★"
+			}
+			if a.service != nil && modifiedBuiltInTemplate(configuration, a.service.cfg) {
+				name += " •"
+			}
+			tuiLine(inner, i+2, fmt.Sprintf("%-18s %-6d %-11s %-11s %s", name, configuration.VCPUs, formatTUIResourceSize(configuration.MemoryMiB), formatTUIResourceSize(configuration.DiskMiB), strings.Join(configuration.Environments, ", ")), style)
 		}
 	}
-	tuiLine(win.New(2, height-3, width-4, 1), 0, "n new · e edit · c clone · d delete · N create node · Tab configs/environments", theme.muted)
+	tuiLine(win.New(2, height-3, width-4, 1), 0, "n new · e edit · c clone · d delete · R restore built-in · N create node", theme.muted)
 }
 
 func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {

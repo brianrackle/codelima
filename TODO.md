@@ -526,13 +526,27 @@ and investigate Lima recovery before claiming uninterrupted startup. Keeping
 socket ownership in Lima avoids an application-specific transport workaround,
 but requires separate native qualification.
 
-The nested template editor currently reuses the generic
-resource/environment fields and preserves inherited bootstrap commands. It
-still needs the full TemplateEdit board's stepped resource controls, environment
-ordering, multiline bootstrap editing, affected-node counts and built-in reset.
-Use a shared editor rather than extending a second independent implementation;
-this reduces duplication but needs parent-return and async-failure regression
-coverage. Complete final picker metadata/preview fidelity with that editor.
+ADR 175 replaces the independent template forms with a shared editor for
+Templates, Spec and the create picker: stepped/typed resources, ordered
+environment checks, multiline command blocks, resolved agent/environment/direct
+preview, frozen-node counts and reviewable built-in reset. Live 150×38/80×24
+checks covered these flows, byte-for-byte Unicode/newline/tab paste, mouse
+resource/environment controls, empty clone selections and nested return with
+the node name and ports retained. A new node's six frozen steps matched its
+preview while the existing node's resources and commands stayed unchanged.
+
+Complete final Templates/Environments board and picker fidelity, including
+mouse equivalents and modal presentation for the generic image/profile lists
+and command editor, plus native terminal qualification. Reuse shared panel/hit
+regions and the command-block editor for environments; this keeps behavior and
+script boundaries consistent, but adds responsive and native interaction cases.
+The broader manager redesign remains partially complete.
+
+Editor verification passed full verify/race/integration, focused editor checks,
+the Vaxis fork suite and its required upstream mise check. Its created-only
+nodes, templates/environments/profile, daemon/TUI, tmux window, isolated homes,
+captures and scratch files were removed, including tmp/te and stale Go test
+scratch. No new disposable VM or mount remains from this editor work.
 
 The form QA nodes, templates, terminal, daemon, TUI, homes, captures and logs
 were removed. Its project-local ext4 volume was unmounted, the loop device

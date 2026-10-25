@@ -51,9 +51,13 @@ func appendBootstrapSteps(steps []BootstrapStep, commands []string, kind, source
 }
 
 func (s *Service) resolveConfigurationBootstrapSteps(c Configuration) ([]BootstrapStep, error) {
+	return configurationBootstrapSteps(c, s.store.EnvironmentConfigByIDOrSlug)
+}
+
+func configurationBootstrapSteps(c Configuration, lookup func(string) (EnvironmentConfig, error)) ([]BootstrapStep, error) {
 	var steps []BootstrapStep
 	for _, slug := range c.Environments {
-		env, err := s.store.EnvironmentConfigByIDOrSlug(slug)
+		env, err := lookup(slug)
 		if err != nil {
 			return nil, err
 		}

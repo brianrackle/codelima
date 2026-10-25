@@ -10,10 +10,6 @@ import (
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
-func commaSeparatedValues(values []string) string {
-	return strings.Join(values, ",")
-}
-
 func parseCommaSeparatedValues(value string) []string {
 	if strings.TrimSpace(value) == "" {
 		return []string{}
@@ -256,85 +252,15 @@ func (a *vaxisTUIApp) openConfigurationMenu(configuration Configuration) {
 }
 
 func (a *vaxisTUIApp) openCreateConfigurationDialog() {
-	a.overlay = newTUIDialog("Create Configuration", "Create", []string{"New configurations copy the current default configuration once."}, []tuiDialogField{
-		newTUIInputField("slug", "Configuration Slug", "", true),
-	}, func(values map[string]string) error {
-		return a.startMetadataOperation("Creating configuration "+values["slug"], "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-			configuration, err := service.ConfigurationCreate(ctx, ConfigurationCreateInput{Slug: values["slug"]})
-			if err != nil {
-				return tuiOperationResult{}, err
-			}
-			return tuiOperationResult{
-				Status: "created configuration " + configuration.Slug,
-				Apply:  func(a *vaxisTUIApp) error { a.openConfigurationMenu(configuration); return nil },
-			}, nil
-		})
-	})
+	a.openTemplateEditor(Configuration{}, true, nil, nil)
 }
 
 func (a *vaxisTUIApp) openUpdateConfigurationDialog(configuration Configuration) {
-	dialog := newTUIDialog("Update Configuration", "Update", []string{"Changes apply to future nodes only; existing nodes keep their frozen values."}, []tuiDialogField{
-		newTUIInputField("slug", "Configuration Slug", configuration.Slug, true),
-		newTUIInputField("image", "Image", configuration.Image, true),
-		newTUIInputField("agent", "Agent Profile", configuration.AgentProfileName, true),
-		newTUIInputField("vcpus", "vCPUs", strconv.Itoa(int(configuration.VCPUs)), true),
-		newTUIInputField("memory", "Memory MiB", strconv.FormatUint(uint64(configuration.MemoryMiB), 10), true),
-		newTUIInputField("disk", "Disk MiB", strconv.FormatUint(uint64(configuration.DiskMiB), 10), true),
-		newTUISelectorField("environments", "Environments", commaSeparatedValues(configuration.Environments), false, nil),
-	}, func(values map[string]string) error {
-		vcpus64, err := strconv.ParseUint(values["vcpus"], 10, 8)
-		if err != nil || vcpus64 == 0 {
-			return fmt.Errorf("vCPUs must be a positive integer")
-		}
-		memory, err := parseSizeMiB(values["memory"])
-		if err != nil {
-			return fmt.Errorf("memory must be a positive MiB value")
-		}
-		disk, err := parseSizeMiB(values["disk"])
-		if err != nil {
-			return fmt.Errorf("disk must be a positive MiB value")
-		}
-		image, agent, vcpus := values["image"], values["agent"], uint8(vcpus64)
-		return a.startMetadataOperation("Updating configuration "+configuration.Slug, "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-			updated, err := service.ConfigurationUpdate(ctx, configuration.ID, ConfigurationUpdateInput{
-				Slug: values["slug"], Image: &image, AgentProfile: &agent,
-				Environments: parseCommaSeparatedValues(values["environments"]), VCPUs: &vcpus, MemoryMiB: &memory, DiskMiB: &disk,
-			})
-			if err != nil {
-				return tuiOperationResult{}, err
-			}
-			return tuiOperationResult{
-				Status:     "updated configuration " + updated.Slug,
-				ReloadData: true,
-				Apply:      func(a *vaxisTUIApp) error { a.openConfigurationMenu(updated); return nil },
-			}, nil
-		})
-	})
-	dialog.Fields[6].Display = func(value string) string { return environmentConfigSelectionSummary(parseCommaSeparatedValues(value)) }
-	dialog.Fields[6].Activate = func() error {
-		return a.openEnvironmentConfigSelector("Select Environments", []string{"Choose reusable environments for future nodes."}, parseCommaSeparatedValues(dialog.Fields[6].Value), true, func(values []string) error {
-			dialog.SetFieldValue("environments", commaSeparatedValues(values))
-			return nil
-		})
-	}
-	a.overlay = dialog
+	a.openTemplateEditor(configuration, false, nil, nil)
 }
 
 func (a *vaxisTUIApp) openCloneConfigurationDialog(configuration Configuration) {
-	a.overlay = newTUIDialog("Clone Configuration", "Clone", []string{"Copy this reusable configuration under a new slug."}, []tuiDialogField{
-		newTUIInputField("slug", "New Configuration Slug", "", true),
-	}, func(values map[string]string) error {
-		return a.startMetadataOperation("Cloning configuration "+configuration.Slug, "configurations", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-			cloned, err := service.ConfigurationClone(ctx, ConfigurationCloneInput{Source: configuration.ID, Slug: values["slug"]})
-			if err != nil {
-				return tuiOperationResult{}, err
-			}
-			return tuiOperationResult{
-				Status: "cloned configuration " + cloned.Slug,
-				Apply:  func(a *vaxisTUIApp) error { a.openConfigurationMenu(cloned); return nil },
-			}, nil
-		})
-	})
+	a.openTemplateEditor(configuration, true, nil, nil)
 }
 
 func (a *vaxisTUIApp) openDeleteConfigurationDialog(configuration Configuration) {

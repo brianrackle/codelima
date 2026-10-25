@@ -42,7 +42,7 @@ func TestTUITemplatePickerCreatesThenReturnsWithNewTemplateSelected(t *testing.T
 	f.openTemplatePicker()
 	p := a.overlay.(*tuiTemplatePicker)
 	p.openNewTemplate()
-	e := a.overlay.(*tuiTemplateCreateEditor)
+	e := a.overlay.(*tuiTemplateEditor)
 	e.dialog.SetFieldValue("slug", DefaultConfigurationSlug)
 	a.updateOverlay(vaxis.Key{Keycode: 's', Modifiers: vaxis.ModCtrl})
 	if a.overlay != e || e.dialog.Error == "" {

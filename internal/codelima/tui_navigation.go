@@ -333,6 +333,11 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 		a.openDeleteConfigurationDialog(configuration)
 	case key.MatchString("N"):
 		return a.openCreateNodeDialogWithDefaults("", configuration.Slug)
+	case key.MatchString("R"):
+		if _, ok := builtInTemplateDefaults(configuration.Slug, a.service.cfg); ok {
+			editor := a.openTemplateEditor(configuration, false, nil, nil)
+			editor.restoreDefaults()
+		}
 	}
 	return nil
 }

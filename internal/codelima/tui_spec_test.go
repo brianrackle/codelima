@@ -68,7 +68,7 @@ func TestTUISpecActionsUseCurrentTemplateAndCopyYAMLPath(t *testing.T) {
 		t.Fatal("preset defaults prompted to discard unedited form")
 	}
 	a.handleKey(vaxis.Key{Keycode: 'e', Text: "e"})
-	if a.activeDialog() == nil || a.activeDialog().Fields[4].rawValue() != "12288" {
+	if a.activeDialog() == nil || a.activeDialog().Fields[4].rawValue() != "12 GiB" {
 		t.Fatal("edit did not use current template")
 	}
 	a.overlay = nil

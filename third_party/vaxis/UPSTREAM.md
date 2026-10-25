@@ -21,6 +21,11 @@ any unfinished transfer to its first chunk. Continuations contain only m/q,
 as required by the [Kitty protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/#remote-client).
 It does not add native dependencies.
 
+The template command editor also opts into `textinput.Model.PreserveTabs`
+(ADR 175). It retains tabs in loaded, typed and pasted content as a single
+editable character, drawn as ⇥. The default eight-space expansion is unchanged.
+Keep this additive option and its regression test when rebasing the fork.
+
 Run `make test-vaxis-fork` from the CodeLima root, including all retained
 upstream module tests. When upgrading, copy the verified upstream module and
 reapply this documented delta; do not edit cached modules. Remove the local

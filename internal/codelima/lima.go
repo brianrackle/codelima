@@ -82,6 +82,15 @@ func (c *LimaClient) binary() string {
 	return c.Binary
 }
 
+// TemplateNames reads the installed Lima catalog without creating an instance.
+func (c *LimaClient) TemplateNames(ctx context.Context) ([]string, error) {
+	stdout, stderr, err := runRuntimeCommand(ctx, 5*time.Second, resolvedRuntimeCommand{argv: []string{c.binary(), "create", "--list-templates"}}, nil, nil)
+	if err != nil {
+		return nil, mapLimaCommandError("list Lima templates", err, stderr, nil)
+	}
+	return strings.Fields(string(stdout)), nil
+}
+
 func (c *LimaClient) platform() (string, string) {
 	goos, goarch := c.GOOS, c.GOARCH
 	if goos == "" {

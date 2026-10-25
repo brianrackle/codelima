@@ -678,3 +678,22 @@ Reconnect snapshots never replay clipboard effects. See ADR 148.
 A mouse release without a native selection is an empty successful interaction;
 skip clipboard delivery for empty selection results. Normalize only the native
 no-value result for this expected gesture and preserve other errors (ADR 149).
+
+## Shared template drafts and command boundaries
+
+Use one domain editor for create, clone and update entry points. Parent overlays
+retain their drafts; child completion changes the parent only after explicit
+apply. Load definitions and usage asynchronously and address completions to the
+exact editor. Save through the service, preserving drafts after rejection.
+
+Resolve preview order through the same pure environment/template resolver used
+by node creation. A multiline command is one execution block: retain its newlines
+inside one buffer, and make adding/removing/reordering blocks explicit. Persist
+empty environment and command arrays explicitly so creation cannot accidentally
+inherit defaults. See ADR 175.
+
+Recover bracketed-paste control events before handing text to an editor, and
+normalize CRLF after the complete paste. Script buffers opt into the vendored
+text input's `PreserveTabs`; generic text widgets otherwise expand literal tabs
+into spaces. Exercise parser-shaped LF/CR/tab events as well as whole-string
+paste fixtures, then verify a real terminal paste.

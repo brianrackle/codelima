@@ -61,6 +61,7 @@ export PKG_CONFIG_PATH := $(GHOSTTY_VT_CURRENT)/share/pkgconfig:$(PKG_CONFIG_PAT
 FMT_DIRS := cmd internal tests scripts/tooling_lock.go scripts/renderer_build.go
 FMT_DIRS += third_party/vaxis/encoded_kitty_image.go third_party/vaxis/encoded_kitty_image_test.go third_party/vaxis/image.go third_party/vaxis/vaxis.go
 FMT_DIRS += third_party/vaxis/render_fallback_width_test.go
+FMT_DIRS += third_party/vaxis/widgets/textinput
 
 PACKAGE_VERSION ?= 0.0.0-dev
 RENDERER_LDFLAGS = $(if $(wildcard $(GHOSTTY_VT_CURRENT)/.native-build-id),-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=$(shell cat $(GHOSTTY_VT_CURRENT)/.native-build-id))
@@ -223,6 +224,11 @@ test-terminal-attach: init
 .PHONY: test-node-operations
 .PHONY: test-activity
 .PHONY: test-create-node
+.PHONY: test-template-editor
+test-template-editor: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUITemplate|TUICommandEditor|TUIDialogSubmitUnderHeldLock|LimaTemplateNames)' -count=1
+
 test-create-node: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(NodeCreate|NodeOperationsCreate|TUICreate|TUITemplatePicker)' -count=1
