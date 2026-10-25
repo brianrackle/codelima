@@ -330,10 +330,15 @@ test-embedded-shell: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(EMBEDDED_SHELL_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIEmbedded|TUIManager|TUIResize|TUIHostTerminal|TUIDrawActiveHost|TUITerminalTab|TUIShortcut|TUIHandleKeyOption|TUIFocusToggle|TUIHandleKeyF6|TUIBackgroundNodeOperation|TUIDrawTerminal)' -count=1 -timeout=120s
 
-.PHONY: test-node-confirmations test-clone test-node-batch
+.PHONY: test-node-confirmations test-clone test-node-batch test-node-delete-sessions
 NODE_CONFIRMATION_TEST_FLAGS ?=
 CLONE_TEST_FLAGS ?=
 NODE_BATCH_TEST_FLAGS ?=
+NODE_DELETE_SESSION_TEST_FLAGS ?=
+test-node-delete-sessions: init
+	@mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(NODE_DELETE_SESSION_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^TestDaemonNodeDelete' -count=1 -timeout=120s
+
 test-node-batch: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(NODE_BATCH_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(NodeBatch|TUIBatch|LimaIdentity|TUIManagerPalette.*Batch|TUINodeRestart)' -count=1 -timeout=120s

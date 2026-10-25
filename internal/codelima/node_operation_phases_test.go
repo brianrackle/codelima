@@ -146,7 +146,7 @@ func TestNodeOperationsPhasesKeepInterruptedFinishUnknown(t *testing.T) {
 	if err := operations.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := newNodeOperations(s, nil)
+	recovered, err := newNodeOperations(s, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

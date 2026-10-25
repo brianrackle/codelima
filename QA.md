@@ -709,6 +709,23 @@ Parallel batch review and execution (ADR 198):
    while its host workspace files remain. Remove all owned guests, terminals,
    daemon/frontends, stores, captures, overlays, mounts and temporary artifacts.
 
+Deletion without a frontend (ADR 199):
+
+1. In an isolated home, create a disposable node and open its managed host shell
+   through the CLI. Record its terminal ID and PID, set an exported variable, and
+   create a sentinel file in its host workspace. Keep every TUI closed.
+2. Delete that node through the CLI. The terminal must disappear from both the
+   live list and persisted session; its process must exit within the bounded
+   teardown window. The host workspace and sentinel must remain.
+3. Attempt to open the deleted canonical target and restart the isolated daemon
+   with respawn enabled. The deleted target must not open or reappear. Automated
+   checks cover stale launch intent, a launch racing with deletion, slug reuse,
+   requester cancellation and replacement exclusion.
+4. With a second disposable node, inject a provider deletion failure. Its host
+   terminal, PID and exported state must survive. Remove the fault and explicitly
+   retry deletion; the session must then close. Remove all owned daemon processes,
+   terminals, stores, workspace files, captures and test-only environment state.
+
 Clone review and optional startup (ADR 197):
 
 1. With a disposable stopped node, open `c` at 150×38 truecolor and 80×24 ANSI.

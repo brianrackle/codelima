@@ -552,7 +552,9 @@ guest sessions end. Each admitted restart continues after its caller exits.
 Marked start/stop, restart and delete actions review the complete captured list,
 including hidden marks. Bulk deletion requires typing the exact target count.
 Stop and restart end guest sessions while host shells continue; deletion ends
-both guest and host sessions belonging to each deleted node.
+both guest and host sessions belonging to each deleted node. The daemon performs
+that cleanup even after every TUI and the requesting CLI have exited. A failed
+runtime deletion preserves sessions; host workspace files are retained.
 The daemon admits all targets together, reserves them through batch completion,
 and runs up to four at once within its global limit of sixteen lifecycle
 operations. A batch accepts up to 64 targets. Queued targets and running phases

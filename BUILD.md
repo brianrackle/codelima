@@ -18,6 +18,12 @@ released-delete recovery and session impact, plus Lima's first-use identity
 gate without serializing VM boot (ADR 198).
 Run the batch subsection of QA.md Flow 7 with isolated real VMs after full gates.
 
+`make test-node-delete-sessions NODE_DELETE_SESSION_TEST_FLAGS=-race` checks
+daemon-owned deletion cleanup without a frontend, partial batches, runtime/event/
+session-persistence failure, requester cancellation, replacement exclusion, late
+terminal publication, canonical ownership and stale-session restoration (ADR 199).
+Run the no-frontend deletion subsection of QA.md Flow 7 with a real host shell.
+
 `make test-clone CLONE_TEST_FLAGS=-race` covers clone/start ordering,
 cancellation before/after child admission, source restoration, retained startup
 failures, reservations, projections and observer disconnect, plus the clone

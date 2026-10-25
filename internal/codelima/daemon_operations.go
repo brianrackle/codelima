@@ -25,7 +25,7 @@ func (h *daemonHost) nodeOperations() (*nodeOperations, error) {
 		return nil, errNodeOperationsClosed
 	}
 	if h.operations == nil && h.operationsErr == nil {
-		h.operations, h.operationsErr = newNodeOperations(h.service, func() { h.broadcast(daemon.EventNodeOperationChanged, nil) })
+		h.operations, h.operationsErr = newNodeOperations(h.service, func() { h.broadcast(daemon.EventNodeOperationChanged, nil) }, h.closeDeletedNodeTerminals)
 	}
 	return h.operations, h.operationsErr
 }

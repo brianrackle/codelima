@@ -115,16 +115,17 @@ after a released failure, persistent count errors and truthful host-session impa
 
 ### 57. Implement the retrieved major-version TUI design
 
-Batch teardown follow-up (ADR 198 source audit): the live deletion checks ran
-with a frontend present, and node-owned host terminals closed when stale targets
-were pruned. Audit deletion with every frontend gone; the daemon operation owner
-currently broadcasts changes while `PruneStaleSessions` lives in the frontend.
-If that leaves an orphan host terminal, make target teardown daemon-owned and
-test ordering against deletion failure, caller exit and daemon replacement.
-Advantages: the session-impact promise remains true without a frontend.
-Disadvantages: terminal teardown must respect daemon ownership and replacement
-barriers without closing sessions for a failed deletion. This untested path is
-not covered by the completed foreground-deletion checks.
+The no-frontend deletion audit reproduced an orphan host terminal with a live
+PID and retained shell state. Daemon-owned deletion cleanup is implemented
+(ADR 199): committed deletion closes node-owned sessions before releasing the
+operation reservation, failed runtime deletion preserves them, and late terminal
+publication plus stale cold restoration are fenced. Focused race and real host
+shell checks passed, including failure/retry and workspace preservation. Full
+format/lint/build, unit, race and CLI integration checks passed. All owned
+verification state is cleaned, as recorded in the design ledger. Advantages: session impact
+no longer depends on a frontend. Disadvantages: physical PTY teardown remains
+bounded and asynchronous, and persistence errors can report a partial outcome
+after deletion has committed.
 
 Presentation follow-up: one marked target currently says `Delete 1 nodes?`, and
 the fleet similarly says `1 nodes`. Use shared singular/plural count formatting
@@ -135,8 +136,9 @@ Confirmation work (ADR 196): single-node delete/stop review, exact-name gating,
 captured attachment, guest/host impact and host-tab preservation are implemented;
 automated and live Linux/TCG qualification passed, with cleanup recorded in the
 design ledger. The Dialogs artboard remains partial. Durable parallel batch
-ownership and per-node review/outcomes are implemented and tested (ADR 198);
-finish the teardown audit above and final whole-design/native qualification. Advantages:
+ownership and per-node review/outcomes are implemented and tested (ADR 198), with
+daemon-owned deletion cleanup covered by ADR 199 above. Final whole-design/native
+qualification remains. Advantages:
 clone/start and every batch member survive frontend exit, with truthful progress.
 Disadvantages: admission, cancellation, source restoration, partial failure and
 recovery require lifecycle tests beyond modal presentation. Historical last-up

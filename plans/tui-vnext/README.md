@@ -23,7 +23,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions, VM inspection and readiness-gated ports verified; final artboard qualification remains |
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
-| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: delete/stop (ADR 196) and clone/start (ADR 197) passed automated and live Linux/TCG qualification; durable batch review, partial outcomes and cancellation verified (ADR 198); no-frontend terminal teardown audit and final native/artboard qualification remain |
+| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: delete/stop (ADR 196) and clone/start (ADR 197) passed automated and live Linux/TCG qualification; durable batch review, partial outcomes and cancellation verified (ADR 198); no-frontend terminal teardown passed focused/full automated and live checks (ADR 199); final native/artboard qualification remains |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
@@ -37,6 +37,42 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+ADR 199 checkpoint, 2026-10-25: a real no-frontend audit reproduced the orphaned
+host terminal: its node was deleted but the terminal ID, PID and exported state
+survived. Deletion now removes the complete node-owned session set in the daemon
+before receipt finalization. Runtime failure preserves sessions; a committed
+tombstone still requires cleanup when the later node-event write fails. Terminal
+opens resolve canonical identity and recheck it under the removal mutex before
+publication. Cold restoration refuses deleted targets. Versions remain 29/2/6/7.
+
+Regression tests failed first on the original implementation, including single
+and partial-batch cleanup, post-commit event failure, session-persistence errors,
+late publication, caller exit/ownership and cold restoration. The focused race
+suite then passed (2.216s), also covering slug reuse and canonical session targets.
+Targeted gopls found no errors; existing modernization suggestions in service.go
+are outside this change. `make build verify test-race test-integration` passed
+with exit 0: core unit 97.508s, core race 126.840s and CLI integration 17.712s,
+plus format, lint, Vaxis and both normal VCS-stamped builds.
+
+The rebuilt binary passed the new QA Flow 7 no-frontend subsection using isolated
+metadata and a real managed host shell, with no VM created or booted. The original
+orphan exited on shutdown; its stale saved intent was refused at cold restart.
+Two fresh disposable metadata targets then verified successful deletion, actual
+terminal/PID removal, retained host workspace/sentinel, refusal to open a deleted
+canonical target, and empty persisted/restored sessions. A deliberately failed
+provider list command prevented the second deletion and preserved its terminal,
+PID and exported variable; removing that fault and explicitly retrying closed
+the shell. No frontend was opened at any point in this audit.
+
+Cleanup stopped the isolated daemon and removed all three metadata fixtures,
+workspace/sentinel, provider wrapper, stores, captures, runners and logs under
+`tmp/bt`, plus completed Go/integration scratch. A privileged command/environment
+audit found no owned process survivors. Removed 25 new inactive exact-content
+inputrc files; preserved 1,015 older files and the active user's INPUTRC. No VM
+or mount was created. The baseline VM disk SHA-256 remained
+`a717dba3fd2c2dfe699262623aa2c6b5147955ea4bca46c8da4dfae8ba42913c`.
+The full 26-artboard/native qualification remains open.
 
 ADR 198 checkpoint, 2026-10-25: marked and directory palette actions now admit
 one captured batch to the daemon. Up to four ordinary children execute
@@ -93,7 +129,8 @@ sessions, so its review now distinguishes this from stop/restart host survival.
 A final mouse-confirmed deletion of a stopped fixture verified the corrected
 warning, host terminal/PID closure, preserved host workspace marker, and retained
 root/child outcomes after every node was deleted. These deletion checks had a
-frontend present; the no-frontend teardown audit remains explicitly in TODO #57.
+frontend present; the subsequent no-frontend audit and fix are recorded in the
+ADR 199 checkpoint above.
 
 Cleanup removed all three node fixtures and every owned VM, terminal, frontend,
 daemon and tmux server. A privileged read-only command/environment audit found

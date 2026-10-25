@@ -370,7 +370,7 @@ func (s gatedOperationSandbox) Shell(ctx context.Context, node Node, identity gu
 
 func testNodeOperations(t *testing.T, service *Service) *nodeOperations {
 	t.Helper()
-	operations, err := newNodeOperations(service, nil)
+	operations, err := newNodeOperations(service, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

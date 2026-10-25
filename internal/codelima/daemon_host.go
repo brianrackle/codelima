@@ -633,9 +633,13 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 	if err != nil {
 		return daemon.TerminalState{}, daemon.Error("InvalidArgument", err.Error(), ExitInvalidArgument, nil)
 	}
+	if target.Kind != terminal.TargetNode {
+		return daemon.TerminalState{}, daemon.Error("InvalidArgument", "terminal target must be a node", ExitInvalidArgument, nil)
+	}
 	kind := terminal.NodeHostShell
 	workspace := ""
 	nodeSlug := ""
+	nodeID := ""
 	switch params.Kind {
 	case "node-host-shell", "host":
 		node, nodeErr := h.service.nodeTerminalMetadata(ctx, target.ID)
@@ -644,6 +648,7 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 		}
 		workspace = node.DirectoryPath
 		nodeSlug = node.Slug
+		nodeID = node.ID
 		if params.Label == "" {
 			params.Label = node.Slug + " host"
 		}
@@ -654,6 +659,7 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 			return daemon.TerminalState{}, toDaemonError(nodeErr)
 		}
 		nodeSlug = node.Slug
+		nodeID = node.ID
 		// Defense in depth for the TUI's own gate, and the only gate for any
 		// other client: a guest shell for a node whose record still has a
 		// lifecycle operation in flight would land in a VM that has booted but
@@ -674,6 +680,10 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 	default:
 		return daemon.TerminalState{}, daemon.Error("InvalidArgument", "terminal kind must be node-host-shell or node-shell", ExitInvalidArgument, nil)
 	}
+	// Resolve a supplied slug once. Session ownership must survive slug reuse
+	// and terminal startup must never switch to a replacement node.
+	target = terminal.NodeTarget(nodeID)
+	params.Target = target.String()
 	spec, err := h.service.TerminalLaunchSpec(target, kind, workspace)
 	if err != nil {
 		return daemon.TerminalState{}, toDaemonError(err)
@@ -707,6 +717,18 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 	}
 	state := daemon.TerminalState{TerminalID: terminalID, TabID: params.Target + "#" + terminalID, Target: params.Target, Kind: kind.String(), Label: params.Label, CWD: spec.Dir, Argv: slices.Clone(spec.Argv), CreatedAt: time.Now().UTC(), Cols: cols, Rows: rows}
 	h.mu.Lock()
+	// Starting a runtime can overlap deletion. Check its original identity
+	// while holding the same lock as deletion's terminal removal: either this
+	// entry is published first and removed there, or the tombstone rejects it.
+	node, nodeErr := h.service.store.NodeByID(nodeID)
+	if nodeErr == nil && node.DeletedAt != nil {
+		nodeErr = notFound("node has been deleted", map[string]any{"id": nodeID})
+	}
+	if nodeErr != nil {
+		h.mu.Unlock()
+		h.closeTerminalRuntimeAsync(&daemonTerminalEntry{state: state, term: runtime})
+		return daemon.TerminalState{}, toDaemonError(nodeErr)
+	}
 	h.ensureTerminalOrderLocked()
 	h.terminals[terminalID] = h.newTerminalEntry(state, runtime, terminalActivityState{nodeSlug: nodeSlug})
 	h.terminalOrder = append(h.terminalOrder, terminalID)
@@ -786,16 +808,55 @@ func (h *daemonHost) closeTerminal(id string) error {
 	if !ok {
 		return daemon.Error("NotFound", "terminal not found", ExitNotFound, map[string]any{"terminal_id": id})
 	}
-	entry.stopSnapshotPublisher()
+	return h.finishClosingTerminals([]*daemonTerminalEntry{entry})
+}
+
+// closeDeletedNodeTerminals runs before the deletion receipt releases its
+// reservation. The tombstone, rather than the service error, decides whether
+// teardown is owed. A failed runtime deletion leaves every session intact.
+func (h *daemonHost) closeDeletedNodeTerminals(nodeID string) error {
+	if err := h.enterTerminalMutation(); err != nil {
+		return err
+	}
+	defer h.leaveTerminalMutation()
+	node, err := h.service.store.NodeByID(nodeID)
+	if err != nil {
+		return err
+	}
+	if node.DeletedAt == nil {
+		return nil
+	}
+	target := terminal.NodeTarget(nodeID).String()
+	h.mu.Lock()
+	h.ensureTerminalOrderLocked()
+	var entries []*daemonTerminalEntry
+	for id, entry := range h.terminals {
+		if entry.state.Target == target {
+			entries = append(entries, entry)
+			delete(h.terminals, id)
+			h.removeTerminalOrderLocked(id)
+		}
+	}
+	h.mu.Unlock()
+	return h.finishClosingTerminals(entries)
+}
+
+// Callers hold the update barrier and have removed these entries under mu.
+func (h *daemonHost) finishClosingTerminals(entries []*daemonTerminalEntry) error {
 	// Runtime teardown escalates SIGHUP to SIGTERM to SIGKILL and can take
 	// seconds against a signal-immune shell. Every piece of daemon-owned state
 	// this request owns is already committed, so the reply must not wait for
 	// the process to exit: a connection is a transport boundary, not a
 	// serialization boundary.
-	h.closeTerminalRuntimeAsync(entry)
+	for _, entry := range entries {
+		entry.stopSnapshotPublisher()
+		h.closeTerminalRuntimeAsync(entry)
+	}
 	persistErr := h.persist()
-	h.broadcast(daemon.EventTerminalClosed, entry.state)
-	h.broadcast(daemon.EventTargetTabsChanged, daemon.TargetTabsChangedEvent{Target: entry.state.Target})
+	for _, entry := range entries {
+		h.broadcast(daemon.EventTerminalClosed, entry.state)
+		h.broadcast(daemon.EventTargetTabsChanged, daemon.TargetTabsChangedEvent{Target: entry.state.Target})
+	}
 	return persistErr
 }
 

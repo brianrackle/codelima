@@ -89,6 +89,7 @@ type nodeOperations struct {
 	cancelCleanup context.CancelFunc
 	service       *Service
 	onChange      func()
+	afterDelete   func(string) error
 	dir           string
 	mu            sync.Mutex
 	closed        bool
@@ -96,7 +97,7 @@ type nodeOperations struct {
 	workers       sync.WaitGroup
 }
 
-func newNodeOperations(service *Service, onChange func()) (*nodeOperations, error) {
+func newNodeOperations(service *Service, onChange func(), afterDelete func(string) error) (*nodeOperations, error) {
 	localService := *service
 	localService.daemonClient = nil
 	localService.operationConnect = nil
@@ -109,7 +110,7 @@ func newNodeOperations(service *Service, onChange func()) (*nodeOperations, erro
 			cancelCleanup()
 		}
 	}()
-	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation), cleanupCtx: cleanupCtx, cancelCleanup: cancelCleanup, onChange: onChange}
+	m := &nodeOperations{service: &localService, dir: filepath.Join(service.cfg.MetadataRoot, "_operations"), records: make(map[string]*runningNodeOperation), cleanupCtx: cleanupCtx, cancelCleanup: cancelCleanup, onChange: onChange, afterDelete: afterDelete}
 	if err := os.MkdirAll(m.dir, 0o700); err != nil {
 		return nil, err
 	}
@@ -442,6 +443,13 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 			node, err = service.NodeStop(ctx, nodeID)
 		case "delete":
 			node, err = service.NodeDelete(ctx, nodeID)
+			// A node.deleted event write can fail after the tombstone commits.
+			// The daemon checks that durable result before closing sessions.
+			// Keep the operation reservation until cleanup has been persisted;
+			// requester/operation cancellation cannot undo committed deletion.
+			if m.afterDelete != nil {
+				err = errors.Join(err, m.afterDelete(nodeID))
+			}
 		case "create", "clone":
 			if request.Kind == "create" {
 				node, err = service.createNode(ctx, *request.Create)

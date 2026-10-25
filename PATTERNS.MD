@@ -943,6 +943,21 @@ Reuse captured-node reviews for clone inputs. Load all names off the UI loop,
 apply only to the same live review, preserve edits and let the service arbitrate
 final uniqueness. The checkbox belongs to this request, not global settings.
 
+## Finish deleted-target session cleanup before releasing operation ownership (ADR 199)
+
+Use the committed node tombstone as the authority for terminal teardown, even
+when a subsequent event write fails. Invoke cleanup inside the daemon operation
+owner before receipt finalization; requester cancellation must not skip an owed
+cleanup. Retain sessions when deletion did not commit. Remove the complete target
+set under the terminal mutex, then share ordinary close persistence, publication
+and bounded tracked runtime teardown under the update barrier.
+
+Resolve reusable slugs to canonical identity before launching a terminal. Recheck
+that identity under the same mutex just before publication: deletion either sees
+the published entry or the late publisher sees deletion and closes its runtime.
+Cold restoration must pass the same admission gate. Do not hold metadata locks
+across runtime launch or acquire the update gate while holding the terminal mutex.
+
 ## Admit a complete batch before running its members (ADR 198)
 
 Persist an ordered root receipt containing captured node IDs/names, action kinds

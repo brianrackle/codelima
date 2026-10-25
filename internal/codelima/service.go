@@ -1302,7 +1302,11 @@ func (s *Service) nodeTerminalMetadata(ctx context.Context, value string) (Node,
 	if err := s.EnsureReady(ctx, false); err != nil {
 		return Node{}, err
 	}
-	return s.store.NodeByIDOrSlug(value)
+	node, err := s.store.NodeByIDOrSlug(value)
+	if err == nil && node.DeletedAt != nil {
+		err = notFound("node has been deleted", map[string]any{"id": node.ID})
+	}
+	return node, err
 }
 
 func (s *Service) NodeStart(ctx context.Context, value string) (Node, error) {
