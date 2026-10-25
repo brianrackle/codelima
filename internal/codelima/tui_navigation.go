@@ -197,6 +197,14 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		a.openDoctorDetails()
 	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemDaemon:
 		a.openDaemonDetails()
+	case a.view == tuiViewSystem && key.MatchString("u"):
+		a.runSystemDaemonAction("update")
+	case a.view == tuiViewSystem && key.MatchString("S"):
+		a.runSystemDaemonAction("restart")
+	case a.view == tuiViewSystem && key.MatchString("L"):
+		a.runSystemDaemonAction("log")
+	case a.view == tuiViewSystem && key.MatchString("D"):
+		a.runSystemDaemonAction("diagnose")
 	case a.view != tuiViewNodes:
 		return false
 	case key.MatchString("/") && !a.nodeDetail:

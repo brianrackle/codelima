@@ -526,28 +526,30 @@ var cliCommands = []*cliCommand{
 		},
 	},
 	{
+		Group: "daemon", Name: "restart", Summary: "restart the daemon; live shells end and saved tabs follow daemon.restore",
+		Run: func(ctx context.Context, service *Service, _ string, _ *flag.FlagSet, _ []string) (any, error) {
+			return restartDaemon(ctx, service)
+		},
+	},
+	{
+		Group: "daemon", Name: "diagnose", Summary: "save local terminal-freeze evidence without attempting recovery",
+		Flags: func(fs *flag.FlagSet) {
+			fs.String("output", "", "new capture directory (default: CODELIMA_HOME/_diagnostics/terminal-freeze-*)")
+			fs.String("terminal-id", "", "terminal to inspect (default: first listed terminal)")
+			fs.Uint("sample-seconds", 10, "macOS native sample duration, 0 disables, maximum 30")
+		},
+		Run: func(ctx context.Context, service *Service, _ string, fs *flag.FlagSet, _ []string) (any, error) {
+			capture := newDaemonDiagnosticCapture(service.cfg.MetadataRoot, daemonDiagnosticOptions{Output: flagString(fs, "output"), TerminalID: flagString(fs, "terminal-id"), SampleSeconds: int(flagUint(fs, "sample-seconds"))})
+			return capture.capture(ctx)
+		},
+	},
+	{
 		Group:      "daemon",
 		Name:       "update",
 		Summary:    "hand terminals off to a new daemon binary (defaults to this executable)",
 		Positional: "path",
 		Run: func(ctx context.Context, service *Service, positional string, _ *flag.FlagSet, _ []string) (any, error) {
-			path, err := daemonUpdateBinaryPath(positional)
-			if err != nil {
-				return nil, invalidArgument("resolve daemon update binary: "+err.Error(), map[string]any{"path": path})
-			}
-			client, err := dialDaemonUpdateClient(ctx, service)
-			if err != nil {
-				return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
-			}
-			defer func() { _ = client.Close() }()
-			var result map[string]any
-			if err := client.Call(ctx, "daemon.update", map[string]string{"path": path}, &result); err != nil {
-				if !isUnsupportedLegacyHandoffTransport(err) {
-					return nil, fromDaemonError(err)
-				}
-				return restartAfterUnsupportedLegacyHandoff(ctx, service, client)
-			}
-			return result, nil
+			return updateDaemon(ctx, service, daemonUpdateOptions{Path: positional, AllowLegacyRestart: true, TakeSeat: true})
 		},
 	},
 

@@ -134,6 +134,12 @@ func homeIsFresh(home string) (bool, error) {
 		if !entry.IsDir() {
 			return false, nil
 		}
+		// Offline diagnosis can precede first run. This reserved evidence
+		// directory is never application state and initialization preserves it.
+		// Symlinks/files with this name still fail the directory check above.
+		if entry.Name() == "_diagnostics" {
+			continue
+		}
 		children, err := os.ReadDir(filepath.Join(home, entry.Name()))
 		if err != nil {
 			return false, err

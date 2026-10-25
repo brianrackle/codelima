@@ -29,7 +29,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
-| [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–180 responsive capacity, retained Doctor findings and cached daemon runtime status | Partial; Doctor and daemon overview flows verified; daemon controls and full artboard/native qualification remain |
+| [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–181 responsive capacity, retained Doctor findings, cached daemon status and explicit actions | Partial; Doctor, overview and action flows verified; macOS sampling and full artboard/native qualification remain |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -622,3 +622,34 @@ The host session, both TUIs, daemon, tmux, metadata, screenshots, tmp/oq and its
 tmpfs mount were removed; no VM was created. Forwarding/reclaim error cases have
 automated fixture coverage. Daemon action controls, packaged diagnostic capture
 and final artboard/native qualification remain open in TODO #57.
+
+
+ADR 181 / ordinary protocol 21 adds explicit System update/restart/log/diagnostic
+controls, shared CLI lifecycle helpers and an installed Go evidence collector.
+Update refuses restart fallback; confirmed restart guards the observed epoch.
+Independent workers keep evidence access available, fence shutdown completions
+and preserve navigation. The build-free skill wrapper delegates to the same
+collector. Offline/malformed-settings capture and subsequent first-run metadata
+initialization have regression coverage; unknown home content remains rejected.
+
+Live keyboard/mouse/palette checks at 150×38 and 80×24 verified update shell/PID
+and variable continuity, restart confirmation/cancellation, respawn and forget,
+log reload/missing/error recovery and pager return. Healthy and suspended-daemon
+captures retained private evidence, failed probes, one active capture and the
+foreground log view; Activity retained the result path. CLI and wrapper capture
+preserved PID/seat, and offline capture did not start a daemon. Compact help and
+confirmation text were adjusted and rechecked in the running final build.
+
+All fixture processes, host shells, daemon/TUIs/tmux, metadata, bundles, screenshots,
+scripts, tmp/cq and its 64 MiB tmpfs were removed. No VM was created. Native macOS
+sampling and final native/artboard/modal qualification remain open in TODO #57;
+ANSI-to-HTML previews are not native pixel-level qualification. Older stepqa
+cleanup debt remains separate.
+
+Final ADR 181 verification passed: core unit 69.380s, core race 100.661s and
+CLI integration 20.571s, plus formatting, lint, Vaxis fork checks and builds.
+Gopls reported only existing slices.Clone suggestions in unchanged store code.
+The final run used Linux signal tracing and a saved exit result (0); its trace
+contained no SIGTERM sender outside the traced processes. The untraced launcher
+interruption did not recur there and its cause remains unproven. The 937210-byte
+trace, log, exit receipt and identified interrupted-run Go scratch were removed.

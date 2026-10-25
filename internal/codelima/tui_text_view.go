@@ -7,11 +7,14 @@ import (
 	"go.rockorager.dev/vaxis/widgets/border"
 )
 
-// tuiTextView displays an immutable, wrapped detail snapshot without I/O.
+// tuiTextView displays a wrapped detail snapshot without I/O.
 type tuiTextView struct {
 	title, text      string
 	scroll, viewport int
 	end              bool
+	wrappedText      string
+	wrappedWidth     int
+	lines            []string
 }
 
 func (v *tuiTextView) Update(event vaxis.Event) (bool, error) {
@@ -56,12 +59,16 @@ func (v *tuiTextView) Draw(win vaxis.Window, header, muted, _ vaxis.Style) {
 	body := border.All(win, muted)
 	w, h := body.Size()
 	tuiLine(body, 0, plainLogText(v.title), header)
-	var lines []string
-	for _, line := range strings.Split(v.text, "\n") {
-		for _, row := range commandVisualRows(vaxis.Characters(plainLogText(line)), max(1, w)) {
-			lines = append(lines, row.text)
+	if v.lines == nil || v.wrappedText != v.text || v.wrappedWidth != w {
+		v.lines = nil
+		for _, line := range strings.Split(v.text, "\n") {
+			for _, row := range commandVisualRows(vaxis.Characters(plainLogText(line)), max(1, w)) {
+				v.lines = append(v.lines, row.text)
+			}
 		}
+		v.wrappedText, v.wrappedWidth = v.text, w
 	}
+	lines := v.lines
 	v.viewport = max(1, h-3)
 	if v.end {
 		v.scroll, v.end = len(lines), false

@@ -13,6 +13,7 @@ import (
 const tuiDaemonOverviewInterval = 3 * time.Second
 
 type tuiSystemDaemonState struct {
+	tuiDaemonWorkState
 	overview             daemon.Overview
 	clientID             string
 	checkedAt, startedAt time.Time
@@ -181,9 +182,26 @@ func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, t tuiTheme) {
 	case s.checkedAt.IsZero() && (a.service == nil || a.service.daemonClient == nil):
 		message = "No daemon connection · C re-check"
 	}
+	if s.lifecycle != "" {
+		message, style = "Daemon "+s.lifecycle+" running… · L log · D diagnose", t.amber
+	}
 	tuiLine(win, 1, plainLogText(message), style)
+	type button struct {
+		action, text string
+		col, row     int
+	}
+	var buttons []button
+	col, controlRow := 0, 0
+	for _, action := range [][2]string{{"update", "u update, keep sessions"}, {"restart", "S restart"}, {"log", "L daemon log"}, {"diagnose", "D diagnose freeze"}, {"details", "Enter details"}, {"check", "C re-check"}} {
+		if col > 0 && col+len(action[1]) > w {
+			col, controlRow = 0, controlRow+1
+		}
+		buttons = append(buttons, button{action[0], action[1], col, controlRow})
+		col += len(action[1]) + 2
+	}
+	controlStart := max(2, h-controlRow-1)
 	rows := a.daemonOverviewRows()
-	for i, row := range visibleSystemLines(rows, &a.systemScroll[tuiSystemDaemon], h-3) {
+	for i, row := range visibleSystemLines(rows, &a.systemScroll[tuiSystemDaemon], controlStart-2) {
 		rowStyle := t.text
 		if strings.Contains(row, "degraded") || strings.Contains(row, "unavailable") || strings.Contains(row, "failed") {
 			rowStyle = t.amber
@@ -191,19 +209,20 @@ func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, t tuiTheme) {
 		tuiLine(win, i+2, plainLogText(row), rowStyle)
 	}
 	s.controls = nil
-	col := 0
-	for _, action := range [][2]string{{"details", "Enter details"}, {"check", "C re-check"}} {
-		text := action[1] + "  "
-		if col+len(text) > w {
+	for _, b := range buttons {
+		if controlStart+b.row >= h {
 			break
 		}
-		button := win.New(col, h-1, len(text), 1)
-		tuiLine(button, 0, text, t.mint)
+		button := win.New(b.col, controlStart+b.row, min(w-b.col, len(b.text)), 1)
+		style := t.mint
+		if s.lifecycle != "" && (b.action == "update" || b.action == "restart") {
+			style = t.dim
+		}
+		tuiLine(button, 0, b.text, style)
 		x, y := button.Origin()
-		s.controls = append(s.controls, tuiSystemDaemonControl{tuiRect{col: x, row: y, width: len(text), height: 1}, action[0]})
-		col += len(text)
+		s.controls = append(s.controls, tuiSystemDaemonControl{tuiRect{col: x, row: y, width: min(w-b.col, len(b.text)), height: 1}, b.action})
 	}
-	if len(rows) > h-3 {
+	if len(rows) > controlStart-2 {
 		tuiLine(win.New(col, h-1, max(0, w-col), 1), 0, "↑↓ more", t.dim)
 	}
 }
@@ -256,11 +275,7 @@ func (a *vaxisTUIApp) handleSystemDaemonMouse(mouse vaxis.Mouse) bool {
 	for _, c := range a.systemDaemon.controls {
 		if c.rect.contains(mouse.Col, mouse.Row) {
 			a.systemPanel = tuiSystemDaemon
-			if c.action == "details" {
-				a.openDaemonDetails()
-			} else {
-				a.startDaemonOverview(true)
-			}
+			a.runSystemDaemonAction(c.action)
 			return true
 		}
 	}

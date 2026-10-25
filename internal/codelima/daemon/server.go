@@ -1068,6 +1068,13 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 		}
 		return overview, nil
 	case "daemon.stop":
+		var params StopParams
+		if len(request.Params) > 0 && json.Unmarshal(request.Params, &params) != nil {
+			return nil, Error("InvalidArgument", "invalid daemon.stop params", CodeInvalidArgument, nil)
+		}
+		if params.ExpectedEpoch != "" && params.ExpectedEpoch != s.identity.Token {
+			return nil, Error("PreconditionFailed", "daemon changed before restart; re-check status", CodePreconditionFailed, nil)
+		}
 		s.Broadcast(EventDaemonShutdown, nil)
 		// Stop accepting BEFORE responding so a client that saw this response
 		// can never ping a daemon that still looks alive: the response rides

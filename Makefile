@@ -240,7 +240,7 @@ test-terminal-attach: init
 .PHONY: test-system-daemon
 test-system-daemon: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
-	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima ./internal/codelima/daemon -run '^Test(DaemonOverview|TUISystemDaemon)' -count=1 -timeout=90s
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima ./internal/codelima/daemon ./internal/diagnosticskill -run '^Test(DiagnoseTerminal|DaemonOverview|DaemonStop|DaemonControl|DaemonUpdate|DaemonDiagnostics|TUISystemDaemon|TUIDaemonControl)' -count=1 -timeout=90s
 
 test-system-doctor: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'

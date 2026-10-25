@@ -40,7 +40,9 @@ Capture the live failure before attempting recovery. Preserve daemon and termina
 
 ## Capture script
 
-Use `scripts/capture.sh`. It performs only:
+Use `scripts/capture.sh`. It delegates to the installed `daemon diagnose` command;
+the chosen binary must support that command. The wrapper does not build or update
+a binary. The same collector is available from System with `D`. It performs only:
 
 - daemon status, terminal list, and daemon snapshot reads
 - at most one terminal screen read
@@ -48,7 +50,11 @@ Use `scripts/capture.sh`. It performs only:
 - process inspection
 - non-terminating macOS `sample` captures of the daemon and selected renderer when available
 
-The script continues when an individual probe fails and records every exit status. A successful script exit means the evidence bundle was created, not that the daemon is healthy.
+The collector continues when an individual probe fails and records results in
+`probes.json`, exit files and error files. Log tails and copied files are bounded,
+commands and RPCs have deadlines, and capture directories/files are private.
+Native sample raw output stays inside the capture directory and is removed after
+its bounded report is saved. Command arguments are omitted from process listings. A successful script exit means the evidence bundle was created, not that the daemon is healthy.
 
 If the script cannot run, reproduce the same sequence manually without adding mutating RPCs. Do not substitute `SIGQUIT`; Go terminates after emitting that dump.
 

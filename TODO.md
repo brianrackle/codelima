@@ -629,13 +629,51 @@ record the signal sender around make/go-test with strace and separate process
 sessions before changing terminal shutdown code. This can distinguish tooling
 cleanup from a test defect, but tracing is Linux-specific and affects timing.
 
-Daemon update/restart/log/diagnostic controls and complete System fidelity remain
-open. Reuse the existing update handoff and shutdown ownership checks in bounded
-background actions; package diagnostic collection for installed binaries. This
-preserves established lifecycle semantics and gives operators evidence without
-blocking the TUI, at the cost of explicit interruption handling and maintaining
-a portable collector. The retained snapshot keeps navigation responsive but can be one minute
-old; explicit C re-check and stale/error labels expose that limit.
+ADR 181 implements System u/S/L/D with independent lifecycle, log and capture
+workers. Update refuses a legacy restart fallback; explicit restart confirms
+process loss and guards shutdown by daemon epoch (ordinary protocol 21). CLI
+restart and installed diagnostic capture share the TUI helpers; the build-free
+skill wrapper delegates to the same bounded private Go collector. Capture works
+with a missing daemon or malformed settings and preserves partial evidence.
+The reserved diagnostics directory no longer prevents first-run initialization;
+unrelated files and legacy homes retain their rejection behavior.
+
+Live checks at 150×38/80×24 covered keyboard and all four mouse actions, palette
+dispatch and full compact help, log reload/missing/error recovery and pager
+return. Update changed daemon PID 1683259 → 1683519 while preserving runtime
+shell 1683299, bash 1683324 and a shell variable. Dismissing restart left those
+processes alone; confirmation replaced daemon/shell processes. The forget policy
+returned no saved tabs. Healthy capture produced 70 private files; a suspended
+fixture daemon produced a partial capture with explicit deadlines. Closing and
+reopening D admitted one capture, and completion left L visible with its path
+retained in Activity. Installed CLI and build-free wrapper captures preserved
+PID/seat. An absent-daemon capture did not start it. All fixture processes,
+metadata, bundles, screenshots, scripts, tmux state, tmp/cq and its 64 MiB tmpfs
+were removed; no VM was created. Final automated results are in the design ledger.
+
+The ADR 181 final untraced launcher also received SIGTERM without a failed
+assertion. Its detached make/go-test children initially continued, so this
+observation does not identify a terminal-runtime failure. After they exited,
+a complete rerun with signal tracing, redirected output and a saved exit result
+passed (unit 69.380s, race 100.661s, integration 20.571s). No SIGTERM sender in
+that trace was outside the traced processes. Gopls only suggested slices.Clone
+in unchanged store code. Logs, the 937210-byte trace, exit receipt and the
+identified interrupted-run project Go scratch were removed. If the launcher
+interruption recurs, preserve its sender and the child exit results before
+changing runtime code. Redirected logs/exit receipts distinguish a launcher
+failure from a failed check, but do not themselves explain the signal source.
+
+Remaining System work: native macOS sampling, exact artboard/presentation and
+final cross-view/native qualification. Run QA Flow 9 on macOS and check both
+native reports, deadlines and removal of owned raw sample files; then exercise
+System and modal/footer/mouse flows in a native terminal. This verifies actual
+platform behavior and typography; it needs a native macOS host and cannot be
+proven by Linux fixtures or ANSI-to-HTML previews. In particular, the generic
+compact dialog footer still truncates its redundant last hint, although its
+in-dialog cancel hint and all restart descriptions are readable. Audit the
+shared dialog presentation with the remaining modal work instead of changing
+that cross-cutting layout only for this action. The retained Doctor snapshot can
+be one minute old; explicit C re-check and stale/error labels expose that limit.
 
 Finish native terminal and exact artboard qualification, including generic
 child-modal mouse/presentation. Global catalog metadata currently uses the

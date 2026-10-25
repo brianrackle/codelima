@@ -250,6 +250,10 @@ on transient executable-file behavior in loaded CI filesystems.
 
 ## Schema-owned metadata home
 
+The reserved `_diagnostics/` directory may exist before first initialization.
+Preserve it while recognizing a fresh home; it holds evidence, not runtime
+intent. Do not extend that exception to unknown files or legacy layouts.
+
 `CODELIMA_HOME` is authoritative for configurations, environments, nodes, daemon state, indexes, and locks. Durable writes use temp-file-plus-rename semantics. `_config/schema.version` is checked before metadata is interpreted; schema v4 rejects schema-v2, schema-v3, and legacy Lima homes instead of attempting an in-place migration.
 
 Read paths create only the directory skeleton required to inspect a recognized home. Seed and repair work is triggered by mutating readiness, `doctor --repair`, or TUI startup, and checks its version stamp before taking any lock, so an already-seeded home never queues behind another operation; only a pass that has work takes the relevant flock set, re-checks the stamp under it, and locks each node whose file it may rewrite. Runtime-backed node lists fetch sandbox observations once, index by sandbox name, and merge transient status in memory.
@@ -539,13 +543,18 @@ tails, collect a non-terminating native process sample, record every probe exit
 status, and continue when one probe fails. Never rebuild, stop, update, signal,
 take input ownership, or send terminal data before the capture completes.
 
-Store evidence under the project `tmp/` root, do not upload it automatically,
-and warn that logs, argv, paths, and terminal metadata may be sensitive. A
+The installed Go collector is shared by CLI, System and the build-free skill
+wrapper. Default installed captures go under the metadata home's private
+`_diagnostics/` directory; repository captures use project `tmp/`. Do not
+upload automatically, and warn that logs, paths and terminal contents may be sensitive. A
 successful capture command means the bundle was created, not that the daemon is
 healthy. Interpret observations before hypotheses: a responsive status/list
-surface with a failed terminal read isolates the terminal-engine boundary,
-while a responsive terminal read with frozen clients shifts investigation to
-event delivery and snapshot/redraw handling.
+surface with a failed cached read narrows investigation to that terminal's
+session/cache/renderer; a responsive cached read is not proof of live rendering.
+Record probe failures and partial output, cap command/file/log bytes, and give
+each probe a deadline. Cancel only a probe's owned subprocess group, never the
+inspected daemon/renderer. Native sample raw files stay within the private bundle
+and are removed after retaining a bounded report (ADR 181).
 
 ## Exact daemon protocol and live update
 
@@ -761,3 +770,15 @@ than transport connections, and label observed units precisely. Bound and
 coalesce visible-view polling, cancel it on navigation, fence reconnect
 completions and preserve prior evidence with an explicit stale timestamp.
 See ADR 180.
+
+## Explicit daemon actions
+
+Share lifecycle helpers between CLI and TUI, but make fallback policy explicit.
+An action promising live-session continuity must refuse a restart fallback.
+Guard explicit shutdown with the observed daemon epoch, wait for ownership
+release, then start its successor. Treat a lost mutation reply as an unknown
+outcome and never automatically resubmit it. Only one lifecycle worker runs
+per frontend; diagnostic and log workers remain independent. Post results onto
+the event loop, fence shutdown completions, and retain saved evidence paths
+without replacing a different foreground view. Closing an evidence view does
+not cancel its capture; quitting the frontend does (ADR 181).

@@ -77,6 +77,14 @@ func DefaultConfig(home string) Config {
 }
 
 func LoadConfig(homeOverride string) (Config, error) {
+	home, err := resolveConfigHome(homeOverride)
+	if err != nil {
+		return Config{}, err
+	}
+	return loadConfigAtHome(home)
+}
+
+func resolveConfigHome(homeOverride string) (string, error) {
 	home := homeOverride
 	if home == "" {
 		home = os.Getenv("CODELIMA_HOME")
@@ -89,9 +97,12 @@ func LoadConfig(homeOverride string) (Config, error) {
 	var err error
 	home, err = canonicalPath(home)
 	if err != nil {
-		return Config{}, invalidArgument("failed to resolve CODELIMA_HOME", map[string]any{"path": home})
+		return "", invalidArgument("failed to resolve CODELIMA_HOME", map[string]any{"path": home})
 	}
+	return home, nil
+}
 
+func loadConfigAtHome(home string) (Config, error) {
 	cfg := DefaultConfig(home)
 	configPath := filepath.Join(home, "_config", "settings.yaml")
 	if exists(configPath) {

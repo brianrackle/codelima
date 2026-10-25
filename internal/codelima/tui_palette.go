@@ -132,6 +132,18 @@ func (a *vaxisTUIApp) openCommandPalette() {
 		tuiPaletteCommand{label: "Open shell chooser", hint: "X", run: func() error { a.openShellChooser(); return nil }},
 		tuiPaletteCommand{label: "Show keybindings", hint: "?", run: func() error { a.openKeyHelp(); return nil }},
 	)
+	for _, action := range [][3]string{
+		{"update", "Update daemon, keep sessions", "System · u"},
+		{"restart", "Restart daemon", "System · S · ends live shells"},
+		{"log", "Open daemon log", "System · L"},
+		{"diagnose", "Diagnose terminal freeze", "System · D · save local evidence"},
+	} {
+		commands = append(commands, tuiPaletteCommand{label: action[1], hint: action[2], run: func() error {
+			a.switchView(tuiViewSystem)
+			a.runSystemDaemonAction(action[0])
+			return nil
+		}})
+	}
 	for _, record := range a.fleet.records {
 		id := record.Node.ID
 		commands = append(commands, tuiPaletteCommand{label: "Node: " + record.Node.Slug, hint: record.Node.DirectoryPath, run: func() error {
@@ -168,6 +180,11 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "[ ] / t / T / w", hint: "Shell tabs / new guest / new host / close (TUI focus only)"},
 		{label: "F7", hint: "Search embedded terminal (TUI focus only)"},
 		{label: ": / ?", hint: "Command palette / searchable key help"},
+		{label: "u", hint: "System: update daemon, keep sessions"},
+		{label: "S", hint: "System: restart daemon; ends live shell processes"},
+		{label: "L", hint: "System: open daemon log"},
+		{label: "D", hint: "System: diagnose freeze; save local evidence"},
+		{label: "Tab / C / R", hint: "System: panel / check / Doctor repair"},
 		{label: "q", hint: "Quit from a global view; return from node detail"},
 	}
 	p := newTUIPalette("Keyboard shortcuts · type to filter", commands)

@@ -568,6 +568,16 @@ Subscribers include event observers as well as TUIs. Failed refreshes retain
 an explicitly stale snapshot. Focus Daemon and press Enter or click details
 for full errors and sample times; arrows/wheel reveal additional rows.
 
+In System, press `u` to update the daemon while keeping live sessions. This
+control fails explicitly if live handoff is unavailable; it never falls back
+to a restart. `S` opens a restart confirmation: existing shell processes end,
+and saved tabs reopen as fresh shells when `daemon.restore: respawn` is set
+(the default); `forget` discards them. Keep the TUI open until restart finishes.
+`L` opens the daemon log, with `C` to reload and `o` to open your pager.
+`D` captures diagnostic evidence in the background. You can close its view
+and reopen it with `D` while it runs; completion records the saved path in
+Activity. These actions also appear in the command palette.
+
 By default, `x` attaches the node's daemon session directly to your terminal and suspends
 the manager. `Ctrl+]` detaches; `exit` ends the session. `codelima shell NODE`
 uses the same managed shell, and `codelima terminal attach TERMINAL_ID` resumes
@@ -773,14 +783,32 @@ All TUIs using one `CODELIMA_HOME` share its daemon. If every tab and VM freezes
 together, capture the live daemon before restarting it:
 
 ```sh
+codelima daemon diagnose
+# Choose the frozen terminal and a new destination directory:
+codelima daemon diagnose --terminal-id term_example --output ./tmp/freeze-evidence
+# From a source checkout, the build-free wrapper uses the same collector:
 make diagnose-terminal-freeze
 ```
 
 The read-only capture records daemon status, terminal state, logs, process
-details, and a native macOS sample under `./tmp/terminal-freeze-*`. It does not
+details, and a native macOS sample. The installed command and System `D` save
+private bundles under `CODELIMA_HOME/_diagnostics/terminal-freeze-*`; the Make
+wrapper defaults to `./tmp/terminal-freeze-*`. It does not
 stop, update, signal, or send input to the daemon. Review the bundle for
 sensitive paths, commands, logs, and metadata before sharing it. The target
 uses `CODELIMA_HOME` when set and otherwise defaults to `~/.codelima`.
+Each RPC has a five-second deadline; optional probe failures are retained in
+`probes.json`, error and exit files. Log tails are capped at 256 KiB, copied
+files and command output at 1 MiB; daemon JSON retains the protocol frame limit.
+Use `--sample-seconds 0` to omit native samples (maximum 30 seconds). Capture
+does not start a missing daemon. A successful capture means evidence was saved,
+not that every probe succeeded.
+Malformed settings do not block capture and are left unchanged.
+
+For an explicit process replacement, run `codelima daemon restart`. It has the
+same shell/process impact as System `S`. If the reply to an update or stop is
+lost, inspect `codelima daemon status` before retrying. If the frontend exits
+after shutdown but before startup, use `codelima daemon start` to recover.
 
 Agents can invoke the repository skill directly as
 `$diagnose-codelima-terminal-freezes`. Run the capture on the host that owns the

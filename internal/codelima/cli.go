@@ -50,7 +50,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return ExitSuccess
 	}
 
-	cfg, err := LoadConfig(options.Home)
+	cfg, err := loadCLIConfig(options.Home, rest)
 	if err != nil {
 		writeError(stdout, stderr, options.JSON, err)
 		return exitCodeForError(err)
@@ -74,6 +74,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	return ExitSuccess
+}
+
+func loadCLIConfig(home string, args []string) (Config, error) {
+	// Evidence collection must still work when settings themselves are broken.
+	// It needs only the selected canonical home and never seeds runtime state.
+	if len(args) >= 2 && args[0] == "daemon" && args[1] == "diagnose" {
+		path, err := resolveConfigHome(home)
+		return DefaultConfig(path), err
+	}
+	return LoadConfig(home)
 }
 
 func parseGlobalOptions(args []string) (globalOptions, []string, error) {

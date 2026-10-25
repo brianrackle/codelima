@@ -494,6 +494,33 @@ System daemon overview (ADR 180), using an isolated metadata home:
    captures. Retain older qualification fixtures separately until their work
    is complete.
 
+System daemon controls (ADR 181), in an isolated metadata home:
+
+1. At 150×38 and 80×24, inspect and use u/S/L/D by keyboard and mouse.
+   Find the four actions in the command palette and their keys in help.
+2. Open a host shell, save a variable and record its PID. Use System u:
+   the daemon PID changes, the shell PID/variable remain, and the TUI reconnects.
+   Navigate during the action; completion must not change the current view.
+3. Open S, read the process-loss warning and dismiss with Esc; PIDs must remain.
+   Confirm S on the next attempt: the old shell exits and the saved tab respawns
+   with a different process when daemon.restore is respawn. With forget, no
+   saved tab returns. If the frontend exits during restart, check status before
+   using daemon start. Never retry an unknown delivery outcome automatically.
+4. Open L, scroll/Home/End, resize, append a log line and C reload. Use o with a
+   safe pager and verify the TUI resumes. Check a missing log and a failed read.
+5. Open D, close its view and reopen D while capture runs: only one bundle is
+   created. Switch to L before capture completes; L must stay open and Activity
+   must retain the capture path. Verify private directory/file modes and the
+   status/list/snapshot/cached-read and process evidence. Run the installed CLI
+   and build-free wrapper too. Neither may change daemon PID, shell PID or seat.
+6. Briefly suspend only the isolated fixture daemon, capture evidence, then
+   resume it. The TUI must remain usable and failed probes must be retained;
+   diagnosis must not restart the daemon. Capture with an absent daemon and
+   confirm it remains absent. Native macOS sample output must stay inside the
+   bundle with temporary raw files removed.
+7. Close fixture terminals/TUIs, stop the daemon and remove all diagnostic
+   bundles, metadata, tmux state, screenshots, mounts and verification scripts.
+
 Settings and shell choices (ADR 152):
 
 1. Open System, cycle Tab to Settings, and change shell mode with Enter. Quit and
@@ -1280,7 +1307,7 @@ cmp "$QA_ROOT/terminals.before-diagnostics" "$QA_ROOT/terminals.after-diagnostic
 
 Verify `summary.md`, daemon status/list/snapshot probe outputs, exit-status
 files, metadata, and bounded log tails exist. Verify the summary reports a
-responsive control plane and terminal actor. On macOS, verify
+responsive control plane and cached terminal read. On macOS, verify
 `daemon-sample.txt` exists and the daemon remained responsive during sampling;
 on Linux, verify the available `/proc` artifacts were captured instead. Confirm
 the command did not change daemon PID, terminal IDs, input ownership, or shell

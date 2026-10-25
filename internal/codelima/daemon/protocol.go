@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 20 adds lightweight
-	// runtime overviews and the count of subscribed logical frontends.
-	ProtocolVersion                = 20
+	// whenever a wire shape this protocol carries changes; 21 adds an optional
+	// expected daemon epoch to stop requests used by explicit restart.
+	ProtocolVersion                = 21
 	SessionVersion                 = 2
 	HandoffVersion                 = 6
 	PreviousRecoveryHandoffVersion = 5
@@ -155,6 +155,10 @@ type Status struct {
 	InputOwner    string    `json:"input_owner,omitempty" yaml:"input_owner,omitempty"`
 	DaemonEpoch   string    `json:"daemon_epoch,omitempty" yaml:"daemon_epoch,omitempty"`
 	StateSequence uint64    `json:"state_sequence,omitempty" yaml:"state_sequence,omitempty"`
+}
+
+type StopParams struct {
+	ExpectedEpoch string `json:"expected_epoch,omitempty"`
 }
 
 type SyncSnapshot struct {

@@ -576,6 +576,9 @@ func (a *vaxisTUIApp) managerFooter() string {
 		}
 		return "↑↓ move · ⏎ open · K cancel · f level · / filter · y copy · [] pages · g top"
 	case tuiViewSystem:
+		if a.systemPanel == tuiSystemDaemon {
+			return "u update · S restart · L log · D diagnose · Tab panel · Enter details"
+		}
 		return "Tab panel · ↑↓ move · Enter details/edit · C check · R repair · Esc nodes"
 	}
 	if a.vx != nil {

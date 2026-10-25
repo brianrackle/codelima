@@ -325,6 +325,7 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.cancelActivityAttachment()
 	defer a.cancelDoctorCheck()
 	defer a.cancelDaemonOverview()
+	defer a.cancelDaemonWork()
 	defer a.cancelLogsLoad()
 	defer a.cancelSpecLoad()
 	defer a.cancelMetricsLoad()
@@ -534,6 +535,18 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiDaemonOverviewEvent:
 		a.applyDaemonOverview(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiDaemonLifecycleEvent:
+		a.applyDaemonLifecycle(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiDaemonLogEvent:
+		a.applyDaemonLog(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiDaemonCaptureEvent:
+		a.applyDaemonCapture(event)
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:

@@ -215,14 +215,14 @@ func daemonUpdateBinaryPath(path string) (string, error) {
 	return resolveCodelimaExecutablePath(absolute), nil
 }
 
-// dialDaemonUpdateClient is the update half of the daemon lifecycle
+// dialDaemonLifecycleClient is the update half of the daemon lifecycle
 // compatibility boundary. It authenticates using the running daemon's
 // persisted identity so daemon.update can ask that process to exec the caller's
 // new binary. Startup recovery may use the same identity only to stop the old
 // owner; ordinary commands retain the exact current-version handshake.
-func dialDaemonUpdateClient(ctx context.Context, service *Service) (*daemonclient.Client, error) {
+func dialDaemonLifecycleClient(ctx context.Context, service *Service, takeSeat bool) (*daemonclient.Client, error) {
 	options := daemonclient.Options{
-		Home: service.cfg.MetadataRoot, Version: Version, WantInput: true, Timeout: 45 * time.Second,
+		Home: service.cfg.MetadataRoot, Version: Version, WantInput: takeSeat, Timeout: 45 * time.Second,
 	}
 	usingPersistedIdentity := false
 	identityPath := daemon.HomePaths(service.cfg.MetadataRoot).Identity
@@ -240,17 +240,79 @@ func dialDaemonUpdateClient(ctx context.Context, service *Service) (*daemonclien
 	client, err := daemonclient.Dial(ctx, options)
 	if err != nil && usingPersistedIdentity {
 		client, err = daemonclient.Dial(ctx, daemonclient.Options{
-			Home: service.cfg.MetadataRoot, Version: Version, WantInput: true, Timeout: 45 * time.Second,
+			Home: service.cfg.MetadataRoot, Version: Version, WantInput: takeSeat, Timeout: 45 * time.Second,
 		})
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !client.HelloSnapshot().InputOwner {
+	if takeSeat && !client.HelloSnapshot().InputOwner {
 		if err := takeTUIDaemonInput(ctx, client); err != nil {
 			_ = client.Close()
 			return nil, err
 		}
 	}
 	return client, nil
+}
+
+type daemonUpdateOptions struct {
+	Path               string
+	AllowLegacyRestart bool
+	TakeSeat           bool
+}
+
+func updateDaemon(ctx context.Context, service *Service, options daemonUpdateOptions) (map[string]any, error) {
+	path, err := daemonUpdateBinaryPath(options.Path)
+	if err != nil {
+		return nil, invalidArgument("resolve daemon update binary: "+err.Error(), map[string]any{"path": path})
+	}
+	client, err := dialDaemonLifecycleClient(ctx, service, options.TakeSeat)
+	if err != nil {
+		return nil, dependencyUnavailable("daemon not running (codelima daemon start)", err, nil)
+	}
+	defer func() { _ = client.Close() }()
+	var result map[string]any
+	if err := client.Call(ctx, "daemon.update", map[string]string{"path": path}, &result); err != nil {
+		if isUnsupportedLegacyHandoffTransport(err) && options.AllowLegacyRestart {
+			return restartAfterUnsupportedLegacyHandoff(ctx, service, client)
+		}
+		return nil, fromDaemonError(err)
+	}
+	return result, nil
+}
+
+// restartDaemon is an explicit process replacement, not a live handoff. The
+// epoch condition prevents a reconnect from stopping a successor installed by
+// another caller between status and stop. A lost acknowledgment is returned to
+// the operator; neither stop nor restart is automatically resubmitted.
+func restartDaemon(ctx context.Context, service *Service) (daemon.Status, error) {
+	client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: service.cfg.MetadataRoot, Version: Version})
+	if err != nil {
+		available, lockErr := daemonLockAvailable(daemon.HomePaths(service.cfg.MetadataRoot).Lock)
+		if lockErr == nil && available {
+			return startDaemon(ctx, service)
+		}
+		return daemon.Status{}, dependencyUnavailable("connect to daemon before restart", errors.Join(err, lockErr), nil)
+	}
+	defer func() { _ = client.Close() }()
+	var status daemon.Status
+	if err := client.Call(ctx, "daemon.status", nil, &status); err != nil {
+		return daemon.Status{}, fromDaemonError(err)
+	}
+	if status.Identity == "" || status.PID <= 0 {
+		return daemon.Status{}, preconditionFailed("daemon has no verifiable identity; restart was not requested", nil)
+	}
+	identity := daemon.Identity{Token: status.Identity, Version: status.Version, Protocol: status.Protocol, PID: status.PID, StartedAt: status.StartedAt}
+	if err := client.Call(ctx, "daemon.stop", daemon.StopParams{ExpectedEpoch: status.Identity}, nil); err != nil {
+		return daemon.Status{}, fromDaemonError(err)
+	}
+	_ = client.Close()
+	if err := finishDaemonShutdown(ctx, service.cfg.MetadataRoot, identity, daemonShutdownTimeout(status.TerminalCount)); err != nil {
+		return daemon.Status{}, dependencyUnavailable("daemon restart could not finish shutdown", err, nil)
+	}
+	status, err = startDaemon(ctx, service)
+	if err != nil {
+		return daemon.Status{}, fmt.Errorf("daemon stopped but restart failed; use codelima daemon start to recover: %w", err)
+	}
+	return status, nil
 }
