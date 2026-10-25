@@ -440,6 +440,10 @@ limit comes first; each message is limited to 4 KiB. They survive daemon restart
 Messages labeled “this window” await persistence and may be lost on exit or
 when this window's 200-entry queue fills. Delivery retries on reconnection.
 Footer notices expire after six seconds; their history remains in Activity.
+Successful in-place daemon updates also record the old and new versions and
+the number of preserved terminal sessions, even with no TUI open. The successor
+queues this notice after sending its commit acknowledgment; a crash before
+persistence can still lose a pending notice.
 If a live daemon update rolls back, Activity reloads messages already accepted
 by the replacement before recording new ones.
 The daemon also records route additions/removals, degraded/restored forwarding,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2037,6 +2038,12 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			// Publish native transitions only after the committed response was
 			// sent, so a failed importer cannot announce successful recovery.
 			host.markServing()
+			host.activityEvents.enqueue(activityMessageRequest{
+				Source: "daemon", Level: slog.LevelInfo,
+				Text: fmt.Sprintf("updated in place %s → %s · %d sessions kept",
+					coalesce(terminalMetadataText(manifest.BinaryVersion, 128), "unknown"),
+					coalesce(terminalMetadataText(Version, 128), "unknown"), len(imported)),
+			})
 			host.startVirtioFSReclaimTicker(ctx)
 			return <-done
 		}

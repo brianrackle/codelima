@@ -704,6 +704,10 @@ func TestDaemonImportAcceptsPreviousChunkedHandoffVersion(t *testing.T) {
 	testDaemonImportPersistsSession(t, daemon.PreviousChunkedHandoffVersion)
 }
 
+func TestActivityNativeUpdateRecordsCommittedImport(t *testing.T) {
+	testDaemonImportPersistsSession(t, daemon.HandoffVersion)
+}
+
 func testDaemonImportPersistsSession(t *testing.T, version int) {
 	t.Helper()
 	service, _ := newHandoffTestService(t)
@@ -719,6 +723,7 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 	token := "import-token"
 	manifest := handoffManifestFor(ids, token)
 	manifest.Version = version
+	manifest.BinaryVersion = "0.3.4"
 	if version == daemon.HandoffVersion {
 		for index := range manifest.Runtimes {
 			manifest.Runtimes[index].RecoverySize = len("handoff-recovery")
@@ -780,6 +785,9 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 	if err != nil || message.Type != "ready" {
 		t.Fatalf("handoff ready = %#v, %v", message, err)
 	}
+	if files, err := os.ReadDir(filepath.Join(service.cfg.MetadataRoot, "_activity")); !os.IsNotExist(err) && (err != nil || len(files) != 0) {
+		t.Fatal("import announced an update before commit", files, err)
+	}
 	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "commit", Token: token}, nil); err != nil {
 		t.Fatalf("write commit: %v", err)
 	}
@@ -794,6 +802,18 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 	}
 	if _, err := daemonclient.Ping(ctx, service.cfg.MetadataRoot, Version); err != nil {
 		t.Fatalf("imported daemon is not serving at commit: %v", err)
+	}
+	client, err := daemonclient.Dial(ctx, daemonclient.Options{Home: service.cfg.MetadataRoot, Version: Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	var page ActivityPage
+	waitForHandoff(t, 5*time.Second, func() bool {
+		return client.Call(ctx, "activity.list", nil, &page) == nil && len(page.History) == 1
+	}, "committed update Activity message")
+	if got := page.History[0]; got.Source != "daemon" || got.Text != "updated in place 0.3.4 → "+Version+" · 2 sessions kept" {
+		t.Fatal("update history lost version or retained-session evidence", got)
 	}
 
 	cancel()

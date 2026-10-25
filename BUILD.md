@@ -80,6 +80,10 @@ unknown recovery, bounded retries/overflow, ownership fencing, shutdown and
 frontend footer deduplication. The full daemon suite checks the Ready callback
 against competing startup ownership. Follow QA.md for real guest forwarding
 and capacity qualification before marking this surface complete.
+The Activity suite also exercises committed live imports with retained sessions,
+unauthorized commits and failed commit-acknowledgment writes (ADR 169). Successful
+successors record the version transition and adopted count through the existing
+queue; neither a failed import nor a restart fallback claims in-place success.
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's

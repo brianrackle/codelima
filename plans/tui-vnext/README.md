@@ -278,6 +278,16 @@ eight native records survived daemon restart unchanged. The start/stop receipts
 succeeded; the interrupted stop CLI waiter was checked against the durable
 receipt and Lima's Stopped state. Original fixture bytes are restored, the TUI
 and daemon stopped, and slice records, HTTP files and scratch evidence removed.
-Two-guest ownership qualification and a possible stale completion capture remain
-explicit follow-ups in TODO. Native terminal bells/notifications,
-committed daemon-update events and final Activity fidelity still remain.
+Two-guest ownership qualification remains in TODO. A follow-up check showed the
+apparently missing completion was retained scroll position: three controlled
+receipts refreshed immediately, and `g` revealed the newest rows after compact
+scrolling and widening. Its fixture and artifacts were restored/removed.
+Native terminal bells/notifications and final Activity fidelity still remain.
+ADR 169 records committed daemon-update history. Focused tests, full verify,
+race, integration and gopls pass. A real unattended update preserved two host
+shell identities and child PIDs; subsequent input worked and one record reported
+two sessions kept. The record rendered at 150×38 and 80×24 and survived restart
+unchanged. Injected import failure preserved the predecessor and shells without
+recording success. The disposable sessions, TUI, daemon, home and slice scratch
+artifacts are removed. Typed outcomes/navigation and terminal notices remain
+part of the final Activity work.

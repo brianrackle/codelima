@@ -66,6 +66,9 @@ and start its writer only after process ownership. Gate writes against live
 handoff and retire a process that cannot recover ownership. Broadcast committed
 records to frontend footers without sending them back through the outbox
 (ADR 168). Share the observed allocation helper with host capacity rendering.
+An in-place update notice belongs to the successor after its committed reply
+succeeds. Derive retained counts from adopted objects and reuse the owned queue;
+frontend completion and predecessor intent are insufficient evidence (ADR 169).
 
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence

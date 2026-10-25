@@ -651,6 +651,13 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   stop the excess allocation and confirm recovery. Missing observations must
   not invent recovery. Restart the daemon and confirm committed history remains.
   Clean guest listeners, logs, test resource changes and new journal records.
+- With no TUI open, keep two disposable host shell sessions alive and run
+  `daemon update`. Verify their identities and child processes survive, input
+  still works, and Activity records the old/new versions and two kept sessions
+  exactly once. Open Activity at 150×38 and 80×24; restart the daemon and confirm
+  the committed update record remains. An injected import failure must leave
+  the predecessor usable and add no successful-update record. Close the shells
+  and remove the disposable home and fault-injection setup.
 - Remove all disposable nodes, homes, daemons, terminals and verification files.
 
 For recorded bootstrap steps and explicit retry, use one disposable guest:
