@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
 )
@@ -554,33 +553,10 @@ func (a *vaxisTUIApp) drawNodePreview(win vaxis.Window, record tuiFleetRecord, t
 	resources := inner.New(third+1, 0, third-2, height)
 	sessions := inner.New(2*third+1, 0, width-2*third-2, height)
 	a.drawNodeIdentity(identity, record, theme)
-	tuiLine(resources, 0, "CPU · last 60s", theme.muted)
-	var cpuHistory []daemon.NodeMetricPoint
-	if observation := record.Node.LastRuntimeObservation; observation != nil {
-		cpuHistory = observation.CPUHistory
-	}
-	graphHeight := max(1, min(4, height-6))
-	drawTUIMetricChart(resources.New(0, 1, third-2, graphHeight), cpuHistory, time.Now(), time.Minute, metricCPU, theme.mint)
-	for i, field := range []tuiFleetSort{tuiFleetSortMemory, tuiFleetSortDisk} {
-		text, style := a.fleetCell(record, field, false, third-10, theme)
-		tuiLine(resources, graphHeight+2+i, fmt.Sprintf("%-7s %s", field, text), style)
-	}
+	a.drawFleetResources(resources, record, theme)
 	a.drawFleetSessions(sessions, record.Node, theme)
 	a.drawFleetRoutes(sessions, record.Node.ID, 5, min(8, height), theme)
 	a.drawFleetRecent(sessions, record.Node.ID, 9, height, theme)
-}
-
-func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
-	node := record.Node
-	fields := [][2]string{
-		{"status", record.Status}, {"template", node.ConfigurationSlug},
-		{"resources", fmt.Sprintf("%d vCPU · %s mem · %s disk", node.VCPUs, formatTUIResourceSize(node.MemoryMiB), formatTUIResourceSize(node.DiskMiB))},
-		{"runtime", strings.TrimSpace(node.Runtime + " " + node.Provider)}, {"image", node.Image}, {"directory", node.DirectoryPath}, {"workspace", nodeWorkspaceMode(node)},
-		{"bootstrap", strconv.FormatBool(node.BootstrapCompleted)}, {"agent", node.AgentProfileName},
-	}
-	for i, field := range fields {
-		tuiLine(win, i, fmt.Sprintf("%-10s %s", field[0], field[1]), theme.text)
-	}
 }
 
 func (a *vaxisTUIApp) managerFooter() string {

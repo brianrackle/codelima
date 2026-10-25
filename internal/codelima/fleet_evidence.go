@@ -20,6 +20,7 @@ type fleetEvidenceRequest struct {
 // Fleet evidence carries bounded facts, never command bodies or output. The
 // selected node's recent records are independent of the Activity page cursor.
 type fleetEvidenceSnapshot struct {
+	Preview        *fleetPreviewEvidence        `json:"preview,omitempty"`
 	ObservedAt     time.Time                    `json:"observed_at"`
 	Nodes          map[string]fleetNodeEvidence `json:"nodes"`
 	RecentNode     string                       `json:"recent_node,omitempty"`
@@ -125,6 +126,9 @@ func (h *daemonHost) handleFleetEvidence(ctx context.Context, raw json.RawMessag
 			}
 		}
 		result.Nodes[id] = evidence
+		if id == request.RecentNode {
+			result.Preview = h.fleetPreview(node)
+		}
 	}
 	if request.RecentNode != "" {
 		result.RecentError = result.LifecycleError

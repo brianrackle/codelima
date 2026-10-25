@@ -9,10 +9,10 @@ All example identities, metrics and timestamps in those files are reference data
 
 | Surface | Required behavior | Status |
 |---|---|---|
-| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime identity, preview trends/idle timing and final qualification remain |
+| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail added (ADR 188); idle timing, complete agent validation and final qualification remain |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail, durable batch queue and final qualification remain |
+| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); durable idle timing, batch queue and final qualification remain |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -37,6 +37,29 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+ADR 188 checkpoint, 2026-10-25: `make verify test-race test-integration`
+passed (core unit 81.792s, race 112.109s, CLI integration 17.759s), including
+format, lint, Vaxis checks and both builds. Final focused fleet race checks
+passed in 4.825s after adding current-successful-check evidence coverage.
+Go API inspection and gopls checks completed; gopls reported only the existing
+append-to-slices.Clone style suggestion outside the changed test lines.
+
+Two rebuilt Linux frontends at 150×38 and 80×24 were visually inspected and
+operated against a disposable QEMU/TCG guest. They retained the same CPU/memory
+history, preserved sample gaps and reflected a real 64 MiB memory allocation.
+Effective runtime settings and workspace access matched `lima.yaml`; omitting
+settings while stopped showed unknowns, and changing access showed read-only.
+Creation/auth/Lima identity, observed task detail and stale/recovery labels
+passed. The route-open action dispatched the discovered node-qualified URL to
+an isolated opener, and actual Chromium loaded the guest page at that URL.
+Confirmed stop ended the managed guest terminal, succeeded after 28s, removed
+the route, released observed allocation and rendered stop age in both clients.
+All owned processes, guests, overlays, stores, captures, tmpfs and 25 inactive
+test inputrc files were removed; the existing backing image was unchanged.
+Multi-node conflicts, native desktop browser launch, durable idle timing,
+complete agent validation and final native/artboard qualification remain open.
+The complete redesign remains partial.
 
 ADR 187 checkpoint, 2026-10-25: `make verify test-race test-integration`
 passed (core unit 81.167s, race 113.556s, CLI integration 17.780s). After adding
@@ -65,11 +88,11 @@ Fleet re-audit against the three home artboards:
 | `r` restart, with failed-step retry retained | ADR 185 service/daemon/CLI/TUI restart passes two-guest Linux/TCG checks; full native/artboard qualification remains |
 | `o` opens the first forwarded route | ADR 186 opens the selected ready node's first current live HTTP route; unavailable/stale/non-live/TCP guards tested |
 | Port filters/counts include discovered forwarding | ADR 186 joins frozen guest ports with discovered routes by node ID; unavailable/stale counts remain explicit |
-| Marked-node panel replaces single-node preview | ADRs 186–187 include hidden targets, global release/remaining allocation, guest/host counts and observed working/unknown activity; per-target task labels and idle timing remain |
+| Marked-node panel replaces single-node preview | ADRs 186–187 include hidden targets, global release/remaining allocation, guest/host counts and observed working/unknown activity; per-target task labels added (ADR 188); idle timing remains |
 | Flat filter view includes directory | ADR 186 shows Directory when grouping is absent |
 | Wide memory/disk values show used/total | ADR 186 uses observed byte totals and explicit unavailable values; compact stays percentages |
 | Compact navigation retains connection and capacity | ADR 186 abbreviates inactive views and preserves connection/global allocation with unknowns |
-| Preview includes resolved routes, runtime and recent events | ADRs 186–187 add provider/runtime, observed routes, independent recent events and explicit session activity; actual VM/mount/nesting identity and complete trend/idle fidelity remain |
+| Preview includes resolved routes, runtime and recent events | ADRs 186–187 add provider/runtime, observed routes, independent recent events and explicit session activity; selected VM/mount/nesting configuration and CPU/memory trends added (ADR 188); durable idle timing and full qualification remain |
 | Lifecycle rows explain current work and failure | ADRs 186–187 show recorded running phases, causally matched failed steps/duration, confirmed stop age and recovered interrupted state with live-claim precedence |
 | Whole-batch caller independence | Individual admitted mutations survive; the sequential frontend queue does not. Persist complete queue/result ownership |
 

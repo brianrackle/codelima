@@ -232,6 +232,7 @@ func (a *vaxisTUIApp) drawMarkedPreview(win vaxis.Window, theme tuiTheme) {
 		if !slices.ContainsFunc(a.fleet.visible, func(r tuiFleetRecord) bool { return r.Node.ID == record.Node.ID }) {
 			text += " · hidden by filter"
 		}
+		text += a.fleetSessionSummary(record.Node)
 		tuiLine(inner.New(1, i, width-2, 1), 0, text, theme.text)
 	}
 	row := min(len(impact.targets), limit)

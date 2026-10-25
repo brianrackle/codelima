@@ -33,6 +33,9 @@ func TestTUIFleetMarkedSessionImpactIncludesHiddenGuestAndHostKinds(t *testing.T
 	a.fleet.marks[first.ID], a.fleet.marks[second.ID] = true, true
 	a.fleet.setFilter(first.Slug)
 	impact := a.markedImpact()
+	if got := a.fleetSessionSummary(first); !strings.Contains(got, "1 working (codex · compile") {
+		t.Fatalf("marked task detail lost: %s", got)
+	}
 	if impact.sessions != 3 || impact.guestSessions != 2 || impact.hostSessions != 1 || impact.working != 1 || impact.activityUnknown != 1 || impact.hidden != 1 {
 		t.Fatalf("hidden session impact lost: %+v", impact)
 	}

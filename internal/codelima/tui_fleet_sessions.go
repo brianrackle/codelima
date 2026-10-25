@@ -78,3 +78,31 @@ func (impact tuiMarkedImpact) sessionWarning() string {
 	}
 	return text
 }
+
+func (a *vaxisTUIApp) fleetSessionSummary(node Node) string {
+	working, prompt, unknown := 0, 0, 0
+	first := ""
+	for _, session := range a.fleetSessions(node) {
+		switch session.activity {
+		case "working":
+			working++
+			if first == "" {
+				first = session.label
+			}
+		case "at prompt":
+			prompt++
+		case "unknown":
+			unknown++
+		}
+	}
+	if working > 0 {
+		return fmt.Sprintf(" · %d working (%s)", working, first)
+	}
+	if unknown > 0 {
+		return fmt.Sprintf(" · %d activity unknown", unknown)
+	}
+	if prompt > 0 {
+		return fmt.Sprintf(" · %d at prompt", prompt)
+	}
+	return ""
+}

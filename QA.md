@@ -632,6 +632,20 @@ diagnostics; they do not replace those manual qualifications.
 - With a running guest, compare the fleet's eight-second CPU sparkline and
   preview's 60-second plot across two frontends. New windows must include
   retained observations; blank intervals must remain blank after disconnection.
+- Preview evidence (ADR 188): at 150×38 compare CPU current/average/peak with
+  the retained last minute and memory used/total/available with guest procfs.
+  Change memory/CPU load, open a second frontend and verify both charts include
+  samples from before it opened. Missing samples stay gaps; stale readings are
+  labeled last. Select another node and return without mixing histories.
+  Compare VM type with runtime inventory and mount/nesting/workspace access with
+  the selected instance's effective Lima YAML. Omitted fields and unavailable
+  files must show unknowns, never defaults inferred from this host. Compare
+  creation/auth and Lima name with frozen node metadata. At 80×24 the preview
+  disappears cleanly while selection and compact metrics remain intact.
+- With disposable marked sessions, emit an explicit working progress signal
+  and verify its task label appears on the corresponding marked row, including
+  when that target is hidden. A title alone must not count as working. Cancel
+  bulk actions during this inspection and remove all owned sessions afterwards.
 - Select several running nodes, press Enter/Esc and refresh. `terminal list`
   must show no newly created shell. Directory headings cannot be selected by
   keyboard or mouse. `G` toggles groups; `<`/`>` chooses sort and `=` reverses.
@@ -708,6 +722,26 @@ the host count. Daemon suspension labeled cached evidence stale; recovery
 restored fresh rows. Terminals, processes, fixture files, captures and the tmpfs
 were removed. Real guest session termination, confirmed stop-age rendering,
 resource/route comparisons and final native/artboard qualification remain open.
+
+ADR 188 checkpoint (2026-10-25): two rebuilt Linux frontends were visually
+inspected and operated at 150×38 and 80×24 with one disposable QEMU/TCG guest.
+Both displayed retained CPU and memory history, including missing intervals.
+Observed memory tracked a real 64 MiB allocation; available bytes matched the
+guest sampler's total-minus-used definition. Runtime qemu/9p/nested-off,
+workspace rw, creation/auth state and Lima identity matched their sources.
+Changing only effective `lima.yaml` while stopped produced unknown mount/nesting
+and read-only access; the frozen rendered recipe was unchanged. The effective
+configuration was restored. A managed guest terminal's OSC progress/title
+appeared in its marked target row. The open action dispatched the discovered
+node-qualified HTTP route to an isolated opener; actual Chromium then loaded
+the guest page at that URL. This qualifies action dispatch and route reachability,
+not native desktop browser launch. Ctrl+s confirmed stop, the guest session
+ended, the receipt succeeded after 28s, and both frontends showed zero allocation,
+no route and confirmed stop age. Daemon suspension/recovery produced and cleared
+stale labels. Full verify/race/CLI integration and final focused race checks
+passed. All owned terminals, daemon/TUI/tmux processes, guest overlay, stores,
+captures and tmpfs were removed; the existing backing image's checksum matched.
+Multi-node conflicts and final native/artboard qualification remain open.
 
 - In the create form, type a replacement slug and verify the muted default
   disappears. Esc asks whether to discard; `n` preserves edits and `y`

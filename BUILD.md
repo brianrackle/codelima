@@ -34,8 +34,10 @@ qualification remains tracked in TODO #57.
 `make test-fleet-evidence` checks bounded, node/attempt-scoped evidence, recovered
 interruption and live claims, independent recent history, response fencing,
 cancellation, incomplete sources and explicit terminal activity (ADR 187).
+It also checks selected CPU/memory history, runtime configuration, workspace
+mount matching and preview response identity (ADR 188).
 Use `FLEET_EVIDENCE_TEST_FLAGS=-race` for race checking. The current ordinary
-daemon protocol is **24**; update older daemons explicitly. Session protocol 2
+daemon protocol is **25**; update older daemons explicitly. Session protocol 2
 and handoff protocol 6 are unchanged. Run the fleet evidence/session flows in
 QA.md after the full verification gates.
 

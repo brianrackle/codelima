@@ -118,6 +118,9 @@ func (a *vaxisTUIApp) startFleetEvidenceLoad(force bool) {
 				}
 			}
 			if batch.RecentNode != "" && snapshot.RecentNode == batch.RecentNode {
+				if snapshot.Preview != nil && snapshot.Preview.NodeID == batch.RecentNode {
+					e.snapshot.Preview = snapshot.Preview
+				}
 				e.snapshot.Recent = snapshot.Recent
 				e.snapshot.RecentError = snapshot.RecentError
 			}

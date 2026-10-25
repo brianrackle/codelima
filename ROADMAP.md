@@ -45,8 +45,10 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   first-port opening, observed byte cells, compact navigation/capacity, flat
   directory context, hidden-mark/global-allocation summary and running phase
   rows are implemented (ADR 186). Bounded failure/recent evidence and explicit
-  guest/host session activity/impact are implemented (ADR 187). Remaining preview
-  fidelity, idle timing and final artboard/native qualification remain in TODO #57.
+  guest/host session activity/impact are implemented (ADR 187). Selected runtime
+  configuration, CPU/memory preview trends and per-target tasks are implemented
+  (ADR 188). Idle timing, complete agent validation and final artboard/native
+  qualification remain in TODO #57.
 
 - Ports delivery [partially complete, in progress]: readiness-gated application
   routes and daemon-owned published TCP with stopped-node migration (ADR 182).

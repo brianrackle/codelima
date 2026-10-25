@@ -89,7 +89,8 @@ func TestTUIMetricsCPUTrendDrawsTimeInsteadOfGauge(t *testing.T) {
 	entry := app.state.selectedEntry()
 	app.applyNodeUsage(nodeUsageEvent{NodeID: entry.node.ID, SampledAt: now, CPUUsagePercent: &high, CPUHistory: points})
 	app.draw()
-	if !strings.Contains(renderedScreenText(t, app.vx, 150, 38), "CPU · last 60s") {
-		t.Fatal("preview history missing")
+	screen := renderedScreenText(t, app.vx, 150, 38)
+	if !strings.Contains(screen, "avg 67% · peak 100%") || !strings.Contains(screen, "−1m0s") {
+		t.Fatalf("preview history/statistics missing:\n%s", screen)
 	}
 }

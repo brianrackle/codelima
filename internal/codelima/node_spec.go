@@ -126,58 +126,69 @@ func (s *nodeSpecSnapshot) compareTemplate(c Configuration) {
 
 // Read the actual rendered YAML, with strict file and allocation bounds. Never
 // infer host-specific settings from the machine running this inspection.
-func readNodeSpecLima(path, name string) ([]nodeSpecField, error) {
+type limaConfiguration struct {
+	VMType     string                       `yaml:"vmType"`
+	MountType  string                       `yaml:"mountType"`
+	Nested     *bool                        `yaml:"nestedVirtualization"`
+	Containerd struct{ System, User *bool } `yaml:"containerd"`
+	Mounts     []struct {
+		Location   string
+		MountPoint string `yaml:"mountPoint"`
+		Writable   *bool
+	} `yaml:"mounts"`
+	PortForwards []struct {
+		GuestPort         int    `yaml:"guestPort"`
+		HostPort          int    `yaml:"hostPort"`
+		GuestPortRange    []int  `yaml:"guestPortRange"`
+		GuestIP           string `yaml:"guestIP"`
+		GuestIPMustBeZero *bool  `yaml:"guestIPMustBeZero"`
+		Proto             string
+		Ignore            bool
+	} `yaml:"portForwards"`
+}
+
+func readLimaConfiguration(path string) (limaConfiguration, error) {
+	var config limaConfiguration
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, err
+		return config, err
 	}
 	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return config, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, errors.New("Lima YAML must be a regular file")
+		return config, errors.New("Lima YAML must be a regular file")
 	}
 	if info.Size() > nodeSpecYAMLLimit {
-		return nil, errors.New("Lima YAML exceeds the 2 MiB inspection limit; use v to view the file")
+		return config, errors.New("Lima YAML exceeds the 2 MiB inspection limit; use v to view the file")
 	}
 	data, err := io.ReadAll(io.LimitReader(file, nodeSpecYAMLLimit+1))
 	if err != nil {
-		return nil, err
+		return config, err
 	}
 	if len(data) > nodeSpecYAMLLimit {
-		return nil, errors.New("Lima YAML grew beyond the 2 MiB inspection limit")
+		return config, errors.New("Lima YAML grew beyond the 2 MiB inspection limit")
 	}
-	var config struct {
-		VMType     string                       `yaml:"vmType"`
-		MountType  string                       `yaml:"mountType"`
-		Nested     *bool                        `yaml:"nestedVirtualization"`
-		Containerd struct{ System, User *bool } `yaml:"containerd"`
-		Mounts     []struct {
-			Location   string
-			MountPoint string `yaml:"mountPoint"`
-			Writable   *bool
-		} `yaml:"mounts"`
-		PortForwards []struct {
-			GuestPort         int    `yaml:"guestPort"`
-			HostPort          int    `yaml:"hostPort"`
-			GuestPortRange    []int  `yaml:"guestPortRange"`
-			GuestIP           string `yaml:"guestIP"`
-			GuestIPMustBeZero *bool  `yaml:"guestIPMustBeZero"`
-			Proto             string
-			Ignore            bool
-		} `yaml:"portForwards"`
-	}
+
 	var document yaml.Node
 	if err := yaml.Unmarshal(data, &document); err != nil {
-		return nil, fmt.Errorf("read Lima YAML: %w", err)
+		return config, fmt.Errorf("read Lima YAML: %w", err)
 	}
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return nil, errors.New("Lima YAML must contain a mapping")
+		return config, errors.New("Lima YAML must contain a mapping")
 	}
 	if err := document.Decode(&config); err != nil {
-		return nil, fmt.Errorf("read Lima YAML: %w", err)
+		return config, fmt.Errorf("read Lima YAML: %w", err)
+	}
+	return config, nil
+}
+
+func readNodeSpecLima(path, name string) ([]nodeSpecField, error) {
+	config, err := readLimaConfiguration(path)
+	if err != nil {
+		return nil, err
 	}
 	fields := []nodeSpecField{{"name", name}, {"vmType", coalesce(config.VMType, "not specified")}, {"mountType", coalesce(config.MountType, "not specified")}, {"nestedVirtualization", specBool(config.Nested)}}
 	if len(config.Mounts) == 0 {

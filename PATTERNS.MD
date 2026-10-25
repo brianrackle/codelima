@@ -685,6 +685,14 @@ takes precedence. Positive terminal progress/prompt signals may describe work,
 but titles and absent signals never prove busy/idle state. Keep guest stop impact
 separate from host and unclassified sessions, including hidden marks (ADR 187).
 
+Keep richer preview data selected-node-only. Copy a bounded minute from the
+existing metrics owner instead of adding history to every inventory row or
+probing in a renderer. Share a bounded regular-file parser across Spec and
+runtime inspection, but retain their distinct sources: rendered recipe versus
+effective instance configuration. Match workspace host and guest paths before
+showing access mode; absent capability fields remain unknown. Fence the result
+by node identity and metadata revision (ADR 188).
+
 Retain aggregate metric history once in a bounded daemon-owned ring. Use an epoch and timestamp cursor for incremental frontend reads, deep-copy observations across ownership boundaries, and preserve missing intervals. Optional detail probes share the existing guest transport, use bounded output and deadlines, coalesce concurrent requests, and never affect route health. Fence frontend responses by request serial and navigation generation; stop requesting detail when its view is hidden or paused (ADR 155).
 
 Bounded presentation animations stay inside the UI event loop. Derive their frame from monotonic elapsed time so delayed events cannot rewind visible state, keep changing text cell-width stable, and stop their ticker as soon as the terminal state is reached. When only a small fixed region changes, update that region and use the normal Vaxis diff render instead of clearing and rebuilding terminal, tree, and overlay surfaces. Keep pure elapsed-time-to-frame behavior separate from the event producer so progression tests do not sleep.

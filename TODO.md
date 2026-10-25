@@ -19,16 +19,17 @@ compact navigation/capacity, flat directory context, running phase rows, and a
 marked summary including hidden targets and global allocation impact.
 Full verify/race/integration and focused race checks pass. Isolated metadata-only
 TUI checks covered four widths, keyboard/mouse, hidden marks, scrolling and
-disconnect/recovery; all fixture state was removed. The new positive live-route
-browser action and guest resource-release comparisons still need live QA.
+disconnect/recovery; all fixture state was removed. ADR 188's live guest checks
+below now cover positive route opening and observed resource release on Linux.
 ADR 187 adds independent bounded recent events and retained failure/step/duration
 evidence, recovered interruption/liveness checks and explicit guest/host session
 impact with progress/prompt activity. Qualification evidence is in the design
-ledger. Remaining fleet work: actual runtime/mount/nesting identity, CPU
-average/peak and memory history, durable idle timing, per-target working task
-labels, plus final wide/compact native artboard qualification. Add observed
-runtime capabilities and terminal activity timestamps to their owning caches,
-then project them without guest I/O in renderers. Advantages: faithful,
+ledger. ADR 188 adds selected runtime/mount/nesting configuration, CPU
+average/peak and memory history, creation/auth/Lima identity, workspace access
+and per-target working task labels. Remaining fleet work: durable idle timing,
+complete multi-agent validation and final wide/compact native artboard
+qualification. Add terminal activity timestamps and explicit validation evidence
+to their owning caches, then project them without guest I/O in renderers. Advantages: faithful,
 truthful cross-view presentation. Disadvantages: additional observation
 contracts, retention/staleness rules and responsive/native QA. These remain
 in the full #57 scope; unknown activity must not be inferred from titles.
@@ -37,9 +38,18 @@ ADR 187 verification passed full unit/race/CLI integration, final verification,
 focused race and gopls checks. Isolated wide/compact TUI checks exercised retained
 failure, interrupted recovery/live claims, independent Recent, malformed source
 recovery, real host-terminal progress/prompt signals, hidden host impact and
-daemon suspension/recovery. All owned fixture state was removed. Real guest
-session termination and confirmed stop-age presentation still require manual
-qualification, alongside the remaining live route/resource and native checks.
+daemon suspension/recovery. All owned fixture state was removed.
+
+ADR 188 verification passed full verify/race/CLI integration and focused race
+checks. Two rebuilt Linux frontends at 150×38 and 80×24 retained the same guest
+CPU/memory history and reflected a real allocation change. Effective runtime
+configuration, unknown settings, read-only workspace access, per-target task
+labels and stale/recovery behavior passed. The open action dispatched the real
+discovered route, which Chromium loaded successfully. Confirmed stop ended the
+guest session, removed the route, released observed allocation and showed stop
+age. Owned guests, overlays, processes, stores, captures and tmpfs were removed;
+the older backing image remained unchanged. Multi-node route conflicts,
+native desktop browser launch and final native/artboard qualification remain.
 
 Verification cleanup follow-up: forced shell termination in existing tests can
 leave `.codelima-inputrc.*` files in the user home. This checkpoint removed its
