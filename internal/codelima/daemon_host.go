@@ -52,8 +52,9 @@ type rendererRestartableTerminal interface {
 }
 
 type daemonTerminalEntry struct {
-	state daemon.TerminalState
-	term  daemonTerminal
+	state    daemon.TerminalState
+	term     daemonTerminal
+	activity terminalActivityState
 
 	cache            atomic.Pointer[daemonTerminalCache]
 	snapshotSequence atomic.Uint64
@@ -153,12 +154,15 @@ func newDaemonHost(service *Service) *daemonHost {
 	return host
 }
 
-func (h *daemonHost) newTerminalEntry(state daemon.TerminalState, runtime daemonTerminal) *daemonTerminalEntry {
+func (h *daemonHost) newTerminalEntry(state daemon.TerminalState, runtime daemonTerminal, initial ...terminalActivityState) *daemonTerminalEntry {
 	entry := &daemonTerminalEntry{
 		state:        state,
 		term:         runtime,
 		snapshotWake: make(chan struct{}, 1),
 		snapshotStop: make(chan struct{}),
+	}
+	if len(initial) > 0 {
+		entry.activity = initial[0]
 	}
 	go h.runTerminalSnapshotPublisher(entry)
 	entry.requestSnapshot()
@@ -183,6 +187,9 @@ func (e *daemonTerminalEntry) stopSnapshotPublisher() {
 }
 
 func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
+	// These identity fields never change. Do not copy the whole state here:
+	// resize mutates its geometry under the host lock while publishers run.
+	identity := daemon.TerminalState{TerminalID: entry.state.TerminalID, Target: entry.state.Target, Label: entry.state.Label}
 	for {
 		select {
 		case <-entry.snapshotStop:
@@ -191,6 +198,11 @@ func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
 		}
 
 		result := entry.term.Snapshot()
+		select {
+		case <-entry.snapshotStop:
+			return
+		default:
+		}
 		if result.Err != nil {
 			h.broadcast(daemon.EventTerminalError, daemon.TerminalErrorEvent{
 				Error:      result.Err.Error(),
@@ -210,6 +222,7 @@ func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
 			},
 		}
 		entry.cache.Store(cache)
+		entry.activity.observe(h.activityEvents, identity, published)
 		h.broadcast(daemon.EventTerminalDirty, daemon.TerminalDirtyEvent{
 			Metadata:         published.Metadata,
 			SnapshotSequence: published.SnapshotSequence,
@@ -609,6 +622,7 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 	}
 	kind := terminal.NodeHostShell
 	workspace := ""
+	nodeSlug := ""
 	switch params.Kind {
 	case "node-host-shell", "host":
 		node, nodeErr := h.service.nodeTerminalMetadata(ctx, target.ID)
@@ -616,6 +630,7 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 			return daemon.TerminalState{}, toDaemonError(nodeErr)
 		}
 		workspace = node.DirectoryPath
+		nodeSlug = node.Slug
 		if params.Label == "" {
 			params.Label = node.Slug + " host"
 		}
@@ -625,6 +640,7 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 		if nodeErr != nil {
 			return daemon.TerminalState{}, toDaemonError(nodeErr)
 		}
+		nodeSlug = node.Slug
 		// Defense in depth for the TUI's own gate, and the only gate for any
 		// other client: a guest shell for a node whose record still has a
 		// lifecycle operation in flight would land in a VM that has booted but
@@ -679,7 +695,7 @@ func (h *daemonHost) openTerminal(ctx context.Context, params terminalOpenParams
 	state := daemon.TerminalState{TerminalID: terminalID, TabID: params.Target + "#" + terminalID, Target: params.Target, Kind: kind.String(), Label: params.Label, CWD: spec.Dir, Argv: slices.Clone(spec.Argv), CreatedAt: time.Now().UTC(), Cols: cols, Rows: rows}
 	h.mu.Lock()
 	h.ensureTerminalOrderLocked()
-	h.terminals[terminalID] = h.newTerminalEntry(state, runtime)
+	h.terminals[terminalID] = h.newTerminalEntry(state, runtime, terminalActivityState{nodeSlug: nodeSlug})
 	h.terminalOrder = append(h.terminalOrder, terminalID)
 	h.mu.Unlock()
 	if err := h.persist(); err != nil {
@@ -1015,7 +1031,6 @@ func (h *daemonHost) Close() error {
 	if h.forwarder != nil {
 		closeErr = errors.Join(closeErr, h.forwarder.Close())
 	}
-	h.activityEvents.Close()
 	if h.observer != nil {
 		closeErr = errors.Join(closeErr, h.observer.StopObservation())
 	}
@@ -1026,10 +1041,13 @@ func (h *daemonHost) Close() error {
 		delete(h.terminals, id)
 	}
 	h.mu.Unlock()
+	for _, entry := range entries {
+		entry.stopSnapshotPublisher()
+	}
+	h.activityEvents.Close()
 	var terminals sync.WaitGroup
 	terminals.Add(len(entries))
 	for _, entry := range entries {
-		entry.stopSnapshotPublisher()
 		go func() {
 			defer terminals.Done()
 			entry.term.Close()
@@ -1535,6 +1553,7 @@ type handoffAdopter func(
 // under the same lock rather than written into a bare map. fdsByID loses each
 // descriptor it hands over; whatever remains is still owned by the caller.
 func (h *daemonHost) adoptHandoffTerminals(
+	ctx context.Context,
 	manifest daemon.HandoffManifest,
 	fdsByID map[string]int,
 	adopt handoffAdopter,
@@ -1592,8 +1611,14 @@ func (h *daemonHost) adoptHandoffTerminals(
 			return nil, errors.New("adopted terminal does not support handoff release")
 		}
 		imported = append(imported, handoff)
+		baseline, err := terminalActivityBaseline(ctx, term)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		activity := terminalActivityState{metadata: baseline, nodeSlug: h.terminalActivitySlug(state)}
 		h.mu.Lock()
-		h.terminals[state.TerminalID] = h.newTerminalEntry(state, term)
+		h.terminals[state.TerminalID] = h.newTerminalEntry(state, term, activity)
 		h.mu.Unlock()
 	}
 	// The manifest session carries the daemon-owned tab order, which is not the
@@ -1972,7 +1997,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 		Ready: host.startActivityEvents,
 	})
 	host.wireServerLinks(server)
-	imported, err := host.adoptHandoffTerminals(manifest, fdsByID, adopt)
+	imported, err := host.adoptHandoffTerminals(ctx, manifest, fdsByID, adopt)
 	if err != nil {
 		_ = peer.WriteJSON(daemon.HandoffMessage{Type: "failed", Error: err.Error()}, nil)
 		return err
@@ -2040,6 +2065,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			host.markServing()
 			host.activityEvents.enqueue(activityMessageRequest{
 				Source: "daemon", Level: slog.LevelInfo,
+				Action: activityOpenDaemon, Success: true,
 				Text: fmt.Sprintf("updated in place %s → %s · %d sessions kept",
 					coalesce(terminalMetadataText(manifest.BinaryVersion, 128), "unknown"),
 					coalesce(terminalMetadataText(Version, 128), "unknown"), len(imported)),

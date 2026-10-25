@@ -14,15 +14,17 @@ import (
 // a committed message. Request rows and completion rows have distinct IDs;
 // completion retains the running row's ID so selection follows the receipt.
 type ActivityRecord struct {
-	ID          string     `json:"id"`
-	OperationID string     `json:"operation_id,omitempty"`
-	NodeID      string     `json:"node_id,omitempty"`
-	NodeSlug    string     `json:"node_slug,omitempty"`
-	Source      string     `json:"source,omitempty"`
-	Time        time.Time  `json:"time"`
-	Level       slog.Level `json:"level"`
-	Text        string     `json:"text"`
-	Success     bool       `json:"success,omitempty"`
+	Action      activityAction `json:"action,omitempty"`
+	TerminalID  string         `json:"terminal_id,omitempty"`
+	ID          string         `json:"id"`
+	OperationID string         `json:"operation_id,omitempty"`
+	NodeID      string         `json:"node_id,omitempty"`
+	NodeSlug    string         `json:"node_slug,omitempty"`
+	Source      string         `json:"source,omitempty"`
+	Time        time.Time      `json:"time"`
+	Level       slog.Level     `json:"level"`
+	Text        string         `json:"text"`
+	Success     bool           `json:"success,omitempty"`
 }
 
 type ActivityPage struct {
@@ -59,7 +61,7 @@ func activityOperationRecord(op NodeOperation, requested bool) ActivityRecord {
 }
 
 func activityMessageRecord(message ActivityMessage) ActivityRecord {
-	return ActivityRecord{ID: "message:" + message.ID, NodeID: message.NodeID, NodeSlug: message.NodeSlug, Source: message.Source, Time: message.Time, Level: message.Level, Text: message.Text}
+	return ActivityRecord{ID: "message:" + message.ID, NodeID: message.NodeID, NodeSlug: message.NodeSlug, Source: message.Source, Time: message.Time, Level: message.Level, Text: message.Text, Action: message.Action, TerminalID: message.TerminalID, Success: message.Success}
 }
 
 func buildActivityPage(operations []NodeOperation, messages []ActivityMessage, before string, limit int) (ActivityPage, error) {

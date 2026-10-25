@@ -671,7 +671,7 @@ func TestDaemonImportAdoptionIsRaceFreeUnderRuntimeCallbacks(t *testing.T) {
 	// access the callbacks race against.
 	adopt := newHandoffCallbackAdopter(stop, &callbacks, 0, func() { host.list() })
 
-	imported, err := host.adoptHandoffTerminals(manifest, fds, adopt)
+	imported, err := host.adoptHandoffTerminals(context.Background(), manifest, fds, adopt)
 	close(stop)
 	callbacks.Wait()
 	if err != nil {

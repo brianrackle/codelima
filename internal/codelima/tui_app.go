@@ -303,6 +303,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // host-terminal restoration (vx.Close) and auto-refresh cancellation deferred
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
+	defer a.cancelActivityAttachment()
 	defer a.cancelLogsLoad()
 	defer a.cancelSpecLoad()
 	defer a.cancelMetricsLoad()
@@ -424,6 +425,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiRawShellReadyEvent:
 		a.finishRawShell(event)
+		a.draw()
+		return false, nil
+	case tuiActivityTerminalEvent:
+		a.finishActivityTerminal(event)
 		a.draw()
 		return false, nil
 	case tuiManagerDataEvent:
@@ -677,7 +682,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		event()
 		a.draw()
 	case term.EventNotify:
-		a.vx.Notify(event.Title, event.Body)
+		if message := terminalNoticeText(TerminalMetadata{NotificationTitle: event.Title, NotificationBody: event.Body}); message != "" {
+			a.pushMessage(slog.LevelInfo, "terminal: "+message)
+			a.draw()
+		}
 	case vaxis.QuitEvent:
 		return true, nil
 	}

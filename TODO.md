@@ -289,10 +289,9 @@ A twenty-second outage produced one outage and one recovery after a regression
 fixed repeated retry notifications. Corruption was restored, both TUIs and the
 QA daemon stopped, and all 87 disposable journal records were removed. This replaces the earlier
 window-only message limitation. ADR 168 supplies native route and capacity
-producers; ADR 169 adds committed daemon-update events. Terminal notifications remain.
-These need stable event IDs, bounded summaries and restored-state baselines to
-capture unattended events without replaying old metadata. Reusing frontend
-statuses is smaller, but cannot provide global unattended history. Protocol 15 now
+producers; ADR 169 adds committed daemon-update events, and ADR 170 adds counted
+terminal notices with restored-state baselines and typed navigation. Native
+pending-event preservation during replacement remains below. Protocol 15 now
 projects observed phase counts/current detail for running rows (ADR 166). Full
 verify, race, integration and gopls checks pass. Live 150×38 and 80×24 checks
 confirmed Boot at 1/7, Bootstrap at 4/7 with step 2/3 and the frozen source,
@@ -309,8 +308,8 @@ adds a server-ready lifecycle hook, a bounded queue that flushes under ownership
 callbacks outside forwarding locks, and stop/drain through the update barrier.
 It shares observed host allocation semantics with the TUI. This captures
 unattended events safely but adds explicit producer lifecycle and delivery
-state. Bell/notification producers still need a handoff baseline so restored
-metadata does not replay old notifications. ADR 169 records update success in
+state. ADR 170 adds a handoff baseline so restored terminal metadata does not
+replay old notifications. ADR 169 records update success in
 the committed successor. A failed
 handoff previously resumed the predecessor without invalidating its journal
 cache after successor writes. ADR 167
@@ -351,19 +350,48 @@ at 80×24, widening to 150×38 and pressing `g` confirmed the newest rows remain
 available. That check's fixture was restored and its three receipts and scratch
 files removed. Consider a visible row-range indicator during final Activity
 fidelity checks; it clarifies scroll position at the cost of header space.
-Terminal bell/notification
-producers still need the baselines/ownership behavior above;
-they should reuse this queue instead of separate frontend publishers. That keeps
-one delivery path, but requires preserving terminal identity and navigation intent.
-The daemon snapshot publisher is the existing unattended metadata source.
-Seed adopted-terminal bell/notice baselines before `ActivateAfterHandoff` starts
-reading new PTY output; an arbitrary first later snapshot could suppress a new
-notification. The isolated adopter starts its renderer before activation, but
-its verified snapshot is asynchronous, so baseline acquisition needs a bounded
-handoff check. Stop terminal producers before draining their queue. Typed message
-targets/outcomes should also support bell-to-session attachment, capacity-to-Host
-navigation and the design's successful-update check mark; this avoids parsing
-display text but requires a protocol/storage-compatible extension.
+Terminal bell/notification production and typed navigation are implemented
+under ADR 170. Daemon protocol
+17 / renderer protocol 5 carry counted notices and optional Activity actions,
+terminal identity and success outcomes. The snapshot publisher compares fresh
+metadata; adoption acquires a bounded fresh baseline before new PTY reads.
+Producer admission closes before shutdown drain. Frontend daemon notices no
+longer enter a second outbox, and exact session lookup never creates substitutes.
+Focused Activity and native checkpoint-counter checks, full verify, race,
+integration and gopls pass. Live checks with two host sessions recorded a bell
+and notice with no TUI open, then shared them across two windows without
+duplicates. Identical notice text produced a distinct record. Both 150×38 and
+80×24 attachments reached the recorded second session and retained its PID;
+the wide window's directory scope excluded its node. Detach returned to the
+same Activity selection. Closing the recorded session retained its history and
+reported that it ended without creating or substituting another session.
+A committed update preserved shell identity and did not replay old notices;
+renderer restart also suppressed replay and accepted the next new notice.
+All four terminal records survived cold restart unchanged. Compact navigation
+opened Host and Ports from explicit QA action fixtures, and the real successful
+update displayed a check mark and opened Daemon. Escape/late-completion fencing
+is automated; a deliberately delayed live attachment remains for final QA.
+Both TUIs, host shells, renderers and daemon are stopped; `tmp/naq`, its 21
+journal fixtures and all 46 slice scratch files are removed. The reusable base
+QA environment remains subject to the cleanup ledger below.
+The legacy `term.EventNotify` handler now routes notices through bounded history
+instead of desktop popups; its regression reproduced the missing history. A
+concurrent resize regression also protects the publisher's immutable identity
+projection. Final artboard/native qualification remains open.
+
+Native Activity replacement follow-up: the update barrier blocks predecessor
+queue flushes during handoff, and a committed predecessor skips its final flush.
+A notice admitted immediately before replacement can therefore be lost even
+though the successor correctly suppresses old checkpoint metadata. The steady
+live-update check proves that persisted notices are not replayed; it does not
+prove preservation of pending events at the cut. Transfer the bounded pending
+queue with stable IDs and the final terminal observation baseline under an
+explicit handoff boundary, or quiesce producers and durably drain before
+releasing ownership. Add committed-update and rollback tests with deliberately
+blocked persistence and output at the boundary, then repeat the live check.
+This preserves admitted events and avoids replay, but adds queue/version and
+ownership coordination. A pre-lock flush alone is simpler and leaves a race;
+keeping memory-only delivery loses events during an otherwise successful update.
 
 ADR 169 queues successful daemon-update history in the committed successor,
 with both versions and the actual adopted session count. Focused tests, full
@@ -374,8 +402,8 @@ input afterward and one shared record reported two sessions kept. Live 150×38
 and 80×24 views showed the record, which survived restart unchanged. Injected
 import failure preserved the predecessor and both child PIDs without adding a
 success record. Both shells, the daemon, TUI, isolated home and slice scratch
-artifacts are removed. Terminal notification production and typed outcomes/
-navigation remain above; final Activity artboard qualification is still open.
+artifacts are removed. ADR 170 supplies terminal notices and typed outcomes/
+navigation above; final Activity artboard qualification is still open.
 
 Protocol 13 supplies node-scoped latest-start inspection and Starting/Failed
 detail views (ADR 164). Queue intent follows one node/receipt and is revoked by

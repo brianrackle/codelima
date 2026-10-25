@@ -81,6 +81,10 @@ func (a *vaxisTUIApp) recordTerminalNotices() {
 	if a.sessions == nil {
 		return
 	}
+	// Daemon-backed sessions publish once globally, even with no frontend.
+	if a.service != nil && a.service.daemonClient != nil {
+		return
+	}
 	if a.terminalNotices == nil {
 		a.terminalNotices = make(map[string]string)
 	}
@@ -99,13 +103,7 @@ func (a *vaxisTUIApp) recordTerminalNotices() {
 			continue
 		}
 		metadata := receiver.Metadata()
-		message := terminalMetadataText(metadata.NotificationTitle, 120)
-		if body := terminalMetadataText(metadata.NotificationBody, 512); body != "" {
-			if message != "" {
-				message += ": "
-			}
-			message += body
-		}
+		message := terminalNoticeText(metadata)
 		if message == "" || message == a.terminalNotices[key] {
 			continue
 		}

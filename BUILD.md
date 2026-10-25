@@ -17,7 +17,7 @@ sampler for macOS arm64 and amd64; native macOS readings require manual QA.
 `make test-metrics` covers bounded history, incremental reads, telemetry parsing,
 process CPU deltas/PID reuse, shared probe caching and cancellation, protocol
 frame size, navigation fencing, pause/sort/copy controls and responsive plots.
-The current daemon protocol is 16 (ADR 168); Metrics and inventory trends were
+The current daemon protocol is 17 (ADR 170); Metrics and inventory trends were
 introduced in protocols 9 and 10 (ADRs 155–156).
 The focused suite also checks CPU trend retention/epoch reset, stale refreshes
 and both process rankings during pause. Live guest qualification
@@ -84,6 +84,12 @@ The Activity suite also exercises committed live imports with retained sessions,
 unauthorized commits and failed commit-acknowledgment writes (ADR 169). Successful
 successors record the version transition and adopted count through the existing
 queue; neither a failed import nor a restart fallback claims in-place success.
+Protocol 17 and renderer protocol 5 add counted terminal notices and typed
+Activity navigation/outcomes. `make test-activity` covers fresh/stale baselines,
+adopted publishers, repeated notices, counter resets, closed producers, legacy
+journals, exact session resolution and canceled navigation. The Ghostty adapter
+suite checks native counters through checkpoint restore. Run the terminal-notice
+QA flow with both packaged executables from the same build.
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
@@ -714,8 +720,9 @@ QA.md; offline tests do not establish outer-terminal permission behavior.
 
 `make test-terminal-attach` runs the native ANSI export, VT boundary, lease,
 input parser and real-PTY/socket regressions. `make verify` additionally checks
-the production binaries, all Go packages, lint and formatting. Daemon protocol
-8 and renderer protocol 4 must ship together; checkpoint envelope 2 adds the
+the production binaries, all Go packages, lint and formatting. Ship current
+daemon protocol 17 and renderer protocol 5 together; attachment was introduced
+in protocols 8/4. Checkpoint envelope 2 adds the
 VT boundary state, and older envelopes use journal recovery. Native Ghostty
 remains pinned to the existing revision. Rebuild both binaries with `make build`
 before manual attachment checks. The new TUI and runtime scope remains tracked

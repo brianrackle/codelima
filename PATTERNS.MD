@@ -69,6 +69,11 @@ records to frontend footers without sending them back through the outbox
 An in-place update notice belongs to the successor after its committed reply
 succeeds. Derive retained counts from adopted objects and reuse the owned queue;
 frontend completion and predecessor intent are insufficient evidence (ADR 169).
+Compare terminal notification counters only on fresh snapshots. Seed adopted
+metadata before admitting new PTY output, and close producer admission before
+draining shutdown queues. Keep Activity navigation typed and match both terminal
+and node identity; never substitute a live session for an ended history target
+or interpret display text as an action (ADR 170).
 
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence

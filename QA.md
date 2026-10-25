@@ -658,6 +658,18 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   the committed update record remains. An injected import failure must leave
   the predecessor usable and add no successful-update record. Close the shells
   and remove the disposable home and fault-injection setup.
+- With no TUI open, emit a bell and OSC 777 notice from a disposable host shell.
+  Open two TUIs and confirm both see the same records without adding copies.
+  Emit identical notices again and verify they are counted. At 150×38 and 80×24,
+  select a terminal record, press Enter, send input, and detach with Ctrl+].
+  Verify the attached shell is the recorded session even when another session
+  is first or the node is outside the current scope. End the recorded session
+  and press Enter again: history remains and no replacement session is opened.
+  Update the daemon and restart its renderer with old notices present; neither
+  action may replay them. New output afterward must still produce history.
+  Verify Host, Ports and Daemon records navigate to their corresponding views,
+  with successful updates shown as successful. Remove all disposable sessions,
+  homes, records and test output after stopping the test daemon and TUIs.
 - Remove all disposable nodes, homes, daemons, terminals and verification files.
 
 For recorded bootstrap steps and explicit retry, use one disposable guest:

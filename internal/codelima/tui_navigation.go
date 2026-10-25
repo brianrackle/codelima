@@ -15,6 +15,7 @@ import (
 )
 
 func (a *vaxisTUIApp) switchView(view tuiView) {
+	a.cancelActivityAttachment()
 	a.activity.input, a.activity.pendingNode = nil, ""
 	a.view, a.nodeDetail, a.detailScroll = view, false, 0
 	a.state.focusTree()
@@ -25,6 +26,7 @@ func (a *vaxisTUIApp) switchView(view tuiView) {
 }
 
 func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
+	a.cancelActivityAttachment()
 	if !a.state.selectedEntry().valid() {
 		return
 	}

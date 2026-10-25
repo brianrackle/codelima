@@ -444,6 +444,12 @@ Successful in-place daemon updates also record the old and new versions and
 the number of preserved terminal sessions, even with no TUI open. The successor
 queues this notice after sending its commit acknowledgment; a crash before
 persistence can still lose a pending notice.
+Terminal bells and notifications are recorded by the daemon even with no TUI
+open. Repeated identical notices are counted; bursts between snapshots show a
+count and the latest notice. Restoring a session does not replay old notices.
+Enter on a terminal record attaches that exact session; an ended session reports
+that it is gone and keeps its history. Escape cancels an attachment still being
+resolved. Host, route and update records open Host, Ports and Daemon respectively.
 If a live daemon update rolls back, Activity reloads messages already accepted
 by the replacement before recording new ones.
 The daemon also records route additions/removals, degraded/restored forwarding,
@@ -455,7 +461,8 @@ Capacity notices follow the daemon's runtime observations, so a delayed runtime
 refresh can delay the notice even when a VM has already started or stopped.
 Up to 256 native events can await persistence in memory; retries keep their IDs.
 A full queue omits newer events and later records the omitted count. Pending
-events can be lost on daemon exit; committed events follow normal retention.
+events can be lost on daemon exit, including live replacement; committed events
+follow normal retention.
 Running rows show current phase/step text and completed/total phases. The bar
 counts observed phase boundaries, including skipped work; it does not predict
 time remaining. Compact terminals put progress on a second line. Older receipts
@@ -784,8 +791,9 @@ Visiting the tab in the focused window clears it; a later bell can show it
 again. Bells received while you are viewing the tab are already acknowledged.
 Acknowledgement is local to each TUI window. It does not identify an agent's
 current state.
-Progress and notification badges also appear in tabs; notification text is
-retained in the local messages view, not sent as unsolicited desktop notifications.
+Progress and notification badges also appear in tabs. Notification text is
+retained in shared Activity for daemon sessions and local history for fallback
+sessions. These notices do not request desktop popups.
 
 Host default foreground/background, palette and light/dark changes are queried
 with a bounded deadline and propagated to hidden tabs too. An unanswered color

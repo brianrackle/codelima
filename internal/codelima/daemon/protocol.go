@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 16 adds committed
-	// native Activity notifications with journal epoch and sequence.
-	ProtocolVersion               = 16
+	// whenever a wire shape this protocol carries changes; 17 adds Activity
+	// navigation/outcomes and counted terminal notifications.
+	ProtocolVersion               = 17
 	SessionVersion                = 2
 	HandoffVersion                = 5
 	PreviousChunkedHandoffVersion = 4
@@ -277,6 +277,7 @@ type TerminalMetadata struct {
 	Title             string `json:"title,omitempty"`
 	WorkingDirectory  string `json:"working_directory,omitempty"`
 	BellCount         uint64 `json:"bell_count,omitempty"`
+	NotificationCount uint64 `json:"notification_count,omitempty"`
 	NotificationTitle string `json:"notification_title,omitempty"`
 	NotificationBody  string `json:"notification_body,omitempty"`
 	ProgressState     int    `json:"progress_state,omitempty"`

@@ -29,7 +29,8 @@ const rendererInputEventBit = uint64(1) << 63
 // all, which decodes as 0 and is rejected as a mismatch -- exactly the intent.
 // Version 3 adds native checkpoint envelopes and contiguous journal watermarks.
 // Version 4 adds coherent ANSI attachment capture and clipboard output IDs.
-const rendererWorkerProtocolVersion = 4
+// Version 5 adds the cumulative terminal notification counter.
+const rendererWorkerProtocolVersion = 5
 
 // errRendererProtocolMismatch marks a version disagreement between this binary
 // and the renderer worker beside it. It is deliberately distinct from every

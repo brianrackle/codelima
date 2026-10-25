@@ -22,6 +22,7 @@ type daemonActivityEvents struct {
 	mu         sync.Mutex
 	pending    []activityMessageRequest
 	dropped    uint64
+	closed     bool
 	routes     forwardingActivitySnapshot
 	cpuOver    bool
 	memoryOver bool
@@ -61,6 +62,9 @@ func (e *daemonActivityEvents) notify() {
 func (e *daemonActivityEvents) enqueue(request activityMessageRequest) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
 	e.enqueueLocked(request)
 }
 
@@ -176,7 +180,13 @@ func (e *daemonActivityEvents) flush() bool {
 }
 
 func (e *daemonActivityEvents) Close() {
-	if e == nil || e.cancel == nil {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.closed = true
+	e.mu.Unlock()
+	if e.cancel == nil {
 		return
 	}
 	e.cancel()
@@ -193,6 +203,9 @@ func (e *daemonActivityEvents) observeCapacity(capacity hostinfo.Snapshot, nodes
 	a := summarizeHostAllocations(nodes)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
 	observe := func(over *bool, used, total uint64, name, detail string) {
 		if total == 0 || (used <= total && a.UnknownNodes > 0) {
 			return
@@ -206,7 +219,7 @@ func (e *daemonActivityEvents) observeCapacity(capacity hostinfo.Snapshot, nodes
 		if next {
 			level, text = slog.LevelWarn, name+" overcommitted"
 		}
-		e.enqueueLocked(activityMessageRequest{Source: "host", Level: level, Text: text + " · " + detail})
+		e.enqueueLocked(activityMessageRequest{Source: "host", Level: level, Text: text + " · " + detail, Action: activityOpenHost})
 	}
 	if capacity.CPUs > 0 {
 		observe(&e.cpuOver, a.AllocatedCPUs, uint64(capacity.CPUs), "vCPU", fmt.Sprintf("%d of %d allocated", a.AllocatedCPUs, capacity.CPUs))

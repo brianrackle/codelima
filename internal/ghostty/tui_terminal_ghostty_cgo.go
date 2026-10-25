@@ -1180,6 +1180,7 @@ func (t *ghosttyTUITerminal) drainEffectsLockedRaw() {
 		case C.GHOSTTY_BRIDGE_EFFECT_BELL:
 			t.metadata.BellCount++
 		case C.GHOSTTY_BRIDGE_EFFECT_NOTIFICATION:
+			t.metadata.NotificationCount++
 			t.metadata.NotificationTitle, t.metadata.NotificationBody = text, detail
 		case C.GHOSTTY_BRIDGE_EFFECT_PROGRESS:
 			t.metadata.ProgressState, t.metadata.Progress = int(effect.location), int(effect.value)

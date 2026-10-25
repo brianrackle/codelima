@@ -48,6 +48,9 @@ func (f *dynamicForwarder) publishActivity() {
 func (e *daemonActivityEvents) observeForwarding(view forwardingActivitySnapshot) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
 	keys := slices.Collect(maps.Keys(view.Routes))
 	for key := range e.routes.Routes {
 		if _, exists := view.Routes[key]; !exists {
@@ -86,7 +89,7 @@ func (e *daemonActivityEvents) observeForwarding(view forwardingActivitySnapshot
 		if exists && !current.Serving {
 			level, detail = slog.LevelWarn, detail+" · host port unavailable"
 		}
-		e.enqueueLocked(activityMessageRequest{Source: "ports", Level: level, NodeID: current.NodeID, NodeSlug: current.NodeSlug, Text: fmt.Sprintf("route :%d %s%s", key.port, transition, detail)})
+		e.enqueueLocked(activityMessageRequest{Source: "ports", Level: level, NodeID: current.NodeID, NodeSlug: current.NodeSlug, Text: fmt.Sprintf("route :%d %s%s", key.port, transition, detail), Action: activityOpenPorts})
 	}
 	ports := slices.Collect(maps.Keys(view.Owners))
 	for port := range e.routes.Owners {
@@ -107,7 +110,7 @@ func (e *daemonActivityEvents) observeForwarding(view forwardingActivitySnapshot
 		} else if existed {
 			text += " · was " + previous.NodeSlug
 		}
-		e.enqueueLocked(activityMessageRequest{Source: "ports", NodeID: current.NodeID, NodeSlug: current.NodeSlug, Text: text})
+		e.enqueueLocked(activityMessageRequest{Source: "ports", NodeID: current.NodeID, NodeSlug: current.NodeSlug, Text: text, Action: activityOpenPorts})
 	}
 	e.routes = forwardingActivitySnapshot{Routes: maps.Clone(view.Routes), Owners: maps.Clone(view.Owners)}
 }

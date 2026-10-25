@@ -3,6 +3,7 @@
 package codelima
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -44,7 +45,7 @@ func TestDaemonHandoffAdoptionUsesRendererTerminalIdentityNotTabID(t *testing.T)
 		}
 		return adoptFakeHandoffTerminal(pty), nil
 	}
-	if _, err := host.adoptHandoffTerminals(manifest, fds, adopt); err != nil {
+	if _, err := host.adoptHandoffTerminals(context.Background(), manifest, fds, adopt); err != nil {
 		t.Fatalf("handoff changed the renderer's identity: %v", err)
 	}
 	if entry, err := host.lookup(ids[0]); err != nil || entry.state.TabID != manifest.Session.Terminals[0].TabID {

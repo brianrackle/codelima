@@ -23,12 +23,15 @@ const (
 )
 
 type activityMessageRequest struct {
-	ID       string     `json:"id"`
-	Source   string     `json:"source"`
-	Level    slog.Level `json:"level"`
-	Text     string     `json:"text"`
-	NodeID   string     `json:"node_id,omitempty"`
-	NodeSlug string     `json:"node_slug,omitempty"`
+	Action     activityAction `json:"action,omitempty"`
+	TerminalID string         `json:"terminal_id,omitempty"`
+	Success    bool           `json:"success,omitempty"`
+	ID         string         `json:"id"`
+	Source     string         `json:"source"`
+	Level      slog.Level     `json:"level"`
+	Text       string         `json:"text"`
+	NodeID     string         `json:"node_id,omitempty"`
+	NodeSlug   string         `json:"node_slug,omitempty"`
 }
 
 // ActivityMessage separates a producer's stable idempotency key and content
@@ -111,6 +114,9 @@ func normalizeActivityMessage(request activityMessageRequest) (activityMessageRe
 	}
 	if request.Level != slog.LevelInfo && request.Level != slog.LevelWarn && request.Level != slog.LevelError {
 		return request, invalidArgument("activity level must be info, warn or error", nil)
+	}
+	if err := validateActivityAction(request); err != nil {
+		return request, err
 	}
 	for _, field := range []struct {
 		value string

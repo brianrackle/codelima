@@ -13,6 +13,8 @@ import (
 )
 
 type tuiActivityState struct {
+	attachSerial                 uint64
+	attachCancel                 context.CancelFunc
 	nativeEpoch                  string
 	nativeThrough                uint64
 	page                         ActivityPage
@@ -46,6 +48,8 @@ type tuiActivityCancelEvent struct {
 }
 
 type tuiActivityRow struct {
+	action                 activityAction
+	terminalID             string
 	id, nodeID, node, text string
 	at                     time.Time
 	level                  slog.Level
@@ -130,7 +134,7 @@ func activityRecordRow(record ActivityRecord) tuiActivityRow {
 	if record.OperationID != "" && record.Source != "" {
 		text += " · via " + strings.ToUpper(record.Source)
 	}
-	return tuiActivityRow{id: record.ID, nodeID: record.NodeID, node: coalesce(record.NodeSlug, record.NodeID, record.Source), text: plainLogText(text), at: record.Time, level: record.Level, operation: record.OperationID != "", success: record.Success}
+	return tuiActivityRow{id: record.ID, nodeID: record.NodeID, node: coalesce(record.NodeSlug, record.NodeID, record.Source), text: plainLogText(text), at: record.Time, level: record.Level, operation: record.OperationID != "", success: record.Success, action: record.Action, terminalID: record.TerminalID}
 }
 
 func (a *vaxisTUIApp) activityRows() (running, history []tuiActivityRow) {
@@ -293,6 +297,9 @@ func (a *vaxisTUIApp) handleActivityKey(key vaxis.Key) bool {
 		a.cancelActivityOperation()
 	case key.Matches(vaxis.KeyEnter):
 		a.openActivityNode()
+	case key.Matches(vaxis.KeyEsc) && s.attachCancel != nil:
+		a.cancelActivityAttachment()
+		a.setFooterStatus(slog.LevelInfo, "Session attachment canceled")
 	default:
 		return false
 	}
@@ -352,7 +359,25 @@ func (a *vaxisTUIApp) finishActivityCancel(event tuiActivityCancelEvent) {
 
 func (a *vaxisTUIApp) openActivityNode() {
 	row, ok := a.activitySelection()
-	if !ok || row.nodeID == "" {
+	if !ok {
+		return
+	}
+	switch row.action {
+	case activityOpenTerminal:
+		a.startActivityTerminal(row)
+		return
+	case activityOpenHost, activityOpenDaemon:
+		a.systemPanel = tuiSystemHost
+		if row.action == activityOpenDaemon {
+			a.systemPanel = tuiSystemDaemon
+		}
+		a.switchView(tuiViewSystem)
+		return
+	case activityOpenPorts:
+		a.switchView(tuiViewPorts)
+		return
+	}
+	if row.nodeID == "" {
 		return
 	}
 	a.fleet.setFilter("")

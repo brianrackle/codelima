@@ -28,7 +28,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared request/completion history and TUI messages, cancel/filter/copy/navigation; native event producers and final qualification remain |
+| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native route/capacity/update/terminal events, controls and typed/exact-session navigation; pending-event handoff and final qualification remain |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -289,5 +289,26 @@ shell identities and child PIDs; subsequent input worked and one record reported
 two sessions kept. The record rendered at 150×38 and 80×24 and survived restart
 unchanged. Injected import failure preserved the predecessor and shells without
 recording success. The disposable sessions, TUI, daemon, home and slice scratch
-artifacts are removed. Typed outcomes/navigation and terminal notices remain
-part of the final Activity work.
+artifacts are removed. ADR 170 supplies typed outcomes/navigation and terminal
+notices below; final Activity qualification remains open.
+
+Protocol 17 / renderer protocol 5 adds counted daemon-owned terminal notices
+and typed Activity actions (ADR 170). Focused/native checkpoint tests, full
+verify, race, integration and gopls pass. Real host shells emitted a bell and
+notice with both TUIs closed; opening two windows did not duplicate them, and
+identical text emitted again created a new record. Wide and compact Enter
+attached the exact second session, including from a scope excluding its node;
+input confirmed its PID and detach restored Activity. An ended session left
+readable history and never created or substituted another session. Live update
+preserved the shell and did not replay notices; renderer restart also avoided
+replay and recorded subsequent output. All four terminal records survived cold
+restart unchanged. At 80×24, explicit QA Host/Ports actions opened their views;
+the real successful update displayed a check mark and opened Daemon. Cancellation
+and late replies have automated coverage; delayed live attachment and final
+native/artboard qualification remain. The two TUIs, shells, renderers and daemon
+are stopped; the isolated `tmp/naq` home, 21 journal fixtures and 46 slice scratch
+files are removed. The reusable base QA environment remains in the cleanup ledger.
+Review found that memory-only native events pending at the handoff boundary can
+be lost: the predecessor cannot flush under the update barrier and the successor
+correctly suppresses old metadata. Stable queue transfer or a final owned drain
+and corresponding rollback tests are required follow-up in TODO #57.
