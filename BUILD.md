@@ -739,8 +739,7 @@ Qualify that fresh-install path as well as upgrades in QA Flow 11.
 The maintainer requested `v1.0.0` for the shift to a Lima VM manager.
 The release uses the standard three-platform automated gate below. Remaining
 native/manual qualification stays tracked in TODO #57 and the release notes;
-publication does not mark that work complete. Release preparation is limited
-to the README, release notes, release-tool checks, and the existing pipeline.
+publication does not mark that work complete.
 
 Standard release flow:
 

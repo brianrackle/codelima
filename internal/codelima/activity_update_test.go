@@ -19,6 +19,10 @@ func TestActivityNativeUpdateFailureDoesNotRecordSuccess(t *testing.T) {
 func testActivityUpdateFailure(t *testing.T, failure string) {
 	t.Helper()
 	service, _ := newHandoffTestService(t)
+	peerClosed := make(chan struct{})
+	if failure == "acknowledgment" {
+		service.sandbox = &activityFailedAckSandbox{fakeSandbox: newFakeSandbox(), peerClosed: peerClosed}
+	}
 	path := filepath.Join(daemon.HomePaths(service.cfg.MetadataRoot).Dir, "reject.sock")
 	listener, err := daemon.ListenHandoff(path)
 	if err != nil {
@@ -53,15 +57,18 @@ func testActivityUpdateFailure(t *testing.T, failure string) {
 	token := "wrong"
 	if failure == "acknowledgment" {
 		token = "expected"
-		// Refuse the committed reply while leaving the write side available
-		// to send authorization. The importer can acquire ownership, but its
-		// final write must fail before it opens native event publication.
-		if err := conn.CloseRead(); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if err := peer.WriteJSON(daemon.HandoffMessage{Type: "commit", Token: token}, nil); err != nil {
 		t.Fatal(err)
+	}
+	if failure == "acknowledgment" {
+		// CloseRead does not reject peer writes on every supported OS. Close
+		// both directions after sending commit, and hold observation startup
+		// until closure so the final acknowledgment must fail deterministically.
+		if err := conn.Close(); err != nil {
+			t.Fatal(err)
+		}
+		close(peerClosed)
 	}
 	select {
 	case err := <-done:
@@ -71,7 +78,29 @@ func testActivityUpdateFailure(t *testing.T, failure string) {
 	case <-ctx.Done():
 		t.Fatal("import did not finish after failed commit")
 	}
+	if failure == "acknowledgment" {
+		if _, err := os.Stat(daemon.HomePaths(service.cfg.MetadataRoot).Session); err != nil {
+			t.Fatal("import did not reach authorized session persistence", err)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(service.cfg.MetadataRoot, "_activity")); !os.IsNotExist(err) {
 		t.Fatal("failed import created Activity history", err)
 	}
 }
+
+type activityFailedAckSandbox struct {
+	*fakeSandbox
+	peerClosed <-chan struct{}
+}
+
+func (s *activityFailedAckSandbox) StartObservation(ctx context.Context) error {
+	select {
+	case <-s.peerClosed:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (*activityFailedAckSandbox) StopObservation() error              { return nil }
+func (*activityFailedAckSandbox) ObservationSnapshot() map[string]any { return nil }

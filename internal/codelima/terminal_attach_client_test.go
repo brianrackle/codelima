@@ -81,7 +81,9 @@ func TestRawAttachClientUsesPhysicalTerminalAndDrainsExitOutput(t *testing.T) {
 }
 
 func TestRawAttachHostAnswersTerminalQueriesWithoutNativeDuplicate(t *testing.T) {
-	client, _ := newRawAttachHarness(t, "stty raw -echo; printf query-ready; dd bs=1 count=1 >/dev/null 2>&1; printf '\033[6n'; dd bs=1 count=6 2>/dev/null | od -An -tx1; printf query-finished")
+	// Compare the response bytes in the guest shell instead of depending on
+	// platform-specific od output formatting.
+	client, _ := newRawAttachHarness(t, `stty raw -echo; printf query-ready; dd bs=1 count=1 >/dev/null 2>&1; printf '\033[6n'; response=$(dd bs=1 count=6 2>/dev/null); if [ "$response" = "$(printf '\033[9;9R')" ]; then printf query-response-matched; fi; printf query-finished`)
 	master, slave := rawAttachTestPTY(t)
 	var captured lockedRawOutput
 	readDone := make(chan struct{})
@@ -106,7 +108,7 @@ func TestRawAttachHostAnswersTerminalQueriesWithoutNativeDuplicate(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("host response did not reach the process")
 	}
-	waitForCondition(t, time.Second, func() bool { return captured.contains("1b 5b 39 3b 39 52") }, "physical terminal's query response")
+	waitForCondition(t, time.Second, func() bool { return captured.contains("query-response-matched") }, "physical terminal's query response")
 }
 
 type lockedRawOutput struct {
