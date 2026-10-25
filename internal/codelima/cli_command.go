@@ -105,7 +105,7 @@ var cliCommands = []*cliCommand{
 		},
 	},
 	{
-		Group: "operation", Name: "cancel", Summary: "request cancellation; start/retry also stop the VM",
+		Group: "operation", Name: "cancel", Summary: "request cancellation; start/retry/restart also stop the VM",
 		Positional: "id", MinArgs: 1,
 		Run: func(ctx context.Context, service *Service, id string, _ *flag.FlagSet, _ []string) (any, error) {
 			var record NodeOperation
@@ -384,6 +384,16 @@ var cliCommands = []*cliCommand{
 		MinArgs:    1,
 		Run: func(ctx context.Context, service *Service, node string, _ *flag.FlagSet, _ []string) (any, error) {
 			return service.NodeStop(ctx, node)
+		},
+	},
+	{
+		Group:      "node",
+		Name:       "restart",
+		Summary:    "stop and start a node under one lifecycle operation",
+		Positional: "node",
+		MinArgs:    1,
+		Run: func(ctx context.Context, service *Service, node string, _ *flag.FlagSet, _ []string) (any, error) {
+			return service.NodeRestart(ctx, node)
 		},
 	},
 	{

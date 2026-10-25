@@ -701,7 +701,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 	}
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeInfo, runningNodeEntry)
-	if got != "Up/Down move   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" terminal   "+hostTerminalTabOpenFooterHint+" host tab   [n] create node   [a] configurations   [g] environments   [s] stop node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" terminal   "+hostTerminalTabOpenFooterHint+" host tab   [n] create node   [a] configurations   [g] environments   [r] restart node   [s] stop node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected running-node footer with shell focus and node actions, got %q", got)
 	}
 	if strings.Contains(got, "drag copy") || strings.Contains(got, "wheel scroll") {
@@ -712,7 +712,7 @@ func TestRenderFooterUsesAvailableActionsForFocus(t *testing.T) {
 	}
 
 	got = renderFooter(tuiFocusTree, tuiTreePaneModeTerminal, runningNodeEntry)
-	if got != "Up/Down move   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" info   "+terminalTabPrevFooterHint+"/"+terminalTabNextFooterHint+" switch tab   "+terminalTabMovePrevFooterHint+"/"+terminalTabMoveNextFooterHint+" move tab   "+terminalTabCloseFooterHint+" close tab   "+hostTerminalTabOpenFooterHint+" host tab   [n] create node   [a] configurations   [g] environments   [s] stop node   [d] delete node   [c] clone node   q quit" {
+	if got != "Up/Down move   "+terminalViewToggleFooterHint+" shell focus   "+terminalTabOpenFooterHint+" new tab   "+infoViewToggleFooterHint+" info   "+terminalTabPrevFooterHint+"/"+terminalTabNextFooterHint+" switch tab   "+terminalTabMovePrevFooterHint+"/"+terminalTabMoveNextFooterHint+" move tab   "+terminalTabCloseFooterHint+" close tab   "+hostTerminalTabOpenFooterHint+" host tab   [n] create node   [a] configurations   [g] environments   [r] restart node   [s] stop node   [d] delete node   [c] clone node   q quit" {
 		t.Fatalf("expected running-node terminal-pane footer with tab management hints, got %q", got)
 	}
 
@@ -3472,7 +3472,7 @@ func TestTUIAvailableActionsDependOnSelectedEntry(t *testing.T) {
 		node: Node{ID: "node-root", Slug: "root-node", Status: NodeStatusRunning},
 	})
 
-	if got := actionIDs(runningNodeActions); got != "node.create,configuration.manage,environment_config.manage,node.stop,node.delete,node.clone" {
+	if got := actionIDs(runningNodeActions); got != "node.create,configuration.manage,environment_config.manage,node.restart,node.stop,node.delete,node.clone" {
 		t.Fatalf("unexpected running node action set: %s", got)
 	}
 

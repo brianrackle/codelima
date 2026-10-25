@@ -107,6 +107,12 @@ func TestNodeOperationsLatestStartIsIndependentOfHistoryPagesAndStopReceipts(t *
 }
 
 func TestNodeOperationsClientExitAndActivityCancellation(t *testing.T) {
+	for _, kind := range []string{"start", "restart"} {
+		t.Run(kind, func(t *testing.T) { testNodeOperationClientExitAndActivityCancellation(t, kind) })
+	}
+}
+
+func testNodeOperationClientExitAndActivityCancellation(t *testing.T, kind string) {
 	s, n := setupBootstrapStepsTest(t)
 	s.sandbox = outputOperationSandbox{SandboxClient: s.sandbox}
 	host := newDaemonHost(s)
@@ -130,7 +136,15 @@ func TestNodeOperationsClientExitAndActivityCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { _, err := frontend.NodeStart(ctx, n.ID); result <- err }()
+	go func() {
+		var err error
+		if kind == "restart" {
+			_, err = frontend.NodeRestart(ctx, n.ID)
+		} else {
+			_, err = frontend.NodeStart(ctx, n.ID)
+		}
+		result <- err
+	}()
 	var page NodeOperationsPage
 	testutil.WaitForCondition(t, 3*time.Second, func() bool {
 		err := client.Call(context.Background(), "operation.list", nil, &page)

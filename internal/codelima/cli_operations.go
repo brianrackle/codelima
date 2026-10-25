@@ -13,7 +13,7 @@ func configureCLIOperations(service *Service, args []string) {
 		return
 	}
 	switch args[1] {
-	case "create", "start", "retry", "stop", "clone", "delete":
+	case "create", "start", "retry", "restart", "stop", "clone", "delete":
 		service.operationConnect = service.connectOperationDaemon
 	}
 }

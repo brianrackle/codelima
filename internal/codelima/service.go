@@ -1341,6 +1341,12 @@ func (s *Service) nodeStart(ctx context.Context, value string, resume bool) (_ N
 	}
 	defer token.release()
 
+	return s.nodeStartClaimed(ctx, resolved, resume, op)
+}
+
+// nodeStartClaimed runs while its caller owns the node's lifecycle token.
+// Restart keeps that same token across stop and start, including this boundary.
+func (s *Service) nodeStartClaimed(ctx context.Context, resolved Node, resume bool, op string) (_ Node, err error) {
 	var (
 		node           Node
 		bootstrap      BootstrapState
@@ -1675,6 +1681,11 @@ func (s *Service) NodeStop(ctx context.Context, value string) (_ Node, err error
 	}
 	defer token.release()
 
+	return s.nodeStopClaimed(ctx, resolved)
+}
+
+// nodeStopClaimed uses uncached observations while the caller retains ownership.
+func (s *Service) nodeStopClaimed(ctx context.Context, resolved Node) (_ Node, err error) {
 	var (
 		node      Node
 		bootstrap BootstrapState

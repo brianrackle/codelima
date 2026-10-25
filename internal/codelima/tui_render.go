@@ -637,6 +637,11 @@ func (a *vaxisTUIApp) operationDisplayStatus(entry tuiTreeEntry) string {
 		switch operation.Request.Kind {
 		case "start", "retry":
 			return "starting"
+		case "restart":
+			if operation.CurrentPhase == "stop" {
+				return "stopping"
+			}
+			return "starting"
 		case "stop":
 			return "stopping"
 		case "delete":

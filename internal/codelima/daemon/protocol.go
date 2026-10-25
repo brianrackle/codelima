@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 22 adds the cached
-	// Ports projection, explicit bare-host pinning and forwarding ownership.
-	ProtocolVersion                = 22
+	// whenever a wire shape this protocol carries changes; 23 adds a durable
+	// node restart with one lifecycle claim across stop and start.
+	ProtocolVersion                = 23
 	SessionVersion                 = 2
 	HandoffVersion                 = 6
 	PreviousRecoveryHandoffVersion = 5

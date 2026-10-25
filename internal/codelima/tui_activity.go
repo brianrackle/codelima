@@ -358,7 +358,7 @@ func (a *vaxisTUIApp) finishActivityCancel(event tuiActivityCancelEvent) {
 	if event.err != nil {
 		a.setStatus(slog.LevelError, event.err.Error())
 	} else {
-		a.setStatus(slog.LevelInfo, "Cancellation requested; start/retry also stops the VM")
+		a.setStatus(slog.LevelInfo, "Cancellation requested; startup also stops the VM")
 	}
 	a.startActivityLoad(true)
 }

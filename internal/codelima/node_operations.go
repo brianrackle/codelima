@@ -35,7 +35,7 @@ type NodeOperationRequest struct {
 }
 
 func (r NodeOperationRequest) startsNode() bool {
-	return r.Kind == "start" || r.Kind == "retry" || r.Kind == "create" && r.Create != nil && r.Create.Start
+	return r.Kind == "start" || r.Kind == "retry" || r.Kind == "restart" || r.Kind == "create" && r.Create != nil && r.Create.Start
 }
 
 type NodeOperation struct {
@@ -218,7 +218,7 @@ func (m *nodeOperations) normalize(request NodeOperationRequest) (NodeOperationR
 			return request, Node{}, nil, invalidArgument("environment is required and real nodes cannot be test targets", nil)
 		}
 		return request, Node{}, nil, nil
-	case "start", "retry", "stop", "delete", "clone":
+	case "start", "retry", "restart", "stop", "delete", "clone":
 		query := request.Node
 		if request.Kind == "clone" {
 			if request.Clone == nil {
@@ -377,7 +377,7 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 	output := newNodeOperationOutput(m, operation)
 	request := operation.record.Request
 	service := m.service.withIO(m.service.stdout, m.service.stderr)
-	if request.Kind == "start" || request.Kind == "retry" {
+	if request.Kind == "start" || request.Kind == "retry" || request.Kind == "restart" {
 		// Bootstrap owns explicit streams on every runtime implementation.
 		// Tee that source once; Lima also mirrors it to its diagnostic writers.
 		service.operationOutput = output
@@ -393,6 +393,8 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 	firstPhase := request.Kind
 	if firstPhase == "start" || firstPhase == "retry" {
 		firstPhase = "prepare"
+	} else if firstPhase == "restart" {
+		firstPhase = "stop"
 	}
 	if err = service.advanceOperationPhase(firstPhase, "", false); err == nil {
 		switch request.Kind {
@@ -400,6 +402,8 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 			node, err = service.NodeStart(ctx, nodeID)
 		case "retry":
 			node, err = service.NodeRetry(ctx, nodeID)
+		case "restart":
+			node, err = service.NodeRestart(ctx, nodeID)
 		case "stop":
 			node, err = service.NodeStop(ctx, nodeID)
 		case "delete":

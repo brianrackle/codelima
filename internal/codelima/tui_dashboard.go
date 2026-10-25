@@ -570,7 +570,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 			}
 			return "s start/stop · x inspect · E template · l logs · Esc nodes"
 		}
-		return "Tab/Shift-Tab view · x shell · s start/stop · l logs · Esc nodes · : commands · ? help"
+		return "Tab/Shift-Tab view · x shell · s start/stop · r restart · l logs · Esc nodes · ? help"
 	}
 	switch a.view {
 	case tuiViewTemplates:
@@ -591,10 +591,21 @@ func (a *vaxisTUIApp) managerFooter() string {
 		}
 		return "Tab panel · ↑↓ move · Enter details/edit · C check · R repair · Esc nodes"
 	}
+	if len(a.fleet.marks) > 0 {
+		return "Space mark · s start/stop · r restart · d delete · Esc clear · ? help"
+	}
+	failed := a.state.selectedEntry().node.Status == NodeStatusFailed
 	if a.vx != nil {
 		if width, _ := a.vx.Window().Size(); width < 100 {
+			if failed {
+				return "↑↓ select · Enter detail · r retry · s stop/start · l logs · ? help"
+			}
 			return "↑↓ select  Enter detail  x shell  s start/stop  n new  / filter  ? help"
 		}
 	}
-	return "↑↓ select · Enter detail · s start/stop · x shell · n new · / filter · : commands · ? help · q quit"
+	restart := "r restart"
+	if failed {
+		restart = "r retry"
+	}
+	return "↑↓ select · Enter detail · s start/stop · " + restart + " · x shell · n new · / filter · : commands · ? help · q quit"
 }

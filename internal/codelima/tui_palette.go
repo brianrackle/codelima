@@ -162,6 +162,13 @@ func (a *vaxisTUIApp) openCommandPalette() {
 			}})
 		}
 	}
+	if a.view == tuiViewNodes && len(a.fleet.targets()) > 0 {
+		label := "Restart selected/marked nodes"
+		if a.nodeDetail {
+			label = "Restart this node"
+		}
+		commands = append(commands, tuiPaletteCommand{label: label, hint: "stops guest sessions; incomplete setup reruns", run: func() error { return a.fleetNodeAction(tuiActionNodeRestart) }})
+	}
 	a.overlay = newTUIPalette("Command palette", commands)
 }
 
@@ -175,7 +182,7 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "Space / *", hint: "Mark node / mark every visible node; marks survive filtering"},
 		{label: "n / c / d", hint: "Create / clone / delete node"},
 		{label: "s", hint: "Start or stop selected/marked nodes"},
-		{label: "r", hint: "Failed node: retry from its recorded failed bootstrap or validation step"},
+		{label: "r", hint: "Restart selected/marked nodes; unmarked failed node retries its failed step"},
 		{label: "x / X", hint: "Open shell / shell chooser"},
 		{label: "Tab / Shift-Tab", hint: "Cycle detail tabs or templates/environments"},
 		{label: "+ − / Space", hint: "Metrics: 1m / 5m / 15m / 1h window; pause samples"},

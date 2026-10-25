@@ -628,6 +628,13 @@ The daemon lock, not the presence of socket or identity pathnames, is the author
 
 ## TUI data flow
 
+Composite lifecycle operations retain one node liveness token across their
+runtime phases. Internal helpers require that ownership and perform the same
+uncached checks as standalone operations; they must not reacquire the token.
+Persist phases before their side effects and tee each runtime stream once.
+Caller exit stops waiting without canceling admitted work. Detail actions use
+the open node, never retained fleet marks (ADR 185).
+
 Empty states are projections of known inventory, not substitutes for a failed
 filter or unavailable data. Reuse cached prerequisite reports and asynchronous
 metadata loading; never run checks while drawing. Separate read-only re-check

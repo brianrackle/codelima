@@ -9,12 +9,12 @@ All example identities, metrics and timestamps in those files are reference data
 
 | Surface | Required behavior | Status |
 |---|---|---|
-| [Nodes · dashboard (home)](reference/Main.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: table/projection and verified restart present; preview/resource fidelity and first-port action remain |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: projection and confirmations implemented; marked summary, flat-directory column and durable batch queue remain |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
-| [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: percentage table present; compact header/capacity and summary fidelity remain |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
@@ -37,6 +37,21 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+Fleet re-audit against the three home artboards:
+
+| Requirement | Current evidence and remaining work |
+|---|---|
+| `r` restart, with failed-step retry retained | ADR 185 service/daemon/CLI/TUI restart passes two-guest Linux/TCG checks; full native/artboard qualification remains |
+| `o` opens the first forwarded route | Fleet key dispatcher has no route action; connect it to actual cached routes |
+| Port filters/counts include discovered forwarding | `refreshFleet` only reads frozen `Node.Ports`; project daemon routes consistently with the Ports view and distinguish unavailable observations |
+| Marked-node panel replaces single-node preview | `drawFleet` always draws the selected preview; add full target/resource/session impact and compact summary |
+| Flat filter view includes directory | `tuiFleetColumns` always uses Ports; add the reference's directory context when grouping is absent |
+| Wide memory/disk values show used/total | `fleetCell` currently renders percentages beside gauges; use observed byte totals with explicit unavailable values |
+| Compact navigation retains connection and capacity | Header always renders full view names; shorten labels at the compact breakpoint and fit measured allocation |
+| Preview includes resolved routes, runtime and recent events | Current preview only includes basic identity, resources and session labels; complete it from observed snapshots |
+| Lifecycle rows explain current work and failure | Wide rows use generic status or frontend output and compact rows lack the same summary branch; use retained receipt phases/failed-step evidence at both sizes |
+| Whole-batch caller independence | Individual admitted mutations survive; the sequential frontend queue does not. Persist complete queue/result ownership |
 
 - Preserve daemon-owned sessions, node/configuration identities and existing storage compatibility.
 - Fleet dashboard is the launch view; selecting a node must never create a shell.
@@ -705,3 +720,43 @@ integration 17.651s, plus formatting, lint, Vaxis and builds. The focused race
 suite passed in 1.736s. Gopls reported only existing style suggestions outside
 the changed lines. Existing dialog-routing tests now explicitly start with
 successful prerequisites. Verification logs and Go scratch were cleaned.
+
+ADR 185 / ordinary protocol 23 adds daemon-owned restart across confirmed stop
+and startup under one node lifecycle claim. CLI and TUI share the receipt;
+shutdown and boot output are retained once. Completed bootstrap stays frozen,
+validation runs again, incomplete setup follows normal start, and an unmarked
+failed node retains explicit suffix retry. Detail actions ignore fleet marks.
+
+Two disposable Ubuntu guests exercised the real Lima lifecycle on Linux/aarch64
+with TCG and 9p; only creation used private overlays over an unchanged stopped
+QA backing disk. At 150×38 and 80×24, canceled confirmations preserved boot and
+terminal identities, counters and attempts. Keyboard/palette restart ended the
+old daemon-owned guest shell, changed the boot ID, kept each bootstrap counter
+and attempt at one and advanced validation. A CLI disappeared while its admitted
+receipt remained running; that same receipt completed successfully. Receipts
+retained shutdown/boot output and recorded stop finishing before boot began.
+
+An injected stop-command failure left the VM, boot ID and attempts unchanged
+with Boot still pending. A real validation failure followed by `r` retried only
+validation, retaining the boot ID and bootstrap count. One marked confirmation
+restarted both guests sequentially and cleared marks on total success. With two
+marks present, detail restart admitted only the open node; the other node's boot
+ID, counter and attempts stayed unchanged. Activity `K` canceled during boot.
+The reopened frontend retained canceling state until Lima confirmed stop; this
+early emulated boot required Lima's own three-minute forced-shutdown fallback.
+The final receipt was canceled and both metadata and Lima reported stopped.
+
+Live checks found a clipped compact confirmation and a misleading failed-node
+footer. Both now have wide/compact regressions, and the rebuilt frontend was
+visually checked again. Cancellation copy now covers startup generally. ANSI
+captures were inspected; this does not finish native-terminal or full artboard
+qualification. Both guests, daemon, TUI/tmux, overlays, stores, scripts, captures
+and temporary mounts under `tmp/rq` were removed. The backing disk hash matched
+its pre-test value. Existing stepqa cleanup debt remains separate.
+
+Final ADR 185 checks passed after the live fixes: core unit 82.327s, core race
+108.016s and CLI integration 17.708s, plus formatting, lint, Vaxis and builds.
+The focused restart race suite passed in 6.661s. Go doc and gopls inspection
+covered the service and changed UI paths; only pre-existing style suggestions
+appeared in the shared runtime/service files. The final CLI runs locally and
+advertises `node restart`. Verification logs and Go scratch were cleaned.

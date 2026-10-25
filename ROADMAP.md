@@ -33,6 +33,14 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
 
 ## Related Draft Plans
 
+- Fleet restart [partially complete]: one daemon-owned
+  stop/start receipt and lifecycle claim, CLI command, TUI single/marked actions,
+  detail-only targeting, output capture and cancellation are implemented (ADR 185).
+  Automated checks and two-guest Linux/TCG restart, retry, batch, stop-failure,
+  caller-exit and cancellation checks pass at wide/compact sizes. Remaining fleet
+  presentation/route actions, durable batch ownership and final native/artboard
+  qualification are recorded in TODO #57 and the design ledger's fleet audit.
+
 - Ports delivery [partially complete, in progress]: readiness-gated application
   routes and daemon-owned published TCP with stopped-node migration (ADR 182).
   Cached Ports presentation, durable generic-host ownership controls, optional

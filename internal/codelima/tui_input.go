@@ -144,7 +144,7 @@ func (a *vaxisTUIApp) actionResourceKeys(action tuiActionSpec, entry tuiTreeEntr
 		return []string{"configurations"}
 	case tuiActionNodeCreate:
 		return []string{"nodes"}
-	case tuiActionNodeStart, tuiActionNodeRetry, tuiActionNodeStop, tuiActionNodeDelete:
+	case tuiActionNodeStart, tuiActionNodeRetry, tuiActionNodeRestart, tuiActionNodeStop, tuiActionNodeDelete:
 		return []string{terminal.NodeTarget(entry.node.ID).String()}
 	case tuiActionNodeClone:
 		return []string{terminal.NodeTarget(entry.node.ID).String()}
@@ -196,6 +196,19 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 				}, nil
 			},
 		})
+	case tuiActionNodeRestart:
+		if !entry.valid() {
+			return fmt.Errorf("select a node first")
+		}
+		if a.confirmNodeStop(entry.node) {
+			a.overlay = newTUIDialog("Restart "+entry.node.Slug, "Restart", []string{
+				"Restart stops the VM and ends its guest sessions.",
+				"It then starts the VM. Completed bootstrap steps are kept.",
+				"Failed setup is rerun; use Retry to resume it.",
+			}, nil, func(map[string]string) error { return a.restartNode(entry.node) })
+			return nil
+		}
+		return a.restartNode(entry.node)
 	case tuiActionNodeStop:
 		if a.confirmNodeStop(entry.node) {
 			a.overlay = newTUIDialog("Stop "+entry.node.Slug, "Stop", []string{"Sessions may have running commands. Stopping ends their guest processes."}, nil, func(map[string]string) error { return a.stopNode(entry.node) })
@@ -218,6 +231,18 @@ func (a *vaxisTUIApp) stopNode(node Node) error {
 		Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 			stopped, err := service.NodeStop(ctx, node.ID)
 			return tuiOperationResult{Status: "stopped node " + stopped.Slug, PreferredKey: terminal.NodeTarget(stopped.ID).String(), CloseNodeID: stopped.ID, ReloadData: true}, err
+		},
+	})
+}
+
+func (a *vaxisTUIApp) restartNode(node Node) error {
+	key := terminal.NodeTarget(node.ID).String()
+	return a.startOperation(tuiOperationRequest{
+		Title: "Restarting " + node.Slug, DisplayStatus: "starting",
+		ResourceKeys: []string{key}, EntryKeys: []string{key},
+		Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+			restarted, err := service.NodeRestart(ctx, node.ID)
+			return tuiOperationResult{Status: "restarted node " + restarted.Slug, PreferredKey: key, ReloadData: true}, err
 		},
 	})
 }

@@ -26,8 +26,11 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 	}
 	progress := border.All(win.New(0, 0, progressWidth, progressHeight), theme.mint)
 	title := "Starting " + record.Node.Slug
+	if operation.Request.Kind == "restart" {
+		title = "Restarting " + record.Node.Slug
+	}
 	if operation.State == "canceling" {
-		title = "Canceling start · stopping VM"
+		title = "Canceling startup · stopping VM"
 	}
 	tuiLine(progress, 0, title, theme.mint)
 	row, completed := 1, 0

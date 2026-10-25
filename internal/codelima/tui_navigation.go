@@ -253,8 +253,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			action = tuiActionNodeStop
 		}
 		err = a.fleetNodeAction(action)
-	case key.MatchString("r") && a.state.selectedEntry().node.Status == NodeStatusFailed:
+	case key.MatchString("r") && a.state.selectedEntry().node.Status == NodeStatusFailed && (a.nodeDetail || len(a.fleet.marks) == 0):
 		err = a.performAction(tuiActionSpec{ID: tuiActionNodeRetry})
+	case key.MatchString("r"):
+		err = a.fleetNodeAction(tuiActionNodeRestart)
 	case key.MatchString("y"):
 		err = a.copyToHostClipboard(a.state.selectedEntry().node.Slug)
 	case key.MatchString("X"):
@@ -449,6 +451,9 @@ func (a *vaxisTUIApp) defaultShellChoice(mode string) func() error {
 }
 
 func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
+	if a.nodeDetail {
+		return a.performAction(tuiActionSpec{ID: action})
+	}
 	if action == tuiActionNodeStart && a.emptyNodesVisible() {
 		if reason := a.emptyNodeBlockReason(); reason != "" {
 			return fmt.Errorf("%s", reason)
@@ -468,6 +473,9 @@ func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
 		labels = append(labels, record.Node.Slug)
 		keys = append(keys, terminal.NodeTarget(record.Node.ID).String())
 	}
+	if action == tuiActionNodeRestart {
+		labels = append(labels, "Restart ends guest sessions on these nodes, then starts each VM.", "Completed bootstrap is kept; failed setup is rerun from the beginning.")
+	}
 	fields := []tuiDialogField{}
 	if action == tuiActionNodeDelete {
 		fields = append(fields, newTUIInputField("confirm", "Type "+expected+" to delete these nodes", "", true))
@@ -485,6 +493,8 @@ func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
 						_, err = service.NodeStart(ctx, record.Node.ID)
 					case tuiActionNodeStop:
 						_, err = service.NodeStop(ctx, record.Node.ID)
+					case tuiActionNodeRestart:
+						_, err = service.NodeRestart(ctx, record.Node.ID)
 					case tuiActionNodeDelete:
 						_, err = service.NodeDelete(ctx, record.Node.ID)
 					}

@@ -113,7 +113,7 @@ func TestDaemonStartupRecoveryPreservesResponsiveOperationCapableDaemon(t *testi
 }
 
 func TestCLIOperationConnectionIsLazyAndOnlyForLifecycleCommands(t *testing.T) {
-	for _, command := range []string{"create", "start", "retry", "stop", "clone", "delete"} {
+	for _, command := range []string{"create", "start", "retry", "restart", "stop", "clone", "delete"} {
 		s, _ := newTestService(t)
 		configureCLIOperations(s, []string{"node", command})
 		if s.operationConnect == nil {

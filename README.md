@@ -333,6 +333,7 @@ complete long findings. A filter with no matches stays in the searchable table.
 | `G`, `<` / `>`, `=` | Toggle directory grouping, choose sort, reverse order |
 | `Space`, `*` | Mark one node / all visible nodes; marks survive filtering |
 | `n`, `s`, `c`, `d` | Create, start/stop, clone, delete |
+| `r` | Restart selected/marked nodes; an unmarked failed node retries its failed step |
 | `x`, `X` | Open a shell / show shell choices |
 | `Tab` / `Shift-Tab` | Cycle node detail tabs |
 | `a`, `g`, `m` | Configurations, environments, activity |
@@ -459,8 +460,16 @@ after successful bootstrap it only revalidates the agent. Canceled attempts
 and old failures without step records require ordinary start. `s` stops a VM
 that remains running after bootstrap failure.
 
+For other nodes, `r` restarts the selected node; marked fleet rows get one
+confirmation listing every target. Detail actions apply only to the open node.
+`codelima node restart NODE` explicitly stops and starts under one lifecycle
+claim. It confirms shutdown before booting, preserves completed bootstrap, and
+reruns incomplete setup. Restart uses the stop-confirmation preference because
+guest sessions end. Each admitted restart continues after its caller exits;
+keep a bulk-action window open until its sequential queue finishes.
+
 Lifecycle actions launched from the TUI or CLI (`node create`, `start`, `retry`,
-`stop`, `clone`, `delete`) run in the daemon and continue when the caller exits.
+`restart`, `stop`, `clone`, `delete`) run in the daemon and continue when the caller exits.
 CLI progress goes to stderr; stdout retains the command's result format.
 The CLI honors daemon autostart; with it disabled, run `codelima daemon start`
 first. A responsive daemon with a different version requires explicit
@@ -748,6 +757,7 @@ codelima node show api-redesign
 codelima node start api-redesign
 codelima shell api-redesign
 codelima node logs api-redesign
+codelima node restart api-redesign
 codelima node stop api-redesign
 codelima node delete api-redesign
 ```

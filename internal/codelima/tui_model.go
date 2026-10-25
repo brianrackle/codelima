@@ -46,6 +46,7 @@ const (
 	tuiActionEnvironmentConfigManage tuiActionID = "environment_config.manage"
 	tuiActionNodeStart               tuiActionID = "node.start"
 	tuiActionNodeRetry               tuiActionID = "node.retry"
+	tuiActionNodeRestart             tuiActionID = "node.restart"
 	tuiActionNodeStop                tuiActionID = "node.stop"
 	tuiActionNodeDelete              tuiActionID = "node.delete"
 	tuiActionNodeClone               tuiActionID = "node.clone"
@@ -590,6 +591,8 @@ func availableTUIActions(entry tuiTreeEntry) []tuiActionSpec {
 	}
 	if entry.node.Status == NodeStatusFailed {
 		actions = append(actions, tuiActionSpec{ID: tuiActionNodeRetry, Label: "Retry Failed Step", Hotkey: 'r'})
+	} else if nodeIsRunning(entry.node) {
+		actions = append(actions, tuiActionSpec{ID: tuiActionNodeRestart, Label: "Restart Node", Hotkey: 'r'})
 	}
 
 	if nodeIsRunning(entry.node) {

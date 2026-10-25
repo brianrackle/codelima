@@ -2,6 +2,37 @@
 
 ## Open Work
 
+Restart is implemented (ADR 185, part of #57) with one daemon receipt and one
+lifecycle claim across stop/start. Two isolated Linux/TCG guests passed restart,
+caller exit, preserved bootstrap, repeated validation, session shutdown, failed
+stop, single failed-step retry, marked restart, detail-only targeting and Activity
+cancellation checks. Wide/compact confirmation and footer defects found live
+have regressions and fixes. Both guests, daemon, TUI/tmux, overlays, stores,
+scripts, captures and tmpfs mounts were removed; the existing backing image's
+checksum stayed unchanged. Final unit/race/CLI integration, lint, format,
+Vaxis and build checks pass; detailed evidence is in the design ledger.
+Final native/artboard qualification remains open.
+
+The fleet audit identified missing marked-node summaries, flat-directory
+columns and the fleet's first-port open action. Port filters/counts currently
+read only frozen `Node.Ports`; project discovered daemon routes consistently
+with Ports. Lifecycle rows also need retained phase/failed-step summaries at
+both sizes instead of generic state/frontend output. This improves cross-view
+consistency but requires explicit cache/readiness handling and regression checks.
+Continue comparing the complete Main/NodesFilter/NodesCompact artboards and
+implement those gaps. This delivers
+the actual reference workflow; the cost is additional responsive layout and
+cross-view verification rather than declaring the existing table complete.
+
+Bulk queue lifetime remains a separate problem: the current frontend submits
+marked nodes sequentially, so closing it prevents later submissions and the first
+failure ends the queue. Individual admitted operations continue in the daemon.
+Suggested solution: persist the complete ordered batch, its admission and each
+target's result in the daemon, with explicit partial failure/cancellation and
+conflict behavior. Advantages: caller-independent batches and reviewable progress.
+Disadvantages: a broader operation contract, rollback/partial-success rules and
+additional compatibility/QA work. Preserve this in the full redesign scope.
+
 ### 57. Implement the retrieved major-version TUI design
 
 Source access resolved on 2026-10-24. The user's interactive Claude Code

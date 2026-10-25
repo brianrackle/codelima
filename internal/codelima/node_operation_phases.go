@@ -19,6 +19,9 @@ type NodeOperationPhase struct {
 }
 
 func initialNodeOperationPhases(kind string) []NodeOperationPhase {
+	if kind == "restart" {
+		return append(initialNodeOperationPhases("stop"), initialNodeOperationPhases("start")...)
+	}
 	if kind == "test-environment" {
 		phases := append(initialNodeOperationPhases("create"), initialNodeOperationPhases("start")...)
 		return append(phases, NodeOperationPhase{ID: "cleanup", Label: "Delete test VM", State: "pending"})

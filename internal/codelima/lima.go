@@ -687,7 +687,7 @@ func (c *LimaClient) Stop(ctx context.Context, node Node) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.runCommands(ctx, 10*time.Minute, "stop Lima instance", commands, map[string]any{"sandbox_name": node.SandboxName}); err != nil {
+	if _, err := c.runCommandsWithOutput(ctx, 10*time.Minute, "stop Lima instance", commands, map[string]any{"sandbox_name": node.SandboxName}, c.Stdout); err != nil {
 		return err
 	}
 	return c.verifyObservation(ctx, node.SandboxName, ObservationStopped)

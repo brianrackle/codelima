@@ -57,6 +57,13 @@ failure/cancellation/interruption, explicit suffix retry, legacy metadata,
 clone inheritance, JSON/YAML round trips, CLI/TUI retry and failed-VM stopping
 (ADR 160). Run the real guest failure/retry procedure in QA.md as well.
 
+`make test-node-restart` covers stop/start ownership, confirmed shutdown,
+cancellation, preserved bootstrap, both output streams, durable phases and
+caller-disconnect behavior, plus TUI single/bulk confirmation and detail scope
+(ADR 185). Use `NODE_RESTART_TEST_FLAGS=-race` for the focused race run. The
+ordinary protocol is 23; update older daemons explicitly. Run the real-guest
+restart procedure in QA.md after the full verification gates.
+
 `make test-node-operations` checks independent execution lifetime, per-node
 conflicts, duplicate admission, cancel-and-stop, restart recovery, private
 history, bounded pagination/output and the daemon update barrier (ADR 161).

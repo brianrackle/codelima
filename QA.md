@@ -882,7 +882,20 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   The fraction includes skipped phases but is not a time estimate. Legacy receipts
   without phases show unavailable progress. Completed durations must match
   observed receipt times; interruption must not invent a finish.
-- Press `K` on a running start/retry. Wait for cancellation to finish and confirm
+- For restart (ADR 185), use a completed disposable node with a guest shell and
+  a bootstrap counter. At 150×38 and 80×24, press `r`, cancel the confirmation,
+  and confirm the guest PID and counter are unchanged. Confirm restart and inspect
+  Stop followed by startup in Activity/detail: the old guest session ends, the
+  VM returns ready, completed bootstrap and its counter stay unchanged, and
+  validation runs again. Verify the palette route and `node restart NODE`.
+  Close the initiating frontend during restart and inspect the same receipt from
+  another frontend; it must continue. Mark two disposable nodes and confirm
+  restart once, keeping the batch window open until both finish. Open one node's
+  detail while fleet marks remain and verify restart affects only that node.
+  A single failed node's `r` still retries its recorded failed step. Inspect both
+  shutdown and boot output; a stop failure cannot proceed to boot. Remove all
+  disposable guests, stores, terminals, scripts and captures afterward.
+- Press `K` on a running start/retry/restart. Wait for cancellation to finish and confirm
   Lima reports the VM stopped and allocation is released. A stop failure must
   remain visible as failure. Reopen and confirm the receipt and output remain.
 - Use `Enter` to open an operation's node outside the current directory scope.
