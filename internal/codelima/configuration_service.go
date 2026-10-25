@@ -150,7 +150,11 @@ func (s *Service) ConfigurationDelete(ctx context.Context, value string) (Config
 			return err
 		}
 		if len(nodes) != 0 {
-			return preconditionFailed("configuration is referenced by nodes", map[string]any{"configuration": configuration.Slug, "node_count": len(nodes)})
+			names := make([]string, 0, len(nodes))
+			for _, node := range nodes {
+				names = append(names, node.Slug)
+			}
+			return preconditionFailed("configuration is referenced by nodes: "+strings.Join(names, ", "), map[string]any{"configuration": configuration.Slug, "node_count": len(nodes), "nodes": names})
 		}
 		now := s.now()
 		configuration.DeletedAt = &now

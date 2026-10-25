@@ -272,7 +272,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 			}
 		}
 	}
-	if a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) || a.handleActivityMouse(mouse) {
+	if a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) || a.handleActivityMouse(mouse) || a.handleRecipeMouse(mouse) {
 		return
 	}
 	if a.view == tuiViewSystem && mouse.EventType == vaxis.EventPress {

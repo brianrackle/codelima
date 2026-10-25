@@ -425,13 +425,17 @@ func (a *vaxisTUIApp) openFilePager(path string) error {
 	if err != nil {
 		return err
 	}
-	if _, err = exec.LookPath(args[0]); err != nil {
-		return fmt.Errorf("file pager: %w; set PAGER to an installed pager", err)
+	return a.runInteractiveProcess(args)
+}
+
+func (a *vaxisTUIApp) runInteractiveProcess(args []string) error {
+	if _, err := exec.LookPath(args[0]); err != nil {
+		return fmt.Errorf("interactive command: %w", err)
 	}
 	if a.vx == nil {
 		return errors.New("interactive terminal is unavailable")
 	}
-	if err = a.vx.Suspend(); err != nil {
+	if err := a.vx.Suspend(); err != nil {
 		return err
 	}
 	ctx := a.ctx

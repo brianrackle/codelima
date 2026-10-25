@@ -357,6 +357,19 @@ their order. Ctrl-S returns command edits to the template; Ctrl-S in the templat
 saves it. Esc asks before discarding edits. `R` on a built-in template loads its
 defaults into the editor for review and saving; `small` cannot be renamed.
 
+The recipe lists show global usage even when Nodes is scoped to one directory.
+Right opens details; Left returns to the list. At narrow widths these occupy
+the same panel. Page Up/Down scrolls a list or details; the mouse wheel scrolls
+the panel under it. Template details identify nodes whose frozen values drift
+from the current recipe.
+
+Tab switches to Environments. Right focuses its command list; Up/Down selects
+a block, Enter edits it, `o` adds one, Shift-Up/Down reorders it and `D` removes
+it from a draft. `E` opens the selected block in `$EDITOR` (default `vi`) and
+returns to the draft for review. Ctrl-S in the command editor applies its edits;
+Ctrl-S in the environment draft saves. `R` reviews shipped built-in commands.
+The last-run line uses recorded node execution, and says when none is available.
+
 For example, `/status:running template:small dir:"acme api"` combines filters.
 Selection follows node identity through sorting and refreshes. Missing metrics
 show `—`. Metric sorts place unavailable readings last and temporarily flatten

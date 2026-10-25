@@ -29,42 +29,44 @@ type vaxisTUIApp struct {
 	// silently drops events once its queue is full — exactly when the loop is
 	// busy — and every dropped completion latches a state that never clears.
 	// nil falls back to postEvent (tests that never fill the queue).
-	postEventBlocking  func(vaxis.Event)
-	treeWorkspaceRoot  string
-	openLink           func(string) error
-	screenHyperlinkAt  func(int, int) (string, bool)
-	state              *tuiState
-	fleet              *tuiFleet
-	view               tuiView
-	nodeDetail         bool
-	detailTab          tuiDetailTab
-	filterInput        *textinput.Model
-	filterBefore       string
-	fleetMouseRows     []tuiFleetRow
-	viewRegions        []tuiRect
-	managerData        tuiManagerData
-	managerGeneration  uint64
-	templateIndex      int
-	templateSelectID   string
-	environmentIndex   int
-	environmentsView   bool
-	detailScroll       int
-	launchScope        string
-	rawShellPending    bool
-	preferences        *Config
-	preferenceRevision uint64
-	systemPanel        int
-	settingIndex       int
-	metrics            tuiMetricsState
-	logs               tuiLogsState
-	spec               tuiSpecState
-	activity           tuiActivityState
-	messageDelivery    tuiActivityDelivery
-	lifecycle          tuiLifecycleState
-	createIntent       *tuiCreateIntent
-	host               tuiHostSummary
-	systemRects        [tuiSystemPanelCount]tuiRect
-	systemScroll       [tuiSystemPanelCount]int
+	postEventBlocking   func(vaxis.Event)
+	treeWorkspaceRoot   string
+	openLink            func(string) error
+	screenHyperlinkAt   func(int, int) (string, bool)
+	state               *tuiState
+	fleet               *tuiFleet
+	view                tuiView
+	nodeDetail          bool
+	detailTab           tuiDetailTab
+	filterInput         *textinput.Model
+	filterBefore        string
+	fleetMouseRows      []tuiFleetRow
+	viewRegions         []tuiRect
+	managerData         tuiManagerData
+	managerGeneration   uint64
+	templateIndex       int
+	templateSelectID    string
+	environmentIndex    int
+	environmentSelectID string
+	recipes             tuiRecipesState
+	environmentsView    bool
+	detailScroll        int
+	launchScope         string
+	rawShellPending     bool
+	preferences         *Config
+	preferenceRevision  uint64
+	systemPanel         int
+	settingIndex        int
+	metrics             tuiMetricsState
+	logs                tuiLogsState
+	spec                tuiSpecState
+	activity            tuiActivityState
+	messageDelivery     tuiActivityDelivery
+	lifecycle           tuiLifecycleState
+	createIntent        *tuiCreateIntent
+	host                tuiHostSummary
+	systemRects         [tuiSystemPanelCount]tuiRect
+	systemScroll        [tuiSystemPanelCount]int
 	// shortcutKeys consumes followups of one-shot shortcuts and keys that
 	// changed input context. It belongs to the UI event loop.
 	shortcutKeys      map[rune]struct{}
@@ -144,6 +146,9 @@ func (a *vaxisTUIApp) postCompletion(event vaxis.Event) {
 // type is showing. Dialog flows and tests use these instead of per-type
 // fields.
 func (a *vaxisTUIApp) activeDialog() *tuiDialog {
+	if editor, ok := a.overlay.(*tuiEnvironmentEditor); ok {
+		return editor.dialog
+	}
 	if editor, ok := a.overlay.(*tuiTemplateEditor); ok {
 		return editor.dialog
 	}
@@ -472,6 +477,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case tuiTemplateSavedEvent:
 		a.applyTemplateSaved(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiEnvironmentSavedEvent:
+		a.applyEnvironmentSaved(event)
 		a.requestRedraw()
 		return false, nil
 	case tuiTemplateImagesEvent:

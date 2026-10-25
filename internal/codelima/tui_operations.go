@@ -71,6 +71,9 @@ func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperati
 		// The reload is a daemon RPC or a store read; it runs off the event
 		// loop and applies through tuiRefreshCompleteEvent (invariant I1).
 		a.startDataRefresh(selectedKey)
+		if a.view == tuiViewTemplates {
+			a.loadManagerData(false)
+		}
 	}
 	if result.ShowTerminalPane {
 		a.state.treePaneMode = tuiTreePaneModeTerminal

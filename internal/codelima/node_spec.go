@@ -44,7 +44,22 @@ func (s *Service) NodeSpec(ctx context.Context, value string) (nodeSpecSnapshot,
 	if err != nil {
 		return nodeSpecSnapshot{}, err
 	}
-	result := nodeSpecSnapshot{Node: node, LimaPath: filepath.Join(s.store.nodeDir(node.ID), "instance.lima.yaml")}
+	result, err := s.nodeRecipeSpec(ctx, node)
+	if err != nil {
+		return result, err
+	}
+	result.LimaPath = filepath.Join(s.store.nodeDir(node.ID), "instance.lima.yaml")
+	result.LimaFields, result.LimaError = readNodeSpecLima(result.LimaPath, node.SandboxName)
+	return result, ctx.Err()
+}
+
+// nodeRecipeSpec compares metadata without opening the rendered Lima file.
+// Catalog usage and the node Spec view must agree about frozen recipe drift.
+func (s *Service) nodeRecipeSpec(ctx context.Context, node Node) (nodeSpecSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nodeSpecSnapshot{}, err
+	}
+	result := nodeSpecSnapshot{Node: node}
 	result.Bootstrap, result.BootstrapError = s.store.LoadBootstrapState(node.ID)
 	if result.BootstrapError == nil {
 		result.Bootstrap.ensureSteps()
@@ -84,7 +99,6 @@ func (s *Service) NodeSpec(ctx context.Context, value string) (nodeSpecSnapshot,
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	result.LimaFields, result.LimaError = readNodeSpecLima(result.LimaPath, node.SandboxName)
 	return result, ctx.Err()
 }
 

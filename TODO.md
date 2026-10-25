@@ -542,6 +542,36 @@ regions and the command-block editor for environments; this keeps behavior and
 script boundaries consistent, but adds responsive and native interaction cases.
 The broader manager redesign remains partially complete.
 
+ADR 176 adds global configuration/environment catalogs, frozen-value drift,
+recorded execution outcomes, stable selection, compact details and shared
+environment drafts, including ordered command blocks and external editing.
+These are inspection/editing foundations, not completion of both artboards.
+
+Recipe verification passed full verify/race/integration, focused catalog/editor
+checks and live 150×38/80×24 interaction. Live deletion exposed and verified a
+catalog refresh fix; a completed delete now removes its row immediately.
+The created-only node, custom definitions, daemon/TUI, tmux window, isolated
+homes, captures, scripts and test scratch were removed. No disposable resource
+from this catalog work remains; the older stepqa cleanup debt is unchanged.
+
+Implement the environment `t` test action as a daemon-owned disposable xsmall
+operation with streamed Activity output and durable cleanup of its exact node,
+workspace and temporary definitions on success, failure, cancellation and
+daemon recovery. Reuse operation receipts and frozen bootstrap provenance;
+avoid a frontend goroutine whose exit can leave a guest behind. This gives
+reliable lifecycle ownership and meaningful last-run evidence, but needs an
+explicit test recipe without unrelated agent validation, cleanup recovery and
+more lifecycle/VM qualification. Add the reference's dependency warning using
+an explainable static check, clearly distinguishing a heuristic from execution.
+
+Finish native terminal and exact artboard qualification, including generic
+child-modal mouse/presentation. Global catalog metadata currently uses the
+existing manager
+generation fence; evaluate cancellation/single-flight loading for large node
+histories so repeated refreshes do not accumulate work. This retains accurate
+global usage at the cost of scanning retained node metadata. Keep the full QA
+matrix and older stepqa cleanup debt open until their evidence is complete.
+
 Editor verification passed full verify/race/integration, focused editor checks,
 the Vaxis fork suite and its required upstream mise check. Its created-only
 nodes, templates/environments/profile, daemon/TUI, tmux window, isolated homes,

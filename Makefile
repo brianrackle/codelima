@@ -225,6 +225,11 @@ test-terminal-attach: init
 .PHONY: test-activity
 .PHONY: test-create-node
 .PHONY: test-template-editor
+.PHONY: test-recipes
+test-recipes: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUIRecipe|TUIEnvironmentEditor|NodeSpec|EnvironmentConfig)' -count=1
+
 test-template-editor: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUITemplate|TUICommandEditor|TUIDialogSubmitUnderHeldLock|LimaTemplateNames)' -count=1

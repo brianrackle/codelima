@@ -546,6 +546,38 @@ For the template editor, use an isolated home and disposable definitions:
   the node form's values. Remove disposable definitions, processes and files.
 - `make test-template-editor` checks these state and execution-boundary rules.
 
+For the recipe catalogs, use an isolated home and disposable definitions:
+
+- Open Templates at 150×38 and 80×24. Check counted tabs, default/modified
+  markers, resource columns, global usage, host hints and list pagination.
+  Right/Left switches list/detail focus; PageUp/PageDown and mouse scrolling
+  expose long lists and details. Mouse tabs, rows and action hints must work.
+- Create a node in a different directory from the current fleet scope. Its
+  template usage must still count it. Edit the template/environment and verify
+  the node's frozen resources and commands remain unchanged and show drift.
+  Refresh after inserting/removing a definition; retain the selected identity
+  or select a valid neighboring row if it was deleted.
+- In Environments, select a command with Right and Up/Down. Enter edits its
+  block; Shift-Up/Down reorders into a reviewable draft, D removes and o adds.
+  Paste Unicode, LF and literal tabs using a raw bracketed paste. Save, reopen
+  and compare the exact stored bytes and command boundaries. Cancel dirty edits
+  with both keep and discard choices. Clone, retry a duplicate-name save and
+  save an empty command list. Existing names must remain fixed.
+- Set EDITOR to a disposable wrapper that replaces the provided file with a
+  known multiline block. E must resume the TUI with an unsaved draft, preserve
+  bytes on save and remove its private scratch on success and failure. Restore
+  EDITOR afterward. Modify a built-in, inspect its marker and use R to review
+  and save the shipped commands.
+- Try deleting an environment used by a template and a template used by a
+  node. Errors must name the blocking definition/node. Delete an unused clone
+  and check selection. Confirm that missing execution evidence says so;
+  retained real failures must include the node, step, date and exit status.
+  Deleted nodes can supply history but cannot count as current usage, and
+  inherited clone receipts cannot claim a new execution.
+- Remove all disposable nodes, definitions, processes and files. Run
+  `make test-recipes`. The disposable test-run action and its Activity/cleanup
+  flow remain part of the unfinished redesign tracked in TODO #57.
+
 For Metrics, use a disposable running Linux guest:
 
 - Open Enter → Metrics at 150×38, then resize to 80×24. Confirm CPU/memory

@@ -92,6 +92,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			}
 		}
 	}
+	if a.handleRecipeKey(key) {
+		return false
+	}
 	if key.MatchString("Up") || key.MatchString("k") || key.MatchString("Down") || key.MatchString("j") {
 		delta := 1
 		if key.MatchString("Up") || key.MatchString("k") {
@@ -164,7 +167,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			}
 			a.systemPanel = (a.systemPanel + delta + tuiSystemPanelCount) % tuiSystemPanelCount
 		case a.view == tuiViewTemplates:
-			a.environmentsView = !a.environmentsView
+			a.switchRecipeKind(!a.environmentsView)
 		case a.nodeDetail:
 			delta, count := 1, 4
 			if len(a.state.sessions.TargetSessionKeys(a.state.selectedEntry().key())) > 0 {
@@ -286,11 +289,7 @@ func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 			a.systemScroll[a.systemPanel] = max(0, a.systemScroll[a.systemPanel]+delta)
 		}
 	case a.view == tuiViewTemplates:
-		if a.environmentsView {
-			a.environmentIndex = max(0, min(len(a.managerData.environments)-1, a.environmentIndex+delta))
-		} else {
-			a.templateIndex = max(0, min(len(a.managerData.configurations)-1, a.templateIndex+delta))
-		}
+		a.moveRecipeSelection(delta)
 	case a.nodeDetail || a.view == tuiViewActivity:
 		a.detailScroll = max(0, a.detailScroll-delta)
 	default:
@@ -302,16 +301,37 @@ func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 	if a.environmentsView {
 		if key.MatchString("n") {
-			a.openCreateEnvironmentConfigDialog()
+			a.openEnvironmentEditor(EnvironmentConfig{}, true)
 		} else if a.environmentIndex < len(a.managerData.environments) {
 			environment := a.managerData.environments[a.environmentIndex]
 			switch {
 			case key.MatchString("e"), key.MatchString("Enter"):
-				a.openEnvironmentConfigCommandMenu(environment)
+				e := a.openEnvironmentEditor(environment, false)
+				if key.MatchString("Enter") {
+					e.openCommands(a.recipes.command)
+				}
 			case key.MatchString("c"):
-				a.openCloneEnvironmentDialog(environment)
+				a.openEnvironmentEditor(environment, true)
 			case key.MatchString("d"):
 				a.openDeleteEnvironmentConfigDialog(environment)
+			case key.MatchString("R"):
+				if _, ok := builtInEnvironment(environment.Slug); ok {
+					a.openEnvironmentEditor(environment, false).restoreDefaults()
+				}
+			case key.MatchString("o"):
+				e := a.openEnvironmentEditor(environment, false)
+				e.openCommands(len(environment.BootstrapCommands))
+				_, _ = a.overlay.(*tuiCommandEditor).Update(vaxis.Key{Keycode: 'n', Modifiers: vaxis.ModCtrl})
+			case key.MatchString("D"):
+				if !a.recipes.details {
+					return fmt.Errorf("focus a command with → before removing it")
+				}
+				if a.recipes.command < len(environment.BootstrapCommands) {
+					e := a.openEnvironmentEditor(environment, false)
+					e.setCommands(removeCommandsByIndex(environment.BootstrapCommands, []int{a.recipes.command}))
+				}
+			case key.MatchString("E"):
+				return a.editEnvironmentCommandExternally(environment, a.recipes.command)
 			}
 		}
 		return nil
@@ -334,7 +354,7 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 	case key.MatchString("N"):
 		return a.openCreateNodeDialogWithDefaults("", configuration.Slug)
 	case key.MatchString("R"):
-		if _, ok := builtInTemplateDefaults(configuration.Slug, a.service.cfg); ok {
+		if _, ok := builtInTemplateDefaults(configuration.Slug, a.managerSettings()); ok {
 			editor := a.openTemplateEditor(configuration, false, nil, nil)
 			editor.restoreDefaults()
 		}
@@ -393,17 +413,6 @@ func (a *vaxisTUIApp) defaultShellChoice(mode string) func() error {
 	return func() error {
 		return a.saveManagerSetting("shell.mode", mode, func(app *vaxisTUIApp) error { return app.startShellMode(mode, false, false, "") })
 	}
-}
-
-func (a *vaxisTUIApp) openCloneEnvironmentDialog(environment EnvironmentConfig) {
-	a.overlay = newTUIDialog("Clone environment "+environment.Slug, "Clone", nil,
-		[]tuiDialogField{newTUIInputField("slug", "Name", environment.Slug+"-copy", true)},
-		func(values map[string]string) error {
-			return a.startMetadataOperation("Cloning environment "+environment.Slug, "environments", func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-				_, err := service.EnvironmentConfigCreate(ctx, EnvironmentConfigCreateInput{Slug: values["slug"], BootstrapCommands: environment.BootstrapCommands})
-				return tuiOperationResult{Status: "Cloned environment", Apply: func(a *vaxisTUIApp) error { a.loadManagerData(false); return nil }}, err
-			})
-		})
 }
 
 func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {

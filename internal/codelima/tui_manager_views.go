@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"go.rockorager.dev/vaxis"
@@ -12,6 +11,7 @@ import (
 )
 
 type tuiManagerData struct {
+	recipes        tuiRecipeCatalog
 	configurations []Configuration
 	environments   []EnvironmentConfig
 	logs           []Event
@@ -74,6 +74,9 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 			if data.err == nil {
 				data.environments, data.err = a.service.EnvironmentConfigList(ctx, false)
 			}
+			if data.err == nil {
+				data.recipes, data.err = a.service.readRecipeCatalog(ctx, data.environments)
+			}
 		case tuiViewSystem:
 			if a.service.daemonClient != nil {
 				var status daemon.Status
@@ -107,7 +110,20 @@ func (a *vaxisTUIApp) applyManagerData(event tuiManagerDataEvent) {
 	if event.generation != a.managerGeneration || event.view != a.view {
 		return
 	}
+	a.rememberRecipeSelection()
 	a.managerData = event.data
+	if event.view == tuiViewTemplates {
+		a.restoreRecipeSelection()
+		if a.environmentSelectID != "" {
+			for i, e := range event.data.environments {
+				if e.ID == a.environmentSelectID {
+					a.environmentIndex = i
+					a.environmentSelectID = ""
+					break
+				}
+			}
+		}
+	}
 	if a.templateSelectID != "" && event.view == tuiViewTemplates {
 		for i, c := range event.data.configurations {
 			if c.ID == a.templateSelectID {
@@ -116,6 +132,14 @@ func (a *vaxisTUIApp) applyManagerData(event tuiManagerDataEvent) {
 				break
 			}
 		}
+	}
+	if event.view == tuiViewTemplates {
+		commands := 0
+		if a.environmentIndex < len(a.managerData.environments) {
+			commands = len(a.managerData.environments[a.environmentIndex].BootstrapCommands)
+		}
+		a.recipes.command = max(0, min(a.recipes.command, commands-1))
+		a.rememberRecipeSelection()
 	}
 	if event.data.preferences != nil && event.preferenceRevision == a.preferenceRevision {
 		a.preferences = event.data.preferences
@@ -205,46 +229,6 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 		}
 		a.drawTerminalSurface(surface, tuiTreeEntry{node: record.Node}, theme.mint, theme.muted, theme.coral)
 	}
-}
-
-func (a *vaxisTUIApp) drawTemplates(win vaxis.Window, theme tuiTheme) {
-	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "Templates   [Configs]   [Environments]   Tab switch · • modified", theme.mint)
-	if a.environmentsView {
-		tuiLine(win.New(2, 2, width-4, 1), 0, "Templates   [Configs]   [Environments ✓]   Tab switch", theme.mint)
-	}
-	inner := border.All(win.New(1, 4, width-2, height-7), theme.border)
-	if a.managerData.loading {
-		tuiLine(inner, 0, "Loading templates…", theme.dim)
-		return
-	}
-	if a.environmentsView {
-		tuiLine(inner, 0, "NAME                     COMMANDS", theme.dim)
-		for i, environment := range a.managerData.environments {
-			style := theme.text
-			if i == a.environmentIndex {
-				style = theme.selected
-			}
-			tuiLine(inner, i+2, fmt.Sprintf("%-24s %d", environment.Slug, len(environment.BootstrapCommands)), style)
-		}
-	} else {
-		tuiLine(inner, 0, "NAME               VCPU   MEMORY      DISK        ENVIRONMENTS", theme.dim)
-		for i, configuration := range a.managerData.configurations {
-			style := theme.text
-			if i == a.templateIndex {
-				style = theme.selected
-			}
-			name := configuration.Slug
-			if name == DefaultConfigurationSlug {
-				name += " ★"
-			}
-			if a.service != nil && modifiedBuiltInTemplate(configuration, a.service.cfg) {
-				name += " •"
-			}
-			tuiLine(inner, i+2, fmt.Sprintf("%-18s %-6d %-11s %-11s %s", name, configuration.VCPUs, formatTUIResourceSize(configuration.MemoryMiB), formatTUIResourceSize(configuration.DiskMiB), strings.Join(configuration.Environments, ", ")), style)
-		}
-	}
-	tuiLine(win.New(2, height-3, width-4, 1), 0, "n new · e edit · c clone · d delete · R restore built-in · N create node", theme.muted)
 }
 
 func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {

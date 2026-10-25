@@ -109,7 +109,7 @@ func (s *Service) EnvironmentConfigDelete(ctx context.Context, value string) (En
 		for _, configuration := range configurations {
 			for _, slug := range configuration.Environments {
 				if slug == config.Slug {
-					return preconditionFailed("environment is assigned to a configuration", map[string]any{"environment": config.Slug, "configuration_id": configuration.ID, "configuration_slug": configuration.Slug})
+					return preconditionFailed("environment is assigned to a configuration: "+configuration.Slug, map[string]any{"environment": config.Slug, "configuration_id": configuration.ID, "configuration_slug": configuration.Slug})
 				}
 			}
 		}

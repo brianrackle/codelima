@@ -697,3 +697,17 @@ normalize CRLF after the complete paste. Script buffers opt into the vendored
 text input's `PreserveTabs`; generic text widgets otherwise expand literal tabs
 into spaces. Exercise parser-shaped LF/CR/tab events as well as whole-string
 paste fixtures, then verify a real terminal paste.
+
+## Global recipe inspection
+
+Derive recipe usage from global stored nodes and configurations, independently
+of the scoped fleet. Share frozen/current comparisons with Node Spec and read
+execution outcomes only from recorded bootstrap steps. A clone's inherited
+steps belong to their original execution node. Include deleted records for
+history without counting them as current template users. Keep identity separate
+from row indices through refreshes, sorting and responsive panel changes.
+
+An external command editor operates on one command block in private owned
+scratch, then returns to an unsaved draft. Parse executable arguments without
+shell evaluation, bound the returned file and clean up on every outcome. Reuse
+the pager's foreground suspend/resume path. See ADR 176.

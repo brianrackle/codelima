@@ -239,7 +239,7 @@ func (e *tuiCommandEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	if w < 20 || h < 6 {
 		return
 	}
-	body := templatePanel(win, "Bootstrap commands · each block runs as root after environments", t.mint, t)
+	body := templatePanel(win, "Bootstrap commands · each block runs as root", t.mint, t)
 	left := min(24, w/3)
 	list := body.New(1, 1, left, h-5)
 	e.listRects = make([]tuiRect, len(e.buffers))
@@ -277,7 +277,7 @@ func (e *tuiCommandEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		}
 		area.ShowCursor(min(col, e.width-1), current-e.scroll, vaxis.CursorBlock)
 	}
-	status := fmt.Sprintf("Command %d/%d · Enter newline · Ctrl+s returns changes to the template", e.index+1, len(e.buffers))
+	status := fmt.Sprintf("Command %d/%d · Enter newline · Ctrl+s applies these command edits", e.index+1, len(e.buffers))
 	if e.confirmDiscard {
 		status = "Discard command edits? y discard · n keep editing"
 	}

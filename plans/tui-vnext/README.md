@@ -24,9 +24,9 @@ All example identities, metrics and timestamps in those files are reference data
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Templates · configurations](reference/Templates.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
-| [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Templates · environments](reference/Environments.dc.html) | ADR 176 ordered drafts, shared command editor, external editing and recorded execution | Partial; disposable test run, dependency warning and final qualification pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -430,3 +430,48 @@ screenshots, logs and project-local test scratch were removed. The prior stepqa
 fixture remains separately recorded cleanup debt. Final manager-board fidelity,
 generic child-modal mouse/presentation and native qualification remain open;
 this does not qualify the complete redesign or the complete QA matrix.
+
+## Recipe catalogs and environment drafts (ADR 176)
+
+Templates and Environments now show counted tabs, scrollable cell-aligned
+lists, global usage and responsive details. Configuration details share Node
+Spec's frozen/current comparison without reading Lima files or probing the
+runtime. Environment details show ordered blocks, root execution context,
+template references and retained command outcomes. Deleted nodes supply history
+without inflating usage; copied execution receipts do not count as new runs.
+Unavailable metadata is explicit, and selection follows stable IDs through
+refreshes. Successful deletion reloads the catalog and clamps its selection.
+
+Environment new/edit/clone/restore, reordering and removal use a reviewable
+draft and the same multiline command editor as templates. Duplicate saves keep
+the draft, existing names remain fixed, and empty lists can be saved. E invokes
+EDITOR with a private command file, resumes the TUI with an unsaved result and
+cleans scratch on success/failure. Notes and notices have their own row, leaving
+mouse actions visible; focused command hints fit an 80-column terminal.
+
+Live 150×38 and 80×24 checks covered out-of-scope usage, frozen-resource drift,
+long wrapped details, command selection/reorder/remove/add, raw bracketed
+Unicode/LF/tab paste, exact external-editor output, editor failure cleanup,
+dirty keep/discard, duplicate-name retry, empty clones, built-in markers/reset,
+mouse tabs/rows/actions and pagination across 20 environment rows. The real
+created-only node retained its original resources and commands throughout;
+neither this inspection nor editing booted its VM. Deletion errors named the
+blocking template/node. Live deletion exposed the missing catalog refresh;
+service-backed dialog regression tests now cover that completion path.
+
+The final build also passed live configuration and environment deletion: counts
+updated immediately and the next valid selection stayed visible after resize.
+`make verify`, `make test-recipes`, `make test-race` and
+`make test-integration` passed. `gopls check` found no errors; `go doc` was used
+to inspect the process and scratch-file APIs. One race attempt ended with
+SIGTERM during manual cleanup; the complete rerun with no manual QA processes
+active passed. No source changes followed the final checks.
+
+The created-only node and its Lima directory, all custom recipe definitions,
+daemon/TUI, tmux window, homes, scripts, screenshots and test scratch were
+removed, including tmp/recipes and tmp/.go-work. Integration scratch was removed
+by its Make target. The older stepqa fixture remains separate cleanup debt.
+
+The disposable environment test-run action, dependency heuristic, final
+artboard/native qualification and the complete QA matrix remain open in TODO
+#57. This checkpoint does not complete the major-version redesign.

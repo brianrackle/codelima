@@ -148,7 +148,16 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	if a.statusLevel >= slog.LevelWarn {
 		style = theme.coral
 	}
-	tuiLine(window.New(1, height-2, width-2, 1), 0, status, style)
+	statusRow := height - 2
+	if a.view == tuiViewTemplates {
+		// Keep recipe actions visible and clickable while a notice replaces
+		// the explanatory note above them.
+		statusRow--
+		if status != "" {
+			tuiFill(window.New(1, statusRow, width-2, 1), theme.text)
+		}
+	}
+	tuiLine(window.New(1, statusRow, width-2, 1), 0, status, style)
 	footer := a.managerFooter()
 	if a.overlay != nil {
 		// Reuse existing form/selector behavior inside a centered modal. The
@@ -550,7 +559,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 	}
 	switch a.view {
 	case tuiViewTemplates:
-		return "↑↓ select · Tab configs/envs · n new · e edit · c clone · R restore · ? help"
+		return a.recipeFooter()
 	case tuiViewPorts:
 		return "Esc nodes · : commands · ? help · q quit"
 	case tuiViewActivity:
