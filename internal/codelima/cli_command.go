@@ -308,6 +308,7 @@ var cliCommands = []*cliCommand{
 			fs.String("slug", "", "unique lowercase identifier for the new node")
 			fs.String("workspace-mode", DefaultWorkspaceMode, "how the workspace reaches the node: mounted or copy")
 			fs.Bool("no-import-auth", false, "do not copy host git identity and agent credentials into the new node")
+			fs.Bool("start", false, "start and bootstrap the new node in the same operation")
 			ports := &stringSliceFlag{}
 			fs.Var(ports, "port", "port forward as HOST:GUEST (repeatable)")
 		},
@@ -323,6 +324,7 @@ var cliCommands = []*cliCommand{
 				importHostAuth = boolPointer(false)
 			}
 			return service.NodeCreate(ctx, NodeCreateInput{
+				Start:          flagBool(fs, "start"),
 				Configuration:  flagString(fs, "configuration"),
 				Directory:      flagString(fs, "directory"),
 				Slug:           slug,

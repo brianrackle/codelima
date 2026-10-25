@@ -33,6 +33,10 @@ type NodeOperationRequest struct {
 	Clone  *NodeCloneInput  `json:"clone,omitempty"`
 }
 
+func (r NodeOperationRequest) startsNode() bool {
+	return r.Kind == "start" || r.Kind == "retry" || r.Kind == "create" && r.Create != nil && r.Create.Start
+}
+
 type NodeOperation struct {
 	Progress      *NodeOperationProgress `json:"progress,omitempty"`
 	ID            string                 `json:"id"`
@@ -178,7 +182,9 @@ func (m *nodeOperations) normalize(request NodeOperationRequest) (NodeOperationR
 		if err != nil {
 			return request, Node{}, nil, err
 		}
-		keys := []string{"node:" + node.ID}
+		// A create reserves its slug before the node has an ID. Keep that key
+		// on existing-node mutations to exclude competitors during first boot.
+		keys := []string{"node:" + node.ID, "slug:" + node.Slug}
 		if request.Clone != nil {
 			keys = append(keys, "slug:"+request.Clone.NodeSlug)
 		}
@@ -250,6 +256,9 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 	}
 	record := NodeOperation{ID: request.ID, Request: request, NodeID: node.ID, NodeSlug: node.Slug, State: "running", CreatedAt: m.service.now()}
 	record.Phases = initialNodeOperationPhases(request.Kind)
+	if request.Kind == "create" && request.startsNode() {
+		record.Phases = append(record.Phases, initialNodeOperationPhases("start")...)
+	}
 	if err := m.persist(record); err != nil {
 		return NodeOperation{}, err
 	}
@@ -260,6 +269,20 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 	m.workers.Add(1)
 	go m.run(operationCtx, running)
 	return cloneNodeOperation(record), nil
+}
+
+// Publish the created identity before boot can make additional side effects.
+// The slug admission already excludes competing operations on the new node.
+func (m *nodeOperations) bindCreatedNode(operation *runningNodeOperation, node Node) error {
+	m.mu.Lock()
+	operation.record.NodeID, operation.record.NodeSlug = node.ID, node.Slug
+	operation.keys = append(operation.keys, "node:"+node.ID)
+	err := m.persist(operation.record)
+	m.mu.Unlock()
+	if m.onChange != nil {
+		m.onChange()
+	}
+	return err
 }
 
 func (m *nodeOperations) repeatedRequestLocked(request NodeOperationRequest) (NodeOperation, bool, error) {
@@ -321,7 +344,21 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 		case "delete":
 			node, err = service.NodeDelete(ctx, nodeID)
 		case "create":
-			node, err = service.NodeCreate(ctx, *request.Create)
+			node, err = service.createNode(ctx, *request.Create)
+			if err == nil && request.startsNode() {
+				nodeID = node.ID
+				err = m.bindCreatedNode(operation, node)
+				if err == nil {
+					// The creation's liveness token is released before startup.
+					// Its admission remains reserved under this same receipt.
+					startup := m.service.withIO(m.service.stdout, m.service.stderr)
+					startup.operationPhase, startup.operationOutput = service.operationPhase, output
+					err = startup.advanceOperationPhase("prepare", "start the created VM", false)
+					if err == nil {
+						node, err = startup.NodeStart(ctx, nodeID)
+					}
+				}
+			}
 		case "clone":
 			input := *request.Clone
 			input.SourceNode = nodeID
@@ -344,7 +381,7 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 	executionFinished := m.service.now()
 	finishNodeOperationPhases(&operation.record, phaseState, &executionFinished)
 	stopFailed := false
-	if errors.Is(cause, errNodeOperationCanceled) && (request.Kind == "start" || request.Kind == "retry") {
+	if errors.Is(cause, errNodeOperationCanceled) && request.startsNode() && nodeID != "" {
 		// The start released its liveness token. Keep this manager's resource
 		// reservation while stopping the VM on an independent bounded context.
 		m.mu.Unlock()
@@ -415,7 +452,7 @@ func (m *nodeOperations) LatestStart(nodeID string) (NodeOperation, error) {
 	var latest *NodeOperation
 	for _, operation := range m.records {
 		record := &operation.record
-		if record.NodeID != nodeID || operationExpired(*record, m.service.now()) || (record.Request.Kind != "start" && record.Request.Kind != "retry") {
+		if record.NodeID != nodeID || operationExpired(*record, m.service.now()) || !record.Request.startsNode() {
 			continue
 		}
 		if latest == nil || record.CreatedAt.After(latest.CreatedAt) || record.CreatedAt.Equal(latest.CreatedAt) && record.ID > latest.ID {
@@ -438,7 +475,12 @@ func (m *nodeOperations) List() []NodeOperation {
 			// retained command/output body on each frontend's polling tick.
 			record := operation.record
 			record.Progress = summarizeNodeOperationProgress(record)
+			createStart := record.Request.Kind == "create" && record.Request.startsNode()
 			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind, Origin: record.Request.Origin}
+			if createStart {
+				// Keep the startup contract without copying the full create input.
+				record.Request.Create = &NodeCreateInput{Start: true}
+			}
 			record.Result = nil
 			record.Output, record.OutputPartial = nil, ""
 			record.Phases = nil

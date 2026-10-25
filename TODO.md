@@ -487,6 +487,33 @@ all native lifecycle flows. For future constrained-host QA, use one guest at a
 time and bound QEMU's TCG translation cache; two 1 GiB guests consumed more
 than their assigned RAM and exceeded this 3.8 GiB VM's available memory.
 
+Create-node integration is underway. ADR 173 adds the daemon-owned create-and-
+start contract and CLI `node create --start`: one receipt, persisted created
+identity before boot, shared slug/UUID admission, startup phases, cancellation
+cleanup and latest-start/Activity integration. Protocol 18 carries the option;
+renderer protocol 5 and handoff version 6 are unchanged. Focused tests cover
+real-socket caller disconnect, duplicate admission, failure/cancellation,
+pre-binding conflicts, CLI defaults and TUI readiness gating. The new real-guest
+QA flow remains required with the form integration; this is not evidence that
+the CreateNode or TemplatePicker artboards are implemented.
+
+Continue with the actual create form and picker, preserving the existing input
+and dirty-discard behavior through reusable dialog presentation hooks. Required
+work: centered/dimmed modal, compact field scrolling, live inline slug/duplicate,
+directory and HOST:GUEST validation, duplicate-name Tab suggestion, directory
+browse, workspace/credential toggles, template filtering/details/new-editor
+return, real host fit warnings, CLI preview, start-now and attach-when-ready.
+Load metadata and path checks outside the event loop with stale-result fencing;
+use global node identities and reject metadata-root symlink aliases as well as
+literal paths. Capacity shortfalls warn without disabling otherwise valid forms.
+Keep failed admission values editable and retain an idempotency ID after an
+ambiguous reply. Bind transient open/attach intent to the accepted receipt,
+follow its created UUID into Overview, and reuse the existing readiness gate;
+navigation cancels attachment only. Remove the old unconditional terminal-pane
+switch. Add automated input/render/async/navigation tests and real 150×38/80×24
+create/attach/cancel checks. This avoids losing first-start intent on frontend
+exit; it adds explicit async form and navigation state that needs race coverage.
+
 Activity presentation is implemented in ADR 172: aligned cell columns, distinct
 status/request glyphs, full-row selection in ANSI/truecolor, panel-border titles,
 focused panels, clickable severity choices, per-row actions and footer controls,

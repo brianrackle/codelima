@@ -399,6 +399,12 @@ first. A responsive daemon with a different version requires explicit
 an explicit daemon shutdown interrupts them without automatically replaying
 partially executed commands when the daemon restarts.
 
+Use `codelima node create --slug api-redesign --start` to create and boot a node
+under one receipt. This request continues after the caller exits; canceling it
+after creation also stops its VM. Ordinary `node create` only creates the node.
+Activity and node detail show the combined request, including a failed first
+boot and its created node identity.
+
 Inspect and explicitly cancel work from any terminal:
 
 ```sh

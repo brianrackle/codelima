@@ -345,3 +345,18 @@ the final runtime and receipt both confirmed stopped. The compact empty-filter
 state also passed. The disposable daemon/TUI, 67 message records, 4 operation
 receipts, homes, clipboard buffer and slice scratch files were removed.
 Final native/cross-view qualification remains open.
+
+The create form’s launch workflow now has a daemon-owned create-and-start
+contract (ADR 173, ordinary protocol 18). The CLI exposes --start; creation-only
+remains the default. The combined receipt publishes the new UUID before boot,
+retains slug/UUID arbitration, exposes eight observed phases, participates in
+latest-start and TUI readiness queries, and stops the VM on explicit cancellation.
+Focused regression checks include real socket disconnect and partial failures.
+Full verify, race and integration suites pass. Gopls reported only existing
+slice-copy and struct-omitempty advisories. Live CLI/TUI checks confirmed a
+rejected create-and-start receipt, its request/failure history at 150×38 and
+80×24, severity filtering and clipboard copy. The isolated daemon, TUI,
+receipt, homes, clipboard entry and scratch evidence were removed. These
+checks do not qualify successful first boot or cancellation with a real guest.
+The create form/picker, its transient open/attach intent and the new real-guest
+QA flow remain pending in TODO #57; the two artboard rows remain unqualified.

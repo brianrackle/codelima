@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 17 adds Activity
-	// navigation/outcomes and counted terminal notifications.
-	ProtocolVersion                = 17
+	// whenever a wire shape this protocol carries changes; 18 adds daemon-owned
+	// create-and-start requests under one lifecycle receipt.
+	ProtocolVersion                = 18
 	SessionVersion                 = 2
 	HandoffVersion                 = 6
 	PreviousRecoveryHandoffVersion = 5

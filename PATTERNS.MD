@@ -37,6 +37,13 @@ different causes: cancellation may owe VM cleanup, while shutdown records an
 interruption. Recover history without replaying uncertain side effects. Gate
 live replacement against active operations until their ownership can be
 transferred safely (ADR 161).
+
+Keep a requested create-and-start chain within one durable admission. Reserve
+the slug before creation and retain that key on existing-node operations, then
+persist the created UUID before first boot. Release the create service token
+before acquiring the start token, while retaining the daemon admission across
+both phases. Include combined requests in startup queries and cancellation
+cleanup; summary projections must retain their startup intent (ADR 173).
 Runtime mutation decisions and their success checks must bypass observation
 caches. An old stopped sample cannot prove that a canceled boot left no VM.
 

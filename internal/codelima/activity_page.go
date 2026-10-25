@@ -38,10 +38,14 @@ type ActivityPage struct {
 }
 
 func activityOperationRecord(op NodeOperation, requested bool) ActivityRecord {
-	r := ActivityRecord{ID: op.ID, OperationID: op.ID, NodeID: op.NodeID, NodeSlug: op.NodeSlug, Source: op.Request.Origin, Time: nodeOperationHistoryTime(op), Text: op.Request.Kind + " · " + op.State, Success: op.State == "succeeded"}
+	kind := op.Request.Kind
+	if kind == "create" && op.Request.startsNode() {
+		kind = "create + start"
+	}
+	r := ActivityRecord{ID: op.ID, OperationID: op.ID, NodeID: op.NodeID, NodeSlug: op.NodeSlug, Source: op.Request.Origin, Time: nodeOperationHistoryTime(op), Text: kind + " · " + op.State, Success: op.State == "succeeded"}
 	if requested {
 		r.ID += ":requested"
-		r.Time, r.Text, r.Success = op.CreatedAt, op.Request.Kind+" requested", false
+		r.Time, r.Text, r.Success = op.CreatedAt, kind+" requested", false
 	} else {
 		switch op.State {
 		case "failed":

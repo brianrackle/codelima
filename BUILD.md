@@ -100,6 +100,13 @@ halves with blocked persistence, rollback before/after ownership release,
 unobserved terminal output, unchanged route/capacity observations and malformed
 state; its daemon transport checks cover the 8 MiB payload bound and chunking.
 
+`make test-create-node` covers create-only defaults and create-and-start under
+one receipt, caller disconnect through real sockets, persisted identity before
+boot, slug/UUID admission conflicts, failure/cancellation and TUI readiness gates
+(ADR 173). Daemon protocol 18 adds the optional startup intent to create input.
+Renderer protocol 5 and handoff version 6 remain unchanged. Run the new
+create-and-start QA flow with an isolated home and disposable guest.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool
@@ -734,7 +741,7 @@ QA.md; offline tests do not establish outer-terminal permission behavior.
 `make test-terminal-attach` runs the native ANSI export, VT boundary, lease,
 input parser and real-PTY/socket regressions. `make verify` additionally checks
 the production binaries, all Go packages, lint and formatting. Ship current
-daemon protocol 17 and renderer protocol 5 together; attachment was introduced
+daemon protocol 18 and renderer protocol 5 together; attachment was introduced
 in protocols 8/4. Checkpoint envelope 2 adds the
 VT boundary state, and older envelopes use journal recovery. Native Ghostty
 remains pinned to the existing revision. Rebuild both binaries with `make build`

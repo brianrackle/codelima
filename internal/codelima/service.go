@@ -53,6 +53,8 @@ type serviceReadiness struct {
 }
 
 type NodeCreateInput struct {
+	// Start keeps creation and first startup in one daemon-owned operation.
+	Start         bool     `json:"start,omitempty"`
 	Configuration string   `json:"configuration"`
 	Directory     string   `json:"directory"`
 	Slug          string   `json:"slug"`
@@ -867,6 +869,14 @@ func (s *Service) NodeCreate(ctx context.Context, input NodeCreateInput) (_ Node
 	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "create", Create: &input})
 	}
+	node, err := s.createNode(ctx, input)
+	if err != nil || !input.Start {
+		return node, err
+	}
+	return s.NodeStart(ctx, node.ID)
+}
+
+func (s *Service) createNode(ctx context.Context, input NodeCreateInput) (_ Node, err error) {
 	s.log().Debug("operation started", "op", "node.create", "configuration", input.Configuration, "directory", input.Directory)
 	defer s.logOperation("node.create", s.now(), &err)
 

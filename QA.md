@@ -578,6 +578,15 @@ For Spec, use an isolated node and editable template:
 
 For shared lifecycle operations, use an isolated home and disposable guest:
 
+- Create with `node create --slug qa-create --start --no-import-auth`. Interrupt
+  only the CLI wait, then inspect the same receipt from a second frontend. It
+  must progress from Create VM to Boot/Bootstrap/Ready without another start
+  admission. The created UUID must be inspectable during boot. Activity and
+  node detail must recognize this as startup, and a conflicting stop by UUID
+  or slug must be refused. Repeat with cancellation during first boot: the same
+  receipt must finish canceled only after the VM is stopped. A failed first
+  boot must retain its node identity and error. Compare ordinary create without
+  `--start`, then remove all disposable nodes, VMs, receipts and homes.
 - Start or retry from the TUI, quit while work is active, and reopen. Verify
   the same receipt remains running in Activity and its header count is shared
   by a second window. Quitting must not cancel the runtime command.

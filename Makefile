@@ -222,6 +222,11 @@ test-terminal-attach: init
 .PHONY: test-bootstrap-steps
 .PHONY: test-node-operations
 .PHONY: test-activity
+.PHONY: test-create-node
+test-create-node: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(NodeCreate|NodeOperationsCreate|TUICreate|TUITemplatePicker)' -count=1
+
 test-activity: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(ActivityJournal|ActivityPage|ActivityNative|TUIActivity|DaemonLiveUpdate|DaemonImport)' -count=1
