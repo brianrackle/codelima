@@ -9,6 +9,11 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-empty-nodes` covers the first-run guide, actual defaults, scoped
+creation, host blockers/recovery, read-only re-check, mouse actions and complete
+scrollable errors (ADR 184). Use `EMPTY_NODES_TEST_FLAGS=-race` for race checking.
+The live first-run checks are in QA.md; run them at both wide and compact sizes.
+
 `make test-ports` covers readiness without suppressing guest probes, published
 TCP remapping and half-close, cancellation, bind conflicts and recovery,
 confirmed-stop cleanup, legacy ownership and pre-boot migration (ADR 182),

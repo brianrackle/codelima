@@ -38,6 +38,31 @@ notes before implementation. Exact sources now also live in
 `plans/tui-vnext/reference/` and the full delivery ledger is
 `plans/tui-vnext/README.md`.
 
+First-run guide delivery is partial (ADR 184). Scoped actions, observed stored
+defaults, cached Doctor findings, press-only read-only re-check and complete
+scrollable failures are implemented. Regression tests cover initial-check
+errors, warnings, blocked/recovered creation, scope defaults and filtered-empty
+results. The live 150×38/80×24 isolated TUI verified keyboard/mouse/palette host
+blocking, Doctor return after Settings, template navigation, scope switching,
+filter clearing, paging/wheel, resource refresh and unchanged metadata hashes
+after re-check. Template-to-create forms retained the launch directory in scoped
+and all-node views and were canceled without submission. The final rebuilt
+compact guide was run again. All `tmp/eq` fixtures, processes and mounts were
+removed; the attempted outside-scope disposable node failed at disk allocation
+and was rolled back without starting a VM.
+
+Remaining first-run problem: this VM's real Doctor reports inaccessible
+`/dev/kvm`, so a live healthy-host transition and native terminal rendering are
+unqualified. Suggested solution: run the QA.md guide flow on a supported host,
+correct a real prerequisite, re-check and open/cancel scoped creation at both
+sizes. Advantages: qualifies actual host recovery and native presentation.
+Disadvantages: requires a separate host and cannot be replaced by the passing
+healthy/recovery unit fixture. Final automated checks passed: core unit 76.086s,
+core race 104.842s, CLI integration 17.651s, formatting/lint, Vaxis and builds.
+Gopls reported only existing style suggestions outside the changes. Verification
+logs and Go scratch were cleaned; the overall artboard/cross-view QA scope remains
+open.
+
 Current implementation: identity-based fleet filtering/sorting/grouping/marks,
 responsive table and preview, five view routes, initial detail screens,
 palette/help, centered existing forms and F6-only embedded-shell interception

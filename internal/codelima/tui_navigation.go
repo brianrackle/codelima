@@ -15,6 +15,10 @@ import (
 )
 
 func (a *vaxisTUIApp) switchView(view tuiView) {
+	if view == tuiViewSystem && a.emptyNodesVisible() {
+		a.systemPanel = tuiSystemDoctor
+	}
+	a.emptyNodes.scroll = 0
 	a.cancelActivityAttachment()
 	a.activity.input, a.activity.pendingNode = nil, ""
 	a.ports.input, a.ports.pendingNode = nil, ""
@@ -96,6 +100,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	if a.handleRecipeKey(key) {
 		return false
 	}
+	if a.handleEmptyNodesKey(key) {
+		return false
+	}
 	if key.MatchString("Up") || key.MatchString("k") || key.MatchString("Down") || key.MatchString("j") {
 		delta := 1
 		if key.MatchString("Up") || key.MatchString("k") {
@@ -136,6 +143,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			a.fleet.clearMarks()
 		}
 	case key.MatchString("0"):
+		a.emptyNodes.scroll = 0
 		if a.treeWorkspaceRoot != "" {
 			a.treeWorkspaceRoot = ""
 		} else {
@@ -441,6 +449,11 @@ func (a *vaxisTUIApp) defaultShellChoice(mode string) func() error {
 }
 
 func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
+	if action == tuiActionNodeStart && a.emptyNodesVisible() {
+		if reason := a.emptyNodeBlockReason(); reason != "" {
+			return fmt.Errorf("%s", reason)
+		}
+	}
 	targets := a.fleet.targets()
 	if len(targets) == 0 {
 		return fmt.Errorf("select a node first")

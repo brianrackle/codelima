@@ -276,6 +276,11 @@ func (a *vaxisTUIApp) openDeleteConfigurationDialog(configuration Configuration)
 }
 
 func (a *vaxisTUIApp) openCreateNodeDialog() error {
+	if a.emptyNodesVisible() {
+		if reason := a.emptyNodeBlockReason(); reason != "" {
+			return fmt.Errorf("%s", reason)
+		}
+	}
 	return a.openCreateNodeDialogWithDefaults("", DefaultConfigurationSlug)
 }
 
@@ -283,7 +288,7 @@ func (a *vaxisTUIApp) openCreateNodeDialogWithDefaults(directory, configuration 
 	a.createIntent = nil
 	if directory == "" {
 		var err error
-		directory, err = canonicalPath(".")
+		directory, err = canonicalPath(a.createNodeDirectory())
 		if err != nil {
 			return err
 		}

@@ -599,6 +599,32 @@ historical shell and renderer stress cases in this flow still need to be
 qualified using the new controls; TODO #57 tracks the incomplete design and
 manual qualification.
 
+For the first-run guide (ADR 184), use an isolated home and directory scope:
+
+- At 150×38 and 80×24, an empty scope shows its create action, the stored `small`
+  template's actual resources, mounted workspace default and observed host checks.
+  Modify the disposable default template, press `R`, and verify the new values.
+- With a failed host check, `n`, `s`, mouse Create and palette Create show the
+  reason without opening creation. `R` rechecks without repairing metadata;
+  holding it must not submit repeated checks. `5` opens Doctor even when the
+  previously selected System panel was Settings.
+- Correct the prerequisite, re-check and use Create: the form directory must
+  equal the displayed scope, including when the frontend's cwd differs. Cancel
+  the form without creating a VM. Verify template navigation and `0` scope toggle.
+- Inspect complete long failures through PgUp/PgDn and the mouse wheel. A query
+  with no matches remains a filterable table; Esc clears it to the guide.
+- Stop the isolated daemon/TUI and remove all disposable metadata and captures.
+
+ADR 184 Linux evidence: 150×38 and 80×24 live checks covered the real failed host
+check, keyboard/mouse/palette actions, Doctor return after Settings, scoped and
+all-node create-form defaults via Templates, filter clearing, paging/wheel and
+resource reload without metadata changes. ANSI screenshots were inspected and
+the final rebuilt compact guide was rerun. Fixture metadata, captures, processes
+and mounts were cleaned. This VM has no accessible `/dev/kvm`; a live transition
+to healthy host checks and native terminal presentation still need the flow
+above on a supported host. Automated fixtures cover healthy recovery and long
+diagnostics; they do not replace those manual qualifications.
+
 - At 150×38, verify the fleet spans the window and the selected preview sits
   below it. At 120 columns the large preview disappears; at 80×24 the table
   uses percentage columns and a selected-node summary. Preserve selection

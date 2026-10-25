@@ -317,6 +317,13 @@ shell. Wide terminals show a selected-node preview below the table; widths
 below 100 columns use a compact table. `Enter` opens node detail, and `Esc`
 returns to the same selection.
 
+An empty scope shows a first-run guide with the stored `small` template's
+resources and the latest host checks. `n` creates in the displayed directory
+scope; all-node mode uses the launch directory. Failed or unavailable host
+checks explain why creation is blocked there. `R` re-checks without repair and
+reloads template defaults; `5` opens Doctor. PgUp/PgDn or the mouse wheel reveal
+complete long findings. A filter with no matches stays in the searchable table.
+
 | Key | Action |
 | --- | --- |
 | `1`–`5` | Nodes, Templates, Ports, Activity, System |

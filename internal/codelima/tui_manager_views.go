@@ -10,14 +10,15 @@ import (
 )
 
 type tuiManagerData struct {
-	recipes        tuiRecipeCatalog
-	configurations []Configuration
-	environments   []EnvironmentConfig
-	logs           []Event
-	logNodeID      string
-	loading        bool
-	err            error
-	preferences    *Config
+	recipes              tuiRecipeCatalog
+	configurations       []Configuration
+	configurationsLoaded bool
+	environments         []EnvironmentConfig
+	logs                 []Event
+	logNodeID            string
+	loading              bool
+	err                  error
+	preferences          *Config
 }
 
 type tuiManagerDataEvent struct {
@@ -62,6 +63,7 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	preferenceRevision := a.preferenceRevision
 	nodeID := a.state.selectedEntry().node.ID
 	detail, tab := a.nodeDetail, a.detailTab
+	emptyFleet := len(a.state.nodes) == 0
 	a.managerData.loading, a.managerData.err = true, nil
 	ctx := a.ctx
 	if ctx == nil {
@@ -85,6 +87,10 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 				data.preferences = &cfg
 			}
 		case tuiViewNodes:
+			if !detail && emptyFleet {
+				data.configurations, data.err = a.service.ConfigurationList(ctx, false)
+				data.configurationsLoaded = true
+			}
 			if detail && nodeID != "" && tab == tuiDetailOverview {
 				data.logNodeID = nodeID
 				data.logs, data.err = a.service.NodeLogs(ctx, nodeID)

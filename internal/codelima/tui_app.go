@@ -64,6 +64,7 @@ type vaxisTUIApp struct {
 	spec                tuiSpecState
 	activity            tuiActivityState
 	ports               tuiPortsState
+	emptyNodes          tuiEmptyNodesState
 	messageDelivery     tuiActivityDelivery
 	lifecycle           tuiLifecycleState
 	createIntent        *tuiCreateIntent
@@ -283,6 +284,9 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		logoAnimation:     newTUILogoAnimation(),
 		host:              *initial.Host,
 	}
+	if app.launchScope == "" {
+		app.launchScope, _ = canonicalPath(".")
+	}
 	preferences, err := service.SettingsRead()
 	if err != nil {
 		return err
@@ -298,6 +302,9 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	app.syncSessionFocus()
 	app.startHostColorQuery(0)
 	app.startDoctorCheck(false, true)
+	if len(state.nodes) == 0 {
+		app.loadManagerData(false)
+	}
 	app.draw()
 
 	stopLogoAnimation := startTUILogoAnimation(ctx, vx.PostEvent)
@@ -914,12 +921,16 @@ func (a *vaxisTUIApp) requestRedraw() {
 }
 
 func (a *vaxisTUIApp) applyReloadedNodes(nodes []Node, preferredKey string) error {
+	wasEmpty := len(a.state.nodes) == 0
 	if err := a.state.replaceNodes(nodes, preferredKey); err != nil {
 		return err
 	}
 	a.reconcileNodeUsage()
 	a.sessions.PruneStaleSessions(a.targetKeyStillExists)
 	a.refreshFleet()
+	if !wasEmpty && a.emptyNodesVisible() {
+		a.loadManagerData(false)
+	}
 	if preferredKey != "" {
 		a.fleet.selectID(a.state.selectedEntry().node.ID)
 	}

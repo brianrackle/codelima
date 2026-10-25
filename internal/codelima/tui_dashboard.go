@@ -260,6 +260,10 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 }
 
 func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
+	if a.emptyNodesVisible() {
+		a.drawEmptyNodes(win, theme)
+		return
+	}
 	width, height := win.Size()
 	counts := map[string]int{}
 	for _, record := range a.fleet.records {
@@ -321,7 +325,7 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 	}
 	if len(a.fleet.visible) == 0 {
 		message := "No nodes yet.  n Create node   a Browse configurations"
-		if len(a.fleet.records) > 0 {
+		if len(a.fleet.records) > 0 || a.fleet.filter != "" || a.filterInput != nil {
 			message = "No matching nodes.  / Edit filter   Esc Clear filter"
 		}
 		tuiLine(content, 0, message, theme.muted)
@@ -526,6 +530,9 @@ func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, 
 }
 
 func (a *vaxisTUIApp) managerFooter() string {
+	if a.emptyNodesVisible() {
+		return "n new · 2 templates · 5 doctor · 0 scope · R re-check · : commands · ? help"
+	}
 	if a.state.focus == tuiFocusTerminal {
 		return "Shell receives all keys · F6 return to TUI"
 	}

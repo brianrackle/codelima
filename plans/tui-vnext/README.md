@@ -13,7 +13,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
@@ -679,3 +679,29 @@ CLI integration 20.417s, plus fmt/lint, Vaxis, builds and clean gopls checks.
 The rebuilt CLI runs locally. The traced suite exited 0 with no external SIGTERM
 sender recorded; verification logs/traces were removed. TODO #57 retains native
 terminal/browser and final artboard/cross-view qualification.
+
+ADR 184 replaces the empty Nodes table with scoped actions, actual stored
+template resources and cached Doctor findings. It keeps zero-match searches in
+the table, preserves the launch directory in all-node creation and provides
+read-only re-check with press-only activation. Initial check errors take
+precedence over pending state; long diagnostics remain scrollable in both
+layouts. Regression tests cover these behaviors, healthy recovery and warnings.
+
+The isolated Linux TUI passed 150×38/80×24 checks for blocked keyboard, palette
+and mouse creation, System/Doctor return after Settings, template navigation,
+scope toggling, zero-match filtering/clear, paging/wheel and updated resource
+defaults. Re-check preserved configuration/environment/settings hashes.
+Template-to-create forms retained the launch directory even though the process
+cwd differed, in both scoped and all-node views; both forms were canceled.
+The final rebuilt compact guide showed the scroll hint and complete findings.
+ANSI screenshots were inspected. This VM reports inaccessible `/dev/kvm`, so
+the live healthy-host transition and native terminal qualification remain open.
+An attempted outside-scope disposable node failed during disk allocation in the
+small verification tmpfs and was rolled back; no VM started. All fixture
+processes, metadata, captures and tmpfs mounts under `tmp/eq` were removed.
+
+Final ADR 184 checks passed: core unit 76.086s, core race 104.842s and CLI
+integration 17.651s, plus formatting, lint, Vaxis and builds. The focused race
+suite passed in 1.736s. Gopls reported only existing style suggestions outside
+the changed lines. Existing dialog-routing tests now explicitly start with
+successful prerequisites. Verification logs and Go scratch were cleaned.

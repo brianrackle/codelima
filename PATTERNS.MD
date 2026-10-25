@@ -628,6 +628,14 @@ The daemon lock, not the presence of socket or identity pathnames, is the author
 
 ## TUI data flow
 
+Empty states are projections of known inventory, not substitutes for a failed
+filter or unavailable data. Reuse cached prerequisite reports and asynchronous
+metadata loading; never run checks while drawing. Separate read-only re-check
+from repair, keep keyboard/mouse/palette actions on the same guarded path, and
+make complete diagnostics scrollable at compact sizes. Creation defaults must
+use the scope advertised by the view; retain the launch directory as the
+all-node fallback (ADR 184).
+
 Apply outer resize events to Vaxis before deriving terminal pane dimensions
 or drawing. Geometry is global state: process it before overlay input routing
 and even when no terminal session exists. Otherwise the next draw computes

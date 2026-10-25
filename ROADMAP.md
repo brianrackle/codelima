@@ -40,6 +40,12 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   Linux ownership/readiness/migration qualification. Final artboard/native
   qualification remains in TODO #57.
 
+- First-run Nodes guide [partially complete]: scoped creation, stored template
+  defaults, cached host findings, read-only re-check and scrollable diagnostics
+  are implemented (ADR 184). Wide/compact blocked-host interactions and default
+  refresh were verified locally. Live healthy-host recovery and final native
+  presentation remain in TODO #57 and the design ledger.
+
 - Major-version fleet manager [partially complete]: fleet/navigation, managed raw shell attachment, persistent preferences, native host capacity/global allocations, responsive System panels, CPU trends, bounded Metrics history/processes, local log sources, bootstrap output capture, stable fallback grapheme rendering, frozen/current Spec inspection, recorded bootstrap steps with explicit retry, daemon operation ownership, shared history, CLI lifecycle admission, observed phase/boot-output records, receipt-bound Starting/Failed views, shared TUI notifications, measured Activity progress, Activity cache recovery after failed updates, native route/capacity Activity, committed daemon-update history, counted terminal Activity with exact-session/typed navigation, pending native-event handoff with journal recovery, and aligned Activity presentation with mouse controls, daemon-owned create-and-start, the validated create form with nested template/directory choices, shared template editing with ordered environments, preserved multiline command blocks, resolved preview and frozen-node impact, global recipe catalogs with usage/drift/history, and environment drafts with external editing, daemon-owned disposable tests and bounded dependency hints with reviewable fixes, plus retained global Doctor findings with repair/re-check and details, and cached daemon runtime overviews with explicit update/restart/log/diagnostic controls are implemented (ADRs 150–181). Remaining System/native diagnostic qualification, template/environment presentation, lifecycle presentation and full visual/native qualification remain in the [design and delivery ledger](plans/tui-vnext/README.md) and TODO #57.
 
 - September 7 architectural and current libghostty-vt review [review complete;

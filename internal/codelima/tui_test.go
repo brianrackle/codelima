@@ -3264,6 +3264,9 @@ func TestTUIHandleEventEscapeClosesDialog(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+	// This dialog-routing test starts after successful prerequisite checks.
+	app.doctor.checkedAt = time.Now()
+	app.doctor.report.Checks = []DoctorCheck{{Name: "host", Status: "ok", Message: "fixture host ready"}}
 
 	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeCreate}); err != nil {
 		t.Fatalf("performAction(create node) error = %v", err)
@@ -3290,6 +3293,9 @@ func TestTUIHandleEventCtrlCQuitsWithDialogOpen(t *testing.T) {
 	ctx := context.Background()
 	service, _ := newTestService(t)
 	app := newTestTUIApp(t, ctx, service, newFakeTUISessionManager())
+	// This dialog-routing test starts after successful prerequisite checks.
+	app.doctor.checkedAt = time.Now()
+	app.doctor.report.Checks = []DoctorCheck{{Name: "host", Status: "ok", Message: "fixture host ready"}}
 
 	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeCreate}); err != nil {
 		t.Fatalf("performAction(create node) error = %v", err)
