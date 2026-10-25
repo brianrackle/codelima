@@ -38,8 +38,14 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   detail-only targeting, output capture and cancellation are implemented (ADR 185).
   Automated checks and two-guest Linux/TCG restart, retry, batch, stop-failure,
   caller-exit and cancellation checks pass at wide/compact sizes. Remaining fleet
-  presentation/route actions, durable batch ownership and final native/artboard
+  presentation, durable batch ownership and final native/artboard
   qualification are recorded in TODO #57 and the design ledger's fleet audit.
+
+- Fleet observations [partially complete]: shared routing cache and guarded
+  first-port opening, observed byte cells, compact navigation/capacity, flat
+  directory context, hidden-mark/global-allocation summary and running phase
+  rows are implemented (ADR 186). Complete session impact, retained failure/recent
+  event evidence and final artboard/native qualification remain in TODO #57.
 
 - Ports delivery [partially complete, in progress]: readiness-gated application
   routes and daemon-owned published TCP with stopped-node migration (ADR 182).

@@ -185,6 +185,13 @@ not the current filter. Missing or nonfinite metrics remain unavailable and
 sort last in either direction. Keep grouping preference independent of metric
 sort order. Use the rendered projection for mouse hit testing (ADR 150).
 
+Views that consume the same cached projection may share its generation-fenced
+loader. Keep an in-flight read while navigating between consumers, cancel it
+when leaving all consumers, and retain failed observations as explicitly stale.
+Actions require current eligibility as well as durable identity. Derive marked
+resource impact from the global allocation snapshot, never only visible rows;
+missing readings must not become zeros (ADR 186).
+
 Run view-specific service reads outside the UI loop and tag each response with
 the requesting navigation generation. Ignore late replies after changing view
 or selected node. Give text widgets and terminal payload priority over global

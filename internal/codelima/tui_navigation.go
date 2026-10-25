@@ -259,6 +259,8 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		err = a.fleetNodeAction(tuiActionNodeRestart)
 	case key.MatchString("y"):
 		err = a.copyToHostClipboard(a.state.selectedEntry().node.Slug)
+	case key.MatchString("o") && !a.nodeDetail:
+		err = a.openFleetPort()
 	case key.MatchString("X"):
 		a.openShellChooser()
 	case key.MatchString("x"):

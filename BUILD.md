@@ -3,7 +3,8 @@
 ## Fleet-manager frontend checks
 
 `make test-tui-manager` runs the identity/filter/sort/mark projection, responsive
-layout, global/detail navigation, palette, key lifecycle, shell payload and
+layout, observed byte values, compact capacity, hidden-mark/global allocation
+projections, global/detail navigation, palette, key lifecycle, shell payload and
 resize regressions. `make test-tui-input` remains available for a selected
 `TUI_INPUT_TEST_FILTER`. Run `make verify` before packaging the major-version
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
@@ -22,6 +23,9 @@ TCP Activity transitions, stable claims during handoff/rollback, compact/wide
 Ports rendering and real-socket refresh
 cancellation/lost pin replies (ADR 183, ordinary protocol 22).
 Use `make test-ports PORTS_TEST_FLAGS=-race` for the focused race run.
+For the shared fleet projection (ADR 186), run
+`make test-ports PORTS_TEST_FILTER='^Test(TUIFleet|TUIPorts)' PORTS_TEST_FLAGS=-race`;
+this checks shared loader navigation, stale-route guards and the fleet action.
 Use `make gopls GOPLS_ARGS='check internal/codelima/forwarding_policy.go
 internal/codelima/forwarding_ports.go internal/codelima/tui_ports.go'` while
 developing. Run the Ports terminal and real-guest flows in QA.md; final

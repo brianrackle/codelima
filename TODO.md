@@ -13,16 +13,20 @@ checksum stayed unchanged. Final unit/race/CLI integration, lint, format,
 Vaxis and build checks pass; detailed evidence is in the design ledger.
 Final native/artboard qualification remains open.
 
-The fleet audit identified missing marked-node summaries, flat-directory
-columns and the fleet's first-port open action. Port filters/counts currently
-read only frozen `Node.Ports`; project discovered daemon routes consistently
-with Ports. Lifecycle rows also need retained phase/failed-step summaries at
-both sizes instead of generic state/frontend output. This improves cross-view
-consistency but requires explicit cache/readiness handling and regression checks.
-Continue comparing the complete Main/NodesFilter/NodesCompact artboards and
-implement those gaps. This delivers
-the actual reference workflow; the cost is additional responsive layout and
-cross-view verification rather than declaring the existing table complete.
+Fleet observations now share the Ports cache (ADR 186), with discovered-port
+filters, guarded first-live-HTTP opening, observed used/total byte cells,
+compact navigation/capacity, flat directory context, running phase rows, and a
+marked summary including hidden targets and global allocation impact.
+Full verify/race/integration and focused race checks pass. Isolated metadata-only
+TUI checks covered four widths, keyboard/mouse, hidden marks, scrolling and
+disconnect/recovery; all fixture state was removed. The new positive live-route
+browser action and guest resource-release comparisons still need live QA.
+Remaining fleet work: complete busy/end-session impact, bounded recent events
+and retained failed-step/duration evidence, plus final wide/compact native
+artboard qualification. Use independent bounded evidence rather than whichever
+Activity history page happens to be open. Advantages: consistent, truthful
+cross-view presentation. Disadvantages: additional metadata projection,
+staleness handling and responsive QA. These remain in the full #57 scope.
 
 Bulk queue lifetime remains a separate problem: the current frontend submits
 marked nodes sequentially, so closing it prevents later submissions and the first

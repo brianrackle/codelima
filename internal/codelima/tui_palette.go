@@ -163,6 +163,9 @@ func (a *vaxisTUIApp) openCommandPalette() {
 		}
 	}
 	if a.view == tuiViewNodes && len(a.fleet.targets()) > 0 {
+		if !a.nodeDetail {
+			commands = append(commands, tuiPaletteCommand{label: "Open first live HTTP port", hint: "Selected node · o", run: a.openFleetPort})
+		}
 		label := "Restart selected/marked nodes"
 		if a.nodeDetail {
 			label = "Restart this node"
@@ -175,6 +178,7 @@ func (a *vaxisTUIApp) openCommandPalette() {
 func (a *vaxisTUIApp) openKeyHelp() {
 	commands := []tuiPaletteCommand{
 		{label: "1–5", hint: "Nodes · Templates · Ports · Activity · System"},
+		{label: "o", hint: "Nodes: open selected node's first live HTTP route"},
 		{label: "0", hint: "Toggle all nodes / launch directory scope"},
 		{label: "↑↓ / j k", hint: "Select node; Enter opens detail; Esc returns"},
 		{label: "/", hint: "Filter names and directories; status: template: dir: port:"},

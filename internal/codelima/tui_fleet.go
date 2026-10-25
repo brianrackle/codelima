@@ -13,11 +13,12 @@ import (
 // tuiFleetRecord joins observations at the frontend boundary. Missing metrics
 // remain missing; the projection never turns absence into a zero observation.
 type tuiFleetRecord struct {
-	Node      Node
-	Status    string
-	Sessions  int
-	Ports     []int
-	StartedAt time.Time
+	Node             Node
+	Status           string
+	Sessions         int
+	Ports            []int
+	PortsUnavailable bool
+	StartedAt        time.Time
 }
 
 type tuiFleetSort int
@@ -34,6 +35,9 @@ const (
 	tuiFleetSortUptime
 	tuiFleetSortCount
 )
+
+// Directory is a display column in the flat projection, not a sort-cycle key.
+const tuiFleetSortDirectory = tuiFleetSortCount
 
 func (s tuiFleetSort) String() string {
 	names := [...]string{"name", "status", "template", "cpu", "memory", "disk", "sessions", "ports", "uptime"}
@@ -164,7 +168,7 @@ func tuiFleetMetric(record tuiFleetRecord, field tuiFleetSort) (float64, bool) {
 	case tuiFleetSortSessions:
 		return float64(record.Sessions), true
 	case tuiFleetSortPorts:
-		return float64(len(record.Ports)), true
+		return float64(len(record.Ports)), !record.PortsUnavailable
 	case tuiFleetSortUptime:
 		// Older starts have greater uptime without a changing clock in SortFunc.
 		return -float64(record.StartedAt.Unix()), !record.StartedAt.IsZero()
@@ -350,6 +354,10 @@ func layoutTUIFleet(width, height, rows int) tuiFleetLayout {
 	if width >= 140 && available >= 18 {
 		tableHeight = min(tableHeight, available-12)
 		layout.Preview = tuiRect{col: 1, row: 3 + tableHeight, width: max(0, width-2), height: available - tableHeight - 1}
+	} else {
+		// Leave the selected/marked summary above the filter and status rows,
+		// even when the table needs to scroll through a large fleet.
+		tableHeight = min(tableHeight, max(0, height-7))
 	}
 	layout.Table = tuiRect{col: 1, row: 2, width: max(0, width-2), height: tableHeight}
 	if layout.Preview.height == 0 {

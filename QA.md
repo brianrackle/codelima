@@ -641,9 +641,40 @@ diagnostics; they do not replace those manual qualifications.
 - Mark nodes with Space, filter one out and verify the confirmation still
   names every marked target. Cancel the confirmation. `*` marks all visible
   nodes. Never execute a bulk deletion against non-disposable nodes.
+- Fleet observations (ADR 186): at 150×38 mark two nodes, hide one and then
+  both with a filter. The marked panel must persist and count hidden targets.
+  Compare projected resource release with observed running VMs, including a
+  failed-but-running VM, and verify after-stop allocation still includes nodes
+  outside the scope. Unknown readings must remain explicit. Cancel the action.
+  At 80×24 verify the one-line marked summary remains above filter/status even
+  with enough rows to scroll. Clear marks to restore the selected summary.
+- At 100, 120 and 150 columns, toggle grouping and metric sorting; flat tables
+  must show directory context and retain the final uptime column. Wide memory
+  and disk values must match observed used/total bytes, not configured limits;
+  resize to 80 columns and verify percentages, abbreviated inactive view tabs,
+  connection state and global CPU/memory allocation. Click all five tabs.
+- Start a disposable HTTP service on an undeclared guest port. `port:PORT`
+  must find its node after discovery, and `o` must open that node's live HTTP
+  address. Repeat with multiple HTTP routes, another node owning the bare
+  address, and a published TCP route. Only the selected ready node's first live
+  HTTP route may open. A held/stopped/conflicted route or stale inventory must
+  report its unavailable state. Suspend the disposable daemon, navigate between
+  Nodes/Ports and then to System, recover it and verify retained rows cannot
+  authorize a stale open. The running phase must remain visible at both sizes.
 - Visit global views 1–5, then `:` and search for `templates`; Enter navigates
   and Esc backs out. `?` filters key help. Numbers typed in a form or filter
   must remain text.
+
+ADR 186 checkpoint (2026-10-25): the rebuilt TUI was visually inspected and
+interacted with at 150×38, 120×30, 100×30 and 80×24 using 20 isolated metadata-only
+nodes. Hidden/all-hidden marks, confirmation/cancel, marked-list overflow,
+scrolling summaries, directory/uptime headers, all five compact mouse tabs,
+unavailable-route errors, daemon suspension/recovery, stable selection/marks,
+and zero newly created shells passed. ANSI captures were inspected and all
+fixture state/processes/mounts removed. This does not qualify live guest byte
+values, positive discovered-route browser opening, resource release or native
+presentation; those checks above remain open with TODO #57.
+
 - In the create form, type a replacement slug and verify the muted default
   disappears. Esc asks whether to discard; `n` preserves edits and `y`
   discards. Resize while editing a long template and visit every field with

@@ -111,7 +111,7 @@ func TestTUIPortsRefreshCancelsOnNavigationAndPreservesCache(t *testing.T) {
 	if generation != a.ports.generation {
 		t.Fatal("overlapping query admitted")
 	}
-	a.view = tuiViewNodes
+	a.view = tuiViewSystem
 	a.startPortsLoad(false)
 	e := nextPortsEvent(t, events).(tuiPortsEvent)
 	if e.err == nil {
@@ -127,6 +127,27 @@ func TestTUIPortsRefreshCancelsOnNavigationAndPreservesCache(t *testing.T) {
 	a.applyPortsData(nextPortsEvent(t, events).(tuiPortsEvent))
 	if a.ports.err != nil || !a.ports.loaded {
 		t.Fatalf("query did not recover: %v", a.ports.err)
+	}
+}
+
+func TestTUIPortsRefreshContinuesFromPortsToFleet(t *testing.T) {
+	a, h, events, release := portsAsyncFixture(t, false)
+	a.startPortsLoad(true)
+	select {
+	case <-h.entered:
+	case <-time.After(time.Second):
+		t.Fatal("query did not reach daemon")
+	}
+	generation := a.ports.generation
+	a.view = tuiViewNodes
+	a.startPortsLoad(false)
+	if generation != a.ports.generation || !a.ports.loading {
+		t.Fatal("fleet canceled the shared forwarding query")
+	}
+	release()
+	a.applyPortsData(nextPortsEvent(t, events).(tuiPortsEvent))
+	if a.ports.err != nil || a.ports.loading || !a.ports.loaded {
+		t.Fatalf("fleet did not consume completion: %v", a.ports.err)
 	}
 }
 

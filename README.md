@@ -334,6 +334,7 @@ complete long findings. A filter with no matches stays in the searchable table.
 | `Space`, `*` | Mark one node / all visible nodes; marks survive filtering |
 | `n`, `s`, `c`, `d` | Create, start/stop, clone, delete |
 | `r` | Restart selected/marked nodes; an unmarked failed node retries its failed step |
+| `o` | Open the selected node's first current, live HTTP route |
 | `x`, `X` | Open a shell / show shell choices |
 | `Tab` / `Shift-Tab` | Cycle node detail tabs |
 | `a`, `g`, `m` | Configurations, environments, activity |
@@ -403,11 +404,26 @@ For example, `/status:running template:small dir:"acme api"` combines filters.
 Selection follows node identity through sorting and refreshes. Missing metrics
 show `—`. Metric sorts place unavailable readings last and temporarily flatten
 directory groups. Batch actions include marked nodes hidden by the filter and
-show one confirmation; deleting a batch requires its node count.
+show one confirmation; deleting a batch requires its node count. Marks replace
+the selected preview with all-target resource/session counts and a projected
+after-stop global allocation. Hidden targets remain included even when no rows
+match. Unknown observations stay explicit; these projections describe the
+latest host snapshot, not a resource reservation.
 
 Wide fleet rows show the last eight seconds of CPU as a sparkline. The
 selected-node preview shows 60 seconds, including samples retained before
-this window opened. Missing samples remain blank; memory and disk use gauges.
+this window opened. Missing samples remain blank; wide memory and disk cells
+show observed used/total GiB with gauges, and compact cells show percentages.
+At 80 columns inactive views use their number, leaving space for connectivity
+and global CPU/memory allocation. Flat tables include each node's directory.
+
+Port filters include configured guest ports and routes discovered by the daemon.
+A `?` marks missing or stale forwarding observations; retained port numbers may
+still match filters. `o` opens the first live HTTP route for the selected ready
+node, using its recorded node-qualified address. Unavailable, stale, held,
+stopped, conflicted and TCP routes cannot open through this shortcut. `3` opens
+Ports for inspection. Running lifecycle rows show recorded phase progress at
+both widths; phase counts describe completed work, not estimated time.
 
 Open a node with Enter and Tab to Metrics. `+`/`-` select 1m, 5m, 15m or 1h;
 Space pauses/resumes. CPU and memory charts use observed samples, with gaps

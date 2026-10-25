@@ -75,7 +75,11 @@ func TestTUIManagerResponsiveTableAndPreview(t *testing.T) {
 			app, _ := newTestManager(t, size[0], size[1])
 			app.draw()
 			screen := renderedScreenText(t, app.vx, size[0], size[1])
-			for _, want := range []string{"1 Nodes", "2 Templates", "3 Ports", "4 Activity", "5 System", "NAME", "STATUS", "root-node", "child-node"} {
+			labels := []string{"1 Nodes", "NAME", "STATUS", "root-node", "child-node"}
+			if size[0] >= 100 {
+				labels = append(labels, "2 Templates", "3 Ports", "4 Activity", "5 System")
+			}
+			for _, want := range labels {
 				if !strings.Contains(screen, want) {
 					t.Errorf("missing %q:\n%s", want, screen)
 				}

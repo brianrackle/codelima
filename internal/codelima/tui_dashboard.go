@@ -41,7 +41,7 @@ func (a *vaxisTUIApp) refreshFleet() {
 	}
 	records := make([]tuiFleetRecord, 0, len(a.state.nodes))
 	for _, node := range a.state.nodes {
-		record := tuiFleetRecord{Node: node, Status: a.fleetStatus(node)}
+		record := tuiFleetRecord{Node: node, Status: a.fleetStatus(node), PortsUnavailable: !a.fleetPortsCurrent()}
 		if observation := node.LastRuntimeObservation; observation != nil && observation.UsageDetails != nil && observation.UsageDetails.UptimeSeconds != nil && observation.ResourceUsageSampledAt != nil {
 			record.StartedAt = observation.ResourceUsageSampledAt.Add(-time.Duration(*observation.UsageDetails.UptimeSeconds * float64(time.Second)))
 		}
@@ -49,6 +49,15 @@ func (a *vaxisTUIApp) refreshFleet() {
 		for _, mapping := range node.Ports {
 			parts := strings.Split(mapping, ":")
 			if port, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
+				record.Ports = append(record.Ports, port)
+			}
+		}
+		for _, route := range a.fleetRoutes(node.ID) {
+			port := route.GuestPort
+			if port == 0 {
+				port = route.Port
+			}
+			if port > 0 && port <= 65535 {
 				record.Ports = append(record.Ports, port)
 			}
 		}
@@ -206,6 +215,13 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 	tuiLine(bar.New(0, 0, 9, 1), 0, a.headerLogoText(), logo)
 	col := 10
 	views := []string{"1 Nodes", "2 Templates", "3 Ports", "4 Activity", "5 System"}
+	if width < 100 {
+		for i := range views {
+			if tuiView(i) != a.view {
+				views[i] = strconv.Itoa(i + 1)
+			}
+		}
+	}
 	if count := len(a.activity.page.Running); count > 0 {
 		views[tuiViewActivity] += fmt.Sprintf(" ◐%d", count)
 	}
@@ -236,6 +252,21 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 		}
 		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: cells, height: 1})
 		col += cells
+	}
+	if width < 100 {
+		connection := "●"
+		if a.daemonDisconnected || a.service == nil || a.service.daemonClient == nil {
+			connection = "○"
+		}
+		text := connection + " " + a.host.compactAllocation()
+		cells := min(renderedTextWidth(a.vx, text), max(0, width-col-1))
+		style := theme.chrome
+		if (a.host.Capacity.CPUs > 0 && a.host.AllocatedCPUs > uint64(a.host.Capacity.CPUs)) ||
+			(a.host.Capacity.MemoryBytes != nil && a.host.AllocatedMemoryBytes > *a.host.Capacity.MemoryBytes) {
+			style.Foreground = theme.coral.Foreground
+		}
+		tuiLine(bar.New(width-cells, 0, cells, 1), 0, text, style)
+		return
 	}
 	right := width
 	if width >= 140 && !a.host.Capacity.ObservedAt.IsZero() {
@@ -304,7 +335,7 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 	}
 	tuiLine(table.New(2, 0, layout.Table.width-4, 1), 0, title, theme.text)
 	innerWidth, innerHeight := inner.Size()
-	columns := tuiFleetColumns(innerWidth, layout.Compact)
+	columns := tuiFleetColumns(innerWidth, layout.Compact, !a.fleet.grouped())
 	for _, column := range columns {
 		tuiLine(inner.New(column.col, 0, column.width, 1), 0, column.title, theme.dim)
 	}
@@ -330,11 +361,19 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 		}
 		tuiLine(content, 0, message, theme.muted)
 	}
-	if selected, ok := a.fleetSelected(); ok {
+	if len(a.fleet.marks) > 0 {
+		if layout.Preview.height > 0 {
+			a.drawMarkedPreview(win.New(layout.Preview.col, layout.Preview.row, layout.Preview.width, layout.Preview.height), theme)
+		} else {
+			tuiLine(win.New(layout.Summary.col, layout.Summary.row, layout.Summary.width, 1), 0, a.markedImpact().summary(), theme.muted)
+		}
+	} else if selected, ok := a.fleetSelected(); ok {
 		if layout.Preview.height > 0 {
 			a.drawNodePreview(win.New(layout.Preview.col, layout.Preview.row, layout.Preview.width, layout.Preview.height), selected, theme)
 		} else {
-			text := fmt.Sprintf("%s · %s · %d vCPU · %s memory · %s · Enter details", selected.Node.Slug, selected.Status, selected.Node.VCPUs, formatTUIResourceSize(selected.Node.MemoryMiB), selected.Node.DirectoryPath)
+			uptime, _ := a.fleetCell(selected, tuiFleetSortUptime, true, 8, theme)
+			ports, _ := a.fleetCell(selected, tuiFleetSortPorts, true, 16, theme)
+			text := fmt.Sprintf("%s · up %s · ports %s · Enter details", selected.Node.Slug, uptime, ports)
 			tuiLine(win.New(layout.Summary.col, layout.Summary.row, layout.Summary.width, 1), 0, text, theme.muted)
 		}
 	}
@@ -357,7 +396,7 @@ type tuiFleetColumn struct {
 	col, width int
 }
 
-func tuiFleetColumns(width int, compact bool) []tuiFleetColumn {
+func tuiFleetColumns(width int, compact, flat bool) []tuiFleetColumn {
 	columns := []tuiFleetColumn{
 		{field: tuiFleetSortName, title: "NAME", width: 20},
 		{field: tuiFleetSortStatus, title: "STATUS", width: 12},
@@ -377,9 +416,19 @@ func tuiFleetColumns(width int, compact bool) []tuiFleetColumn {
 	} else if width >= 134 {
 		columns[3].width, columns[4].width, columns[5].width = 14, 21, 20
 	}
+	if !compact && flat {
+		columns[7].field, columns[7].title, columns[7].width = tuiFleetSortDirectory, "DIRECTORY", 20
+	}
 	used := 3
 	for _, column := range columns[1:] {
 		used += column.width
+	}
+	if !compact && used+8 > width {
+		// At the medium breakpoint directory context yields space to the
+		// minimum name width, keeping the final uptime column on screen.
+		overflow := used + 8 - width
+		columns[7].width -= overflow
+		used -= overflow
 	}
 	columns[0].width = max(8, width-used)
 	col := 3
@@ -398,12 +447,12 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 		marker = "▸"
 	}
 	if a.fleet.marks[record.Node.ID] {
-		marker = "✓"
+		marker += "✓"
 	}
 	tuiFill(win, style)
 	tuiLine(win.New(0, 0, 2, 1), 0, marker, style)
 	for _, column := range columns {
-		if !compact && record.Status != "running" && column.field == tuiFleetSortCPU {
+		if record.Status != "running" && (column.field == tuiFleetSortCPU || (compact && column.field == tuiFleetSortTemplate)) {
 			text := ""
 			switch record.Status {
 			case "created":
@@ -419,6 +468,9 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 				if len(operation.Lines) > 0 {
 					text = operation.Lines[len(operation.Lines)-1]
 				}
+			}
+			if phase := a.fleetPhase(record.Node.ID); phase != "" {
+				text = phase
 			}
 			_, statusStyle := theme.status(record.Status)
 			style.Foreground = statusStyle.Foreground
@@ -441,12 +493,17 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 		return glyph + " " + record.Status, style
 	case tuiFleetSortTemplate:
 		return record.Node.ConfigurationSlug, theme.violet
+	case tuiFleetSortDirectory:
+		return record.Node.DirectoryPath, theme.muted
 	case tuiFleetSortSessions:
 		return strconv.Itoa(record.Sessions), theme.text
 	case tuiFleetSortPorts:
 		ports := make([]string, len(record.Ports))
 		for i, port := range record.Ports {
 			ports[i] = strconv.Itoa(port)
+		}
+		if record.PortsUnavailable {
+			ports = append(ports, "?")
 		}
 		if len(ports) == 0 {
 			return "—", theme.dim
@@ -463,6 +520,13 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 			return "—", theme.dim
 		}
 		text := fmt.Sprintf("%.0f%%", value)
+		if !compact && (field == tuiFleetSortMemory || field == tuiFleetSortDisk) {
+			text = tuiFleetBytes(record, field)
+			if cells := min(10, width-len(text)-2); cells >= 3 {
+				text = tuiGauge(value, cells) + " " + text
+			}
+			return text, theme.usage(value)
+		}
 		if !compact && width >= 14 {
 			if field == tuiFleetSortCPU && record.Node.LastRuntimeObservation != nil {
 				text = tuiCPUSparkline(record.Node.LastRuntimeObservation.CPUHistory, time.Now(), 8*time.Second, 8) + " " + text
@@ -511,9 +575,7 @@ func (a *vaxisTUIApp) drawNodePreview(win vaxis.Window, record tuiFleetRecord, t
 	if len(keys) == 0 {
 		tuiLine(sessions, 1, "No sessions", theme.dim)
 	}
-	tuiLine(sessions, 5, "Published ports", theme.muted)
-	ports, _ := a.fleetCell(record, tuiFleetSortPorts, false, third, theme)
-	tuiLine(sessions, 6, ports, theme.blue)
+	a.drawFleetRoutes(sessions, record.Node.ID, 5, height, theme)
 }
 
 func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
@@ -521,7 +583,7 @@ func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, 
 	fields := [][2]string{
 		{"status", record.Status}, {"template", node.ConfigurationSlug},
 		{"resources", fmt.Sprintf("%d vCPU · %s mem · %s disk", node.VCPUs, formatTUIResourceSize(node.MemoryMiB), formatTUIResourceSize(node.DiskMiB))},
-		{"image", node.Image}, {"directory", node.DirectoryPath}, {"workspace", nodeWorkspaceMode(node)},
+		{"runtime", strings.TrimSpace(node.Runtime + " " + node.Provider)}, {"image", node.Image}, {"directory", node.DirectoryPath}, {"workspace", nodeWorkspaceMode(node)},
 		{"bootstrap", strconv.FormatBool(node.BootstrapCompleted)}, {"agent", node.AgentProfileName},
 	}
 	for i, field := range fields {
@@ -607,5 +669,5 @@ func (a *vaxisTUIApp) managerFooter() string {
 	if failed {
 		restart = "r retry"
 	}
-	return "↑↓ select · Enter detail · s start/stop · " + restart + " · x shell · n new · / filter · : commands · ? help · q quit"
+	return "↑↓ select · Enter detail · s start/stop · " + restart + " · x shell · o port · n new · / filter · : commands · ? help · q quit"
 }

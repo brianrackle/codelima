@@ -28,7 +28,11 @@ func TestTUIDoctorBadgeRetainsOpenFindingsAcrossViews(t *testing.T) {
 			a.applyManagerData(tuiManagerDataEvent{view: view})
 			a.draw()
 			screen := renderedScreenText(t, a.vx, size[0], size[1])
-			if !strings.Contains(screen, "5 System ⚠3") {
+			label := "5 System ⚠3"
+			if size[0] < 100 && view != tuiViewSystem {
+				label = "5 ⚠3"
+			}
+			if !strings.Contains(screen, label) {
 				t.Fatalf("open findings lost at %v, view %v:\n%s", size, view, screen)
 			}
 			for col := range size[0] {

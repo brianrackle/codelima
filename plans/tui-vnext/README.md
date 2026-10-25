@@ -9,12 +9,12 @@ All example identities, metrics and timestamps in those files are reference data
 
 | Surface | Required behavior | Status |
 |---|---|---|
-| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: table/projection and verified restart present; preview/resource fidelity and first-port action remain |
+| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: observed bytes, cached routes/first-port action, runtime preview and live phase rows added (ADR 186); recent-event/failure/session fidelity and final qualification remain |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: projection and confirmations implemented; marked summary, flat-directory column and durable batch queue remain |
+| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: marks include hidden-target/global-allocation summary and flat-directory context (ADR 186); complete session impact, durable batch queue and final qualification remain |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
-| [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: percentage table present; compact header/capacity and summary fidelity remain |
+| [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
@@ -43,14 +43,14 @@ Fleet re-audit against the three home artboards:
 | Requirement | Current evidence and remaining work |
 |---|---|
 | `r` restart, with failed-step retry retained | ADR 185 service/daemon/CLI/TUI restart passes two-guest Linux/TCG checks; full native/artboard qualification remains |
-| `o` opens the first forwarded route | Fleet key dispatcher has no route action; connect it to actual cached routes |
-| Port filters/counts include discovered forwarding | `refreshFleet` only reads frozen `Node.Ports`; project daemon routes consistently with the Ports view and distinguish unavailable observations |
-| Marked-node panel replaces single-node preview | `drawFleet` always draws the selected preview; add full target/resource/session impact and compact summary |
-| Flat filter view includes directory | `tuiFleetColumns` always uses Ports; add the reference's directory context when grouping is absent |
-| Wide memory/disk values show used/total | `fleetCell` currently renders percentages beside gauges; use observed byte totals with explicit unavailable values |
-| Compact navigation retains connection and capacity | Header always renders full view names; shorten labels at the compact breakpoint and fit measured allocation |
-| Preview includes resolved routes, runtime and recent events | Current preview only includes basic identity, resources and session labels; complete it from observed snapshots |
-| Lifecycle rows explain current work and failure | Wide rows use generic status or frontend output and compact rows lack the same summary branch; use retained receipt phases/failed-step evidence at both sizes |
+| `o` opens the first forwarded route | ADR 186 opens the selected ready node's first current live HTTP route; unavailable/stale/non-live/TCP guards tested |
+| Port filters/counts include discovered forwarding | ADR 186 joins frozen guest ports with discovered routes by node ID; unavailable/stale counts remain explicit |
+| Marked-node panel replaces single-node preview | ADR 186 includes hidden targets, associated session counts and global resource release/remaining allocation; complete busy/end-session detail still remains |
+| Flat filter view includes directory | ADR 186 shows Directory when grouping is absent |
+| Wide memory/disk values show used/total | ADR 186 uses observed byte totals and explicit unavailable values; compact stays percentages |
+| Compact navigation retains connection and capacity | ADR 186 abbreviates inactive views and preserves connection/global allocation with unknowns |
+| Preview includes resolved routes, runtime and recent events | ADR 186 adds runtime and observed routes; recent events and complete session details still require bounded independent evidence |
+| Lifecycle rows explain current work and failure | ADR 186 prefers recorded running phases at both sizes; retained failed-step evidence/duration still remains |
 | Whole-batch caller independence | Individual admitted mutations survive; the sequential frontend queue does not. Persist complete queue/result ownership |
 
 - Preserve daemon-owned sessions, node/configuration identities and existing storage compatibility.
@@ -65,6 +65,25 @@ Fleet re-audit against the three home artboards:
 - Automated checks and every QA.md flow, live visual/interactive verification, documentation and disposable-state cleanup.
 
 ## Current evidence
+
+- ADR 186 fleet checkpoint, 2026-10-25: `make verify test-race test-integration`
+  passes (core unit 84.926s, core race 110.033s, CLI integration 17.700s), along
+  with focused fleet/Ports/Doctor/Activity race checks (8.523s), Go API inspection
+  and clean gopls diagnostics on the changed projection/rendering files. The
+  80–180 column regression caught and fixed a clipped uptime column at 100;
+  the full suite caught and fixed lost compact Activity/Doctor badges.
+  The rebuilt TUI ran against an isolated 20-node metadata fixture at
+  150×38, 120×30, 100×30 and 80×24. ANSI screenshots were visually inspected;
+  keyboard and mouse checks covered hidden marks (including no matching rows),
+  retained confirmation targets/cancel, all five compact tabs, grouping,
+  scrolling, overflow of the marked list, missing-route rejection, daemon
+  suspension and recovery. No shells were created; marks and selection survived
+  reconnect, and unavailable allocation/routes stayed explicit. The daemon,
+  tmux session, fixture metadata, captures, scripts and private tmpfs mount were
+  removed. These were metadata-only UI checks, not new live-guest measurements
+  or native/artboard qualification. Real discovered-route browser opening,
+  resource-release comparisons and the remaining fleet evidence/session flows
+  still require the expanded QA.md flow before full qualification.
 
 - `ddabb01` checkpoints outstanding notes before implementation.
 - Prior baseline `make verify` passed on Linux/aarch64; baseline TUI menus and resize were exercised. These do not qualify the redesign.

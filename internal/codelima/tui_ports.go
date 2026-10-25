@@ -47,9 +47,13 @@ type tuiPortPinEvent struct {
 	err        error
 }
 
+func (a *vaxisTUIApp) portsVisible() bool {
+	return a.view == tuiViewPorts || a.view == tuiViewNodes
+}
+
 func (a *vaxisTUIApp) startPortsLoad(force bool) {
 	s := &a.ports
-	if a.view != tuiViewPorts {
+	if !a.portsVisible() {
 		a.cancelPortsLoad()
 		return
 	}
@@ -98,7 +102,7 @@ func (a *vaxisTUIApp) cancelPortsWork() {
 
 func (a *vaxisTUIApp) applyPortsData(e tuiPortsEvent) {
 	s := &a.ports
-	if e.generation != s.generation || a.view != tuiViewPorts {
+	if e.generation != s.generation || !a.portsVisible() {
 		return
 	}
 	s.loading, s.cancel, s.err = false, nil, e.err
