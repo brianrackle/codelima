@@ -681,11 +681,19 @@ uses the same managed shell, and `codelima terminal attach TERMINAL_ID` resumes
 a specific session from `codelima terminal list`. Supplying a command after
 `codelima shell NODE` runs that command through the existing execution path.
 
-`X` opens a scrollable chooser: Enter attaches, `w` opens a new terminal window,
-`t` opens a tmux window when running inside tmux, and `h` opens a host shell.
-Existing sessions are selectable with arrows/Enter or `1`–`9`. Shift with a
-mode choice saves it as `x`'s default. Open **System**, cycle to Settings,
-then Enter to edit shell mode, the window command, host credential import,
+`X` opens a grouped, scrollable shell chooser. Under New session, Enter on
+Attach here creates a fresh guest session; `w` opens one in the configured
+terminal window, `t` in tmux, and `h` in the node's directory on this host.
+Unavailable launchers and guest readiness show their reasons. Existing sessions
+show observed activity, age and unacknowledged bells; select with arrows/Enter,
+mouse or `1`–`9`. Numbers stay bound to their original sessions until you reopen
+the chooser, so a closed session cannot redirect a delayed key. Arrows and
+PgUp/PgDn reach sessions beyond nine. Esc closes.
+
+Shift+Enter on Attach here, Shift+w or Shift+t saves that mode as `x`'s default.
+The footer shows the current default. `x` reuses a suitable session when one
+exists; the chooser's New session choices create fresh ones. Open **System**,
+cycle to Settings, then Enter to edit shell mode, the window command, host credential import,
 stop confirmations, directory grouping or color. Edits preserve YAML comments
 and unknown keys. These preferences can also be changed from the CLI:
 
@@ -701,7 +709,8 @@ wrapper for shell expressions. Stop confirmation defaults to sessions that
 are busy or do not report an idle prompt; `confirm_stop` accepts `busy`,
 `always` and `never`. The detach key is fixed at Ctrl+].
 
-Choose `X` then `e` to opt into the embedded Shell tab. It reserves **F6 only** while the shell has focus. All
+Set `shell.mode` to `embedded` in Settings to enable `X` then `e`, which opens
+a fresh embedded Shell tab. It reserves **F6 only** while the shell has focus. All
 other keys, including Option/Alt arrows, reach the shell. Press F6 to return
 to TUI focus, then use `[` / `]` to switch tabs, `t` for a guest tab, `T` for a
 host tab, `w` to close, or `F7` to search. Tab creation/closing and focus changes

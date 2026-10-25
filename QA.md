@@ -650,7 +650,7 @@ System daemon controls (ADR 181), in an isolated metadata home:
 7. Close fixture terminals/TUIs, stop the daemon and remove all diagnostic
    bundles, metadata, tmux state, screenshots, mounts and verification scripts.
 
-Settings and shell choices (ADR 152):
+Settings and shell choices (ADRs 152, 194):
 
 1. Open System, cycle Tab to Settings, and change shell mode with Enter. Quit and
    reopen; confirm the saved choice remains. Edit a file comment and unknown
@@ -662,6 +662,22 @@ Settings and shell choices (ADR 152):
    From tmux, repeat with `t`. Shift+w or Shift+t should also set `x`'s default.
 4. Open more sessions than fit in the chooser. Use arrows/Enter and the mouse
    to reach sessions beyond the nine numeric shortcuts. Escape cancels.
+   In both widths, check NEW SESSION and ATTACH TO A RUNNING SESSION groups,
+   selected-row scrolling, dimmed background and current `x` default. Resize
+   down to 40×10 and back. Click a row and Esc, and use PgUp/PgDn/Home/End.
+   A missing window executable, absent `$TMUX`, disabled embedded mode,
+   disconnected daemon or unready guest must explain availability. Host shells
+   remain available on stopped/starting nodes. Paste/repeated action keys must
+   not open shells or change preferences.
+   Confirm New session choices create distinct terminal IDs; `x` reuses one.
+   Close session 1 externally while the chooser stays open: pressing 1 must
+   refuse; 2 must still attach its original ID. Repeat with a stale mouse row,
+   external session reorder and removal of the captured node. Return with
+   Ctrl+] and verify the same PID/variable survive reattachment; exit removes
+   only that session. Verify observed title/activity/bell/age and no invented
+   agent classification. Enable embedded in Settings, then `X`/`e` creates a
+   fresh tab and F6 returns focus. Reopen after saving defaults to verify
+   persistence; failed launcher choices must not save or create a session.
 5. With stop confirmation set to busy, compare an idle integrated shell with
    a running command; unknown prompt state also asks. Verify always and never.
 6. Try an invalid setting and a window command without `{cmd}`. Both must fail

@@ -37,7 +37,7 @@ func (a *vaxisTUIApp) paletteBatchCommands() []tuiPaletteCommand {
 		plan := slices.Clone(byDirectory[dir])
 		names := make([]string, 0, len(plan))
 		for _, target := range plan {
-			node, _ := a.paletteNode(target.id)
+			node, _ := a.managerNode(target.id)
 			name := node.Slug
 			if target.action == tuiActionNodeRetry {
 				name += " (retry)"

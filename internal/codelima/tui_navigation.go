@@ -418,40 +418,8 @@ func (a *vaxisTUIApp) openEmbeddedShell(host bool) error {
 }
 
 func (a *vaxisTUIApp) openShellChooser() {
-	menu := &tuiMenu{Title: "Open shell · " + a.state.selectedEntry().node.Slug,
-		Description: []string{"Ctrl+] detaches · F6 returns from embedded · x uses " + a.managerSettings().Shell.Mode,
-			"Shift+choice saves it as x's default."},
-		Entries: []tuiMenuEntry{
-			{Key: 'a', Label: "Attach here", Action: func() error { return a.startRawShell(false, false, "") }, ShiftAction: a.defaultShellChoice("attach")},
-			{Key: 'w', Label: "New window", Action: func() error { return a.startShellMode("window", false, false, "") }, ShiftAction: a.defaultShellChoice("window")},
-			{Key: 't', Label: "tmux window", Action: func() error { return a.startShellMode("tmux", false, false, "") }, ShiftAction: a.defaultShellChoice("tmux")},
-			{Key: 'n', Label: "New guest shell · attach here", Action: func() error { return a.startRawShell(false, true, "") }},
-			{Key: 'h', Label: "Host shell in node directory", Action: func() error { return a.startRawShell(true, false, "") }},
-			{Key: 'e', Label: "Embedded guest shell", Action: func() error { return a.openEmbeddedShell(false) }, ShiftAction: a.defaultShellChoice("embedded")},
-		},
-	}
-	if a.sessions != nil {
-		for index, key := range a.sessions.TargetSessionKeys(a.state.selectedEntry().key()) {
-			session := a.sessions.sessions[key]
-			if session == nil {
-				continue
-			}
-			id, host := string(session.terminalID), session.shellKind == terminal.NodeHostShell
-			label := coalesce(session.label, session.shellKind.String())
-			shortcut := rune(0)
-			if index < 9 {
-				shortcut = rune('1' + index)
-			}
-			menu.Entries = append(menu.Entries, tuiMenuEntry{Key: shortcut, Label: "Existing · " + label + " · " + id,
-				Action: func() error { return a.startRawShell(host, false, id) }})
-		}
-	}
-	a.overlay = menu
-}
-
-func (a *vaxisTUIApp) defaultShellChoice(mode string) func() error {
-	return func() error {
-		return a.saveManagerSetting("shell.mode", mode, func(app *vaxisTUIApp) error { return app.startShellMode(mode, false, false, "") })
+	if err := a.openNodeShellChooser(a.state.selectedEntry().node.ID); err != nil {
+		a.setStatus(slog.LevelError, err.Error())
 	}
 }
 

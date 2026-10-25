@@ -75,15 +75,29 @@ func (a *vaxisTUIApp) startRawShell(host, fresh bool, sessionID string) error {
 }
 
 func (a *vaxisTUIApp) startShellMode(mode string, host, fresh bool, sessionID string) error {
+	return a.startShellModeForNode(a.state.selectedEntry().node.ID, mode, host, fresh, sessionID)
+}
+
+// Keep asynchronous preference saves and launcher requests bound to the node
+// the user chose, even when navigation changes before the save completes.
+func (a *vaxisTUIApp) startShellModeForNode(nodeID, mode string, host, fresh bool, sessionID string) error {
+	node, err := a.managerNode(nodeID)
+	if err != nil {
+		return err
+	}
 	if mode == "embedded" {
+		if err := a.openManagerNode(nodeID, tuiDetailShell); err != nil {
+			return err
+		}
+		if fresh && !host {
+			if err := a.openTerminalTab(); err != nil {
+				return err
+			}
+		}
 		return a.openEmbeddedShell(host)
 	}
-	entry := a.state.selectedEntry()
-	if !entry.valid() {
-		return errors.New("select a node first")
-	}
-	if !host && !nodeGuestShellReady(entry.node) {
-		return errors.New(nodeGuestShellUnavailable(entry.node, "attach"))
+	if !host && !nodeGuestShellReady(node) {
+		return errors.New(nodeGuestShellUnavailable(node, "attach"))
 	}
 	if a.rawShellPending {
 		return errors.New("a shell is already opening")
@@ -96,7 +110,7 @@ func (a *vaxisTUIApp) startShellMode(mode string, host, fresh bool, sessionID st
 		return err
 	}
 	a.rawShellPending = true
-	client, node, ctx := a.service.daemonClient, entry.node, a.ctx
+	client, ctx := a.service.daemonClient, a.ctx
 	a.setStatus(slog.LevelInfo, "Opening shell · "+node.Slug)
 	go func() {
 		state, err := resolveRawShell(ctx, client, node, host, fresh, sessionID)

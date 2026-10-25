@@ -136,12 +136,18 @@ design ledger; final whole-design/native qualification and the durable batch
 queue described above remain open. Session history intentionally ends on exit;
 the source does not require a persisted recent-command store.
 
-The shell chooser still needs its dedicated artboard pass, including grouped new
-and existing sessions, honest launcher availability, exact-session attachment
-and persisted default hints. Reuse existing action/session owners: this keeps
-confirmation and error behavior consistent, at the cost of adapters and tests
-for selection changes while an overlay is open. Final whole-design and native
-qualification also remain open; these overlay checkpoints do not complete them.
+Shell chooser checkpoint (ADR 194): grouped new/existing sessions, launcher
+availability, exact-session attachment, stable lifetime shortcuts, persisted
+default hints and embedded opt-in are implemented. Verification is tracked in
+the design ledger. Final native window/terminal and whole-design qualification
+remain: exercise the same controls on each supported native terminal. Advantage:
+qualifies launcher and keyboard behavior beyond this Linux VM. Disadvantage:
+requires platform-specific interactive environments. Session agent identity
+continues to depend on the recorded agent/session provenance work below; titles
+are not a reliable substitute. The Attached and Embedded artboards still need
+their dedicated presentation passes; reuse existing raw-attach and terminal
+owners to preserve process/focus behavior, at the cost of cross-mode regressions.
+These overlay checkpoints do not complete the full design.
 
 Source access resolved on 2026-10-24. The user's interactive Claude Code
 session could read the artifact with its `Artifact` tool; the headless

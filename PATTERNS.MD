@@ -754,6 +754,16 @@ suspends the manager; embedded terminal mode is explicit. Preserve selection
 by node identity across refresh and detach. A VM becoming ready updates its
 available actions without changing focus or creating a terminal.
 
+A session chooser captures canonical node and terminal IDs. Keep numeric
+shortcuts stable for its lifetime: retain ended rows as unavailable and append
+new arrivals. Render mouse targets with those IDs and revalidate on activation.
+Revalidate the captured node again after an asynchronous preference save; never
+look up the newly selected row. New-session actions explicitly request creation,
+while ordinary default attachment may reuse. Probe launcher availability once
+per configuration/environment, then repeat preflight before session creation.
+Use observed session metadata for activity and age; do not infer agent identity
+from titles. See ADR 194.
+
 Diagnostic file views read bounded local tails outside the event loop, without
 runtime preparation. Fence completions by both navigation generation and
 request serial, cancel on pause or navigation, and keep record identity across

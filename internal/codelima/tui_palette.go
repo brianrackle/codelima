@@ -20,11 +20,6 @@ type tuiPaletteCommand struct {
 	positions                        []int
 }
 
-type tuiPaletteTarget struct {
-	rect tuiRect
-	id   string
-}
-
 type tuiPalette struct {
 	title                 string
 	app                   *vaxisTUIApp
@@ -35,7 +30,7 @@ type tuiPalette struct {
 	refresh               func() []tuiPaletteCommand
 	recents               func() []string
 	record                func(string)
-	rows                  []tuiPaletteTarget
+	rows                  []tuiCommandTarget
 	controls              []tuiPaletteControl
 }
 

@@ -10,6 +10,13 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-shell-chooser SHELL_CHOOSER_TEST_FLAGS=-race` covers grouped choices,
+launcher availability, embedded opt-in, fresh sessions, stable numbered/mouse
+targets, compact scrolling and captured nodes across asynchronous default saves
+(ADR 194). It includes raw attachment, launcher and palette integration tests.
+Run the Settings and shell choices subsection of QA.md Flow 7 with actual guest
+and host sessions before the full verification gates.
+
 `make test-tui-palette TUI_PALETTE_TEST_FLAGS=-race` checks grouped matching,
 rendered spans, paste/repeat ownership, resize/mouse targets, recent fallback,
 captured node confirmations and directory Start/Retry with real service state

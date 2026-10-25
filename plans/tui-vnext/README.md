@@ -32,11 +32,73 @@ All example identities, metrics and timestamps in those files are reference data
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–181 responsive capacity, retained Doctor findings, cached daemon status and explicit actions | Partial; Doctor, overview and action flows verified; macOS sampling and full artboard/native qualification remain |
 | [Command palette](reference/Palette.dc.html) | Grouped fuzzy results, live context, recents and captured actions | Partial: result spans/counts, responsive modal, session recents, identity guards and directory Start/Retry (ADR 193); final whole-design/native qualification remains |
 | [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping and final native qualification remain |
-| [Shell · where to open](reference/ShellChooser.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Shell · where to open](reference/ShellChooser.dc.html) | Grouped new/existing sessions, availability, captured attachment and saved defaults | Partial: dedicated responsive chooser and stable session shortcuts (ADR 194); live guest/host/window/tmux/embedded checks pass; final native/whole-design qualification remains |
 | [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+ADR 194 checkpoint, 2026-10-25: the dedicated shell chooser now separates new
+sessions from exact existing attachments, shows launcher/readiness availability,
+current default and observed session activity/age/bells, and requires Settings
+opt-in for embedded mode. All new choices create fresh sessions; ordinary `x`
+retains reuse. Numeric shortcuts remain bound to their opening identities after
+closure or reordering. Mouse targets carry IDs, and saved-default callbacks
+revalidate the captured node instead of consulting current selection. The
+palette shares those lookup/navigation helpers. Protocols remain 27/2/6/7.
+
+The focused race target passed (3.398s), including launcher/attach/palette
+regressions, scrolling beyond nine sessions, stale clicks, reordered/ended
+shortcuts, paste/release/repeat guards, real-RPC fresh creation, removed targets
+and navigation changes during asynchronous preference saves. Embedded creation
+also verifies captured-node navigation. `go doc` and `gopls` checks passed.
+Full `make verify test-race test-integration` passed: core unit 84.724s,
+core race 116.744s and CLI integration 17.642s, including formatting, lint,
+Vaxis checks and both builds. An initial plain-pipe runner was terminated
+before unit results; it was not counted as a pass. The complete tracked PTY
+run finished with exit 0. Afterward the owned-process audit was empty, no new
+Lima cache files existed, and 38 new inactive exact INPUTRC files were removed;
+1,015 older/active/other files were preserved. Test work directories and logs
+were removed. Existing baseline cleanup debt remains in TODO #57.
+
+The rebuilt TUI was visually inspected and operated at 150×38 and 80×24 in
+truecolor/ANSI. Resize through 60×14 and 40×10 returned to the same choice.
+Thirteen host sessions exercised compact scrolling, Home/End, PageDown, wheel
+and mouse controls; this found and fixed orphaned context lines and a hidden
+first group heading. Actual OSC title/progress/bell evidence rendered without
+inferring an agent identity or retaining historical bell badges in the title.
+Pasted action text remained inert. A closed numbered session and a stale mouse
+target refused attachment; a daemon RPC reorder preserved the original numeric
+target. Deleting a captured metadata-only node refused a subsequent host launch.
+
+A real disposable Lima guest reached running with completed bootstrap. During
+boot the chooser blocked guest choices and allowed a host shell in the exact
+node directory. Host PID 2184019 and its variable survived detach/reattach; guest
+PID 2453 and its variable also survived. Fresh guest attachment increased the
+session count; `x` reused an existing guest. Mouse attachment and `exit` removed
+only the selected terminal. A project-local launcher wrapper recorded literal
+attach arguments, the correct metadata home and directory, and opened an actual
+attached terminal in an isolated tmux window. This qualifies the launcher
+contract here, not native GUI terminal integration. Real tmux launch also passed.
+Shift+W/T and Shift+Enter saved defaults; reopening retained attach. A missing
+launcher refused Shift+W without creating a session or changing the default.
+A separate ANSI frontend without TMUX showed its explicit unavailable reason.
+Settings opt-in enabled a fresh embedded tab, guest input and F6 manager return.
+Pausing only the fixture daemon produced unavailable choices and suppressed
+stale activity; host launch was refused and resuming recovered the connection.
+
+After stopping the guest, its host-shell choice remained usable in the node's
+exact directory and exited cleanly. All fixture terminals, frontends, guest,
+daemon and tmux processes were stopped; a command/environment process audit
+found none remaining. The read-only backing image hash was unchanged. The owned
+256 MiB tmpfs was unmounted, removing its disk overlay, metadata, screenshots,
+launcher wrapper, socket state and scripts. No existing baseline fixture was
+changed. Full verification runs only after this cleanup.
+
+Interactive Claude Code in this VM independently returned the live artifact
+through its Artifact tool (HTTP 200, 49 published files, 26 artboards); its
+canvas matched the retained design byte-for-byte. The verification scratch
+copy was removed and the Claude session exited normally.
 
 ADR 193 checkpoint, 2026-10-25: the palette now groups live scoped commands,
 counts fuzzy results, highlights actual matching spans and shows lifecycle,

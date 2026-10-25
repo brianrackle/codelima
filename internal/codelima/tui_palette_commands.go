@@ -49,9 +49,9 @@ func (a *vaxisTUIApp) paletteCommands() []tuiPaletteCommand {
 			hint, warning := a.paletteNodeHint(node, action.ID)
 			commands = append(commands, tuiPaletteCommand{id: paletteNodeCommandID(node.ID, action.ID), group: "NODES", label: verb + " " + node.Slug, hint: hint, warning: warning, shortcut: string(action.Hotkey), run: func() error { return a.runPaletteNodeAction(node.ID, action.ID) }})
 		}
-		commands = append(commands, tuiPaletteCommand{id: "node:" + node.ID, group: "GO TO", label: "Node: " + node.Slug, hint: node.DirectoryPath, shortcut: "Enter", run: func() error { return a.openPaletteNode(node.ID, tuiDetailOverview) }})
+		commands = append(commands, tuiPaletteCommand{id: "node:" + node.ID, group: "GO TO", label: "Node: " + node.Slug, hint: node.DirectoryPath, shortcut: "Enter", run: func() error { return a.openManagerNode(node.ID, tuiDetailOverview) }})
 		commands = append(commands, tuiPaletteCommand{id: "logs:" + node.ID, group: "GO TO", label: "Logs › " + node.Slug + " › bootstrap", hint: a.fleetStatus(node) + " · " + node.DirectoryPath, shortcut: "l [ ]", run: func() error {
-			if err := a.openPaletteNode(node.ID, tuiDetailLogs); err != nil {
+			if err := a.openManagerNode(node.ID, tuiDetailLogs); err != nil {
 				return err
 			}
 			a.changeLogSource(slices.Index(nodeLogSources[:], nodeLogBootstrap))
@@ -63,7 +63,7 @@ func (a *vaxisTUIApp) paletteCommands() []tuiPaletteCommand {
 		commands = append(commands, tuiPaletteCommand{id: "chooser:" + id, group: "ACTIONS", label: "Open shell chooser", hint: entry.node.Slug + " · " + entry.node.DirectoryPath, shortcut: "X", run: func() error { return a.openPaletteShellChooser(id) }})
 		if a.view == tuiViewNodes && !a.nodeDetail {
 			commands = append(commands, tuiPaletteCommand{id: "first-port:" + id, group: "ACTIONS", label: "Open first live HTTP port", hint: entry.node.Slug, shortcut: "o", run: func() error {
-				node, err := a.paletteNode(id)
+				node, err := a.managerNode(id)
 				if err != nil {
 					return err
 				}
@@ -102,17 +102,8 @@ func (a *vaxisTUIApp) paletteCommands() []tuiPaletteCommand {
 
 func paletteNodeCommandID(id string, action tuiActionID) string { return string(action) + ":" + id }
 
-func (a *vaxisTUIApp) paletteNode(id string) (Node, error) {
-	for _, node := range a.state.nodes {
-		if node.ID == id {
-			return node, nil
-		}
-	}
-	return Node{}, fmt.Errorf("node is no longer available in this scope")
-}
-
 func (a *vaxisTUIApp) paletteNodeAction(id string, action tuiActionID) (tuiTreeEntry, error) {
-	node, err := a.paletteNode(id)
+	node, err := a.managerNode(id)
 	if err != nil {
 		return tuiTreeEntry{}, err
 	}
@@ -155,44 +146,8 @@ func (a *vaxisTUIApp) runPaletteNodeAction(id string, action tuiActionID) error 
 	return nil
 }
 
-func (a *vaxisTUIApp) openPaletteNode(id string, tab tuiDetailTab) error {
-	if _, err := a.paletteNode(id); err != nil {
-		return err
-	}
-	if !slices.ContainsFunc(a.state.entries, func(entry tuiTreeEntry) bool { return entry.node.ID == id }) {
-		return fmt.Errorf("node is no longer selectable")
-	}
-	a.refreshFleet()
-	a.fleet.setFilter("")
-	a.fleet.selectID(id)
-	a.selectFleetNode()
-	a.openNodeDetail(tab)
-	return nil
-}
-
 func (a *vaxisTUIApp) openPaletteShellChooser(id string) error {
-	if err := a.openPaletteNode(id, tuiDetailOverview); err != nil {
-		return err
-	}
-	a.openShellChooser()
-	if menu := a.activeMenu(); menu != nil {
-		for i := range menu.Entries {
-			wrap := func(action func() error) func() error {
-				if action == nil {
-					return nil
-				}
-				return func() error {
-					if err := a.openPaletteNode(id, tuiDetailOverview); err != nil {
-						return err
-					}
-					return action()
-				}
-			}
-			menu.Entries[i].Action = wrap(menu.Entries[i].Action)
-			menu.Entries[i].ShiftAction = wrap(menu.Entries[i].ShiftAction)
-		}
-	}
-	return nil
+	return a.openNodeShellChooser(id)
 }
 
 func (a *vaxisTUIApp) paletteNodeHint(node Node, action tuiActionID) (string, bool) {

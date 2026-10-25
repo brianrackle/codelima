@@ -82,7 +82,7 @@ func (p *tuiPalette) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		c := p.matches[row.index]
 		p.drawCommand(line, c, row.index == p.index, row.hint, compact, t)
 		col, top := line.Origin()
-		p.rows = append(p.rows, tuiPaletteTarget{rect: tuiRect{col: col, row: top, width: w - 2, height: 1}, id: c.id})
+		p.rows = append(p.rows, tuiCommandTarget{rect: tuiRect{col: col, row: top, width: w - 2, height: 1}, id: c.id})
 	}
 }
 

@@ -225,7 +225,7 @@ func TestTUIManagerPaletteMouseIdentityAndCompactHints(t *testing.T) {
 		if !strings.Contains(renderedScreenText(t, a.vx, size[0], size[1]), "/work/project") {
 			t.Fatal("node context disappeared")
 		}
-		var target tuiPaletteTarget
+		var target tuiCommandTarget
 		for _, row := range p.rows {
 			if row.id == "node:"+a.state.nodes[1].ID {
 				target = row
