@@ -493,26 +493,51 @@ identity before boot, shared slug/UUID admission, startup phases, cancellation
 cleanup and latest-start/Activity integration. Protocol 18 carries the option;
 renderer protocol 5 and handoff version 6 are unchanged. Focused tests cover
 real-socket caller disconnect, duplicate admission, failure/cancellation,
-pre-binding conflicts, CLI defaults and TUI readiness gating. The new real-guest
-QA flow remains required with the form integration; this is not evidence that
-the CreateNode or TemplatePicker artboards are implemented.
+pre-binding conflicts, CLI defaults and TUI readiness gating. The form's real
+guest checks below extend the original backend-only qualification.
 
-Continue with the actual create form and picker, preserving the existing input
-and dirty-discard behavior through reusable dialog presentation hooks. Required
-work: centered/dimmed modal, compact field scrolling, live inline slug/duplicate,
-directory and HOST:GUEST validation, duplicate-name Tab suggestion, directory
-browse, workspace/credential toggles, template filtering/details/new-editor
-return, real host fit warnings, CLI preview, start-now and attach-when-ready.
-Load metadata and path checks outside the event loop with stale-result fencing;
-use global node identities and reject metadata-root symlink aliases as well as
-literal paths. Capacity shortfalls warn without disabling otherwise valid forms.
-Keep failed admission values editable and retain an idempotency ID after an
-ambiguous reply. Bind transient open/attach intent to the accepted receipt,
-follow its created UUID into Overview, and reuse the existing readiness gate;
-navigation cancels attachment only. Remove the old unconditional terminal-pane
-switch. Add automated input/render/async/navigation tests and real 150×38/80×24
-create/attach/cancel checks. This avoids losing first-start intent on frontend
-exit; it adds explicit async form and navigation state that needs race coverage.
+The create form and nested picker are implemented in ADR 174, with the shared
+dialog wrapped for inline validation, compact scrolling, a centered/dimmed
+presentation, directory browsing, workspace/auth/launch controls, CLI preview,
+observed capacity warnings, filtered template details and new-template return.
+Metadata and path checks are asynchronous and fenced; metadata-root symlink
+aliases are rejected by the service. Admission retains editable values after
+definitive rejection and freezes the same ID/payload after an ambiguous reply.
+Created UUID navigation and optional attachment are tied to that receipt;
+leaving revokes only transient intent. Full verify, race and integration passed;
+the later eight-phase compact viewport passed create/lifecycle tests, lint,
+build and gopls. Live wide/compact checks covered the form, picker, creation-only,
+ready-only attachment, navigation away, first-boot failure and CLI disconnect
+followed by cancellation. Artboard and native qualification remain partial.
+
+Live create-only navigation worked and produced zero shell sessions. Its node
+is shown as “stopped” immediately after creation because runtime reconciliation
+maps Lima's stopped observation over the created lifecycle state. Preserve the
+never-started created state while still retaining the actual stopped VM
+observation, with service/fleet regressions. This matches the design's distinct
+created badge without misreporting resource allocation; compatibility with
+explicit stop and migrated records needs care.
+
+Both successful fresh boots on nested QEMU needed repair of Lima's guest-agent
+forward: after an initial connection reset, its local socket disappeared while
+the SSH master retained the forward. Canceling that stale forward let Lima
+recreate it and finish the original receipt. Repeat first boot on native VZ/KVM
+and investigate Lima recovery before claiming uninterrupted startup. Keeping
+socket ownership in Lima avoids an application-specific transport workaround,
+but requires separate native qualification.
+
+The nested template editor currently reuses the generic
+resource/environment fields and preserves inherited bootstrap commands. It
+still needs the full TemplateEdit board's stepped resource controls, environment
+ordering, multiline bootstrap editing, affected-node counts and built-in reset.
+Use a shared editor rather than extending a second independent implementation;
+this reduces duplication but needs parent-return and async-failure regression
+coverage. Complete final picker metadata/preview fidelity with that editor.
+
+The form QA nodes, templates, terminal, daemon, TUI, homes, captures and logs
+were removed. Its project-local ext4 volume was unmounted, the loop device
+released and tmp/cf (including its sparse image) removed. The old reusable
+stepqa fixture remains separate cleanup debt for the overall goal.
 
 Activity presentation is implemented in ADR 172: aligned cell columns, distinct
 status/request glyphs, full-row selection in ANSI/truecolor, panel-border titles,
@@ -1782,7 +1807,7 @@ Suggested solution:
 - Confirm the new TUI checks from `QA.md`: automatic tree refresh, multiline paste preservation, resize repainting, `Alt+t`/`Alt+Left`/`Alt+Right`/`Alt+w` terminal tab behavior, host-terminal red-line rendering, Ghostty-style split-pane shortcuts, and OSC 52 guest-to-host clipboard sync.
 - Confirm the new Ghostty focus-report check from `QA.md`: enable DECSET 1004 inside a focused embedded terminal, toggle terminal focus away and back, and verify `^[[O` then `^[[I` are delivered to the guest.
 - Confirm the path-scoped TUI launch from `QA.md`: `./bin/codelima --home "$CODELIMA_HOME" "$WORK_ROOT"` hides `qa-tui-outside` and keeps that scope after automatic refresh.
-- Confirm the create-node TUI flow from `QA.md`: creating `qa-tui-b` selects it, shows the terminal placeholder immediately, and still does not open a shell session before the node is started.
+- The old create-node terminal-placeholder expectation is superseded by ADR 174. Complete the create-only Overview and optional ready-only attachment flows in QA.md and TODO #57.
 - Record any discrepancies back into `TODO.md` or a follow-up ADR if the info-first behavior exposes a broader product decision.
 
 Advantages:

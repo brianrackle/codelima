@@ -102,14 +102,7 @@ func (a *vaxisTUIApp) selectFleetNode() {
 
 func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	width, height := window.Size()
-	rgb := a.vx.CanRGB()
-	switch a.managerSettings().Color {
-	case "ansi":
-		rgb = false
-	case "truecolor":
-		rgb = true
-	}
-	theme := newTUITheme(rgb)
+	theme := a.managerTheme()
 	tuiFill(window, theme.text)
 	if a.sessions != nil {
 		cols, rows := a.activeTerminalSize(width, height, a.state.focus)
@@ -117,6 +110,10 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	}
 	a.refreshFleet()
 	a.drawManagerHeader(window, theme)
+	normalTheme := theme
+	if a.visibleCreateForm() != nil {
+		theme = theme.dimmed()
+	}
 	a.fleetMouseRows = nil
 	switch a.view {
 	case tuiViewNodes:
@@ -134,6 +131,7 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	case tuiViewSystem:
 		a.drawSystem(window, theme)
 	}
+	theme = normalTheme
 	status := a.status
 	if !a.statusAt.IsZero() && time.Since(a.statusAt) >= 6*time.Second {
 		status = ""
@@ -155,10 +153,20 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	if a.overlay != nil {
 		// Reuse existing form/selector behavior inside a centered modal. The
 		// underlying manager retains both its selection and navigation state.
-		modalWidth, modalHeight := min(width-4, 96), height-4
-		modal := window.New((width-modalWidth)/2, 2, modalWidth, modalHeight)
-		tuiFill(modal, theme.raised)
-		a.overlay.Draw(modal, theme.mint, theme.muted, theme.coral)
+		drawOverlay := func(overlay tuiOverlay) {
+			modalWidth, modalHeight := min(width-4, 96), height-4
+			if sized, ok := overlay.(interface{ PreferredSize() (int, int) }); ok {
+				preferredWidth, preferredHeight := sized.PreferredSize()
+				modalWidth, modalHeight = min(width-4, preferredWidth), min(height-4, preferredHeight)
+			}
+			modal := window.New((width-modalWidth)/2, (height-modalHeight)/2, modalWidth, modalHeight)
+			tuiFill(modal, theme.raised)
+			overlay.Draw(modal, theme.mint, theme.muted, theme.coral)
+		}
+		if parent := a.visibleCreateForm(); parent != nil && a.overlay != parent {
+			drawOverlay(parent)
+		}
+		drawOverlay(a.overlay)
 		footer = a.overlay.FooterHint()
 	}
 	bar := window.New(0, height-1, width, 1)

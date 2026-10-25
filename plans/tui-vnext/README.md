@@ -21,8 +21,8 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Partial: real Lima phases/output, cancellation and queued attachment verified at both sizes; final artboard qualification remains |
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions and VM inspection verified at both sizes; readiness-gated ports and final artboard qualification remain |
-| [Create node · validation](reference/CreateNode.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Create node · template picker](reference/TemplatePicker.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
+| [Create node · template picker](reference/TemplatePicker.dc.html) | ADR 174 filter/details/new-template return | Partial; full editor/final live fidelity pending |
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · configurations](reference/Templates.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -357,6 +357,37 @@ slice-copy and struct-omitempty advisories. Live CLI/TUI checks confirmed a
 rejected create-and-start receipt, its request/failure history at 150×38 and
 80×24, severity filtering and clipboard copy. The isolated daemon, TUI,
 receipt, homes, clipboard entry and scratch evidence were removed. These
-checks do not qualify successful first boot or cancellation with a real guest.
-The create form/picker, its transient open/attach intent and the new real-guest
-QA flow remain pending in TODO #57; the two artboard rows remain unqualified.
+backend-only checks are extended by the ADR 174 form/guest evidence below;
+final artboard/native qualification remains in TODO #57.
+
+ADR 174 integrates the create form with shared input/discard behavior, async
+global-name/path checks, symlink boundaries, directory browsing, nested template
+filter/details/new-template return, observed host-fit warnings and launch choices.
+Admission and transient UUID navigation/attachment retain their receipt identity.
+Full verify, race and integration checks passed. The subsequent compact phase
+viewport adjustment passed the create and lifecycle suites, formatting, lint,
+build and gopls; live 80×24 now displays all eight phases. Live
+wide/compact checks covered name suggestions, directory browsing, invalid ports,
+metadata symlink rejection, retained edits, template save rejection/return and
+mouse launch dependencies. Create-only opened Overview with no terminal. A fresh
+combined creation reached Ready under one UUID-bound receipt; explicit stops
+by slug and UUID were refused during boot. Zero shells existed before completion;
+exactly one opened after successful validation and accepted a command. Lima's
+first guest-agent forward had lost its local socket: canceling that stale SSH
+forward allowed Lima to recreate it and the same receipt to finish. This is
+qualified attachment behavior with an explicitly repaired test transport, not
+evidence of an entirely unattended first boot on this nested-VM host.
+A separate first-boot firmware failure retained its node UUID and error, rendered
+Boot failed and canceled queued attachment without a shell. The fixture was
+deleted. Leaving another form-created startup canceled attachment while the
+same receipt progressed to Ready; Activity stayed open and there were no shells.
+That run needed the same Lima socket repair. Interrupting a CLI creation wait
+returned its receipt ID while the operation continued through Boot. Explicit
+cancellation kept that same receipt canceling, without a finish timestamp, while
+Lima still reported the VM running. After Lima's three-minute shutdown fallback,
+the receipt became canceled only with the VM stopped and both runtime processes
+gone. No terminal existed. All form QA nodes/templates, terminals, daemon/TUI,
+homes, logs and captures were removed; the ext4 volume was unmounted, its loop
+device released and its sparse image removed.
+The nested editor still needs the full TemplateEdit presentation and controls;
+remaining qualification and the older stepqa cleanup debt are in TODO #57.

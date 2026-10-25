@@ -1,5 +1,16 @@
 # Patterns
 
+## Validated asynchronous forms
+
+Keep editable values and dirty-discard behavior in the shared dialog model;
+wrap it for domain-specific presentation and controls. Perform metadata/path
+reads in workers and publish immutable completions carrying the exact form,
+input value and relevant revision. A single-flight check queues only the latest
+changed value. Parent overlay references preserve values across nested choices.
+Never infer free capacity from a missing observation. Preserve an ambiguous
+admission's payload and idempotency key; separate durable operation ownership
+from receipt-bound frontend navigation and attachment intent (ADR 174).
+
 ## Shared notification history
 
 Publish general messages with client-generated idempotency IDs and daemon

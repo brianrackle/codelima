@@ -329,6 +329,20 @@ returns to the same selection.
 | `:`, `?` | Search commands / keyboard shortcuts |
 | `q` | Quit from a global view; return from node detail |
 
+Press `n` for the create form. Names, directories and optional `HOST:GUEST`
+ports validate inline; Tab accepts a suggested name when one is already used.
+Enter on Directory opens a browser. Enter on Template opens a filterable picker
+with resource, environment and memory-fit details; its new-template action
+returns with the saved template selected. Capacity shortfalls warn but do not
+block creation. Tab/Shift-Tab and arrows reach every field at compact sizes.
+
+`Space` toggles workspace, credential and launch choices. The form defaults to
+starting the new node; attachment is optional and waits for successful startup.
+Ctrl-S submits, then opens the new node's Overview. Leaving cancels automatic
+navigation/attachment while accepted work continues. A rejected admission keeps
+the form editable; an unconfirmed reply offers Ctrl-S to retry the same request.
+Esc asks before discarding edits.
+
 For example, `/status:running template:small dir:"acme api"` combines filters.
 Selection follows node identity through sorting and refreshes. Missing metrics
 show `—`. Metric sorts place unavailable readings last and temporarily flatten

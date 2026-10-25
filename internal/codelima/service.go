@@ -2254,6 +2254,17 @@ func (s *Service) resolveNodeDirectoryPath(input string) (string, error) {
 	if pathWithinRoot(s.cfg.MetadataRoot, directoryPath) {
 		return "", invalidArgument("node directory must not be inside CODELIMA_HOME", map[string]any{"path": directoryPath})
 	}
+	resolvedDirectory, err := filepath.EvalSymlinks(directoryPath)
+	if err != nil {
+		return "", invalidArgument("node directory must be resolvable", map[string]any{"path": directoryPath})
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(s.cfg.MetadataRoot)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", invalidArgument("CODELIMA_HOME must be resolvable", nil)
+	}
+	if err == nil && pathWithinRoot(resolvedRoot, resolvedDirectory) {
+		return "", invalidArgument("node directory must not be inside CODELIMA_HOME", map[string]any{"path": directoryPath})
+	}
 	return directoryPath, nil
 }
 

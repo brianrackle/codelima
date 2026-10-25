@@ -501,6 +501,22 @@ manual qualification.
   disappears. Esc asks whether to discard; `n` preserves edits and `y`
   discards. Resize while editing a long template and visit every field with
   Tab: the focused field and submit help must stay visible.
+- At 150×38 and 80×24, create forms must dim the fleet and keep every field
+  reachable. Duplicate a global node name outside the current scope; Tab must
+  accept the first unused suffix. Check invalid ports, missing directories and
+  symlinks into CODELIMA_HOME. Invalid inputs prevent Ctrl-S; real resource
+  shortfalls only warn. Verify the CLI preview matches launch/auth/port choices.
+- Enter on Directory browses folders and restores the form on selection/Esc.
+  Enter on Template filters by name/environment; Right shows details and Esc
+  returns. Create a disposable template, retry a duplicate-name save, then save
+  a unique name and select it. The parent form must retain all other values.
+- Create once with start disabled and once with start plus attachment enabled.
+  The first opens Overview without a shell. The second opens Starting and only
+  attaches after the matching receipt succeeds and runtime readiness is observed.
+  Repeat while leaving the view: creation continues and automatic attachment
+  is canceled. A rejected admission preserves editable values; an unconfirmed
+  reply retries the same ID/payload. Delete every disposable node/template and
+  stop the isolated daemon after verification.
 - In an embedded shell, every key except F6 is shell input, including
   Option/Alt arrows and Option+t/w. F6 returns to TUI focus; there `t`, `T`,
   `[`/`]`, `w` and F7 open guest/host tabs, switch, close and search. Check

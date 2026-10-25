@@ -107,6 +107,12 @@ boot, slug/UUID admission conflicts, failure/cancellation and TUI readiness gate
 Renderer protocol 5 and handoff version 6 remain unchanged. Run the new
 create-and-start QA flow with an isolated home and disposable guest.
 
+The same target covers the create form and nested choices (ADR 174): async
+validation fencing, symlink boundaries, compact rendering, launch controls,
+admission identity and template/directory navigation. Run `make verify` and
+`make test-race` after changes to its completion events. Its real guest QA must
+use a Lima volume with sufficient image space and working Unix sockets.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool

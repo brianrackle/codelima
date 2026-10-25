@@ -60,6 +60,7 @@ type vaxisTUIApp struct {
 	activity           tuiActivityState
 	messageDelivery    tuiActivityDelivery
 	lifecycle          tuiLifecycleState
+	createIntent       *tuiCreateIntent
 	host               tuiHostSummary
 	systemRects        [tuiSystemPanelCount]tuiRect
 	systemScroll       [tuiSystemPanelCount]int
@@ -142,6 +143,9 @@ func (a *vaxisTUIApp) postCompletion(event vaxis.Event) {
 // type is showing. Dialog flows and tests use these instead of per-type
 // fields.
 func (a *vaxisTUIApp) activeDialog() *tuiDialog {
+	if form, ok := a.overlay.(*tuiCreateNodeForm); ok {
+		return form.dialog
+	}
 	dialog, _ := a.overlay.(*tuiDialog)
 	return dialog
 }
@@ -161,8 +165,8 @@ func (a *vaxisTUIApp) activeSelector() *tuiSelector {
 // parent and restored when the selector is dismissed, preserving the old
 // behavior where a.selector stacked over a.dialog.
 func (a *vaxisTUIApp) showSelector(selector *tuiSelector) {
-	if dialog, ok := a.overlay.(*tuiDialog); ok {
-		selector.Parent = dialog
+	if a.activeDialog() != nil {
+		selector.Parent = a.overlay
 	}
 	a.overlay = selector
 }
@@ -170,6 +174,9 @@ func (a *vaxisTUIApp) showSelector(selector *tuiSelector) {
 // overlayParent returns the overlay to restore when overlay is dismissed:
 // the recorded parent for field-picker selectors, nil for everything else.
 func overlayParent(overlay tuiOverlay) tuiOverlay {
+	if child, ok := overlay.(interface{ ParentOverlay() tuiOverlay }); ok {
+		return child.ParentOverlay()
+	}
 	if selector, ok := overlay.(*tuiSelector); ok && selector.Parent != nil {
 		return selector.Parent
 	}
@@ -435,6 +442,30 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyManagerData(event)
 		a.draw()
 		return false, nil
+	case tuiCreateDataEvent:
+		a.applyCreateData(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiCreatePathEvent:
+		a.applyCreatePath(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiCreateAdmissionEvent:
+		a.applyCreateAdmission(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiCreateIntentEvent:
+		a.applyCreateIntent(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiCreateDirectoryEvent:
+		a.applyCreateDirectory(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiTemplateCreatedEvent:
+		a.applyTemplateCreated(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiMetricsDataEvent:
 		a.applyMetricsData(event)
 		a.requestRedraw()
@@ -464,6 +495,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:
+		a.pollCreateIntent()
+		if f := a.visibleCreateForm(); f != nil && time.Since(f.dataAt) >= 3*time.Second {
+			f.loadData()
+		}
 		a.startActivityMessageDelivery()
 		if a.status != "" && !a.statusAt.IsZero() && time.Since(a.statusAt) >= 6*time.Second {
 			a.clearStatus()
@@ -911,6 +946,7 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		a.setStatus(slog.LevelError, err.Error())
 	}
 	a.finishActivityNodeJump()
+	a.finishCreateNodeJump()
 }
 
 // startDaemonInputTakeover reclaims terminal input ownership for this window.

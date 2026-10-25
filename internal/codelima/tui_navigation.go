@@ -43,6 +43,7 @@ func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
 }
 
 func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
+	a.createIntent = nil
 	defer a.cancelHiddenMetricsLoad()
 	defer a.cancelHiddenLogsLoad()
 	defer a.cancelHiddenSpecLoad()
@@ -260,6 +261,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 }
 
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
+	a.createIntent = nil
 	if a.view == tuiViewActivity {
 		a.moveActivitySelection(delta)
 		return

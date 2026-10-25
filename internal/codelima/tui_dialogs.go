@@ -3,7 +3,6 @@ package codelima
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -355,6 +354,7 @@ func (a *vaxisTUIApp) openCreateNodeDialog() error {
 }
 
 func (a *vaxisTUIApp) openCreateNodeDialogWithDefaults(directory, configuration string) error {
+	a.createIntent = nil
 	if directory == "" {
 		var err error
 		directory, err = canonicalPath(".")
@@ -362,69 +362,10 @@ func (a *vaxisTUIApp) openCreateNodeDialogWithDefaults(directory, configuration 
 			return err
 		}
 	}
-	dialog := newTUIDialog(
-		"Create Node",
-		"Create",
-		[]string{"Create a directory-bound node from a reusable configuration."},
-		[]tuiDialogField{
-			newTUIDefaultInputField("slug", "Node Slug", slugify(filepath.Base(directory)), true),
-			newTUIDefaultInputField("directory", "Directory", directory, false),
-			newTUIValueSelectorField("configuration", "Configuration", configuration, func(value string) string { return value }, nil),
-			newTUIValueSelectorField("workspace_mode", "Workspace Mode", DefaultWorkspaceMode, workspaceModeDisplay, nil),
-			newTUIValueSelectorField("import_host_auth", "Host Credentials", hostAuthImportChoice(a.managerSettings().ImportHostAuth), hostAuthImportDisplay, nil),
-		},
-		func(values map[string]string) error {
-			return a.startOperation(tuiOperationRequest{
-				Title:         "Creating node " + values["slug"],
-				DisplayStatus: "creating",
-				ResourceKeys:  []string{"nodes"},
-				EntryKeys:     []string{"nodes"},
-				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-					node, err := service.NodeCreate(ctx, NodeCreateInput{
-						Configuration:  values["configuration"],
-						Directory:      values["directory"],
-						Slug:           values["slug"],
-						WorkspaceMode:  values["workspace_mode"],
-						ImportHostAuth: boolPointer(values["import_host_auth"] == hostAuthImportOn),
-					})
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:           "created node " + node.Slug,
-						PreferredKey:     terminal.NodeTarget(node.ID).String(),
-						ReloadData:       true,
-						ShowTerminalPane: true,
-					}, nil
-				},
-			})
-		},
-	)
-	dialog.Fields[2].Activate = func() error {
-		return a.openConfigurationSelector(dialog.Fields[2].rawValue(), func(value string) error {
-			dialog.SetFieldValue("configuration", value)
-			return nil
-		})
-	}
-	dialog.Fields[3].Activate = func() error {
-		return a.openWorkspaceModeSelector(
-			dialog.Fields[3].rawValue(),
-			func(value string) error {
-				dialog.SetFieldValue("workspace_mode", value)
-				return nil
-			},
-		)
-	}
-	dialog.Fields[4].Activate = func() error {
-		return a.openHostAuthImportSelector(
-			dialog.Fields[4].rawValue(),
-			func(value string) error {
-				dialog.SetFieldValue("import_host_auth", value)
-				return nil
-			},
-		)
-	}
-	a.overlay = dialog
+	form := a.newCreateNodeForm(directory, configuration)
+	a.overlay = form
+	form.loadData()
+	form.checkPath()
 	return nil
 }
 
@@ -445,27 +386,6 @@ func hostAuthImportDisplay(choice string) string {
 		return "skip: the node starts with no host credentials"
 	}
 	return "import: copy git identity and agent logins once, at first start"
-}
-
-func (a *vaxisTUIApp) openHostAuthImportSelector(current string, onSubmit func(value string) error) error {
-	options := []tuiSelectorOption{
-		{Label: hostAuthImportDisplay(hostAuthImportOn), Value: hostAuthImportOn},
-		{Label: hostAuthImportDisplay(hostAuthImportOff), Value: hostAuthImportOff},
-	}
-	a.showSelector(newTUISelector(
-		"Host Credentials",
-		nil,
-		options,
-		[]string{coalesce(current, hostAuthImportOn)},
-		false,
-		func(values []string) error {
-			if len(values) == 0 {
-				return fmt.Errorf("select a host credential choice")
-			}
-			return onSubmit(values[0])
-		},
-	))
-	return nil
 }
 
 func (a *vaxisTUIApp) openWorkspaceModeSelector(current string, onSubmit func(value string) error) error {

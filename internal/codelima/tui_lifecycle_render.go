@@ -20,7 +20,7 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 	operation, _ := a.activeStartOperation()
 	width, height := win.Size()
 	wide := width >= 118 && height >= 22
-	progressWidth, progressHeight := width, min(10, max(4, height-5))
+	progressWidth, progressHeight := width, min(max(10, len(operation.Phases)+3), max(4, height-5))
 	if wide {
 		progressWidth, progressHeight = (width-2)/2, height
 	}
@@ -31,12 +31,20 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 	}
 	tuiLine(progress, 0, title, theme.mint)
 	row, completed := 1, 0
+	visiblePhases := operation.Phases
+	if !wide && len(visiblePhases) > progressHeight-3 {
+		count := max(1, progressHeight-3)
+		active := slices.IndexFunc(visiblePhases, func(phase NodeOperationPhase) bool { return phase.ID == operation.CurrentPhase })
+		start := max(0, active-count+1)
+		visiblePhases = visiblePhases[start:min(len(visiblePhases), start+count)]
+		tuiLine(progress, 0, fmt.Sprintf("%s · phases %d–%d/%d", title, start+1, start+len(visiblePhases), len(operation.Phases)), theme.mint)
+	}
 	for _, phase := range operation.Phases {
 		if phase.State == "succeeded" || phase.State == "skipped" {
 			completed++
 		}
 	}
-	for _, phase := range operation.Phases {
+	for _, phase := range visiblePhases {
 		if row >= progressHeight-2 {
 			break
 		}
@@ -56,7 +64,7 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 		}
 	}
 	if len(operation.Phases) == 0 {
-		tuiLine(progress, 2, "Waiting for observed phase data…", theme.dim)
+		tuiLine(progress, 1, "Waiting for observed phase data…", theme.dim)
 	}
 	if wide && !operation.CreatedAt.IsZero() {
 		tuiLine(progress, progressHeight-4, fmt.Sprintf("%d/%d phases complete · %s elapsed", completed, len(operation.Phases), time.Since(operation.CreatedAt).Truncate(time.Second)), theme.amber)

@@ -73,6 +73,11 @@ func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 		a.updateOverlay(key)
 		return false
 	}
+	if a.createIntent != nil && key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true) {
+		a.createIntent = nil
+		a.setFooterStatus(slog.LevelInfo, "Queued navigation/attachment canceled; creation continues")
+		return false
+	}
 	if a.search != nil {
 		a.handleSearchKey(key)
 		return false
@@ -244,6 +249,9 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 	if a.overlay != nil {
 		a.updateOverlay(mouse)
 		return
+	}
+	if mouse.EventType == vaxis.EventPress {
+		a.createIntent = nil
 	}
 	if mouse.EventType == vaxis.EventPress && mouse.Button == vaxis.MouseLeftButton {
 		if target, ok := a.linkTargetAt(mouse.Col, mouse.Row); ok {
