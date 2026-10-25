@@ -168,7 +168,7 @@ func summarizeFleetLifecycle(nodeID string, records []NodeOperation) fleetNodeEv
 			finished := *record.FinishedAt
 			result.StoppedAt = &finished
 		}
-		if !record.Request.startsNode() || result.Start != nil && (record.CreatedAt.Before(result.Start.CreatedAt) || record.CreatedAt.Equal(result.Start.CreatedAt) && record.ID <= result.Start.ID) {
+		if !record.startsNode() || result.Start != nil && (record.CreatedAt.Before(result.Start.CreatedAt) || record.CreatedAt.Equal(result.Start.CreatedAt) && record.ID <= result.Start.ID) {
 			continue
 		}
 		result.Start = &fleetLifecycleEvidence{ID: record.ID, State: record.State, Phase: record.CurrentPhase, CreatedAt: record.CreatedAt, Error: boundedOperationText(plainLogText(record.Error), 512)}

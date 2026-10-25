@@ -72,6 +72,7 @@ type NodeCreateInput struct {
 type NodeCloneInput struct {
 	SourceNode string `json:"source_node"`
 	NodeSlug   string `json:"node_slug"`
+	Start      bool   `json:"start,omitempty"`
 }
 
 func NewService(cfg Config, sandbox SandboxClient, stdin io.Reader, stdout, stderr io.Writer) *Service {
@@ -1766,10 +1767,33 @@ func (s *Service) nodeStopClaimed(ctx context.Context, resolved Node) (_ Node, e
 // moment it is about to be recorded.
 const nodeCloneSourceRestartTimeout = limaCommandTimeout + 2*time.Minute
 
-func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
+func (s *Service) NodeClone(ctx context.Context, input NodeCloneInput) (Node, error) {
 	if s.daemonClient != nil || s.operationConnect != nil {
 		return s.daemonNodeOperation(ctx, NodeOperationRequest{Kind: "clone", Clone: &input})
 	}
+	node, err := s.cloneNode(ctx, input)
+	if err != nil || !input.Start {
+		return node, err
+	}
+	// cloneNode's deferred source restoration must finish before child boot.
+	return s.startCommittedNode(ctx, node)
+}
+
+// Keep the committed identity and persisted failure state when boot fails.
+// The cloned disk remains available for inspection and a later start/retry.
+func (s *Service) startCommittedNode(ctx context.Context, node Node) (Node, error) {
+	started, err := s.NodeStart(ctx, node.ID)
+	if err == nil {
+		return started, nil
+	}
+	stored, loadErr := s.store.NodeByID(node.ID)
+	if loadErr == nil {
+		node = stored
+	}
+	return node, errors.Join(err, loadErr)
+}
+
+func (s *Service) cloneNode(ctx context.Context, input NodeCloneInput) (childNode Node, err error) {
 	s.log().Debug("operation started", "op", "node.clone", "source", input.SourceNode)
 	defer s.logOperation("node.clone", s.now(), &err)
 

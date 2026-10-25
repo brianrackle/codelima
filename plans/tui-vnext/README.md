@@ -23,7 +23,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions, VM inspection and readiness-gated ports verified; final artboard qualification remains |
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
-| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: single-node delete/stop review and automated/Linux TUI qualification complete (ADR 196); clone/start, durable batches and final native/artboard qualification remain |
+| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: delete/stop (ADR 196) and clone/start (ADR 197) passed automated and live Linux/TCG qualification; durable batches and final native/artboard qualification remain |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
@@ -37,6 +37,70 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+ADR 197 checkpoint, 2026-10-25: the clone review suggests a globally available
+name, preserves edits during asynchronous name loading, shows observed source
+and guest/host impact, and supplies a keyboard/mouse optional-start checkbox.
+The source identity stays captured. Ctrl+s submits; Esc cancels. Optional startup
+belongs to one daemon receipt and begins after source restoration. Cancellation
+tracks the child separately, while failures retain a committed child. Startup
+projections switch from the source to the child only when startup begins.
+Ordinary/session/renderer/handoff versions are now **28/2/6/7**.
+
+The final focused clone race suite passed (8.220s), as did the existing
+confirmation race checks (5.714s). Full
+`make fmt verify test-race test-integration` passed initially (core unit 89.076s,
+core race 122.723s, CLI integration 28.347s). After correcting stale validation
+text when an asynchronous suggested name arrives, the final full log records
+core unit 109.433s, core race 151.198s and CLI integration 19.943s, with formatting,
+lint, Vaxis and both binary builds successful and integration cleanup complete.
+The final run's long-lived tool observer returned 143 despite the completed log;
+no test or make process remained. A subsequent test-only `slices.Clone`
+modernization passed the focused race run above. `go doc` covered cancellation
+and text input; final `gopls` checks reported no new-file diagnostics.
+Tests cover source-before-child ordering, source/child cancellation boundaries,
+restoration/start failures, child reservations and identity, observer disconnect,
+bounded summary/Activity/fleet projections, CLI opt-in, name scope, stale results,
+keyboard event lifecycles, captured source, mouse and unreadable-size refusal.
+
+Live qualification used an isolated `tmp/cq` home and Lima root. Wide 150×38
+truecolor and compact 80×24 ANSI reviews were inspected. A name in another
+directory caused the suggestion to skip to `clone-qa-3`; invalid/occupied names,
+pasted shortcuts and 60×14/40×10 screens did not admit work. Esc discarded the
+checkbox/input. A real stopped clone preserved the parent ID, frozen
+configuration and workspace values and stayed stopped. CLI `node clone --start`
+then reached ready from a stopped source, leaving that source stopped.
+
+A running-source TUI clone/start was submitted with the mouse; the requesting
+TUI exited while a second frontend observed the same daemon receipt. The source
+stopped for copying and restarted before child boot. Its guest shell ended;
+host terminal identity, PID 2313978 and exported state survived. Activity's K
+action canceled child startup. Lima's QMP shutdown waited 180 seconds before
+stopping the child; the final receipt was canceled, the child stopped and the
+source still running. Later starting the retained child reached ready, and a
+guest shell read the source's guest-only `CQ-DISK-MARKER` file. Parent identity,
+frozen configuration, resources, workspace mode and bootstrap state matched.
+The source Overview stayed running during child startup. An initial ANSI header
+retained RGB/query-like cells until a resize repainted it; the repainted capture
+and modal used ANSI colors. This unattributed startup issue remains in TODO #57.
+
+Cleanup deleted all five fixture node records and every owned VM, closed the
+host/guest terminals, stopped the daemon/frontends/tmux server and preserved the
+host workspace marker until teardown. A privileged read-only process audit of
+command lines and environments found no fixture survivors. The baseline disk's
+SHA256 remained
+`a717dba3fd2c2dfe699262623aa2c6b5147955ea4bca46c8da4dfae8ba42913c`.
+Unmounting/removing `tmp/cq` removed all overlays, metadata, captures, scripts
+and socket state. Cleanup removed 46 new inactive exact-content INPUTRC files,
+preserving 1,015 older files and the active process reference; test work
+directories and owned logs were removed. Existing baseline resources remained.
+The full design, including durable parallel batches and final native/artboard
+qualification, remains unfinished.
+
+A live read through Claude Code in this VM again returned HTTP 200, all 49
+published files, the same canvas title and version. The retrieved canvas and
+Main artboard hashes matched the committed references; the tool's two temporary
+copies were removed after checking.
 
 ADR 196 checkpoint, 2026-10-25: single-node delete
 and stop now use a content-sized themed review with a fixed input/action area,

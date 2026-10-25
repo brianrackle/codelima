@@ -39,8 +39,8 @@ type ActivityPage struct {
 
 func activityOperationRecord(op NodeOperation, requested bool) ActivityRecord {
 	kind := op.Request.Kind
-	if kind == "create" && op.Request.startsNode() {
-		kind = "create + start"
+	if (kind == "create" || kind == "clone") && op.Request.startsNode() {
+		kind += " + start"
 	}
 	r := ActivityRecord{ID: op.ID, OperationID: op.ID, NodeID: op.NodeID, NodeSlug: op.NodeSlug, Source: op.Request.Origin, Time: nodeOperationHistoryTime(op), Text: kind + " · " + op.State, Success: op.State == "succeeded"}
 	if op.EnvironmentTest != nil {

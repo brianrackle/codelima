@@ -3728,7 +3728,7 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeClone}); err != nil {
 		t.Fatalf("performAction(clone node) error = %v", err)
 	}
-	if app.activeDialog() == nil || app.activeDialog().Title != "Clone Node" {
+	if app.activeDialog() == nil || app.activeDialog().Title != "Clone "+rootNode.Slug {
 		t.Fatalf("expected clone node dialog, got %#v", app.activeDialog())
 	}
 	if len(app.activeDialog().Fields) != 1 || app.activeDialog().Fields[0].Key != "node_slug" {
@@ -3797,7 +3797,7 @@ func TestTUINodeCloneLeavesProviderStartedCloneStoppedUntilExplicitStart(t *test
 	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeClone}); err != nil {
 		t.Fatalf("performAction(clone node) error = %v", err)
 	}
-	if app.activeDialog() == nil || app.activeDialog().Title != "Clone Node" {
+	if app.activeDialog() == nil || app.activeDialog().Title != "Clone "+rootNode.Slug {
 		t.Fatalf("expected clone node dialog, got %#v", app.activeDialog())
 	}
 	submitTUIDialog(t, app, map[string]string{

@@ -680,6 +680,34 @@ Single-node confirmations (ADR 196):
    refuse submission. Clean all disposable guests, shells, nodes, metadata,
    screenshots, processes, mounts and temporary test inputs after verification.
 
+Clone review and optional startup (ADR 197):
+
+1. With a disposable stopped node, open `c` at 150×38 truecolor and 80×24 ANSI.
+   Verify a mint review, suggested available name, preserved values, truthful
+   stopped-source description and initially unchecked startup. An existing
+   suffixed name outside the current directory must affect the suggestion.
+2. Edit/paste the name, try an invalid/occupied slug, Tab to the checkbox and
+   toggle it with Space and mouse. Esc discards the review immediately. Pasted
+   shortcuts and a 60×14/global minimum-size screen must not submit. Restore
+   the terminal, submit with Ctrl+s and no startup, and inspect the stopped
+   sibling's frozen values and parent ID.
+3. Start the source and open one guest and one host shell. Open `c`: the running
+   warning must describe stop/copy/restart and guest versus host impact without
+   inventing a duration. Choose startup, submit, then close the requesting TUI.
+   Another frontend must see one clone/start receipt advance from clone to boot;
+   the source restarts before the child starts. Cancel the child's boot through
+   Activity: the child must stop while the restored source remains running.
+4. Verify the old guest session ended and the host session retains its terminal
+   ID/PID/state. Inspect the clone's copied guest marker and frozen configuration
+   after a later start. Activity and child detail must identify the same clone
+   operation; source detail must not report child boot as its own start.
+5. From a stopped sibling, exercise `node clone SOURCE --slug CHILD --start`
+   through successful readiness under one receipt; its source stays stopped.
+   The automated lifecycle tests also cover complete running-source success,
+   cancellation during copy/restoration/child boot and retained startup failures.
+   Close shells, delete fixtures, stop the owned daemon and clean every
+   verification artifact/process/mount afterward.
+
 Embedded shell (ADR 195):
 
 1. With `shell.mode=attach`, existing raw sessions must not expose Shell detail;

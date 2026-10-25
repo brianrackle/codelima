@@ -115,7 +115,7 @@ func (a *vaxisTUIApp) applyLifecycleData(event tuiLifecycleDataEvent) {
 func (a *vaxisTUIApp) activeStartOperation() (NodeOperation, bool) {
 	id := a.state.selectedEntry().node.ID
 	for _, operation := range a.activity.page.Running {
-		if operation.NodeID != id || !operation.Request.startsNode() {
+		if operation.NodeID != id || !operation.startsNode() {
 			continue
 		}
 		if a.lifecycle.nodeID == id && a.lifecycle.operation.ID == operation.ID {
@@ -131,7 +131,7 @@ func (a *vaxisTUIApp) activeStartOperation() (NodeOperation, bool) {
 		return operation, true
 	}
 	record := a.lifecycle.operation
-	if a.lifecycle.nodeID == id && record.NodeID == id && (record.State == "running" || record.State == "canceling") && record.Request.startsNode() {
+	if a.lifecycle.nodeID == id && record.NodeID == id && (record.State == "running" || record.State == "canceling") && record.startsNode() {
 		return record, true
 	}
 	return NodeOperation{}, false

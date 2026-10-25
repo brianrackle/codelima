@@ -414,13 +414,14 @@ var cliCommands = []*cliCommand{
 		MinArgs:    1,
 		Flags: func(fs *flag.FlagSet) {
 			fs.String("slug", "", "unique lowercase identifier for the cloned node")
+			fs.Bool("start", false, "start the clone after restoring the source")
 		},
 		Run: func(ctx context.Context, service *Service, sourceNode string, fs *flag.FlagSet, _ []string) (any, error) {
 			slug := flagString(fs, "slug")
 			if slug == "" {
 				return nil, invalidArgument("node clone requires --slug", nil)
 			}
-			return service.NodeClone(ctx, NodeCloneInput{SourceNode: sourceNode, NodeSlug: slug})
+			return service.NodeClone(ctx, NodeCloneInput{SourceNode: sourceNode, NodeSlug: slug, Start: flagBool(fs, "start")})
 		},
 	},
 	{

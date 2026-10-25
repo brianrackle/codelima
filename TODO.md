@@ -110,8 +110,7 @@ Confirmation work (ADR 196): single-node delete/stop review, exact-name gating,
 captured attachment, guest/host impact and host-tab preservation are implemented;
 automated and live Linux/TCG qualification passed, with cleanup recorded in the
 design ledger. The Dialogs artboard remains
-partial. Implement the clone review with an available default name, actual
-source-cycle impact and a daemon-owned optional child start, then the durable
+partial. Implement the durable
 parallel batch owner described above and its per-node review/outcomes. Advantages:
 clone/start and every batch member survive frontend exit, with truthful progress.
 Disadvantages: admission, cancellation, source restoration, partial failure and
@@ -120,16 +119,24 @@ time is not stored; use the matching confirmed-stop evidence now and preserve
 explicit unavailable states when it is absent. Final whole-design/native QA is
 still required. These stages do not reduce the accepted 26-artboard scope.
 
-Clone/start implementation note: `nodeOperations.bindCreatedNode` already adds
-the child reservation and persists its receipt identity. Reuse that transition
-after the clone has returned and restored the source, before optional child
-startup. Do not simply add clone to `startsNode()`: cancellation cleanup currently
-uses the receipt's original node ID, which is the source during cloning, and
-could stop the source again after its guaranteed restoration. Track the child
-cleanup target separately; test cancellation before and after child admission,
-source-restoration failure, startup failure and observer disconnect. Keep the
-direct Service and daemon entrypoints consistent, and qualify compatibility for
-the new optional start field so an older daemon cannot silently ignore it.
+Clone/start (ADR 197) is implemented, with an explicit child cancellation target,
+source-before-child ordering, retained child failures, global suggested names and
+protocol 28 compatibility. Focused and full automated gates pass. Live Linux/TCG
+checks passed for stopped/running sources, optional startup, requester exit,
+child cancellation with source preservation, retained-child restart and copied
+guest data. All owned VM, terminal, daemon, metadata, capture, mount and scratch
+artifacts were removed; baseline resources were preserved. The design ledger
+records the evidence. Final whole-design/native qualification remains open.
+
+Terminal startup follow-up: the fresh 80×24 tmux ANSI frontend briefly retained
+RGB logo cells and query-like header characters from initial capability probes;
+resizing away and back repainted the header correctly, and the clone review used
+only ANSI colors. Similar transient headers appeared during earlier fixture
+runs. Investigate capability-response handling and invalidation after settings
+load with a startup capture regression and native-terminal comparison.
+Advantages: consistent first-frame logo/colors. Disadvantages: terminal/tmux
+negotiation timing must be reproduced before choosing a rendering fix. This is
+an observed qualification issue, not yet an attributed application regression.
 
 Manual setup follow-up: launching two frontends concurrently against the new
 ADR 193 disposable home produced one `daemon exited before becoming ready`

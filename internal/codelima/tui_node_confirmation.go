@@ -21,6 +21,7 @@ type tuiNodeConfirmation struct {
 	tooSmall                  bool
 	run                       func(Node) error
 	attach                    func(string) error
+	clone                     *tuiCloneOptions
 }
 
 func (a *vaxisTUIApp) newNodeConfirmation(node Node, action tuiActionID, run func(Node) error) *tuiNodeConfirmation {
@@ -31,7 +32,13 @@ func (a *vaxisTUIApp) newNodeConfirmation(node Node, action tuiActionID, run fun
 		label = "Delete"
 		fields = []tuiDialogField{newTUIInputField("confirm", "Type "+node.Slug+" to confirm", "", true)}
 	}
-	d.dialog = newTUIDialog(label+" "+node.Slug+"?", label, nil, fields, d.submit)
+	title := label + " " + node.Slug + "?"
+	if action == tuiActionNodeClone {
+		label, title = "Clone", "Clone "+node.Slug
+		fields = []tuiDialogField{newTUIInputField("node_slug", "Name", "", true)}
+		d.clone = &tuiCloneOptions{}
+	}
+	d.dialog = newTUIDialog(title, label, nil, fields, d.submit)
 	d.skipIdle = a.managerSettings().ConfirmStop == "busy"
 	d.initialSkipIdle = d.skipIdle
 	d.attach = func(id string) error { return a.startShellModeForNode(node.ID, "attach", false, false, id) }
@@ -74,10 +81,13 @@ func (d *tuiNodeConfirmation) ready() bool {
 	if _, err := d.currentNode(); err != nil {
 		return false
 	}
+	if d.clone != nil {
+		return d.cloneNameError() == nil
+	}
 	return d.action != tuiActionNodeDelete || d.dialog.Fields[0].Input.String() == d.node.Slug
 }
 
-func (d *tuiNodeConfirmation) submit(map[string]string) error {
+func (d *tuiNodeConfirmation) submit(values map[string]string) error {
 	node, err := d.currentNode()
 	if err != nil {
 		return err
@@ -85,6 +95,13 @@ func (d *tuiNodeConfirmation) submit(map[string]string) error {
 	// Do not use rawValue: trimming would accept a different confirmation text.
 	if d.action == tuiActionNodeDelete && d.dialog.Fields[0].Input.String() != d.node.Slug {
 		return fmt.Errorf("type %s exactly to confirm", d.node.Slug)
+	}
+	if d.clone != nil {
+		// Values is also the public dialog callback contract used by callers.
+		d.dialog.SetFieldValue("node_slug", values["node_slug"])
+		if err := d.cloneNameError(); err != nil {
+			return err
+		}
 	}
 	if d.action == tuiActionNodeStop && d.skipIdle != d.initialSkipIdle {
 		value := "always"
@@ -130,6 +147,11 @@ func (d *tuiNodeConfirmation) activate(id string) (bool, error) {
 		return d.dialog.submit()
 	case "skip-idle":
 		d.skipIdle = !d.skipIdle
+	case "start-clone":
+		d.clone.start = !d.clone.start
+		d.clone.checkFocus = true
+	case "clone-name":
+		d.clone.checkFocus = false
 	case "attach":
 		d.dialog.Error = ""
 		if err := d.attachFirst(); err != nil {
@@ -173,7 +195,11 @@ func (d *tuiNodeConfirmation) Update(event vaxis.Event) (bool, error) {
 	}
 	key, ok := event.(vaxis.Key)
 	if !ok || key.EventType == vaxis.EventPaste {
-		d.dialog.updateInput(event)
+		if d.clone != nil {
+			d.updateCloneInput(event)
+		} else {
+			d.dialog.updateInput(event)
+		}
 		return false, nil
 	}
 	if !tuiKeyActivates(key, false) {
@@ -192,6 +218,19 @@ func (d *tuiNodeConfirmation) Update(event vaxis.Event) (bool, error) {
 		if tuiKeyActivates(key, true) {
 			return d.activate("cancel")
 		}
+	case d.clone != nil && (key.Matches(vaxis.KeyTab) || key.Matches(vaxis.KeyTab, vaxis.ModShift)):
+		d.clone.checkFocus = !d.clone.checkFocus
+	case d.clone != nil && key.Matches(vaxis.KeyEnter):
+		if tuiKeyActivates(key, true) {
+			if d.clone.checkFocus {
+				return d.activate("start-clone")
+			}
+			d.clone.checkFocus = true
+		}
+	case d.clone != nil && d.clone.checkFocus && key.Matches(' '):
+		if tuiKeyActivates(key, true) {
+			return d.activate("start-clone")
+		}
 	case key.Matches(vaxis.KeyEnter), key.Matches('s', vaxis.ModCtrl), d.action == tuiActionNodeStop && key.Matches('s'):
 		if tuiKeyActivates(key, true) {
 			return d.activate("submit")
@@ -205,7 +244,11 @@ func (d *tuiNodeConfirmation) Update(event vaxis.Event) (bool, error) {
 			return d.activate("attach")
 		}
 	default:
-		d.dialog.updateInput(event)
+		if d.clone != nil {
+			d.updateCloneInput(event)
+		} else {
+			d.dialog.updateInput(event)
+		}
 	}
 	return false, nil
 }
@@ -220,10 +263,16 @@ func (d *tuiNodeConfirmation) PreferredSize() (int, int) {
 	for _, line := range d.lines(d.app.managerTheme()) {
 		rows += max(1, len(helpDescriptionRows(plainLogText(line.text), max(1, width-4))))
 	}
+	if d.clone != nil {
+		rows += 3
+	}
 	return 84, min(26, max(14, rows+8))
 }
 
 func (d *tuiNodeConfirmation) FooterHint() string {
+	if d.clone != nil {
+		return "Ctrl+s clone · Tab name/start · Space toggle · PgUp/PgDn review · Esc cancel"
+	}
 	if d.action == tuiActionNodeDelete {
 		return "Enter delete after exact name · PgUp/PgDn review · Esc cancel"
 	}

@@ -330,8 +330,13 @@ test-embedded-shell: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(EMBEDDED_SHELL_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIEmbedded|TUIManager|TUIResize|TUIHostTerminal|TUIDrawActiveHost|TUITerminalTab|TUIShortcut|TUIHandleKeyOption|TUIFocusToggle|TUIHandleKeyF6|TUIBackgroundNodeOperation|TUIDrawTerminal)' -count=1 -timeout=120s
 
-.PHONY: test-node-confirmations
+.PHONY: test-node-confirmations test-clone
 NODE_CONFIRMATION_TEST_FLAGS ?=
+CLONE_TEST_FLAGS ?=
+test-clone: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(CLONE_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(NodeClone|NodeOperations(Clone|CreateStart)|TUIClone)' -count=1 -timeout=120s
+
 test-node-confirmations: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(NODE_CONFIRMATION_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUINode(Confirmation|Restart|Actions)|TUIStopOverlay|TUIManagerSettings|TUIManagerPalette|TUIFleetSession)' -count=1 -timeout=120s

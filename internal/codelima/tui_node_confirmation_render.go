@@ -34,7 +34,8 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 	}
 	var lines []tuiConfirmationLine
 	add := func(text string, style vaxis.Style) { lines = append(lines, tuiConfirmationLine{text, style}) }
-	if d.action == tuiActionNodeDelete {
+	switch d.action {
+	case tuiActionNodeDelete:
 		disk := "virtual disk (size unavailable)"
 		if node.DiskMiB != 0 {
 			disk = formatTUIResourceSize(node.DiskMiB) + " virtual disk"
@@ -59,7 +60,21 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 		}
 		add(last, t.dim)
 		add(fmt.Sprintf("%d guest sessions · %d host sessions", guests, hosts), t.dim)
-	} else {
+	case tuiActionNodeClone:
+		add("Copies the disk. Keeps the directory, template link, frozen values, bootstrap state and workspace mode.", t.muted)
+		add("", t.text)
+		stale := d.app.daemonDisconnected || (d.app.fleetEvidence.loaded || d.app.fleetEvidence.err != nil) && d.app.fleetEvidenceStale()
+		observation := node.LastRuntimeObservation
+		switch {
+		case !stale && observation != nil && observation.Exists && observation.Status == ObservationRunning:
+			add(node.Slug+" is running: it stops for the copy, then restarts.", t.amber)
+			add(fmt.Sprintf("Its %d guest sessions end. %d host sessions keep running.", guests, hosts), t.dim)
+		case !stale && observation != nil && observation.Exists && observation.Status == ObservationStopped:
+			add("Source is stopped; it stays stopped.", t.dim)
+		default:
+			add("Source state unavailable. If running, it stops for the copy and restarts; guest sessions end.", t.amber)
+		}
+	default:
 		add(fmt.Sprintf("%d guest sessions will end:", guests), t.text)
 		for _, session := range sessions {
 			if !session.kindKnown || session.kind != terminal.NodeShell {
@@ -100,6 +115,8 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	accent := t.amber
 	if d.action == tuiActionNodeDelete {
 		accent = t.coral
+	} else if d.clone != nil {
+		accent = t.mint
 	}
 	body := border.All(win, accent)
 	w, h := body.Size()
@@ -113,6 +130,24 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	}
 	content := body.New(1, 0, w-2, h)
 	cw, _ := content.Size()
+	top := 0
+	if d.clone != nil {
+		top = 3
+		tuiLine(content, 0, "Name", t.text)
+		inputWin := content.New(6, 0, max(1, min(cw-6, 36)), 1)
+		input := d.dialog.Fields[0].Input
+		input.HideCursor = d.clone.checkFocus
+		input.Content = d.app.managerTheme().text
+		tuiFill(inputWin, input.Content)
+		input.Draw(inputWin)
+		x, y := inputWin.Origin()
+		d.controls = append(d.controls, tuiCommandTarget{rect: tuiRect{col: x, row: y, width: min(cw-6, 36), height: 1}, id: "clone-name"})
+		hint, style := "Name available", t.mint
+		if err := d.cloneNameError(); err != nil {
+			hint, style = err.Error(), t.dim
+		}
+		tuiLine(content, 1, plainLogText(hint), style)
+	}
 	var rows []tuiConfirmationLine
 	for _, line := range d.lines(t) {
 		if line.text == "" {
@@ -122,24 +157,35 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 			rows = append(rows, tuiConfirmationLine{text, line.style})
 		}
 	}
-	d.height, d.totalRows = h-6, len(rows)
+	d.height, d.totalRows = h-6-top, len(rows)
 	d.scroll = min(max(0, d.scroll), max(0, len(rows)-d.height))
 	for i, row := range rows[d.scroll:min(len(rows), d.scroll+d.height)] {
-		tuiLine(content, i, row.text, row.style)
+		tuiLine(content, top+i, row.text, row.style)
 	}
 	hint := ""
 	if len(rows) > d.height {
 		hint = fmt.Sprintf("PgUp/PgDn · %d–%d/%d", d.scroll+1, min(len(rows), d.scroll+d.height), len(rows))
 	}
 	tuiLine(content, h-6, hint, t.dim)
-	if d.action == tuiActionNodeDelete {
+	switch d.action {
+	case tuiActionNodeDelete:
 		tuiLine(content, h-5, "Type "+d.node.Slug+" to confirm", t.muted)
 		input := d.dialog.Fields[0].Input
 		input.Content = d.app.managerTheme().text
 		inputWin := content.New(0, h-4, min(cw, 36), 1)
 		tuiFill(inputWin, input.Content)
 		input.Draw(inputWin)
-	} else {
+	case tuiActionNodeClone:
+		check := "[ ]"
+		if d.clone.start {
+			check = "[x]"
+		}
+		style := t.muted
+		if d.clone.checkFocus {
+			style = t.mint
+		}
+		d.drawControl(content, 0, h-5, cw, "start-clone", check+" Start clone when done", style)
+	default:
 		check := "[ ]"
 		if d.skipIdle {
 			check = "[x]"
@@ -161,6 +207,8 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	button := "s Stop"
 	if d.action == tuiActionNodeDelete {
 		button = "Enter Delete"
+	} else if d.clone != nil {
+		button = "Ctrl+s Clone"
 	}
 	d.drawControl(content, cw-len(button)-16, h-1, len(button)+2, "submit", "["+button+"]", buttonStyle)
 	d.drawControl(content, cw-12, h-1, 12, "cancel", "[Esc Cancel]", t.muted)

@@ -928,3 +928,17 @@ when a guest operation completes. Share the generic input and submission model
 inside a dedicated domain review instead of adding lifecycle behavior to every
 dialog. Revalidate the current root terminal size before activation: the global
 minimum-size screen may skip the overlay's Draw method entirely (ADR 196).
+
+## Clone before optional child startup (ADR 197)
+
+A clone's deferred source restoration must finish before the child boots. Keep
+clone execution separate, bind the committed child under the existing daemon
+receipt, and reuse normal startup phases. Explicit cancellation tracks a child
+startup UUID separately from the receipt's original source UUID; do not infer
+cleanup from optional-start intent. Bound list summaries retain intent and
+current phase, while startup projections recognize the child only after its
+first startup phase. Return the committed node on a later startup failure.
+
+Reuse captured-node reviews for clone inputs. Load all names off the UI loop,
+apply only to the same live review, preserve edits and let the service arbitrate
+final uniqueness. The checkbox belongs to this request, not global settings.

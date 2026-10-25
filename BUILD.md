@@ -10,6 +10,13 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-clone CLONE_TEST_FLAGS=-race` covers clone/start ordering,
+cancellation before/after child admission, source restoration, retained startup
+failures, reservations, projections and observer disconnect, plus the clone
+review's global name suggestion, captured target, input, mouse and resize
+behavior (ADR 197). Run the clone subsection of QA.md Flow 7 with disposable
+real VMs after the complete gates.
+
 `make test-node-confirmations NODE_CONFIRMATION_TEST_FLAGS=-race` covers exact
 deletion text, captured node/session targets, stale actions, asynchronous
 preference revalidation, guest/host impact, retained host tabs, compact scrolling,
@@ -48,7 +55,7 @@ responsive panels, stable session/route selection, captured end confirmation,
 daemon-derived session age, coalesced cross-client tab-order refresh, mouse
 links and stale/unknown observations
 (ADR 191). It includes the shared fleet/manager and bounded recent-evidence
-regressions. Ordinary/session/renderer/handoff protocols remain 27/2/6/7.
+regressions. Ordinary/session/renderer/handoff protocols are 28/2/6/7.
 Run the Overview subsection of QA.md Flow 7 after the complete gates.
 
 `make test-empty-nodes` covers the first-run guide, actual defaults, scoped
@@ -81,7 +88,7 @@ Per-agent validation tests (ADR 190) cover real service execution records,
 failure/retry, pending suffixes, clones, legacy/edited records, configured
 profile checks, inert labels, read-only projection and responsive presentation.
 Use `FLEET_EVIDENCE_TEST_FLAGS=-race` for race checking. The current ordinary
-daemon protocol is **27**; update older daemons explicitly. Session protocol 2
+daemon protocol is **28**; update older daemons explicitly. Session protocol 2
 is unchanged; renderer protocol 6 and handoff protocol 7 include retained prompt
 idle metadata. The importer still accepts handoff 6 and preserves its Activity
 queue and baselines. Run the fleet evidence/session flows in

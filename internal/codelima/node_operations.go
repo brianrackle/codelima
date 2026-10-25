@@ -35,7 +35,7 @@ type NodeOperationRequest struct {
 }
 
 func (r NodeOperationRequest) startsNode() bool {
-	return r.Kind == "start" || r.Kind == "retry" || r.Kind == "restart" || r.Kind == "create" && r.Create != nil && r.Create.Start
+	return r.Kind == "start" || r.Kind == "retry" || r.Kind == "restart" || r.Kind == "create" && r.Create != nil && r.Create.Start || r.Kind == "clone" && r.Clone != nil && r.Clone.Start
 }
 
 type NodeOperation struct {
@@ -63,6 +63,13 @@ type NodeOperationResult struct {
 	NodeID   string     `json:"node_id"`
 	NodeSlug string     `json:"node_slug"`
 	Status   NodeStatus `json:"status"`
+}
+
+// A clone initially belongs to the source. It becomes a child start attempt
+// only after the child is bound and startup's first phase has been persisted.
+// CurrentPhase survives the bounded list projection; full phase bodies do not.
+func (o NodeOperation) startsNode() bool {
+	return o.Request.startsNode() && (o.Request.Kind != "clone" || o.CurrentPhase != "" && o.CurrentPhase != "clone")
 }
 
 type runningNodeOperation struct {
@@ -313,7 +320,7 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 	}
 	record := NodeOperation{ID: request.ID, Request: request, NodeID: node.ID, NodeSlug: node.Slug, State: "running", CreatedAt: m.service.now(), EnvironmentTest: environmentTest}
 	record.Phases = initialNodeOperationPhases(request.Kind)
-	if request.Kind == "create" && request.startsNode() {
+	if (request.Kind == "create" || request.Kind == "clone") && request.startsNode() {
 		record.Phases = append(record.Phases, initialNodeOperationPhases("start")...)
 	}
 	if err := m.persist(record); err != nil {
@@ -385,6 +392,10 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 		service = m.service.withIO(operationOutputTee(m.service.stdout, output), operationOutputTee(m.service.stderr, output))
 	}
 	nodeID := operation.record.NodeID
+	cleanupNodeID := ""
+	if request.Kind == "start" || request.Kind == "retry" || request.Kind == "restart" {
+		cleanupNodeID = nodeID
+	}
 	var node Node
 	var err error
 	service.operationPhase = func(id, detail string, skipped bool) error {
@@ -408,26 +419,30 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 			node, err = service.NodeStop(ctx, nodeID)
 		case "delete":
 			node, err = service.NodeDelete(ctx, nodeID)
-		case "create":
-			node, err = service.createNode(ctx, *request.Create)
+		case "create", "clone":
+			if request.Kind == "create" {
+				node, err = service.createNode(ctx, *request.Create)
+			} else {
+				input := *request.Clone
+				input.SourceNode = nodeID
+				node, err = service.cloneNode(ctx, input)
+			}
 			if err == nil && request.startsNode() {
 				nodeID = node.ID
 				err = m.bindCreatedNode(operation, node)
 				if err == nil {
-					// The creation's liveness token is released before startup.
-					// Its admission remains reserved under this same receipt.
+					// Creation/clone tokens have been released and any source
+					// restoration has completed. Reserve only the child for
+					// cancellation cleanup, never the clone's original source.
+					cleanupNodeID = nodeID
 					startup := m.service.withIO(m.service.stdout, m.service.stderr)
 					startup.operationPhase, startup.operationOutput = service.operationPhase, output
 					err = startup.advanceOperationPhase("prepare", "start the created VM", false)
 					if err == nil {
-						node, err = startup.NodeStart(ctx, nodeID)
+						node, err = startup.startCommittedNode(ctx, node)
 					}
 				}
 			}
-		case "clone":
-			input := *request.Clone
-			input.SourceNode = nodeID
-			node, err = service.NodeClone(ctx, input)
 		}
 	}
 	err = errors.Join(err, output.Close())
@@ -446,12 +461,12 @@ func (m *nodeOperations) run(ctx context.Context, operation *runningNodeOperatio
 	executionFinished := m.service.now()
 	finishNodeOperationPhases(&operation.record, phaseState, &executionFinished)
 	stopFailed := false
-	if errors.Is(cause, errNodeOperationCanceled) && request.startsNode() && nodeID != "" {
+	if errors.Is(cause, errNodeOperationCanceled) && cleanupNodeID != "" {
 		// The start released its liveness token. Keep this manager's resource
 		// reservation while stopping the VM on an independent bounded context.
 		m.mu.Unlock()
 		stopCtx, cancel := context.WithTimeout(context.Background(), limaCommandTimeout)
-		stopped, stopErr := m.service.NodeStop(stopCtx, nodeID)
+		stopped, stopErr := m.service.NodeStop(stopCtx, cleanupNodeID)
 		cancel()
 		if stopErr == nil {
 			node = stopped
@@ -517,7 +532,7 @@ func (m *nodeOperations) LatestStart(nodeID string) (NodeOperation, error) {
 	var latest *NodeOperation
 	for _, operation := range m.records {
 		record := &operation.record
-		if record.NodeID != nodeID || operationExpired(*record, m.service.now()) || !record.Request.startsNode() {
+		if record.NodeID != nodeID || operationExpired(*record, m.service.now()) || !record.startsNode() {
 			continue
 		}
 		if latest == nil || record.CreatedAt.After(latest.CreatedAt) || record.CreatedAt.Equal(latest.CreatedAt) && record.ID > latest.ID {
@@ -541,10 +556,14 @@ func (m *nodeOperations) List() []NodeOperation {
 			record := operation.record
 			record.Progress = summarizeNodeOperationProgress(record)
 			createStart := record.Request.Kind == "create" && record.Request.startsNode()
+			cloneStart := record.Request.Kind == "clone" && record.Request.startsNode()
 			record.Request = NodeOperationRequest{ID: record.ID, Kind: record.Request.Kind, Origin: record.Request.Origin}
 			if createStart {
 				// Keep the startup contract without copying the full create input.
 				record.Request.Create = &NodeCreateInput{Start: true}
+			}
+			if cloneStart {
+				record.Request.Clone = &NodeCloneInput{Start: true}
 			}
 			record.Result = nil
 			record.Output, record.OutputPartial = nil, ""

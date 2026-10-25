@@ -619,35 +619,3 @@ func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
 		})
 	})
 }
-
-func (a *vaxisTUIApp) openCloneNodeDialog(node Node) {
-	fields := []tuiDialogField{newTUIInputField("node_slug", "Cloned Node Slug", "", true)}
-	a.overlay = newTUIDialog(
-		"Clone Node",
-		"Clone",
-		[]string{
-			"Clone the selected node in the same directory and configuration.",
-			"The cloned VM keeps the source's frozen configuration and writable state.",
-		},
-		fields,
-		func(values map[string]string) error {
-			return a.startOperation(tuiOperationRequest{
-				Title:         "Cloning node " + node.Slug,
-				DisplayStatus: "cloning",
-				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String()},
-				EntryKeys:     []string{terminal.NodeTarget(node.ID).String()},
-				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-					childNode, err := service.NodeClone(ctx, NodeCloneInput{SourceNode: node.ID, NodeSlug: values["node_slug"]})
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:       "cloned node " + node.Slug + " to " + childNode.Slug,
-						PreferredKey: terminal.NodeTarget(childNode.ID).String(),
-						ReloadData:   true,
-					}, nil
-				},
-			})
-		},
-	)
-}

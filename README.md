@@ -875,7 +875,21 @@ Clone a node to branch an experiment:
 
 ```sh
 codelima node clone api-redesign --slug api-redesign-2
+codelima node clone api-redesign --slug api-redesign-3 --start
 ```
+
+Cloning copies the disk and preserves the source directory, template link,
+frozen values, bootstrap state and workspace mode. A running source stops for
+the copy and then restarts; its guest shell processes end, while host shells
+keep running. The clone stays stopped unless `--start` is supplied. Optional
+startup runs after source restoration under the same daemon receipt, even if
+the CLI or TUI exits. A failed child start leaves the clone available to inspect
+and retry.
+
+In the TUI, `c` opens a review with an available suggested name. Edit the name,
+use Tab then Space (or click) to toggle **Start clone when done**, and press
+Ctrl+s to submit. Esc cancels. The review shows observed source/session impact;
+the daemon checks the name again when it executes the request.
 
 Create a guest-local workspace instead of a host mount:
 

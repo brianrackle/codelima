@@ -493,6 +493,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyCreateData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiCloneNamesEvent:
+		a.applyCloneNames(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiCreatePathEvent:
 		a.applyCreatePath(event)
 		a.requestRedraw()
