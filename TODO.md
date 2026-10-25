@@ -581,8 +581,21 @@ and loop volume, `tmp/et`, test scratch and temporary `tmp/stepqa/bin/limactl`
 fault wrapper have been removed. The older stepqa fixture remains separate
 cleanup debt. Durable teardown avoids
 orphaned guests but retains a reservation and consumes resources until runtime
-deletion succeeds. Add the reference's dependency warning using an explainable
-static check, clearly distinguishing a heuristic from execution.
+deletion succeeds.
+
+ADR 178 implements the reference's dependency warning using bounded shell
+syntax analysis, current provider definitions and an exact-source unsaved edit.
+Focused checks, full verify, terminal attachment, race and integration passed.
+Live wide/compact warning, keyboard/mouse draft, discard and exact-source save
+checks passed. Current provider edits, quoted data, conditional/simulated/
+background installs and unavailable syntax/size analysis were verified. An
+oversized-command regression exposed a buried notice; notices now precede the
+script. The final focused/recipe/build/gopls, full verify, race and integration checks
+pass. The isolated daemon/TUI/tmux stopped, its tmpfs was unmounted, and all
+`tmp/dq` and focused-test scratch was removed. No VM was created. This heuristic makes
+the reference example actionable without execution, but dynamic shell behavior
+and unsupported package managers remain unknown rather than proven guest
+dependencies.
 
 Finish native terminal and exact artboard qualification, including generic
 child-modal mouse/presentation. Global catalog metadata currently uses the

@@ -22,10 +22,18 @@ type tuiRecipeCatalog struct {
 	specs          map[string]nodeSpecSnapshot
 	runs           map[string]tuiEnvironmentRun
 	incompleteRuns map[string]bool
+	dependencies   map[string]environmentDependencyReport
 }
 
 func (s *Service) readRecipeCatalog(ctx context.Context, environments []EnvironmentConfig) (tuiRecipeCatalog, error) {
 	d := tuiRecipeCatalog{specs: map[string]nodeSpecSnapshot{}, runs: map[string]tuiEnvironmentRun{}, incompleteRuns: map[string]bool{}}
+	d.dependencies = make(map[string]environmentDependencyReport, len(environments))
+	for _, env := range environments {
+		if err := ctx.Err(); err != nil {
+			return d, err
+		}
+		d.dependencies[env.ID] = analyzeEnvironmentDependencies(env.BootstrapCommands)
+	}
 	// Include deleted nodes for historical execution evidence, but never count
 	// them as current users of a template. Do not consult the scoped fleet.
 	nodes, err := s.store.ListNodes(true)
@@ -266,6 +274,11 @@ func (a *vaxisTUIApp) handleRecipeMouse(m vaxis.Mouse) bool {
 				case "command":
 					a.recipes.command = c.index
 					a.recipes.details = true
+				case "dependency":
+					if a.environmentsView && a.environmentIndex < len(a.managerData.environments) {
+						a.recipes.command, a.recipes.details = c.index, true
+						a.openRecipeDependencyFix(a.managerData.environments[a.environmentIndex], c.index)
+					}
 				default:
 					if err := a.handleTemplateAction(vaxis.Key{Keycode: []rune(c.action)[0], Text: c.action}); err != nil {
 						a.setStatus(slog.LevelError, err.Error())
@@ -296,6 +309,11 @@ func (a *vaxisTUIApp) handleRecipeMouse(m vaxis.Mouse) bool {
 func (a *vaxisTUIApp) recipeFooter() string {
 	if a.environmentsView {
 		if a.recipes.details {
+			if a.environmentIndex < len(a.managerData.environments) {
+				if warning, ok := a.recipeDependencyWarning(a.managerData.environments[a.environmentIndex], a.recipes.command); ok && warning.Fix != nil {
+					return "Enter review curl fix · e edit · ↑↓ command · ← list"
+				}
+			}
 			return "↑↓ command · Enter edit · Shift+↑↓ order · o add · D remove · E editor · ← list"
 		}
 		return "↑↓ select · → details · e edit · n new · c clone · d delete · Tab configs"

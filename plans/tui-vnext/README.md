@@ -26,7 +26,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
-| [Templates · environments](reference/Environments.dc.html) | ADRs 176–177 ordered drafts, external editing, execution evidence and daemon-owned disposable tests | Partial; disposable runs verified, dependency warning and final artboard/native qualification pending |
+| [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -528,3 +528,37 @@ temporary `tmp/stepqa/bin/limactl` fault wrapper, screenshots, scripts, logs,
 `tmp/et` and Go test scratch were removed. The older stepqa fixture remains
 separate cleanup debt. The dependency warning, final artboard/native
 qualification, complete redesign and full QA matrix remain open in TODO #57.
+
+## Environment dependency hints (ADR 178)
+
+The catalog now parses bounded shell syntax without execution, flags literal
+curl uses without recognized earlier installation and derives provider hints
+from current saved definitions. Conservative control-flow handling excludes
+conditional, background and simulated installs from unconditional evidence.
+Enter or the mouse opens a source-preserving edit in the shared unsaved draft;
+normal editing, explicit save and discard remain available. The parser is
+pinned to mvdan.cc/sh/v3 v3.12.0 with creack/pty v1.1.24 selected by its module.
+
+Focused analysis/draft checks, recipe regressions, full verify, terminal
+attachment, race and CLI integration passed. A later oversized-command
+regression showed that analysis-limit notices could be buried below the script;
+notices now precede command content. The regression, recipe suite and final
+build pass, and gopls reports no diagnostics. Final full verify, race and CLI
+integration also pass (core unit 49.576s, core race 69.596s, integration 16.631s).
+
+Live 150×38 and 80×24 checks inspected warnings and reviewable drafts. Enter
+and a mouse click opened the exact earlier install; discard preserved the
+saved source. Explicit apply/save inserted only curl, preserving Unicode,
+comments, quoting and multiline content, and cleared the warning. Editing the
+codex provider removed its name from the hint. Quoted examples and literal
+here-documents did not warn; conditional, simulated and background installs
+did not establish a prerequisite. No-safe-fix Enter retained ordinary editing,
+while e opened the normal environment editor. Invalid and 65,537-byte blocks
+showed visible unavailable notices and remained editable/saveable. Browsing
+and editing created no VM, and the host execution marker remained absent.
+
+The isolated daemon, TUI and tmux have stopped; the metadata/socket tmpfs was
+unmounted. All definitions, captures, logs and other scratch under `tmp/dq`,
+plus focused-test scratch, have been removed. No VM was created. The parser is advisory;
+unsupported dynamic shell behavior remains unknown. Full redesign and native/
+artboard qualification remain open in TODO #57.

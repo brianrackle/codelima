@@ -308,6 +308,9 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 			case key.MatchString("t"):
 				return a.submitEnvironmentTest(environment)
 			case key.MatchString("e"), key.MatchString("Enter"):
+				if key.MatchString("Enter") && a.recipes.details && a.openRecipeDependencyFix(environment, a.recipes.command) {
+					break
+				}
 				e := a.openEnvironmentEditor(environment, false)
 				if key.MatchString("Enter") {
 					e.openCommands(a.recipes.command)

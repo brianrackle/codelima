@@ -16,6 +16,7 @@ type tuiRecipeDetailRow struct {
 	text    string
 	command int
 	style   vaxis.Style
+	action  string
 }
 
 func (a *vaxisTUIApp) drawTemplates(win vaxis.Window, t tuiTheme) {
@@ -204,20 +205,45 @@ func hostRecipeHint(a *vaxisTUIApp) string {
 
 func (a *vaxisTUIApp) recipeDetailRows(t tuiTheme) (string, []tuiRecipeDetailRow) {
 	var rows []tuiRecipeDetailRow
-	add := func(text string, style vaxis.Style) { rows = append(rows, tuiRecipeDetailRow{text, -1, style}) }
+	add := func(text string, style vaxis.Style) {
+		rows = append(rows, tuiRecipeDetailRow{text: text, command: -1, style: style})
+	}
 	if a.environmentsView {
 		if a.environmentIndex >= len(a.managerData.environments) {
 			return "Environment", rows
 		}
 		e := a.managerData.environments[a.environmentIndex]
+		report := a.managerData.recipes.dependencies[e.ID]
+		for _, i := range report.Unavailable[:min(3, len(report.Unavailable))] {
+			add(fmt.Sprintf("Static check unavailable for command %d (syntax or size limit).", i+1), t.dim)
+		}
+		if len(report.Unavailable) > 3 {
+			add(fmt.Sprintf("… %d more commands could not be checked.", len(report.Unavailable)-3), t.dim)
+		}
 		for i, command := range e.BootstrapCommands {
 			for j, line := range strings.Split(normalizeTUITerminalPasteText(command), "\n") {
 				prefix := "    │ "
 				if j == 0 {
 					prefix = fmt.Sprintf("%3d │ ", i+1)
 				}
-				rows = append(rows, tuiRecipeDetailRow{prefix + plainLogText(line), i, t.text})
+				rows = append(rows, tuiRecipeDetailRow{text: prefix + plainLogText(line), command: i, style: t.text})
 			}
+			if warning, ok := a.recipeDependencyWarning(e, i); ok {
+				rows = append(rows, tuiRecipeDetailRow{text: "    │ ⚠ uses curl; no earlier recognized install (static check).", command: i, style: t.amber})
+				if providers := a.environmentCurlProviders(e); len(providers) > 0 {
+					names := strings.Join(providers[:min(3, len(providers))], ", ")
+					if len(providers) > 3 {
+						names += ", …"
+					}
+					rows = append(rows, tuiRecipeDetailRow{text: "    │ Can run after: " + names + " (curl install).", command: i, style: t.dim})
+				}
+				if warning.Fix != nil {
+					rows = append(rows, tuiRecipeDetailRow{text: fmt.Sprintf("    │ ⏎ add curl to line %d · review before saving", warning.Fix.Command+1), command: i, style: t.mint, action: "dependency"})
+				}
+			}
+		}
+		if len(report.Warnings) > 0 {
+			add("Image or earlier scripts may already provide curl.", t.dim)
 		}
 		if len(e.BootstrapCommands) == 0 {
 			add("No commands · o adds a block", t.dim)
@@ -346,13 +372,14 @@ func (a *vaxisTUIApp) drawRecipeDetails(win vaxis.Window, t tuiTheme) {
 	for i, r := range rows[s.detailScroll:min(len(rows), s.detailScroll+visible)] {
 		line := body.New(1, i, w-2, 1)
 		if r.command >= 0 && r.command == s.command && s.details {
-			r.style = t.selected
+			r.style.Background = t.selected.Background
+			r.style.Attribute |= t.selected.Attribute
 			tuiFill(line, r.style)
 		}
 		tuiLine(line, 0, r.text, r.style)
 		if r.command >= 0 {
 			rx, ry := line.Origin()
-			s.controls = append(s.controls, tuiRecipeControl{tuiRect{col: rx, row: ry, width: w - 2, height: 1}, "command", r.command})
+			s.controls = append(s.controls, tuiRecipeControl{tuiRect{col: rx, row: ry, width: w - 2, height: 1}, coalesce(r.action, "command"), r.command})
 		}
 	}
 	tuiLine(body.New(1, h-1, w-2, 1), 0, fmt.Sprintf("%d/%d · ← list · ↑↓/PgUp/PgDn scroll", min(len(rows), s.detailScroll+1), len(rows)), t.dim)

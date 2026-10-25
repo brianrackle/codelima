@@ -191,6 +191,10 @@ gopls: init
 go-doc: init
 	$(GO) doc $(GO_DOC_ARGS)
 
+.PHONY: go-get
+go-get: init
+	$(GO) get $(GO_GET_ARGS)
+
 tidy: init
 	$(GO) mod tidy
 
@@ -231,6 +235,11 @@ test-terminal-attach: init
 .PHONY: test-template-editor
 .PHONY: test-recipes
 .PHONY: test-environment-runs
+.PHONY: test-dependency-hints
+test-dependency-hints: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(EnvironmentDependency|TUIRecipeDependency)' -count=1 -timeout=90s
+
 test-environment-runs: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(EnvironmentTest|NodeOperationsEnvironment|TUIEnvironmentTest)' -count=1 -timeout=90s

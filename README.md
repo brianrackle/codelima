@@ -373,6 +373,15 @@ returns to the draft for review. Ctrl-S in the command editor applies its edits;
 Ctrl-S in the environment draft saves. `R` reviews shipped built-in commands.
 The last-run line uses recorded node execution, and says when none is available.
 
+Environment details flag literal curl uses without a recognized earlier
+apt/apt-get install. This static check is advisory: the image, earlier environments
+or dynamic scripts may already provide curl. Where an earlier install can be
+edited, Enter on the warned command or clicking its suggestion opens an unsaved
+command draft with curl added. Apply the command, then save the environment;
+Esc can discard the proposal. `e` retains ordinary editing. Provider hints use
+current saved definitions, including edits to built-ins. Syntax and size limits
+are reported without blocking editing or execution.
+
 Press `t` on a saved environment to test its commands on a disposable xsmall VM.
 Activity opens the live output; `K` cancels execution and still deletes the VM.
 Esc closes the output while the test continues. Reopen its Activity row later

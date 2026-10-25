@@ -728,3 +728,16 @@ Expose retained operation output by receipt identity rather than requiring a
 live node. Fence async output replies by the visible viewer instance. An
 ambiguous admission acknowledgment retains its original request ID; a typed
 definitive rejection can release it for a new request.
+
+## Static recipe hints
+
+Analyze shell syntax in the asynchronous metadata snapshot, without execution,
+environment expansion or runtime probes. Distinguish source evidence from guest
+state, and report unavailable analysis explicitly. Bound parsing and merge
+control-flow paths conservatively; background or conditional work cannot
+silently establish a prerequisite. Derive provider hints from current saved
+definitions rather than built-in names.
+
+Keep suggested edits as exact-source byte insertions with a stale-source check.
+Open a shared unsaved draft, preserving normal apply/save/discard controls.
+Do not reformat unrelated shell text or save a suggestion implicitly. See ADR 178.

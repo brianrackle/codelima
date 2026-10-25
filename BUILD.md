@@ -132,6 +132,14 @@ navigation. Session 2, handoff 6 and renderer 5 are unchanged. Inspect Go APIs
 with `make go-doc GO_DOC_ARGS='context.WithCancelCause'` and symbols/diagnostics
 with `make gopls GOPLS_ARGS='check internal/codelima/environment_test_run.go'`.
 
+`make test-dependency-hints` covers bounded shell analysis and the environment
+warning's keyboard/mouse draft flow (ADR 178). Run full verify/race/integration
+and `make test-terminal-attach` when changing its parser dependency. The pinned
+syntax package is mvdan.cc/sh/v3 v3.12.0; its module requirements select
+creack/pty v1.1.24. Go remains 1.24.1. Dependency edits use
+`make go-get GO_GET_ARGS='module@version'` followed by `make tidy`, keeping the
+project toolchain and module cache. The live dependency-hint flow is in `QA.md`.
+
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
 required `mise run check`; it installs pinned mise and the upstream tool

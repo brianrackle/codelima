@@ -577,6 +577,28 @@ For the recipe catalogs, use an isolated home and disposable definitions:
 - Remove all disposable nodes, definitions, processes and files. Run
   `make test-recipes`.
 
+For environment dependency hints, use an isolated metadata home:
+
+- Save the reference-shaped recipe: an apt-get install without curl, a curl
+  pipeline, and a final command. At 150×38 and 80×24, inspect the inline warning,
+  static-check explanation, current provider names and visible action.
+- Select the warned command and press Enter; also activate the suggestion with
+  the mouse. The existing command editor must show curl added to the earlier
+  install, preserving comments, quoting and multiline content. Opening and
+  discarding the draft must leave the saved environment unchanged. Apply and
+  explicitly save; the warning must disappear after refresh.
+- Edit a built-in provider to remove its curl install. Its name must disappear
+  from the provider hint. Confirm comments, quoted examples and literal
+  here-documents do not create warnings, while conditional, simulated or
+  background installs do not claim an ordered prerequisite. Without a safe
+  earlier install, Enter must retain ordinary command editing.
+- Inspect an invalid shell block and an oversized block. An unavailable hint
+  must remain advisory; editing and saving still work. Browsing and fixing
+  recipes must neither create a VM nor execute host/guest commands.
+- Remove isolated definitions, daemon/TUI, terminal sessions, sockets, mounts
+  and scratch. Run `make test-dependency-hints`; dependency upgrades also need
+  `make test-terminal-attach`, full verify, race and CLI integration checks.
+
 For disposable environment tests, use a separate metadata/Lima home:
 
 - Create a saved environment that prints a unique marker, root UID and working
