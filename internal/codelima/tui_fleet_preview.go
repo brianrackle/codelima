@@ -64,6 +64,23 @@ func (a *vaxisTUIApp) fleetWorkspaceLabel(node Node) string {
 	return label + " · " + mode
 }
 
+func (a *vaxisTUIApp) fleetAuthLabel(node Node) string {
+	if !node.ImportHostAuth {
+		return "not requested"
+	}
+	if !node.AuthImportCompleted {
+		return "pending"
+	}
+	if p := a.fleetPreviewFor(node); p != nil && p.AuthImport != nil {
+		r := p.AuthImport
+		return "imported " + r.ImportedAt.Local().Format("Jan 2") + " · " + countLabel(r.ItemCount, "item", "items")
+	}
+	if node.ParentNodeID != "" {
+		return "inherited · no receipt"
+	}
+	return "done · receipt unavailable"
+}
+
 func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
 	node := record.Node
 	statusCell, statusStyle := a.fleetCell(record, tuiFleetSortStatus, false, 30, theme)

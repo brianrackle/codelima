@@ -15,7 +15,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
-| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); final artboard/native qualification remains |
+| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); recorded auth-import date/count/categories (ADR 203); final artboard/native qualification remains |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
@@ -37,6 +37,28 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+Auth-import checkpoint (ADR 203), 2026-10-25: Overview projects the selected
+node's retained import event into date, item count and recognized categories.
+Empty imports, missing receipts and inherited clone credentials remain explicit.
+Ordinary daemon protocol is 30; session/renderer/handoff remain 2/6/7.
+`make verify` passed (core 73.498s), focused evidence/Overview checks passed,
+and the evidence race gate passed (5.855s). The existing first-start credential
+test also checks the projection from the actual importer event. A malformed
+latest timestamp regression failed first and was corrected; final focused race
+(5.715s), build and lint checks passed after that correction. No full gate was
+repeated for text fixes.
+
+Live checks used disposable metadata/event fixtures without importing any
+credentials or creating a VM. At 150×38 truecolor and 80×24 ANSI, the receipt
+states, item categories, panel focus, Identity scrolling and resize were checked.
+Inspection found a joined item label and clipped missing-receipt text; both were
+corrected, rebuilt and rechecked with the Overview tests (0.759s) and running TUI.
+The final wide ANSI view also passed. The owned frontend, daemon, tmux server,
+store, captures and 32 MiB tmpfs were removed; two new inactive exact-content
+inputrc files were cleaned, preserving older and active files. The previously
+tracked transient ANSI startup logo corruption was observed again; its existing
+follow-up remains open, as do native qualification and the attached header.
 
 Navigation-map reconciliation, 2026-10-25: the map is a routing reference, not
 an additional screen. Current `tui_key_catalog.go` and `tui_navigation.go` cover

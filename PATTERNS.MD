@@ -1019,3 +1019,9 @@ under its resolved home. Let the provider create its own files, release the gate
 once complete validated evidence exists, and allow long VM boots to overlap.
 Use a persistent cross-process lock inode and context-aware waiting; never hold
 a global metadata lock across the provider command or overwrite provider keys.
+
+Recorded import summaries (ADR 203) project the selected node's completed event
+through the bounded nonblocking diagnostic reader. Return only exact recognized
+artifact categories, count and timestamp; omit paths, reasons and contents.
+Missing or malformed newer evidence must not revive an older success. A clone's
+parent history is not proof of the cloned disk's receipt.

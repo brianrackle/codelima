@@ -25,6 +25,7 @@ type fleetPreviewEvidence struct {
 	History       []daemon.NodeMetricPoint `json:"history,omitempty"`
 	AgentChecks   []fleetAgentCheck        `json:"agent_checks,omitempty"`
 	AgentError    string                   `json:"agent_error,omitempty"`
+	AuthImport    *fleetAuthImportEvidence `json:"auth_import,omitempty"`
 }
 
 // Optional local inspection: no runtime preparation, command execution or guest
@@ -66,6 +67,7 @@ func (c *LimaClient) InspectConfiguration(node Node) (fleetRuntimeEvidence, erro
 
 func (h *daemonHost) fleetPreview(node Node, claimed bool) *fleetPreviewEvidence {
 	p := &fleetPreviewEvidence{NodeID: node.ID, NodeUpdatedAt: node.UpdatedAt}
+	p.AuthImport = h.service.store.fleetAuthImport(node)
 	bootstrap, err := h.service.store.LoadBootstrapState(node.ID)
 	if err != nil {
 		p.AgentChecks, p.AgentError = configuredFleetAgentChecks(node), fleetEvidenceError(err)

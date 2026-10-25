@@ -560,6 +560,10 @@ Overview panels (ADR 191), in the disposable home:
    left and Sessions/Ports/Recent events on the right. Compare configured and
    observed resource values with Metrics, agent checks with Spec, and routes
    with Ports. Missing observations must not become zeros or success claims.
+   Compare the host-auth date/count/categories with its `node.auth.imported`
+   event. Check an empty import and a missing receipt, and a clone with no local
+   receipt: they must show zero/none, unavailable and inherited respectively.
+   Disposable event fixtures may cover presentation without importing credentials.
 2. Open multiple guest and host sessions. Use Ctrl+Up/Down to change panels,
    Up/Down to select rows, and Tab/Shift+Tab to change detail tabs. Select a
    session, reorder tabs with `terminal.move` from another daemon client, and confirm Enter attaches

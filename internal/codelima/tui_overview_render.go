@@ -120,11 +120,11 @@ func (a *vaxisTUIApp) drawOverviewIdentity(win vaxis.Window, record tuiFleetReco
 	if !n.CreatedAt.IsZero() {
 		created = n.CreatedAt.Local().Format("Jan 2 15:04")
 	}
-	auth := "not requested"
-	if n.ImportHostAuth {
-		auth = "pending"
-		if n.AuthImportCompleted {
-			auth = "import completed"
+	authItems := "—"
+	if p := a.fleetPreviewFor(n); p != nil && p.AuthImport != nil {
+		authItems = strings.Join(p.AuthImport.Categories, ", ")
+		if authItems == "" {
+			authItems = "none"
 		}
 	}
 	var clones []string
@@ -146,7 +146,7 @@ func (a *vaxisTUIApp) drawOverviewIdentity(win vaxis.Window, record tuiFleetReco
 		{"status", status}, {"template", template},
 		{"image", n.Image}, {"directory", n.DirectoryPath}, {"workspace", a.fleetWorkspaceLabel(n)},
 		{"lima", n.SandboxName}, {"runtime", a.fleetRuntimeLabel(n)}, {"agents", ""}, {"checks", note},
-		{"host auth", auth}, {"clones", cloneLabel}, {"created", created}, {"id", n.ID},
+		{"host auth", a.fleetAuthLabel(n)}, {"items", authItems}, {"clones", cloneLabel}, {"created", created}, {"id", n.ID},
 	}
 	// Agent pairs wrap as a unit. Render rows against the parent clip so the
 	// focused Identity panel can scroll without moving neighboring panels.

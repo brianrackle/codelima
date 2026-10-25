@@ -322,6 +322,10 @@ Overview shows Identity, Resources, Sessions, Ports and Recent events.
 inside that panel. `Tab` / `Shift+Tab` cycles the node's detail tabs. Compact
 windows keep identity beside the focused Sessions, Ports or Recent panel;
 focusing Resources replaces identity until focus moves again.
+Identity shows the recorded host-auth import date, item count and categories
+when its event is available. Empty imports show zero items; missing receipts
+and inherited clone credentials are labeled explicitly. This records the
+completed import, not the credentials' current validity.
 In Sessions, `Enter` attaches the selected session, `t` creates a fresh guest
 shell, `T` creates a fresh host shell, and `K` confirms ending that exact
 session. Ctrl+] returns from attachment. Session age comes from the daemon;

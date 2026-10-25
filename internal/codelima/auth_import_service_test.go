@@ -178,6 +178,10 @@ func TestNodeStartImportsHostCredentialsOnFirstStartOnly(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("node.auth.imported events = %d, want 1", len(events))
 	}
+	receipt := service.store.fleetAuthImport(node)
+	if receipt == nil || !receipt.ImportedAt.Equal(events[0].Timestamp) || receipt.ItemCount != 7 || strings.Join(receipt.Categories, ", ") != "ssh, git, codex, claude" {
+		t.Fatalf("first import did not project its recorded receipt: %+v", receipt)
+	}
 
 	firstStartCalls := len(callsMatching(fake, "codelima-auth-"))
 	if _, err := service.NodeStart(ctx, node.ID); err != nil {

@@ -43,7 +43,7 @@ against the saved design on both supported hosts. Advantages: faithful
 cross-view presentation; disadvantages: additional native setup and QA time.
 These remain in the full #57 scope; unknown activity must not be inferred from titles.
 Remaining Overview evidence: the selected projection does not expose guest
-architecture/KVM availability or imported credential-item/timestamp receipts;
+architecture/KVM availability;
 session kinds currently identify shell/host, and clone identity is scoped to
 the loaded fleet. Extend the bounded owners with recorded evidence and explicit
 agent-launch identity, and use a bounded global child lookup if all clones must
@@ -51,6 +51,10 @@ be shown. Advantage: can reproduce those artboard details without inferring
 facts from titles or inventing receipts. Disadvantages: additional provider,
 storage/protocol work and native qualification. Keep current unknown states
 until that evidence exists.
+Overview now projects the selected node's recorded auth-import date, count and
+categories (ADR 203), with explicit empty, missing and inherited states. Its
+bounded reader uses the existing 2 MiB event tail; older receipts outside that
+window remain unavailable rather than inferred from the completion flag.
 Final clone qualification must create inherited records through the Clone action
 and revalidate the child; this checkpoint exercised their presentation with
 metadata fixtures. Reuse a disposable stopped guest and compare parent/child
