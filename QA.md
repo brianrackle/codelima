@@ -476,6 +476,34 @@ guests, services, captures and files after completing these checks.
 
 ## Flow 7: path-scoped fleet manager
 
+Command palette (ADR 193), in the disposable home:
+
+1. At 150×38 and 80×24 press `:`. Search `sta` with running, stopped, created
+   and failed nodes. Inspect grouped results, count, matching underlines,
+   context, shortcuts, selection and dimmed background. Navigate past the
+   viewport with arrows, page keys and the wheel. Resize while a result is
+   selected; it must stay selected and visible when the terminal is usable.
+2. Paste `status: failed`, complete with Tab and run with Enter. Reopen with
+   an empty query to see the recent command. Try no-match text and Esc. Click
+   result rows and footer controls; confirm compact context remains readable.
+   Repeat in ANSI and truecolor modes. Close/reopen the frontend to verify
+   session-only history starts empty.
+3. Open a node command, then change selection, marks, node status or membership
+   through a second client. The result must retain its ID or become explicitly
+   unavailable. A stale click/Enter cannot run the next row. Cancel Stop/Restart,
+   then confirm for the intended node. Remove a reviewed target before submit:
+   the confirmation must refuse it, without acting on another node.
+4. Search `start all in` for a directory with stopped/created and failed nodes.
+   Review captured names and Start/Retry choices. Add another node after review;
+   it must not be included. Submit and inspect actual bootstrap attempts: Retry
+   must preserve successful earlier steps. Marks elsewhere must remain intact.
+   A changed member must block the review before its first operation.
+5. Exercise Node, bootstrap Logs, shell chooser, failed filter, global view and
+   daemon-status navigation. Per-node navigation must not drift with selection.
+   Verify disconnected impact and unknown memory do not become zero/success
+   claims. Exit shells and frontends, stop the disposable guests and daemon,
+   then remove the owned stores, overlays, captures, sockets and mounts.
+
 Contextual key help (ADR 192), in the disposable home:
 
 1. At 150×38, press `?` from Nodes, node detail, Templates, Ports, Activity and

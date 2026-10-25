@@ -1,5 +1,15 @@
 # Patterns
 
+## Live commands with captured identities
+
+Build search catalogues from immutable frontend snapshots and store canonical
+IDs in result selections and rendered mouse targets. Refresh before invocation;
+retain a disappeared selected command as unavailable instead of selecting its
+successor. Revalidate again at confirmation, then call the shared action owner
+with the captured identity. Batch reviews capture both membership and action
+kind, validating all members before the first operation. Never derive a target
+from mutable row order or unrelated marks after review (ADR 193).
+
 ## Contextual help without action ownership
 
 Keep shortcut descriptions separate from executable palette commands. A help

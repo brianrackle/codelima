@@ -492,17 +492,7 @@ func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
 		return a.startOperation(tuiOperationRequest{Title: fmt.Sprintf("%s %d nodes", verb, len(targets)), ResourceKeys: keys, EntryKeys: keys,
 			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 				for _, record := range targets {
-					var err error
-					switch action {
-					case tuiActionNodeStart:
-						_, err = service.NodeStart(ctx, record.Node.ID)
-					case tuiActionNodeStop:
-						_, err = service.NodeStop(ctx, record.Node.ID)
-					case tuiActionNodeRestart:
-						_, err = service.NodeRestart(ctx, record.Node.ID)
-					case tuiActionNodeDelete:
-						_, err = service.NodeDelete(ctx, record.Node.ID)
-					}
+					_, err := runTUINodeAction(ctx, service, action, record.Node.ID)
 					if err != nil {
 						return tuiOperationResult{}, fmt.Errorf("%s %s: %w", verb, record.Node.Slug, err)
 					}

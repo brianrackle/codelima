@@ -161,7 +161,12 @@ func (a *vaxisTUIApp) ensureActionNotConflicting(action tuiActionSpec, entry tui
 }
 
 func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
-	entry := a.state.selectedEntry()
+	return a.performEntryAction(action, a.state.selectedEntry())
+}
+
+// The action owner also accepts an explicit entry for identity-bound callers
+// such as the palette. Confirmation callbacks retain that entry's node ID.
+func (a *vaxisTUIApp) performEntryAction(action tuiActionSpec, entry tuiTreeEntry) error {
 	if err := a.ensureActionNotConflicting(action, entry); err != nil {
 		return err
 	}
@@ -179,13 +184,7 @@ func (a *vaxisTUIApp) performAction(action tuiActionSpec) error {
 			ResourceKeys:  []string{terminal.NodeTarget(entry.node.ID).String()},
 			EntryKeys:     []string{terminal.NodeTarget(entry.node.ID).String()},
 			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-				var node Node
-				var err error
-				if action.ID == tuiActionNodeRetry {
-					node, err = service.NodeRetry(ctx, entry.node.ID)
-				} else {
-					node, err = service.NodeStart(ctx, entry.node.ID)
-				}
+				node, err := runTUINodeAction(ctx, service, action.ID, entry.node.ID)
 				if err != nil {
 					return tuiOperationResult{}, err
 				}

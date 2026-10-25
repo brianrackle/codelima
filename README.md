@@ -353,6 +353,21 @@ complete long findings. A filter with no matches stays in the searchable table.
 | `:`, `?` | Search commands / keyboard shortcuts |
 | `q` | Quit from a global view; return from node detail |
 
+Press `:` to search commands by name, node, context or shortcut. Results are
+grouped into Nodes, Actions and Go to; matching letters are underlined. Use
+Up/Down or the wheel to select, Tab to complete and Enter (or a result click)
+to run. Esc closes. Pasting text searches without running it. An empty query
+shows the latest available commands used in this frontend session, or the full
+catalogue when none are available. History is not saved after exit.
+
+For example, search `start api`, `status: failed`, or `Logs bootstrap`.
+Per-node commands retain their target even if the fleet selection changes.
+Unavailable results require a new selection or query. `start all in` reviews
+the directory's captured targets, resumes failed bootstrap steps with Retry
+and starts stopped/created nodes sequentially; unrelated marks are preserved.
+The queue stops at the first error and later submissions depend on the frontend
+remaining open. Memory warnings describe cached allocation, not free OS memory.
+
 Press `?` for contextual key help. The current view leads the columns; compact
 terminals show one group at a time. Tab/Shift-Tab or Left/Right changes groups;
 Up/Down, PgUp/PgDn, Home/End or the mouse wheel scrolls the focused group.

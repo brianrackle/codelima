@@ -45,6 +45,10 @@ func (a *vaxisTUIApp) openFleetPort() error {
 	if !ok {
 		return fmt.Errorf("select a node with a live HTTP route")
 	}
+	return a.openFleetNodePort(record)
+}
+
+func (a *vaxisTUIApp) openFleetNodePort(record tuiFleetRecord) error {
 	if !a.fleetPortsCurrent() {
 		return fmt.Errorf("forwarding observation unavailable or stale; use 3 Ports to inspect")
 	}

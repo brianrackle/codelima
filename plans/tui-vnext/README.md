@@ -30,13 +30,57 @@ All example identities, metrics and timestamps in those files are reference data
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Partial: readiness/TCP, durable pins and interactive Ports pass two-guest Linux qualification (ADRs 182–183); final artboard/native qualification remains |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–181 responsive capacity, retained Doctor findings, cached daemon status and explicit actions | Partial; Doctor, overview and action flows verified; macOS sampling and full artboard/native qualification remain |
-| [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Command palette](reference/Palette.dc.html) | Grouped fuzzy results, live context, recents and captured actions | Partial: result spans/counts, responsive modal, session recents, identity guards and directory Start/Retry (ADR 193); final whole-design/native qualification remains |
 | [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping and final native qualification remain |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+ADR 193 checkpoint, 2026-10-25: the palette now groups live scoped commands,
+counts fuzzy results, highlights actual matching spans and shows lifecycle,
+route and daemon context. Wide rows keep shortcuts aligned; compact rows put
+context below the label. The modal sizes to short results and scrolls longer
+lists. Empty queries show up to 20 available recent commands from this frontend
+session. Per-node commands, confirmation callbacks and mouse targets retain
+canonical IDs; a removed selected result becomes unavailable. Directory reviews
+capture exact members and Start/Retry choices and preserve unrelated marks.
+Existing execution owners and protocols 27/2/6/7 are unchanged.
+
+Focused race checks passed after the live sizing correction (6.782s). Go API
+inspection and gopls passed; the shared-operation file's existing modernization
+suggestions are unrelated. Live Linux checks at 150×38 and 80×24 covered grouped
+matching, paste, completion, scrolling, no matches, frontend-session recents,
+mouse result/footer controls, resize through the minimum-size notice, ANSI and
+truecolor, node/bootstrap-log/system navigation and the captured shell chooser.
+An actual host shell opened in the exact selected node directory and exited.
+Removing a result through another daemon client retained an unavailable command;
+Enter refused it. Removing a confirmed target before submit also refused it.
+
+The disposable QEMU/TCG guest failed its second bootstrap command. Directory
+Retry preserved the first command's one attempt, reran the second successfully
+at attempt two and ran validation once. A node added after review had no
+bootstrap attempts; an unrelated marked peer stayed marked. The guest start
+continued after both frontends exited and reopened. This is Linux terminal
+qualification; final native and whole-design qualification remain open.
+An actual palette Restart preserved bootstrap attempts 1/2 and reran validation
+at attempt two. With confirmation set to always, both Stop and Restart reviews
+named the explicit node and could be canceled; confirmed Stop shut down that
+guest. Removing a captured batch member before submission refused the whole
+review and left the first guest stopped. Suspending the disposable daemon
+retained a clearly unavailable status in the palette; resuming it recovered.
+The terminal inventory was empty, every owned process exited and the original
+backing image hash stayed unchanged. The owned guest overlay, metadata, captures,
+tmux sockets and tmpfs mount were removed before starting the complete gates.
+Final `make verify test-race test-integration` passed: core unit 83.955s,
+core race 115.762s and CLI integration 17.647s, plus format, lint, Vaxis and
+both builds. The final process audit found no owned verification processes.
+Cleanup removed 23 new inactive inputrc files with the exact generated contents;
+1,015 older/other files and all active references were preserved. No new Lima
+cache files were created. Project test scratch and check logs were removed.
+The interactive Claude source-check session also exited, and its downloaded
+scratch canvas was removed. This checkpoint does not complete the overall redesign.
 
 ADR 192 checkpoint, 2026-10-25: help now has seven contextual groups, four/two/one
 responsive columns, independent scrolling, all-context search and read-only

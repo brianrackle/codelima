@@ -59,6 +59,11 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   implemented (ADR 192). Configurable bindings (roadmap #9) and final native
   design qualification remain in TODO #57.
 
+- Command palette [partially complete]: grouped fuzzy matches, actual node
+  context, session recents, captured action identities and reviewed directory
+  Start/Retry are implemented (ADR 193). Final whole-design/native qualification
+  and durable batch ownership remain in TODO #57.
+
 - Ports delivery [partially complete, in progress]: readiness-gated application
   routes and daemon-owned published TCP with stopped-node migration (ADR 182).
   Cached Ports presentation, durable generic-host ownership controls, optional

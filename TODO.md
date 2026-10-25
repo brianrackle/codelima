@@ -106,6 +106,15 @@ additional compatibility/QA work. Preserve this in the full redesign scope.
 
 ### 57. Implement the retrieved major-version TUI design
 
+Manual setup follow-up: launching two frontends concurrently against the new
+ADR 193 disposable home produced one `daemon exited before becoming ready`
+error while the other connected; reopening the failed frontend then worked.
+Investigate concurrent daemon-start admission with an isolated empty home and
+ensure a losing launcher connects to the winner before reporting failure.
+Advantage: reliable simultaneous frontend startup. Disadvantage: readiness,
+lock recovery and process-exit races need a separate reproducible test. This
+single observation is not yet a diagnosed regression.
+
 Help checkpoint (ADR 192): dedicated contextual columns, compact group/scroll
 navigation, all-context search and read-only keyboard/mouse behavior are now
 implemented. Qualification results are tracked in the design ledger.
@@ -119,15 +128,20 @@ terminal focus, migration and recovery from conflicting bindings require a
 separate cross-view regression pass. The current help explicitly describes only
 implemented keys; roadmap #9 remains open.
 
-The command palette and shell chooser still need their dedicated artboard pass.
-Palette work includes grouped results, counts, matching spans, recent commands,
-context hints and per-node commands with captured canonical identities and
-revalidated lifecycle confirmations. Shell chooser work includes grouped new
+Palette checkpoint (ADR 193): grouped results, counts, matching spans, frontend
+session recents, context hints, captured per-node commands and revalidated
+confirmations are implemented. Directory Start/Retry reviews capture membership
+and retain unrelated marks. Automated and live qualification is recorded in the
+design ledger; final whole-design/native qualification and the durable batch
+queue described above remain open. Session history intentionally ends on exit;
+the source does not require a persisted recent-command store.
+
+The shell chooser still needs its dedicated artboard pass, including grouped new
 and existing sessions, honest launcher availability, exact-session attachment
 and persisted default hints. Reuse existing action/session owners: this keeps
 confirmation and error behavior consistent, at the cost of adapters and tests
 for selection changes while an overlay is open. Final whole-design and native
-qualification also remain open; this help checkpoint does not complete them.
+qualification also remain open; these overlay checkpoints do not complete them.
 
 Source access resolved on 2026-10-24. The user's interactive Claude Code
 session could read the artifact with its `Artifact` tool; the headless

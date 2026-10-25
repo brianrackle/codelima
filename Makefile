@@ -312,6 +312,12 @@ test-tui-help: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(TUI_HELP_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIManager(Help|Palette)|TUIDaemonControlLogReload)' -count=1 -timeout=90s
 
+.PHONY: test-tui-palette
+TUI_PALETTE_TEST_FLAGS ?=
+test-tui-palette: init
+	@mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(TUI_PALETTE_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIManager(Palette|Help)|TUINodeRestart|TUIFleet|TUIDaemonControl)' -count=1 -timeout=120s
+
 .PHONY: test-fleet-evidence
 .PHONY: test-overview
 OVERVIEW_TEST_FLAGS ?=

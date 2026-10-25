@@ -1,6 +1,7 @@
 package codelima
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -300,4 +301,22 @@ func (a *vaxisTUIApp) resultSelectionKey(operation *tuiOperationState, result tu
 		return currentKey
 	}
 	return operation.SelectionKey
+}
+
+// Shared service dispatch accepts a captured node ID; it never reads UI selection.
+func runTUINodeAction(ctx context.Context, service *Service, action tuiActionID, id string) (Node, error) {
+	switch action {
+	case tuiActionNodeStart:
+		return service.NodeStart(ctx, id)
+	case tuiActionNodeRetry:
+		return service.NodeRetry(ctx, id)
+	case tuiActionNodeStop:
+		return service.NodeStop(ctx, id)
+	case tuiActionNodeRestart:
+		return service.NodeRestart(ctx, id)
+	case tuiActionNodeDelete:
+		return service.NodeDelete(ctx, id)
+	default:
+		return Node{}, fmt.Errorf("unsupported node action %q", action)
+	}
 }

@@ -35,6 +35,7 @@ type vaxisTUIApp struct {
 	screenHyperlinkAt   func(int, int) (string, bool)
 	state               *tuiState
 	fleet               *tuiFleet
+	paletteRecent       []string
 	fleetEvidence       tuiFleetEvidenceState
 	overview            tuiOverviewState
 	sessionOrder        tuiSessionOrderState
