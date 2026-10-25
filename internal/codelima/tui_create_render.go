@@ -124,12 +124,15 @@ func (f *tuiCreateNodeForm) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		status, style = f.dialog.Error, t.coral
 	}
 	if f.pending {
-		status, style = "Submitting… · accepted work continues after quit", t.amber
+		status, style = "  Submitting… · accepted work continues after quit", t.amber
 	}
 	if f.dialog.confirmDiscard {
 		status, style = "Discard unsaved changes? y discard · n keep editing", t.coral
 	}
 	tuiLine(body.New(2, h-1, w-4, 1), 0, status, style)
+	if f.pending && !f.dialog.confirmDiscard {
+		f.app.drawSpinner(body.New(2, h-1, 1, 1), style)
+	}
 	f.submitRect = tuiRect{}
 	if f.validationError() == "" && !f.pending && !f.dialog.confirmDiscard {
 		f.submitRect = tuiRect{col: x + 2, row: y + h - 1, width: 13, height: 1}

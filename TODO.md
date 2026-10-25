@@ -250,13 +250,14 @@ Advantage: preserves the source's no-embedded-emulator contract. Disadvantage:
 a persistent portable header cannot simply be painted over raw terminal output;
 its fidelity and fallback require an explicit decision before completion.
 
-Kit gauge rendering is implemented (ADR 201): explicit fill/track segments now
-cover fleet, Overview, Metrics, host capacity and create fit, preserving selected
-and modal styles. The Kit's 10-fps spinner requirement remains open. Implement
-a bounded presentation timer for visible in-flight work without increasing
-telemetry polls or changing the separate startup-logo animation. Advantage:
-matches the remaining motion contract; disadvantage: requires redraw/lifetime
-checks. Final whole-design/native visual qualification remains open.
+Kit resource gauges and progress motion are implemented (ADRs 201–202). Gauge
+fill/track styles preserve selection and modal backgrounds. One event-loop timer
+animates only visible foreground progress cells at 10 fps; idle, clipping,
+overlays and shutdown stop it without additional telemetry polling. Final
+whole-design/native visual qualification remains open; reuse the existing
+artboard/QA checks rather than adding another implementation pass. Advantage:
+checks the complete composed UI; disadvantage: needs the supported terminal
+and host environments.
 
 Key-binding plan reconciliation is complete. The specification now describes
 `_config/settings.yaml`, manager action/context IDs, case-sensitive printable

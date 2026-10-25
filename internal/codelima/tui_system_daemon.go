@@ -185,7 +185,14 @@ func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, t tuiTheme) {
 	if s.lifecycle != "" {
 		message, style = "Daemon "+s.lifecycle+a.keyHints(" running… · {system.logs} log · {system.diagnose} diagnose"), t.amber
 	}
+	busy := s.lifecycle != "" || (s.loading && !a.daemonDisconnected && s.err == nil)
+	if busy {
+		message = "  " + message
+	}
 	tuiLine(win, 1, plainLogText(message), style)
+	if busy {
+		a.drawSpinner(win.New(0, 1, 1, 1), t.amber)
+	}
 	type button struct {
 		action, text string
 		col, row     int

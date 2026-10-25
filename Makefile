@@ -217,6 +217,11 @@ lint: init
 test: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) ./...
 
+.PHONY: test-tui-spinners
+TUI_SPINNER_TEST_FLAGS ?=
+test-tui-spinners: init
+	$(GO) test $(TUI_SPINNER_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^TestTUI(Spinner|Activity|Lifecycle|Doctor|Create|Manager|Logo|Spec)' -count=1
+
 .PHONY: test-tui-gauges
 test-tui-gauges: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^TestTUI(Gauge|ManagerThemeAndGauges)' -count=1

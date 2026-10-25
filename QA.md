@@ -1957,3 +1957,12 @@ gray). Move fleet selection and open/close the create form: row selection and
 modal backgrounds must cover the whole gauge. Missing samples must show an
 unavailable marker, never a measured zero. Resize and confirm clipping stays
 inside the panel. Gauge rendering does not change measured values or commands.
+
+## Progress spinner (ADR 202)
+
+During a Doctor check or an active operation, verify the amber braille indicator
+advances at ten frames per second in wide truecolor and compact ANSI layouts.
+Navigate away, open/close a modal, resize, and let the work finish: hidden or
+completed indicators must stop, and a timer tick must not overwrite the modal
+or disturb adjacent text. Node-status and historical-request symbols stay fixed.
+Raw attachment and external editors own their terminal while the TUI is suspended.

@@ -235,7 +235,7 @@ func (a *vaxisTUIApp) drawActivityRunningRow(win vaxis.Window, row tuiActivityRo
 		phase = "canceling"
 	}
 	if width >= 118 {
-		tuiLine(win.New(0, 0, 2, 1), 0, "◐", theme.amber)
+		a.drawSpinner(win.New(0, 0, 1, 1), theme.amber)
 		tuiLine(win.New(3, 0, 14, 1), 0, plainLogText(row.node), theme.text)
 		tuiLine(win.New(19, 0, 8, 1), 0, plainLogText(row.kind), theme.text)
 		tuiLine(win.New(29, 0, width-85, 1), 0, strings.Trim(strings.TrimSpace(phase+" · "+detail), " ·"), theme.text)
@@ -249,7 +249,7 @@ func (a *vaxisTUIApp) drawActivityRunningRow(win vaxis.Window, row tuiActivityRo
 		tuiLine(win.New(width-18, 0, 18, 1), 0, a.activityControlKey("activity.open")+a.keyHints(" open · {activity.cancel} cancel"), theme.dim)
 		return
 	}
-	tuiLine(win.New(0, 0, 2, 1), 0, "◐", theme.amber)
+	a.drawSpinner(win.New(0, 0, 1, 1), theme.amber)
 	tuiLine(win.New(3, 0, width-12, 1), 0, plainLogText(row.node)+"  "+row.kind+" · "+phase, theme.text)
 	tuiLine(win.New(width-8, 0, 8, 1), 0, elapsed, theme.amber)
 	if height >= 2 {

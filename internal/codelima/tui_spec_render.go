@@ -15,6 +15,7 @@ type tuiSpecRow struct {
 	step          int
 	style         vaxis.Style
 	action        string
+	spinner       bool
 }
 
 func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
@@ -96,6 +97,7 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 				first := len(rows)
 				label, style := bootstrapStepDisplay(step, i, n.ID, theme)
 				add(label+"\n"+step.Command, style, step.Command)
+				rows[first].spinner = step.State == BootstrapStepRunning
 				if step.Error != "" {
 					add(step.Error, theme.coral, step.Command)
 				}
@@ -283,6 +285,11 @@ func (a *vaxisTUIApp) drawSpecPanel(win vaxis.Window, panel int, title string, t
 			style = theme.selected
 		}
 		tuiLine(inner, i, row.text, style)
+		if row.spinner {
+			spinnerStyle := style
+			spinnerStyle.Foreground = theme.amber.Foreground
+			a.drawSpinner(inner.New(0, i, 1, 1), spinnerStyle)
+		}
 	}
 	if len(s.rows[panel]) > height {
 		width, height := win.Size()

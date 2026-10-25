@@ -468,6 +468,8 @@ Missing samples remain blank; wide memory and disk cells
 show observed used/total GiB with gauges, and compact cells show percentages.
 Gauges use a dark empty track; filled cells turn amber at 70% and coral at 90%.
 Unavailable measurements stay unavailable rather than appearing as zero.
+Active operations and checks use a 10-fps spinner; node-status symbols remain
+fixed. Animation stops when its indicators are no longer visible.
 At 80 columns inactive views use their number, leaving space for connectivity
 and global CPU/memory allocation. Flat tables include each node's directory.
 

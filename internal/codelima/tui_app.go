@@ -108,6 +108,7 @@ type vaxisTUIApp struct {
 	// It is owned by the UI event loop alongside every other presentation
 	// state; nil renders the stable product name.
 	logoAnimation *tuiLogoAnimation
+	spinners      tuiSpinnerState
 	// daemonDisconnected is latched after the daemon session ends or its
 	// request connection fails. Focus events must not probe a dead connection
 	// and replace the actionable reopen guidance with broken-pipe noise.
@@ -347,6 +348,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // host-terminal restoration (vx.Close) and auto-refresh cancellation deferred
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
+	defer a.stopSpinners()
 	defer a.cancelFleetEvidenceLoad()
 	defer a.cancelActivityAttachment()
 	defer a.cancelDoctorCheck()
@@ -378,6 +380,9 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 		carried = nil
 		if event == nil {
 			select {
+			case now := <-a.spinnerTicks():
+				a.tickSpinners(now)
+				continue
 			case result := <-a.graphicsResults():
 				event = result
 			case <-a.graphicsTicks():

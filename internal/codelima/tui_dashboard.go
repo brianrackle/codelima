@@ -155,6 +155,7 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	}
 	theme = normalTheme
 	status := a.status
+	busySummary := false
 	if !a.statusAt.IsZero() && time.Since(a.statusAt) >= 6*time.Second {
 		status = ""
 	}
@@ -163,7 +164,8 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 		status = a.backgroundOperationSummary()
 		if len(a.operationOrder) == 1 {
 			if operation := a.operations[a.operationOrder[0]]; operation != nil {
-				status = "◐ " + operation.Title
+				status = "  " + operation.Title
+				busySummary = true
 			}
 		}
 	}
@@ -180,11 +182,16 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 		}
 	}
 	tuiLine(window.New(1, statusRow, width-2, 1), 0, status, style)
+	if busySummary {
+		a.drawSpinner(window.New(1, statusRow, 1, 1), theme.amber)
+	}
 	footer := a.managerFooter()
 	if a.overlay != nil {
 		// Reuse existing form/selector behavior inside a centered modal. The
 		// underlying manager retains both its selection and navigation state.
 		drawOverlay := func(overlay tuiOverlay) {
+			// Only the foremost layer may animate over a modal.
+			a.spinners.cells = a.spinners.cells[:0]
 			bindOverlayKeys(overlay, a.keyMap())
 			if full, ok := overlay.(interface{ FullScreen() bool }); ok && full.FullScreen() {
 				overlay.Draw(window.New(0, 1, width, height-2), theme.mint, theme.muted, theme.coral)
@@ -267,6 +274,9 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 			badgeStyle := style
 			badgeStyle.Foreground = theme.amber.Foreground
 			tuiLine(bar.New(col+cells-badgeWidth-1, 0, badgeWidth, 1), 0, badge, badgeStyle)
+			if i == int(tuiViewActivity) {
+				a.drawSpinner(bar.New(col+cells-badgeWidth-1, 0, 1, 1), badgeStyle)
+			}
 		}
 		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: cells, height: 1})
 		col += cells

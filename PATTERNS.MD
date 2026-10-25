@@ -1,5 +1,12 @@
 # Patterns
 
+## Event-loop presentation timers
+
+Register visible animated cells during normal drawing; clear registrations when
+a new foreground layer covers them. Consume one timer in the UI event loop and
+paint only those cells. Stop the timer when none remain. Do not start a graphics
+frame, poll data or write from a callback for a presentation tick (ADR 202).
+
 ## Structured resource gauges
 
 Keep generated gauges as `tuiGaugeLine` values until drawing. Preserve the base

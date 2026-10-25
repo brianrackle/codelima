@@ -529,6 +529,8 @@ func (a *vaxisTUIApp) drawHeaderLogo() {
 }
 
 func (a *vaxisTUIApp) draw() {
+	a.spinners.cells = a.spinners.cells[:0]
+	defer a.finishSpinnerFrame()
 	a.drawPasses++
 	a.recordTerminalNotices()
 	if a.vx == nil {

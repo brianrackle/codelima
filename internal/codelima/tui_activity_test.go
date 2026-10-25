@@ -34,7 +34,7 @@ func TestTUIActivitySharedRecordsRenderAndSelectAcrossRefresh(t *testing.T) {
 			a.activity.selected = "failed"
 			a.draw()
 			screen := renderedScreenText(t, a.vx, size[0], size[1])
-			for _, want := range []string{"Running", "other-window", "History", "failed-node", "bootstrap exit 23", "K cancel", "◐1", "g top"} {
+			for _, want := range []string{"Running", "other-window", "History", "failed-node", "bootstrap exit 23", "K cancel", "⠋1", "g top"} {
 				if !strings.Contains(screen, want) {
 					t.Fatalf("missing %q:\n%s", want, screen)
 				}

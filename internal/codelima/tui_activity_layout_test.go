@@ -96,7 +96,7 @@ func TestTUIActivityRowActionsAndHeaderBadge(t *testing.T) {
 	a := testActivityApp(t, 150, 38)
 	a.activity.page.History = []ActivityRecord{{ID: "host", Source: "host", Text: "capacity warning", Level: slog.LevelWarn, Action: activityOpenHost, Time: time.Now()}}
 	a.draw()
-	col, row := activityTextPosition(t, a, "◐1")
+	col, row := activityTextPosition(t, a, "⠋1")
 	if renderedCellStyle(t, a.vx, col, row).Foreground != newTUITheme(false).amber.Foreground {
 		t.Fatal("running count must remain amber in the active view")
 	}
@@ -107,7 +107,7 @@ func TestTUIActivityRowActionsAndHeaderBadge(t *testing.T) {
 	}
 	a.activity.page.Running = nil
 	a.draw()
-	if strings.Contains(renderedScreenText(t, a.vx, 150, 38), "◐1") {
+	if strings.Contains(renderedScreenText(t, a.vx, 150, 38), "⠋1") {
 		t.Fatal("completed operations left a stale header count")
 	}
 	region := a.viewRegions[tuiViewActivity]

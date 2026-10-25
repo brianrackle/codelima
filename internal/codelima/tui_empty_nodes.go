@@ -22,6 +22,7 @@ type tuiEmptyNodeControl struct {
 type tuiEmptyNodeLine struct {
 	text, key string
 	style     vaxis.Style
+	spinner   bool
 }
 
 func (a *vaxisTUIApp) emptyNodesVisible() bool {
@@ -95,7 +96,7 @@ func (a *vaxisTUIApp) emptyNodeLines(theme tuiTheme) ([]tuiEmptyNodeLine, []tuiE
 	}
 	left = append(left, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: "HOST CHECK", style: theme.muted})
 	if a.doctor.checkedAt.IsZero() && a.doctor.err == nil {
-		left = append(left, tuiEmptyNodeLine{text: "◐ Checking host prerequisites…", style: theme.dim})
+		left = append(left, tuiEmptyNodeLine{text: "  Checking host prerequisites…", style: theme.amber, spinner: a.doctor.loading})
 	}
 	for _, check := range a.doctor.report.Checks {
 		glyph, style := "✓", theme.muted
@@ -122,7 +123,7 @@ func (a *vaxisTUIApp) emptyNodeLines(theme tuiTheme) ([]tuiEmptyNodeLine, []tuiE
 			tuiEmptyNodeLine{text: "The first start downloads the configured image and runs the template's setup. Time depends on the image, commands and network.", style: theme.muted})
 	}
 	if a.doctor.loading {
-		right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: "◐ Re-checking · showing the last result", style: theme.amber})
+		right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: "  Re-checking · showing the last result", style: theme.amber, spinner: true})
 	}
 	if count := len(a.doctor.report.Warnings); count != 0 {
 		right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: a.keyHintsFormat("%d additional findings · {view.system} Doctor", count), key: "view.system", style: theme.amber})
@@ -202,8 +203,8 @@ func (a *vaxisTUIApp) drawEmptyNodeLines(win vaxis.Window, lines []tuiEmptyNodeL
 		if len(wrapped) == 0 {
 			rows = append(rows, line)
 		}
-		for _, row := range wrapped {
-			rows = append(rows, tuiEmptyNodeLine{text: row.text, key: line.key, style: line.style})
+		for i, row := range wrapped {
+			rows = append(rows, tuiEmptyNodeLine{text: row.text, key: line.key, style: line.style, spinner: line.spinner && i == 0})
 		}
 	}
 	start := 0
@@ -215,6 +216,9 @@ func (a *vaxisTUIApp) drawEmptyNodeLines(win vaxis.Window, lines []tuiEmptyNodeL
 	col, top := win.Origin()
 	for i, line := range rows[start:min(len(rows), start+h)] {
 		tuiLine(win.New(indent, i, w-2*indent, 1), 0, line.text, line.style)
+		if line.spinner {
+			a.drawSpinner(win.New(indent, i, 1, 1), line.style)
+		}
 		if line.key != "" && strings.TrimSpace(line.text) != "" {
 			a.emptyNodes.controls = append(a.emptyNodes.controls, tuiEmptyNodeControl{key: line.key, rect: tuiRect{col: col + indent, row: top + i, width: w - 2*indent, height: 1}})
 		}

@@ -2,6 +2,10 @@
 
 ## Fleet-manager frontend checks
 
+`make test-tui-spinners TUI_SPINNER_TEST_FLAGS=-race` covers frame timing,
+partial paints, clipping, overlay ownership, completion/shutdown and the
+affected frontend views (ADR 202). Telemetry polling is unchanged.
+
 Resource-gauge rendering checks: `make test-tui-gauges` covers both color modes,
 selection/modal styles, unavailable readings, clipping and all resource surfaces
 (ADR 201). The normal `make verify` gate includes these tests.

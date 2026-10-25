@@ -257,7 +257,13 @@ func (a *vaxisTUIApp) drawDoctor(win vaxis.Window, t tuiTheme) {
 	case s.err != nil:
 		status, style = "Last check failed: "+s.err.Error()+" · showing last check", t.coral
 	}
+	if s.loading {
+		status = "  " + status
+	}
 	tuiLine(win, 1, status, style)
+	if s.loading {
+		a.drawSpinner(win.New(0, 1, 1, 1), t.amber)
+	}
 	rows := a.doctorRows()
 	visible := max(1, h-4)
 	s.index = max(0, min(s.index, len(rows)-1))

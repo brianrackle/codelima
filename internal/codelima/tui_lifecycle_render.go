@@ -54,6 +54,9 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 		icon, style := lifecyclePhaseStyle(phase.State, theme)
 		text := fmt.Sprintf("%s %-18s %6s  %s", icon, phase.Label, lifecyclePhaseDuration(phase), plainLogText(phase.Detail))
 		tuiLine(progress, row, text, style)
+		if phase.State == "running" {
+			a.drawSpinner(progress.New(0, row, 1, 1), style)
+		}
 		row++
 		if wide && phase.ID == "bootstrap" && a.spec.nodeID == record.Node.ID && a.spec.loaded && phase.State != "pending" {
 			for i, step := range a.spec.snapshot.Bootstrap.Steps {
@@ -62,6 +65,9 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 				}
 				icon, style := lifecyclePhaseStyle(string(step.State), theme)
 				tuiLine(progress, row, fmt.Sprintf("  %s %d · %s · %s", icon, i+1, step.SourceName, plainLogText(step.Command)), style)
+				if string(step.State) == "running" {
+					a.drawSpinner(progress.New(2, row, 1, 1), style)
+				}
 				row++
 			}
 		}

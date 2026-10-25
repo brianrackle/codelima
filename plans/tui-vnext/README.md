@@ -11,7 +11,7 @@ All example identities, metrics and timestamps in those files are reference data
 |---|---|---|
 | [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail (ADR 188); prompt idle timing (ADR 189); per-agent recorded validation (ADR 190); final qualification remains |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
-| [TUI kit · tokens & states](reference/Kit.dc.html) | Palette, states, gauges and motion | Partial: shared fill/track gauges (ADR 201); 10-fps spinner and final qualification remain |
+| [TUI kit · tokens & states](reference/Kit.dc.html) | Palette, states, gauges and motion | Partial: shared fill/track gauges and 10-fps foreground progress cells (ADRs 201–202); final qualification remains |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
@@ -37,6 +37,25 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+Spinner checkpoint (ADR 202), 2026-10-25: active progress cells use the Kit's
+braille sequence on a 100 ms event-loop timer. Ticks touch registered cells only;
+full draws rebuild their clipped positions, overlays own their registrations,
+and idle/shutdown stop the timer. Static node statuses and historical request
+symbols retain their meanings. `make build verify` passed (core tests 73.414s),
+as did `make test-tui-spinners TUI_SPINNER_TEST_FLAGS=-race` (11.440s) and gopls.
+The tests cover frame order, late ticks, partial paints, styles, clipping,
+overlays, foreground loading/completion, hidden panels and shutdown, plus the
+affected view regressions.
+Live checks used an isolated store and a wrapper that delayed only the real
+`limactl --version` check by three seconds. Both 150×38 truecolor and 80×24 ANSI
+captures showed all ten frames in order at roughly 100 ms intervals. Help stayed
+stable while the check ran; switching to Host hid its indicator. A resize to
+100×28 and completion left no stale spinner. Captures were visually inspected;
+no VM was created. The owned frontend, daemon, tmux server, delayed-command
+wrapper, temporary store, mount and captures were removed. The prior
+whole-design/native qualification items remain open.
+
 
 Gauge checkpoint (ADR 201), 2026-10-25: resource lines retain explicit gauge
 values and widths until drawing. Empty cells use `#2b3a49` / ANSI gray, filled

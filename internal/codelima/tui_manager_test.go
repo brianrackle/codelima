@@ -28,6 +28,7 @@ func newTestManager(t *testing.T, width, height int) (*vaxisTUIApp, *sharedFakeT
 	t.Cleanup(vx.Close)
 	app := &vaxisTUIApp{ctx: context.Background(), state: state, sessions: sessions, vx: vx, messages: newTUIMessageLog(200)}
 	app.refreshFleet()
+	t.Cleanup(app.stopSpinners)
 	return app, manager
 }
 
