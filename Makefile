@@ -306,6 +306,12 @@ test-manager-settings: init
 test-tui-manager: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUI(Fleet|Overview|Manager|Resize|Shortcut|Tab|FocusToggle)|PushedReload|TerminalTab)' -count=1
 
+.PHONY: test-tui-help
+TUI_HELP_TEST_FLAGS ?=
+test-tui-help: init
+	@mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(TUI_HELP_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIManager(Help|Palette)|TUIDaemonControlLogReload)' -count=1 -timeout=90s
+
 .PHONY: test-fleet-evidence
 .PHONY: test-overview
 OVERVIEW_TEST_FLAGS ?=

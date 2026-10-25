@@ -10,6 +10,13 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-tui-help TUI_HELP_TEST_FLAGS=-race` checks contextual group order,
+four/two/one-column resizing, search, pasted and inherited key events, mouse
+focus/scroll/close, and retained System action descriptions (ADR 192). Run the
+key-help subsection of QA.md Flow 7 in wide and compact terminals. The existing
+palette tests remain in this target because help no longer shares its action
+model; palette behavior must remain intact.
+
 `make test-overview OVERVIEW_TEST_FLAGS=-race` covers Overview focus and
 responsive panels, stable session/route selection, captured end confirmation,
 daemon-derived session age, coalesced cross-client tab-order refresh, mouse

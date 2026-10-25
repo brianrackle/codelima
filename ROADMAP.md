@@ -54,6 +54,11 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   daemon-derived session age and bounded recent events are implemented (ADR 191).
   Final artboard/native qualification remains in TODO #57.
 
+- Contextual key help [partially complete]: grouped read-only help, current-view
+  ordering, responsive columns, global search and keyboard/mouse navigation are
+  implemented (ADR 192). Configurable bindings (roadmap #9) and final native
+  design qualification remain in TODO #57.
+
 - Ports delivery [partially complete, in progress]: readiness-gated application
   routes and daemon-owned published TCP with stopped-node migration (ADR 182).
   Cached Ports presentation, durable generic-host ownership controls, optional

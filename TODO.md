@@ -106,6 +106,29 @@ additional compatibility/QA work. Preserve this in the full redesign scope.
 
 ### 57. Implement the retrieved major-version TUI design
 
+Help checkpoint (ADR 192): dedicated contextual columns, compact group/scroll
+navigation, all-context search and read-only keyboard/mouse behavior are now
+implemented. Qualification results are tracked in the design ledger.
+
+Remaining help requirement: the source advertises `settings.yaml › keys`, but
+dispatch remains fixed. Follow the key-bindings plan with a context-aware binding
+registry, collision validation, persisted overrides and help generated from the
+effective map. Advantage: help and behavior stay consistent and the artboard's
+remapping promise becomes real. Disadvantage: shortcut precedence, nested forms,
+terminal focus, migration and recovery from conflicting bindings require a
+separate cross-view regression pass. The current help explicitly describes only
+implemented keys; roadmap #9 remains open.
+
+The command palette and shell chooser still need their dedicated artboard pass.
+Palette work includes grouped results, counts, matching spans, recent commands,
+context hints and per-node commands with captured canonical identities and
+revalidated lifecycle confirmations. Shell chooser work includes grouped new
+and existing sessions, honest launcher availability, exact-session attachment
+and persisted default hints. Reuse existing action/session owners: this keeps
+confirmation and error behavior consistent, at the cost of adapters and tests
+for selection changes while an overlay is open. Final whole-design and native
+qualification also remain open; this help checkpoint does not complete them.
+
 Source access resolved on 2026-10-24. The user's interactive Claude Code
 session could read the artifact with its `Artifact` tool; the headless
 sessions used during earlier attempts did not expose that tool. Forking the

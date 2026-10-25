@@ -31,12 +31,53 @@ All example identities, metrics and timestamps in those files are reference data
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–181 responsive capacity, retained Doctor findings, cached daemon status and explicit actions | Partial; Doctor, overview and action flows verified; macOS sampling and full artboard/native qualification remain |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping and final native qualification remain |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+ADR 192 checkpoint, 2026-10-25: help now has seven contextual groups, four/two/one
+responsive columns, independent scrolling, all-context search and read-only
+keyboard/mouse handling. The opening view leads; the focused column is
+highlighted over a dimmed manager. Descriptions and key names wrap at word
+boundaries, with grapheme-preserving fallback for overlong tokens. Overview,
+Ports, Activity, System and form/shell focus restrictions are represented.
+The palette retains its executable model separately. Protocols remain 27/2/6/7.
+
+Final `make verify test-race test-integration` passed after the wrapping fixes:
+core unit 84.110s, core race 114.864s and CLI integration 17.706s, plus format,
+lint, Vaxis and both builds. The focused help/palette/System regression target
+passed (0.766s), and final gopls diagnostics passed. Go API inspection used the
+local Vaxis/text-input documentation. No code changed after the final gates
+started.
+
+The final rebuilt Linux frontends were visually inspected and operated at
+150×38 and 80×24, in truecolor and ANSI modes. The Flow 7 help checks covered
+every opening context, all groups, final Spec/System bindings, forward/reverse
+group navigation, scrolling, mouse focus/wheel/search/close, typed and bracketed
+paste search, empty results, inert Enter/lifecycle/shell keys, palette opening
+and subsequent palette navigation. Resize passed through 110×30, 40×10 and
+back to both ordinary sizes. Terminal inventory stayed empty. Visual inspection
+caught split words and key names; these were fixed, rebuilt and rechecked.
+The fixture used a stopped metadata-only node; no guest was started. Both
+frontends, their tmux server and the isolated daemon exited. A process audit
+found no owned process before the entire fixture/capture tmpfs was unmounted
+and removed. Native platform/full-design qualification and configurable keys
+remain open, as recorded in TODO #57 and roadmap #9.
+The final audit removed 46 new inactive inputrc files with the exact generated
+contents; older, active and other files were preserved. No owned verification
+process remained. The new Claude artifact-check scratch directory was also
+removed after its session exited.
+
+Live source recheck, 2026-10-25: interactive Claude Code in this VM successfully
+used its Artifact tool to read the canonical artifact and `project/canvas.json`.
+The live title, version `1792822420-f77f`, 26-artboard count and canvas SHA-256
+match `reference/SOURCE.md`. A separate local check verified all 27 reference
+file hashes. This recheck did not compare every artboard against a fresh live
+download. The noninteractive invocation lacked the Artifact tool; use the
+interactive terminal path when another live check is needed.
 
 ADR 191 checkpoint, 2026-10-25: Overview now has five responsive panels,
 independent focus/scrolling, stable session and route selections, exact-session

@@ -182,9 +182,9 @@ func TestTUIDaemonControlLogReloadAndAllControlsRemainReachable(t *testing.T) {
 			t.Fatal("reloaded log retained replaced content")
 		}
 		a.openKeyHelp()
-		p := a.overlay.(*tuiPalette)
-		p.input.SetContent("System")
-		p.filter()
+		h := a.overlay.(*tuiKeyHelp)
+		h.searching = true
+		h.input.SetContent("System")
 		a.draw()
 		for _, want := range []string{"update daemon, keep sessions", "restart daemon; ends live shell processes", "open daemon log", "diagnose freeze; save local evidence"} {
 			if !strings.Contains(renderedScreenText(t, a.vx, size[0], size[1]), want) {

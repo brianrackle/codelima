@@ -1,5 +1,16 @@
 # Patterns
 
+## Contextual help without action ownership
+
+Keep shortcut descriptions separate from executable palette commands. A help
+overlay captures its opening context and owns only focus, per-group scrolling,
+search text and rendered mouse regions. Search every context and wrap complete
+bindings at terminal-cell boundaries so compact layouts retain access to the
+same information. Route paste framing through the existing input widget; do
+not treat pasted text, inherited releases or repeats as activation. A catalogue
+entry must describe a supported dispatcher, including focus restrictions.
+Keep unimplemented remapping claims out of the help surface (ADR 192).
+
 ## Validated asynchronous forms
 
 Keep editable values and dirty-discard behavior in the shared dialog model;

@@ -353,6 +353,15 @@ complete long findings. A filter with no matches stays in the searchable table.
 | `:`, `?` | Search commands / keyboard shortcuts |
 | `q` | Quit from a global view; return from node detail |
 
+Press `?` for contextual key help. The current view leads the columns; compact
+terminals show one group at a time. Tab/Shift-Tab or Left/Right changes groups;
+Up/Down, PgUp/PgDn, Home/End or the mouse wheel scrolls the focused group.
+Click a column to focus it. `/` searches all groups by key, context or description
+(for example `overview session` or `system restart`). Search accepts pasted
+text; Enter never runs a binding. Tab returns to columns, and Esc or `?` closes
+help while preserving the underlying view. Keys act once per press; navigation
+and text editing repeat while held. Key remapping is not implemented yet.
+
 Press `n` for the create form. Names, directories and optional `HOST:GUEST`
 ports validate inline; Tab accepts a suggested name when one is already used.
 Enter on Directory opens a browser. Enter on Template opens a filterable picker

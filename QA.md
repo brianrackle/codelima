@@ -476,6 +476,28 @@ guests, services, captures and files after completing these checks.
 
 ## Flow 7: path-scoped fleet manager
 
+Contextual key help (ADR 192), in the disposable home:
+
+1. At 150×38, press `?` from Nodes, node detail, Templates, Ports, Activity and
+   System. The opening context must lead the four columns. The focused column
+   is highlighted and the underlying view is dimmed. Closing with Esc or `?`
+   must preserve that view and selection.
+2. Use Tab/Shift-Tab and Left/Right to reach every group, including Ports,
+   Activity and System. Click another column and scroll it with the wheel;
+   arrows, PgUp/PgDn and Home/End must expose complete descriptions. No
+   displayed binding should execute when pressed while reading help.
+3. `/` searches all contexts. Type `overview session`, then clear with Ctrl+u
+   and paste `system restart`; confirm the result retains its context and
+   describes ending live shell processes. Enter must not restart anything.
+   Try a query with no results, Tab back to columns, and click search/close.
+4. Resize while help is open to 110×30, 80×24 and the minimum-size notice,
+   then return to 150×38. Two/one-column layouts must retain the focused group;
+   all groups and the final Spec/System bindings must remain reachable.
+   Repeat search and mouse controls compactly, with ANSI and truecolor modes.
+5. Open help through the command palette, then close it. Verify the palette
+   can still execute ordinary navigation. Close both frontends and stop the
+   disposable daemon; remove this flow's stores, sockets, captures and mount.
+
 Overview panels (ADR 191), in the disposable home:
 
 1. At 150×38 open a ready node's Overview. Inspect Identity/Resources on the

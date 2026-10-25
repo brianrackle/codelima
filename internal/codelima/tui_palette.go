@@ -20,7 +20,6 @@ type tuiPalette struct {
 	commands []tuiPaletteCommand
 	matches  []tuiPaletteCommand
 	index    int
-	help     bool
 }
 
 func newTUIPalette(title string, commands []tuiPaletteCommand) *tuiPalette {
@@ -86,7 +85,7 @@ func (p *tuiPalette) Update(event vaxis.Event) (bool, error) {
 			p.filter()
 		}
 	case key.Matches(vaxis.KeyEnter) && tuiKeyActivates(key, true):
-		if len(p.matches) > 0 && !p.help && p.matches[p.index].run != nil {
+		if len(p.matches) > 0 && p.matches[p.index].run != nil {
 			return true, p.matches[p.index].run()
 		}
 	default:
@@ -173,43 +172,4 @@ func (a *vaxisTUIApp) openCommandPalette() {
 		commands = append(commands, tuiPaletteCommand{label: label, hint: "stops guest sessions; incomplete setup reruns", run: func() error { return a.fleetNodeAction(tuiActionNodeRestart) }})
 	}
 	a.overlay = newTUIPalette("Command palette", commands)
-}
-
-func (a *vaxisTUIApp) openKeyHelp() {
-	commands := []tuiPaletteCommand{
-		{label: "1–5", hint: "Nodes · Templates · Ports · Activity · System"},
-		{label: "o", hint: "Nodes: open selected node's first live HTTP route"},
-		{label: "0", hint: "Toggle all nodes / launch directory scope"},
-		{label: "↑↓ / j k", hint: "Select node; Enter opens detail; Esc returns"},
-		{label: "/", hint: "Filter names and directories; status: template: dir: port:"},
-		{label: "G / < > / =", hint: "Group directories / sort field / reverse sort"},
-		{label: "Space / *", hint: "Mark node / mark every visible node; marks survive filtering"},
-		{label: "n / c / d", hint: "Create / clone / delete node"},
-		{label: "s", hint: "Start or stop selected/marked nodes"},
-		{label: "r", hint: "Restart selected/marked nodes; unmarked failed node retries its failed step"},
-		{label: "x / X", hint: "Open shell / shell chooser"},
-		{label: "Tab / Shift-Tab", hint: "Cycle detail tabs or templates/environments"},
-		{label: "+ − / Space", hint: "Metrics: 1m / 5m / 15m / 1h window; pause samples"},
-		{label: "p / y", hint: "Metrics: sort processes by CPU or memory / copy selected PID"},
-		{label: "[ ] / f / w / L", hint: "Logs: source / follow / wrap / severity"},
-		{label: "/ / n N / g G / y / o", hint: "Logs: search / matches / top-end / copy line / PAGER"},
-		{label: "N / e / v / y", hint: "Spec: new from current template / edit template / YAML pager / copy YAML path"},
-		{label: "← → / Ctrl-↑↓ / Enter", hint: "Spec: focus panel / focus panel / open selected bootstrap command output"},
-		{label: "F6", hint: "Embedded shell focus; every other key reaches the shell while focused"},
-		{label: "[ ] / t / T / w", hint: "Shell tabs / new guest / new host / close (TUI focus only)"},
-		{label: "F7", hint: "Search embedded terminal (TUI focus only)"},
-		{label: ": / ?", hint: "Command palette / searchable key help"},
-		{label: "u", hint: "System: update daemon, keep sessions"},
-		{label: "S", hint: "System: restart daemon; ends live shell processes"},
-		{label: "L", hint: "System: open daemon log"},
-		{label: "D", hint: "System: diagnose freeze; save local evidence"},
-		{label: "o / y / p", hint: "Ports: open HTTP / copy address / pin bare localhost"},
-		{label: "Enter / / / C", hint: "Ports: go to node / filter / refresh"},
-		{label: "PgUp / PgDn", hint: "Ports: scroll selected route details and compact By node list"},
-		{label: "Tab / C / R", hint: "System: panel / check / Doctor repair"},
-		{label: "q", hint: "Quit from a global view; return from node detail"},
-	}
-	p := newTUIPalette("Keyboard shortcuts · type to filter", commands)
-	p.help = true
-	a.overlay = p
 }
