@@ -6,6 +6,9 @@ Register visible animated cells during normal drawing; clear registrations when
 a new foreground layer covers them. Consume one timer in the UI event loop and
 paint only those cells. Stop the timer when none remain. Do not start a graphics
 frame, poll data or write from a callback for a presentation tick (ADR 202).
+Full and partial paints must use the same style resolver, including persisted
+preferences; terminal capabilities alone do not select the application theme
+(ADR 205).
 
 ## Structured resource gauges
 

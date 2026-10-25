@@ -38,6 +38,21 @@ All example identities, metrics and timestamps in those files are reference data
 
 ## Cross-cutting requirements
 
+Startup-header checkpoint (ADR 205), 2026-10-25: a real tmux capture reproduced
+RGB logo cells during ANSI startup. Animation ticks bypassed the saved color
+preference; full and partial header paints now share the same style resolver.
+The regression failed before the fix and checks unchanged styles across the
+whole screen, plus text outside the wordmark, during animation and completion.
+Focused logo tests and `make verify` passed (core 73.833s); gopls reported only
+existing modernization suggestions outside the changed lines. The rebuilt TUI
+passed 252 sampled frames across ANSI/truecolor/auto at 80×24 and 150×38, with
+Nodes/Templates navigation during the animation. All six settled captures were
+visually inspected. The shuffled letters were the intentional logo effect,
+not evidence of leaked capability replies. The owned daemon, frontends, tmux,
+64 MiB tmpfs, stores, captures and scratch were removed, along with two new
+inactive generated inputrc files. No VM was created. Attached-header choice,
+native qualification and the separate host-side socket cleanup remain open.
+
 Guest-platform checkpoint (ADR 204), 2026-10-25: existing SSH telemetry now
 reports normalized guest architecture and KVM device access independently.
 Current snapshots copy the optional access value, carry it through push/poll,

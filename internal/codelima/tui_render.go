@@ -500,7 +500,7 @@ func (a *vaxisTUIApp) headerLogoText() string {
 }
 
 func (a *vaxisTUIApp) headerStyle() vaxis.Style {
-	theme := newTUITheme(a.vx != nil && a.vx.CanRGB())
+	theme := a.managerTheme()
 	style := theme.mint
 	style.Background = theme.chrome.Background
 	style.Attribute = vaxis.AttrBold

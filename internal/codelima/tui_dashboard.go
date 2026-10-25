@@ -227,13 +227,7 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 	width, _ := win.Size()
 	bar := win.New(0, 0, width, 1)
 	tuiFill(bar, theme.chrome)
-	logo := theme.mint
-	logo.Background = theme.chrome.Background
-	logo.Attribute = vaxis.AttrBold
-	if a.hostTerminalTabActive() {
-		logo.Foreground = theme.coral.Foreground
-	}
-	tuiLine(bar.New(0, 0, 9, 1), 0, a.headerLogoText(), logo)
+	tuiLine(bar.New(0, 0, 9, 1), 0, a.headerLogoText(), a.headerStyle())
 	col := 10
 	viewActions := []string{"view.nodes", "view.recipes", "view.ports", "view.activity", "view.system"}
 	views := []string{"Nodes", "Templates", "Ports", "Activity", "System"}

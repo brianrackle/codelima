@@ -1,7 +1,6 @@
 package codelima
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -89,42 +88,44 @@ func TestTUILogoAnimationTickCompletesWithoutQuitting(t *testing.T) {
 }
 
 func TestTUILogoAnimationTickRedrawsOnlyFixedWidthHeaderMark(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	service, _ := newTestService(t)
-	state, err := newTUIState(testTUINodes(t), newFakeTUISessionManager())
-	if err != nil {
-		t.Fatalf("newTUIState() error = %v", err)
-	}
-	vx := newRenderTestVaxis(t, 100, 24)
-	defer vx.Close()
-
-	app := &vaxisTUIApp{
-		ctx:           ctx,
-		service:       service,
-		state:         state,
-		sessions:      newTUISessionStore(ctx, service, func(vaxis.Event) {}),
-		vx:            vx,
-		logoAnimation: newTUILogoAnimation(),
-	}
-	defer app.sessions.Close()
-	app.draw()
-
-	quit, err := app.handleEvent(tuiLogoAnimationTickEvent{Elapsed: tuiLogoSpinInterval})
-	if err != nil {
-		t.Fatalf("handleEvent(logo tick) error = %v", err)
-	}
-	if quit {
-		t.Fatal("logo tick requested TUI quit")
-	}
-
-	rendered := renderedScreenText(t, vx, 100, 24)
-	if !strings.Contains(rendered, app.logoAnimation.text()+"   1 Nodes") {
-		t.Fatalf("animated header lost its adjacent view navigation:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "Nodes") {
-		t.Fatalf("header-only animation redraw disturbed the TUI body:\n%s", rendered)
+	// A truecolor-capable host must still honor an explicit ANSI preference.
+	t.Setenv("COLORTERM", "truecolor")
+	for _, mode := range []string{"ansi", "truecolor", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			app, _ := newTestManager(t, 80, 24)
+			if !app.vx.CanRGB() {
+				t.Fatal("fixture did not negotiate truecolor")
+			}
+			cfg := app.managerSettings()
+			cfg.Color = mode
+			app.preferences = &cfg
+			app.logoAnimation = newTUILogoAnimation()
+			app.draw()
+			before := renderedScreenText(t, app.vx, 80, 24)
+			styles := make([]vaxis.Style, 80*24)
+			for row := range 24 {
+				for col := range 80 {
+					styles[row*80+col] = renderedCellStyle(t, app.vx, col, row)
+				}
+			}
+			for _, elapsed := range []time.Duration{tuiLogoSpinInterval, tuiLogoAnimationDuration} {
+				quit, err := app.handleEvent(tuiLogoAnimationTickEvent{Elapsed: elapsed})
+				if err != nil || quit {
+					t.Fatalf("logo tick: quit=%t, err=%v", quit, err)
+				}
+				after := renderedScreenText(t, app.vx, 80, 24)
+				if !strings.HasPrefix(after, app.headerLogoText()+"   1 Nodes") || after[len(tuiLogoText):] != before[len(tuiLogoText):] {
+					t.Fatalf("logo tick changed cells outside the wordmark:\n%s", after)
+				}
+				for row := range 24 {
+					for col := range 80 {
+						if got, want := renderedCellStyle(t, app.vx, col, row), styles[row*80+col]; got != want {
+							t.Fatalf("logo tick changed style at (%d,%d): got %+v, want %+v", col, row, got, want)
+						}
+					}
+				}
+			}
+		})
 	}
 }
 

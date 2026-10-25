@@ -6,6 +6,10 @@
 partial paints, clipping, overlay ownership, completion/shutdown and the
 affected frontend views (ADR 202). Telemetry polling is unchanged.
 
+`make test-tui-input TUI_INPUT_TEST_FILTER='^TestTUILogo'` checks startup
+wordmark timing and identical header styles across full and partial paints,
+including an ANSI preference on a truecolor terminal (ADR 205).
+
 Resource-gauge rendering checks: `make test-tui-gauges` covers both color modes,
 selection/modal styles, unavailable readings, clipping and all resource surfaces
 (ADR 201). The normal `make verify` gate includes these tests.

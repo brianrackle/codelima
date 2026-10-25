@@ -33,6 +33,10 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
 
 ## Related Draft Plans
 
+- Startup header colors [complete locally]: full and animated header paints
+  share the saved theme selection, including ANSI on a truecolor-capable host
+  (ADR 205). Final native/whole-design qualification remains in TODO #57.
+
 - Fleet restart [partially complete]: one daemon-owned
   stop/start receipt and lifecycle claim, CLI command, TUI single/marked actions,
   detail-only targeting, output capture and cancellation are implemented (ADR 185).

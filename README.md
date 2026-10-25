@@ -67,7 +67,8 @@ returns from detail to the same node.
 
 When the TUI opens, its fixed-width `CodeLima` wordmark briefly shuffles like a
 slot machine and settles from left to right. The effect runs independently of
-navigation and terminal startup, then stops completely. A standalone,
+navigation and terminal startup, respects the saved color mode throughout,
+then stops completely. A standalone,
 dependency-free webpage version is available in
 [`examples/codelima-logo-animation.html`](examples/codelima-logo-animation.html).
 

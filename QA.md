@@ -1422,6 +1422,11 @@ without moving the adjacent header fields. Starting with `C`, verify one
 additional `CodeLima` character settles from left to right about every third of
 a second, the complete word remains stable after roughly 2.67 seconds, and
 navigation remains responsive throughout.
+Repeat startup at 80×24 and 150×38 on a truecolor-capable terminal with
+`settings set color ansi`: every animation frame must retain the ANSI palette,
+including after switching views during the animation. Repeat with `truecolor`
+and `auto`; the logo and adjacent header must keep their shared theme. Restore
+the original setting and clean up the isolated verification home.
 
 After the TUI renders, launch the same command from a second real terminal. Confirm the second TUI starts normally and the first does not show an input-ownership warning. Return host focus to the first window and open a terminal tab, then return host focus to the second window and open another terminal tab. Repeat the switch once more in each direction; every newly focused window must work immediately and neither window may show an ownership-revoked message. Quit one TUI, then leave the remaining TUI idle for at least 35 seconds before opening a new terminal tab or switching between guest and host terminals.
 

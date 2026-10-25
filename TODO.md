@@ -202,15 +202,14 @@ guest data. All owned VM, terminal, daemon, metadata, capture, mount and scratch
 artifacts were removed; baseline resources were preserved. The design ledger
 records the evidence. Final whole-design/native qualification remains open.
 
-Terminal startup follow-up: the fresh 80×24 tmux ANSI frontend briefly retained
-RGB logo cells and query-like header characters from initial capability probes;
-resizing away and back repainted the header correctly, and the clone review used
-only ANSI colors. Similar transient headers appeared during earlier fixture
-runs. Investigate capability-response handling and invalidation after settings
-load with a startup capture regression and native-terminal comparison.
-Advantages: consistent first-frame logo/colors. Disadvantages: terminal/tmux
-negotiation timing must be reproduced before choosing a rendering fix. This is
-an observed qualification issue, not yet an attributed application regression.
+The startup color defect is attributed and corrected (ADR 205): partial logo
+paints used terminal capability colors instead of the saved preference. A real
+ANSI-mode tmux capture reproduced it, and a regression failed before sharing
+the style resolver with full header paints. The eight changing letters are the
+intentional startup animation; that capture does not show stray query replies.
+Full verification and six compact/wide live startup/navigation runs passed;
+their captures and test resources were cleaned. Native terminal presentation
+remains part of the whole-design QA matrix.
 
 Manual setup follow-up: launching two frontends concurrently against the new
 ADR 193 disposable home produced one `daemon exited before becoming ready`
