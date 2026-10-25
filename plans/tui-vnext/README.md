@@ -29,7 +29,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
-| [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
+| [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179 responsive capacity panels and retained Doctor findings, badge, repair and details | Partial; Doctor flows verified, daemon controls and full artboard/native qualification remain |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -562,3 +562,44 @@ unmounted. All definitions, captures, logs and other scratch under `tmp/dq`,
 plus focused-test scratch, have been removed. No VM was created. The parser is advisory;
 unsupported dynamic shell behavior remains unknown. Full redesign and native/
 artboard qualification remain open in TODO #57.
+
+## Global Doctor findings (ADR 179)
+
+Doctor now retains its own snapshot across navigation, runs one bounded check
+at a time, queues explicit repair after an active read, and re-checks after
+repair before reporting remaining findings. The System header badge includes
+report warnings, failed checks and observed global allocation warnings, with
+unknown/stale state marked explicitly. Selectable severity rows open wrapped,
+scrollable details; mouse controls match keyboard actions. Current settings
+are reread without rewriting malformed files during checks.
+
+Focused checks, full verify, race and CLI integration pass; gopls reports no
+errors (modernization suggestions only). The first full invocation stopped at
+lint; unchecked test-handler errors and two conditional style issues were fixed
+before the successful full run. A settings regression caught stale startup
+configuration; checks now inspect the current file. A separate regression
+ensures a failed first check has readable full details.
+
+Live 150×38/80×24 checks matched the badge against CLI findings, retained it
+across global navigation and exercised selection, full wrapped messages,
+resize and mouse details/repair. Two unreadable records moved to quarantine
+with original node/event bytes preserved. Their resolved warnings left the
+badge while completed repair messages remained in Activity. Malformed settings
+were reported without rewriting; restoring them cleared the finding. A metadata
+read failure retained the old snapshot and added ?, with its full error in
+details. Restored permissions and the following host refresh cleared unknown
+state. A scoped limactl failure appeared as failed version/list checks and
+recovered when the fixture switch was removed. Real inaccessible /dev/kvm
+remains a failed check in this VM.
+
+The periodic read-only check discovered a newly added corrupt record after
+61.1 seconds while Nodes remained visible. It updated the global badge and
+left the original record untouched. Explicit keyboard R then moved that record
+with its bytes preserved. All final automated gates pass (core unit 48.596s,
+core race 70.326s, CLI integration 16.756s).
+
+The isolated daemon/TUI/tmux stopped, the 64 MiB tmpfs was unmounted, and all
+metadata, quarantine, scoped fault wrapper, logs, captures, `tmp/sq` and focused
+test scratch were removed. No VM was created. The older stepqa fixture remains
+separate cleanup debt. Daemon controls and final full-System/artboard/native
+qualification remain open.

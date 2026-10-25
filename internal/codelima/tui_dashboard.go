@@ -209,6 +209,9 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 	if count := len(a.activity.page.Running); count > 0 {
 		views[tuiViewActivity] += fmt.Sprintf(" ◐%d", count)
 	}
+	if badge := a.doctorBadge(); badge != "" {
+		views[tuiViewSystem] += " " + badge
+	}
 	a.viewRegions = nil
 	for i, label := range views {
 		style := theme.chrome
@@ -219,8 +222,13 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 		label = " " + label + " "
 		cells := renderedTextWidth(a.vx, label)
 		tuiLine(bar.New(col, 0, cells, 1), 0, label, style)
+		badge := ""
 		if i == int(tuiViewActivity) && len(a.activity.page.Running) > 0 {
-			badge := fmt.Sprintf("◐%d", len(a.activity.page.Running))
+			badge = fmt.Sprintf("◐%d", len(a.activity.page.Running))
+		} else if i == int(tuiViewSystem) {
+			badge = a.doctorBadge()
+		}
+		if badge != "" {
 			badgeWidth := renderedTextWidth(a.vx, badge)
 			badgeStyle := style
 			badgeStyle.Foreground = theme.amber.Foreground
@@ -568,7 +576,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 		}
 		return "↑↓ move · ⏎ open · K cancel · f level · / filter · y copy · [] pages · g top"
 	case tuiViewSystem:
-		return "Tab panel · ↑↓ move · Enter edit · C check · R repair · Esc nodes · ? help"
+		return "Tab panel · ↑↓ move · Enter details/edit · C check · R repair · Esc nodes"
 	}
 	if a.vx != nil {
 		if width, _ := a.vx.Window().Size(); width < 100 {

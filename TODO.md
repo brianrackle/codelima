@@ -597,6 +597,21 @@ the reference example actionable without execution, but dynamic shell behavior
 and unsupported package managers remain unknown rather than proven guest
 dependencies.
 
+ADR 179 implements retained global Doctor findings, async bounded checks,
+queued explicit repair, post-repair re-check and readable details.
+Focused tests, full verify, race and integration pass; gopls reports no errors.
+Live wide/compact checks verified retained badges, complete keyboard/mouse
+details, exact-byte quarantine and Activity evidence, current malformed settings,
+stale read failures and recovery, and scoped Lima dependency failures. The
+background check discovered a new warning from Nodes after 61.1s without moving
+the record; explicit keyboard repair then preserved its bytes in quarantine.
+The isolated daemon/TUI/tmux, tmpfs, metadata/quarantine, fault wrapper,
+captures/logs, `tmp/sq` and focused-test scratch have been removed. No VM was
+created.
+Daemon update/restart/log/diagnostic controls and complete System fidelity remain
+open. The retained snapshot keeps navigation responsive but can be one minute
+old; explicit C re-check and stale/error labels expose that limit.
+
 Finish native terminal and exact artboard qualification, including generic
 child-modal mouse/presentation. Global catalog metadata currently uses the
 existing manager
@@ -631,7 +646,7 @@ the final runtime and receipt both confirmed stopped. The compact empty-filter
 state also passed. The disposable daemon/TUI, 67 message records, 4 operation
 receipts, homes, clipboard buffer and slice scratch files were removed.
 Remaining work: finish cross-view/native artboard review,
-including the System warning badge, general footer controls, empty/disconnected
+including general footer controls, empty/disconnected
 states and lifecycle presentation. Reuse rendered hit regions and typed actions;
 this keeps behavior consistent but expands responsive/native QA cases. The
 ambiguous committed-reply handoff case above remains independent and unresolved.

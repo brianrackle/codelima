@@ -741,3 +741,12 @@ definitions rather than built-in names.
 Keep suggested edits as exact-source byte insertions with a stale-source check.
 Open a shared unsaved draft, preserving normal apply/save/discard controls.
 Do not reformat unrelated shell text or save a suggestion implicitly. See ADR 178.
+
+## Global diagnostic snapshots
+
+Keep global findings independent of view-local data. Bound asynchronous checks,
+suppress overlap, fence completions and retain the last successful snapshot
+with its observation time when refresh fails. Unknown or stale diagnostics
+must not render as a clean zero. Separate completed repair messages from open
+findings by re-checking; retain repair evidence in Activity. Only explicit user
+actions may request repair. See ADR 179.

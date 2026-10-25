@@ -132,6 +132,12 @@ navigation. Session 2, handoff 6 and renderer 5 are unchanged. Inspect Go APIs
 with `make go-doc GO_DOC_ARGS='context.WithCancelCause'` and symbols/diagnostics
 with `make gopls GOPLS_ARGS='check internal/codelima/environment_test_run.go'`.
 
+`make test-system-doctor` covers retained Doctor snapshots, asynchronous checks,
+repair/re-check outcomes, current settings, header counts and details controls
+(ADR 179). Use `make go-doc GO_DOC_ARGS='context.WithTimeout'` and
+`make gopls GOPLS_ARGS='check internal/codelima/tui_doctor.go'` while developing.
+Run full verify/race/integration and the live System Doctor flow in `QA.md`.
+
 `make test-dependency-hints` covers bounded shell analysis and the environment
 warning's keyboard/mouse draft flow (ADR 178). Run full verify/race/integration
 and `make test-terminal-attach` when changing its parser dependency. The pinned

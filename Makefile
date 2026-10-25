@@ -236,6 +236,11 @@ test-terminal-attach: init
 .PHONY: test-recipes
 .PHONY: test-environment-runs
 .PHONY: test-dependency-hints
+.PHONY: test-system-doctor
+test-system-doctor: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUIDoctor|TUIHost|TUIManagerSettings)' -count=1 -timeout=90s
+
 test-dependency-hints: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(EnvironmentDependency|TUIRecipeDependency)' -count=1 -timeout=90s

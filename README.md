@@ -552,6 +552,14 @@ show `—`. These are configured allocations, not current host CPU/RAM usage.
 System has Doctor, Daemon, Host and Settings panels. Use `Tab`/`Shift-Tab` to
 move between them and arrows or the mouse wheel to scroll. Smaller terminals
 show the focused panel; wide terminals of at least 34 rows show all four.
+The System badge counts open Doctor warnings, failed checks and observed
+allocation warnings across views. Checks run at startup and once per minute;
+entering System or pressing `C` re-checks immediately. A `?` marks unknown or stale results. Select a Doctor
+row and press Enter, or click details, to read its full message. `R` runs
+metadata repair: unreadable records move to `_quarantine/`, and existing
+built-in/stale-claim repairs apply. Completed repair messages remain in Activity;
+a fresh check determines which findings are still open. Doctor reads the latest
+settings file without rewriting malformed YAML during a normal check.
 
 By default, `x` attaches the node's daemon session directly to your terminal and suspends
 the manager. `Ctrl+]` detaches; `exit` ends the session. `codelima shell NODE`

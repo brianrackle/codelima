@@ -2,7 +2,6 @@ package codelima
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"go.rockorager.dev/vaxis"
@@ -21,6 +20,7 @@ func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
 	width, height := win.Size()
 	tuiLine(win.New(2, 2, width-4, 1), 0, "System · Tab/Shift-Tab panel · ↑↓ scroll · C check · R repair", theme.mint)
 	a.systemRects = [tuiSystemPanelCount]tuiRect{}
+	a.doctor.controls = nil
 	full := tuiRect{col: 1, row: 4, width: width - 2, height: height - 7}
 	if width >= 120 && height >= 34 {
 		left, top := (full.width-1)/2, (full.height-1)/2
@@ -56,33 +56,12 @@ func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
 		inner := border.All(window, style)
 		switch panel {
 		case tuiSystemDoctor:
-			a.drawSystemDoctor(inner, theme)
+			a.drawDoctor(inner, theme)
 		case tuiSystemDaemon:
 			a.drawSystemDaemon(inner, theme)
 		case tuiSystemHost:
 			a.drawSystemHost(inner, theme)
 		}
-	}
-}
-
-func (a *vaxisTUIApp) drawSystemDoctor(win vaxis.Window, theme tuiTheme) {
-	tuiLine(win, 0, "Doctor · C re-check · R repair", theme.muted)
-	if a.managerData.loading {
-		tuiLine(win, 2, "Checking system…", theme.dim)
-		return
-	}
-	_, height := win.Size()
-	lines := make([]string, 0, len(a.managerData.doctor.Checks)+len(a.managerData.doctor.Warnings))
-	for _, check := range a.managerData.doctor.Checks {
-		lines = append(lines, fmt.Sprintf("%-8s %-16s %s", check.Status, check.Name, check.Message))
-	}
-	lines = append(lines, a.managerData.doctor.Warnings...)
-	for row, line := range visibleSystemLines(lines, &a.systemScroll[tuiSystemDoctor], height-2) {
-		style := theme.amber
-		if strings.HasPrefix(line, "ok ") {
-			style = theme.mint
-		}
-		tuiLine(win, row+2, line, style)
 	}
 }
 

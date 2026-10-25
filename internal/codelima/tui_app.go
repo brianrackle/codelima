@@ -56,6 +56,7 @@ type vaxisTUIApp struct {
 	preferences         *Config
 	preferenceRevision  uint64
 	systemPanel         int
+	doctor              tuiDoctorState
 	settingIndex        int
 	metrics             tuiMetricsState
 	logs                tuiLogsState
@@ -294,6 +295,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 	sessions.SetPreferredTerminalSize(cols, rows)
 	app.syncSessionFocus()
 	app.startHostColorQuery(0)
+	app.startDoctorCheck(false, true)
 	app.draw()
 
 	stopLogoAnimation := startTUILogoAnimation(ctx, vx.PostEvent)
@@ -320,6 +322,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.cancelActivityAttachment()
+	defer a.cancelDoctorCheck()
 	defer a.cancelLogsLoad()
 	defer a.cancelSpecLoad()
 	defer a.cancelMetricsLoad()
@@ -451,6 +454,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyManagerData(event)
 		a.draw()
 		return false, nil
+	case tuiDoctorDataEvent:
+		a.applyDoctorData(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiCreateDataEvent:
 		a.applyCreateData(event)
 		a.requestRedraw()
@@ -524,6 +531,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:
+		a.startDoctorCheck(false, false)
 		a.pollCreateIntent()
 		if f := a.visibleCreateForm(); f != nil && time.Since(f.dataAt) >= 3*time.Second {
 			f.loadData()

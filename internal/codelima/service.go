@@ -669,8 +669,12 @@ func (s *Service) Doctor(ctx context.Context, repair bool) (DoctorReport, error)
 		})
 	}
 
-	if err := validateConfig(s.cfg); err != nil {
-		report.Checks = append(report.Checks, DoctorCheck{Name: "config", Status: "fail", Message: err.Error()})
+	currentConfig, configErr := s.SettingsRead()
+	if configErr == nil {
+		configErr = validateConfig(currentConfig)
+	}
+	if configErr != nil {
+		report.Checks = append(report.Checks, DoctorCheck{Name: "config", Status: "fail", Message: configErr.Error()})
 	} else {
 		report.Checks = append(report.Checks, DoctorCheck{Name: "config", Status: "ok", Message: "config is valid"})
 	}

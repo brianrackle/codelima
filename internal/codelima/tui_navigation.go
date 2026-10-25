@@ -193,6 +193,8 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		a.loadManagerData(key.MatchString("R"))
 	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemSettings:
 		err = a.editManagerSetting()
+	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemDoctor:
+		a.openDoctorDetails()
 	case a.view != tuiViewNodes:
 		return false
 	case key.MatchString("/") && !a.nodeDetail:
@@ -283,9 +285,12 @@ func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 	}
 	switch {
 	case a.view == tuiViewSystem:
-		if a.systemPanel == tuiSystemSettings {
+		switch a.systemPanel {
+		case tuiSystemSettings:
 			a.settingIndex = max(0, min(len(a.managerSettingRows())-1, a.settingIndex+delta))
-		} else {
+		case tuiSystemDoctor:
+			a.moveDoctorSelection(delta)
+		default:
 			a.systemScroll[a.systemPanel] = max(0, a.systemScroll[a.systemPanel]+delta)
 		}
 	case a.view == tuiViewTemplates:

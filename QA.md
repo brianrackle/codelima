@@ -453,6 +453,28 @@ Resize to 120×30 and 80×24: only the focused panel is visible, and all panels 
 settings remain reachable. Compare daemon PID/version/session count to
 `codelima daemon status`. Stop and remove every disposable node/home afterward.
 
+System Doctor and global findings (ADR 179), using an isolated metadata home:
+
+1. At 150×38 and 80×24, compare the System badge with failed checks, report
+   warnings and observed host allocation warnings. Navigate through other
+   views: the count must persist. Inspect check time and severity colors.
+2. Create an isolated corrupt node record. Read-only checks must leave its bytes
+   in place. Select its warning with arrows and mouse; Enter/details opens the
+   full wrapped message. Scroll and resize long details, then close them.
+3. Press or click R. Inspect the quarantined record and verify its original
+   bytes survive. Re-check must remove resolved warnings from the badge, while
+   Activity retains the completed repair message. Verify duplicate R requests
+   during an active check produce one queued repair (automated blocking test).
+4. Modify settings.yaml to malformed YAML while the TUI remains open. C must
+   report the current file error without rewriting it. Restore the file and
+   re-check: the failed finding must clear. Inject a read failure after a good
+   check and confirm the last snapshot remains explicitly stale with a ? badge.
+5. Exercise missing Lima and inaccessible virtualization dependencies as failed
+   checks. Browsing must remain responsive and must not create or start a VM.
+   Leave Nodes visible, add a corrupt record, and wait for the periodic badge
+   update; that check must leave the record in place. Remove isolated metadata, quarantine data,
+   daemon/TUI, terminal sessions, sockets, mounts and captures afterward.
+
 Settings and shell choices (ADR 152):
 
 1. Open System, cycle Tab to Settings, and change shell mode with Enter. Quit and

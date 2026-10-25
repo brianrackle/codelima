@@ -16,7 +16,6 @@ type tuiManagerData struct {
 	environments   []EnvironmentConfig
 	logs           []Event
 	logNodeID      string
-	doctor         DoctorReport
 	loading        bool
 	err            error
 	preferences    *Config
@@ -41,6 +40,9 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 	a.cancelHiddenLifecycleLoad()
 	if a.service == nil {
 		return
+	}
+	if a.view == tuiViewSystem {
+		a.startDoctorCheck(repair, true)
 	}
 	a.managerGeneration++
 	a.cancelSpecLoad()
@@ -89,7 +91,6 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 			cfg, data.err = a.service.SettingsRead()
 			if data.err == nil {
 				data.preferences = &cfg
-				data.doctor, data.err = a.service.Doctor(ctx, repair)
 			}
 		case tuiViewNodes:
 			if detail && nodeID != "" && tab == tuiDetailOverview {
