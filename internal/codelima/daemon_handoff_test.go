@@ -336,6 +336,13 @@ func (h *updateHandoffHarness) receiveHandoff(t *testing.T, peer *daemon.Handoff
 		}
 		runtimeState.Recovery = recovery
 	}
+	if manifest.Version == daemon.HandoffVersion {
+		data, err := peer.ReadActivity(manifest.ActivitySize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Activity = data
+	}
 	received := 0
 	for received < len(manifest.Runtimes) {
 		message, fds, readErr := peer.ReadMessage()
@@ -571,7 +578,9 @@ func handoffManifestFor(ids []string, token string) daemon.HandoffManifest {
 		Session:       daemon.Session{Version: daemon.SessionVersion},
 	}
 	createdAt := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	activity := activityHandoffState{Terminals: make(map[string]TerminalMetadata, len(ids))}
 	for index, id := range ids {
+		activity.Terminals[id] = TerminalMetadata{}
 		manifest.Session.Terminals = append(manifest.Session.Terminals, daemon.TerminalState{
 			TerminalID: id,
 			TabID:      "node:handoff#" + id,
@@ -590,6 +599,11 @@ func handoffManifestFor(ids []string, token string) daemon.HandoffManifest {
 			ReplaySize: len("handoff-replay"),
 		})
 	}
+	data, err := json.Marshal(activity)
+	if err != nil {
+		panic(err)
+	}
+	manifest.Activity, manifest.ActivitySize = data, len(data)
 	return manifest
 }
 
@@ -704,6 +718,10 @@ func TestDaemonImportAcceptsPreviousChunkedHandoffVersion(t *testing.T) {
 	testDaemonImportPersistsSession(t, daemon.PreviousChunkedHandoffVersion)
 }
 
+func TestDaemonImportAcceptsPreviousRecoveryHandoffVersion(t *testing.T) {
+	testDaemonImportPersistsSession(t, daemon.PreviousRecoveryHandoffVersion)
+}
+
 func TestActivityNativeUpdateRecordsCommittedImport(t *testing.T) {
 	testDaemonImportPersistsSession(t, daemon.HandoffVersion)
 }
@@ -723,8 +741,11 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 	token := "import-token"
 	manifest := handoffManifestFor(ids, token)
 	manifest.Version = version
+	if version < daemon.HandoffVersion {
+		manifest.Activity, manifest.ActivitySize = nil, 0
+	}
 	manifest.BinaryVersion = "0.3.4"
-	if version == daemon.HandoffVersion {
+	if version >= daemon.PreviousRecoveryHandoffVersion {
 		for index := range manifest.Runtimes {
 			manifest.Runtimes[index].RecoverySize = len("handoff-recovery")
 		}
@@ -765,11 +786,16 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 			t.Fatalf("write replay: %v", err)
 		}
 	}
-	if version == daemon.HandoffVersion {
+	if version >= daemon.PreviousRecoveryHandoffVersion {
 		for _, id := range ids {
 			if err := peer.WriteRecovery(id, []byte("handoff-recovery")); err != nil {
 				t.Fatalf("write recovery: %v", err)
 			}
+		}
+	}
+	if version == daemon.HandoffVersion {
+		if err := peer.WriteActivity(manifest.Activity); err != nil {
+			t.Fatal(err)
 		}
 	}
 	batch := make([]int, 0, len(ids))

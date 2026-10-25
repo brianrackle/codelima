@@ -379,19 +379,45 @@ instead of desktop popups; its regression reproduced the missing history. A
 concurrent resize regression also protects the publisher's immutable identity
 projection. Final artboard/native qualification remains open.
 
-Native Activity replacement follow-up: the update barrier blocks predecessor
-queue flushes during handoff, and a committed predecessor skips its final flush.
-A notice admitted immediately before replacement can therefore be lost even
-though the successor correctly suppresses old checkpoint metadata. The steady
-live-update check proves that persisted notices are not replayed; it does not
-prove preservation of pending events at the cut. Transfer the bounded pending
-queue with stable IDs and the final terminal observation baseline under an
-explicit handoff boundary, or quiesce producers and durably drain before
-releasing ownership. Add committed-update and rollback tests with deliberately
-blocked persistence and output at the boundary, then repeat the live check.
-This preserves admitted events and avoids replay, but adds queue/version and
-ownership coordination. A pre-lock flush alone is simpler and leaves a race;
-keeping memory-only delivery loses events during an otherwise successful update.
+The pending native Activity replacement gap is resolved by ADR 171. Handoff
+version 6 transfers the bounded queue, original retry IDs, omitted count and
+terminal/route/capacity observation baselines together; versions 2–5 remain
+importable. The real-socket regression reproduced the lost pending record before
+the fix. Focused tests cover rollback, concurrent publication at the boundary,
+unobserved restored output, unchanged observations, overflow and invalid payloads.
+A live blocked-journal check also exposed permanently cached initialization
+errors. A second red regression keeps storage unavailable through commit; opening
+now retries at most once per second. Full verify, standalone race, integration
+and gopls pass for the final code. The combined command exited 143 during race
+without a test failure; no test process remained before the successful rerun.
+
+The rebuilt live candidate recovered four retained notices without restarting
+the shell. Fresh blocked-journal update and injected rollback each preserved
+their two queued notices, and a later identical notice appeared once. Activity
+was inspected at 150×38 and 80×24; Enter on a transferred record attached the
+original PID, and detach restored the filter. The TUI, shell, renderer, daemon,
+`tmp/nhq`, its 13 journal fixtures and this slice's scratch evidence are removed.
+Transfer keeps updates independent of temporary journal availability at the cost
+of bounded protocol state; crashes before persistence retain the existing
+memory-only delivery limit. Final native/design qualification remains open.
+
+Remaining handoff qualification: exercise the ambiguous boundary where a
+successor has observed additional restored/output notices and persisted them,
+but the predecessor does not receive the committed reply and rolls back. The
+inherited pending IDs are tested; reconciliation of newly derived successor
+notices with the predecessor's older observation baseline is not yet proven.
+Use an explicit reply-loss fixture and counter evidence before deciding whether
+durable observation watermarks are needed. Such watermarks can prevent replay
+after ambiguity but add terminal-generation and journal schema coordination.
+
+Verification cleanup follow-up: native shell checks can leave generated
+`.codelima-inputrc.*` files in the invoking home when process teardown bypasses
+the bootstrap's trailing cleanup. This slice removed its manual and completed-run
+files after checking that no live process referenced them; older
+goal-run files remain part of final cleanup. Give shell verification fixtures a
+project-local disposable HOME, propagate it through daemon/import children and
+clean it after their processes exit. This avoids host-home litter and makes
+ownership explicit, but host-auth tests must use deliberate home fixtures.
 
 ADR 169 queues successful daemon-update history in the committed successor,
 with both versions and the actual adopted session count. Focused tests, full
@@ -440,7 +466,7 @@ prevents recurrence, but cannot erase the old host entries and requires explicit
 mount teardown; do not report the old QA tree as cleaned.
 
 Remaining required work: complete visual fidelity and interactions for all 26 boards; finish
-raw attach qualification and shell window/tmux modes; native Activity event producers;
+raw attach qualification and shell window/tmux modes; final Activity qualification;
 final lifecycle/fleet/preview and Metrics artboard qualification; dynamic
 forwarding route presentation/pinning; key mappings and complete System panels; comprehensive
 form validation/dirty cancellation, template restoration and environment test
@@ -460,6 +486,19 @@ The forced-stop-assisted cleanup does not qualify ordinary nested KVM boot or
 all native lifecycle flows. For future constrained-host QA, use one guest at a
 time and bound QEMU's TCG translation cache; two 1 GiB guests consumed more
 than their assigned RAM and exceeded this 3.8 GiB VM's available memory.
+
+Activity presentation follow-up: compare the actual 150×38 and 80×24 views with
+`reference/Activity.dc.html` and the fleet-wide canvas notes. The current history
+concatenates variable-width fields, applies one style to the whole record, lacks
+per-row action hints and uses interior panel headings. Implement the reference's
+aligned timestamp/icon/node/message/action columns, distinct glyph colors,
+full-row selection, panel-title borders and severity choices. Keep compact
+truncation usable, expose visible row position and date context across retained
+days, and qualify footer/header mouse controls and running-count badges. Use
+real or explicitly identified fixtures for each state. This makes dense history
+scan like the artboard and clarifies navigation; responsive columns and hit
+regions add layout cases that need automated and live checks. Final design
+qualification cannot be inferred from the producer and persistence tests.
 
 
 Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified

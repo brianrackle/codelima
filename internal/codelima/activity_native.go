@@ -18,20 +18,22 @@ const nativeActivityQueueLimit = 256
 // worker persists them after Server.Run owns the process lock. The host update
 // barrier fences every write across handoff; a retry retains its original ID.
 type daemonActivityEvents struct {
-	host       *daemonHost
-	mu         sync.Mutex
-	pending    []activityMessageRequest
-	dropped    uint64
-	closed     bool
-	routes     forwardingActivitySnapshot
-	cpuOver    bool
-	memoryOver bool
-	flushMu    sync.Mutex
-	writeError bool
-	owned      atomic.Bool
-	wake       chan struct{}
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	host             *daemonHost
+	mu               sync.Mutex
+	pending          []activityMessageRequest
+	dropped          uint64
+	closed           bool
+	handoff          bool
+	adoptedBaselines map[string]TerminalMetadata
+	routes           forwardingActivitySnapshot
+	cpuOver          bool
+	memoryOver       bool
+	flushMu          sync.Mutex
+	writeError       bool
+	owned            atomic.Bool
+	wake             chan struct{}
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
 }
 
 func newDaemonActivityEvents(host *daemonHost) *daemonActivityEvents {
@@ -62,7 +64,7 @@ func (e *daemonActivityEvents) notify() {
 func (e *daemonActivityEvents) enqueue(request activityMessageRequest) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.closed {
+	if e.closed || e.handoff {
 		return
 	}
 	e.enqueueLocked(request)
@@ -203,7 +205,7 @@ func (e *daemonActivityEvents) observeCapacity(capacity hostinfo.Snapshot, nodes
 	a := summarizeHostAllocations(nodes)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.closed {
+	if e.closed || e.handoff {
 		return
 	}
 	observe := func(over *bool, used, total uint64, name, detail string) {

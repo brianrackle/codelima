@@ -670,6 +670,14 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   Verify Host, Ports and Daemon records navigate to their corresponding views,
   with successful updates shown as successful. Remove all disposable sessions,
   homes, records and test output after stopping the test daemon and TUIs.
+- In an isolated home, make the Activity journal temporarily unwritable after
+  opening a disposable shell. Emit a bell and notice, and confirm the daemon
+  reports retained pending events. Perform a live update while persistence is
+  still unavailable; restore the journal and verify both notices appear once,
+  the shell PID survives, and the next identical notice adds a new record.
+  Repeat with an injected import failure: the predecessor must resume and
+  persist the queued notices after storage recovers. Inspect wide and compact
+  Activity, then remove the failure setup, shell, daemon, home and output.
 - Remove all disposable nodes, homes, daemons, terminals and verification files.
 
 For recorded bootstrap steps and explicit retry, use one disposable guest:

@@ -56,8 +56,9 @@ are optional. The exact client/worker handshake continues to reject mismatches.
 * Counter resets and legacy text-only checkpoints cannot recover unobserved history.
 * Handoff now requires a fresh metadata baseline within a bounded wait.
 * The native queue retains its bounded-overflow and pre-persistence crash limits.
-  Pending memory-only events are not yet transferred during live replacement;
-  preserving that queue and its final observation boundary is tracked in TODO #57.
+  Pending memory-only events were not transferred by this decision alone;
+  [ADR 171](transfer_native_activity_at_daemon_handoff_171.md) adds the bounded
+  queue and observation-baseline transfer during live replacement.
 
 ## Pros and Cons of the Options
 

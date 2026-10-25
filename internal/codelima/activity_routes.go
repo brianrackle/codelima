@@ -48,7 +48,7 @@ func (f *dynamicForwarder) publishActivity() {
 func (e *daemonActivityEvents) observeForwarding(view forwardingActivitySnapshot) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.closed {
+	if e.closed || e.handoff {
 		return
 	}
 	keys := slices.Collect(maps.Keys(view.Routes))

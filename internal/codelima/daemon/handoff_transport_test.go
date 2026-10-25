@@ -154,6 +154,33 @@ func TestHandoffRecoveryManifestBoundsBeforePayloadAllocation(t *testing.T) {
 	}
 }
 
+func TestHandoffActivityTransferBoundsAndChunks(t *testing.T) {
+	testHandoffBlobRoundTrip(t, MaxHandoffActivityBytes,
+		func(c *HandoffConnection, _ string, data []byte) error { return c.WriteActivity(data) },
+		func(c *HandoffConnection, _ string, size int) ([]byte, error) { return c.ReadActivity(size) })
+	for _, manifest := range []HandoffManifest{
+		{Version: HandoffVersion, ActivitySize: -1},
+		{Version: HandoffVersion},
+		{Version: HandoffVersion, ActivitySize: MaxHandoffActivityBytes + 1},
+		{Version: PreviousRecoveryHandoffVersion, ActivitySize: 1},
+	} {
+		if err := ValidateHandoffActivitySize(manifest); err == nil {
+			t.Fatal("invalid Activity size accepted", manifest)
+		}
+	}
+	for _, manifest := range []HandoffManifest{
+		{Version: HandoffVersion, ActivitySize: MaxHandoffActivityBytes},
+		{Version: PreviousRecoveryHandoffVersion},
+	} {
+		if err := ValidateHandoffActivitySize(manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := (&HandoffConnection{}).ReadActivity(MaxHandoffActivityBytes + 1); err == nil {
+		t.Fatal("oversized Activity payload allocated")
+	}
+}
+
 func testHandoffBlobRoundTrip(t *testing.T, size int, write func(*HandoffConnection, string, []byte) error, read func(*HandoffConnection, string, int) ([]byte, error)) {
 	t.Helper()
 	root := handoffTestTempDir(t, "hf-replay-")

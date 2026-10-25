@@ -21,6 +21,11 @@ func (s *terminalActivityState) observe(events *daemonActivityEvents, state daem
 	if events == nil || snapshot.Stale {
 		return
 	}
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	if events.closed || events.handoff {
+		return
+	}
 	previous, current := s.metadata, snapshot.Metadata
 	s.metadata = current
 	target, err := terminal.ParseTargetKey(state.Target)
@@ -32,7 +37,7 @@ func (s *terminalActivityState) observe(events *daemonActivityEvents, state daem
 		label = coalesce(terminalMetadataText(state.Label, 120), "shell")
 	}
 	appendNotice := func(text string) {
-		events.enqueue(activityMessageRequest{Source: "terminal", NodeID: target.ID, NodeSlug: s.nodeSlug, Text: text, Action: activityOpenTerminal, TerminalID: state.TerminalID})
+		events.enqueueLocked(activityMessageRequest{Source: "terminal", NodeID: target.ID, NodeSlug: s.nodeSlug, Text: text, Action: activityOpenTerminal, TerminalID: state.TerminalID})
 	}
 	if current.BellCount > previous.BellCount {
 		count, detail := current.BellCount-previous.BellCount, "bell"

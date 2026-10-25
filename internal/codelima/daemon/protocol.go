@@ -14,10 +14,11 @@ const (
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
 	// whenever a wire shape this protocol carries changes; 17 adds Activity
 	// navigation/outcomes and counted terminal notifications.
-	ProtocolVersion               = 17
-	SessionVersion                = 2
-	HandoffVersion                = 5
-	PreviousChunkedHandoffVersion = 4
+	ProtocolVersion                = 17
+	SessionVersion                 = 2
+	HandoffVersion                 = 6
+	PreviousRecoveryHandoffVersion = 5
+	PreviousChunkedHandoffVersion  = 4
 
 	// PreviousStreamHandoffVersion is accepted by a new importer so a daemon
 	// using the first length-prefixed stream format can update when its inline
@@ -314,6 +315,8 @@ type HandoffRuntime struct {
 }
 
 type HandoffManifest struct {
+	ActivitySize  int              `json:"activity_size,omitempty"`
+	Activity      []byte           `json:"-"`
 	Version       int              `json:"version"`
 	BinaryVersion string           `json:"binary_version"`
 	Token         string           `json:"token"`

@@ -90,6 +90,11 @@ adopted publishers, repeated notices, counter resets, closed producers, legacy
 journals, exact session resolution and canceled navigation. The Ghostty adapter
 suite checks native counters through checkpoint restore. Run the terminal-notice
 QA flow with both packaged executables from the same build.
+Handoff version 6 transfers the bounded pending native queue, omission count
+and observation baselines. The Activity recipe exercises both real handoff
+halves with blocked persistence, rollback before/after ownership release,
+unobserved terminal output, unchanged route/capacity observations and malformed
+state; its daemon transport checks cover the 8 MiB payload bound and chunking.
 
 `make test-vaxis-fork` exercises the vendored terminal renderer, including
 fallback grapheme widths (ADR 158). `make test-vaxis-upstream` runs the fork's
@@ -274,12 +279,16 @@ rebasing the narrow patches before rebuilding. Compiler-profile overrides
 embedded fingerprint follows the installed dependency. Qualify release
 packages on each native target rather than reusing another platform's cache.
 
-Handoff version 5 keeps terminal metadata in the manifest and transfers raw
+Handoff version 6 keeps terminal identities in the manifest and transfers raw
 replay and renderer recovery envelopes through ordered 512 KiB chunks. JSON
 base64 expansion keeps every encoded chunk below the 1 MiB frame limit. Raw
 replay is capped at 1 MiB per terminal and 64 MiB per handoff. Recovery envelopes
 are separately capped at 24 MiB per terminal and 64 MiB per handoff before
 allocation; retained native checkpoints also share a 64 MiB daemon memory quota.
+Native Activity transfers in a separate lane capped at 8 MiB, after recovery
+and before descriptors. Validate its declared size before allocation and its
+queue/baseline contents before terminal adoption. Version 5 imports remain
+supported with renderer recovery but without pending Activity transfer.
 An envelope binds terminal identity, native build identity, integrity, application
 color policy, and ordered journal watermarks. Same-build recovery uses an eligible
 checkpoint plus a complete tail; cross-build recovery keeps the bounded ordered
@@ -526,7 +535,7 @@ Standard release flow:
    freezing cursor or tab selection while daemon cleanup completes.
 5. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
    Fill at least one renderer journal above 900 KiB before one update and
-   verify handoff version 5 preserves its terminal ID, shell PID, final replay
+   verify handoff version 6 preserves its terminal ID, shell PID, final replay
    marker, and responsive daemon. Exercise both eligible same-build checkpoint
    recovery and cross-build bounded raw fallback; verify a truncated fallback is
    marked partial rather than claiming full terminal-state preservation.

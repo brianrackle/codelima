@@ -40,7 +40,11 @@ func testActivityUpdateFailure(t *testing.T, failure string) {
 	if hello, err := peer.ReadControlMessage(); err != nil || hello.Type != "hello" {
 		t.Fatal(hello, err)
 	}
-	if err := peer.WriteJSON(handoffManifestFor(nil, "expected"), nil); err != nil {
+	manifest := handoffManifestFor(nil, "expected")
+	if err := peer.WriteJSON(manifest, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.WriteActivity(manifest.Activity); err != nil {
 		t.Fatal(err)
 	}
 	if ready, err := peer.ReadControlMessage(); err != nil || ready.Type != "ready" {

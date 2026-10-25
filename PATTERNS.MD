@@ -74,6 +74,12 @@ metadata before admitting new PTY output, and close producer admission before
 draining shutdown queues. Keep Activity navigation typed and match both terminal
 and node identity; never substitute a live session for an ended history target
 or interpret display text as an action (ADR 170).
+Freeze native admission and snapshot its pending queue and observation baselines
+under one mutex while the update barrier excludes persistence. Transfer stable
+IDs and overflow accounting, then let the successor compare restored terminal
+metadata with the last observation instead of assuming every restored notice
+was announced. Preserve the original queue on rollback and wake observers after
+ownership resumes. Bound and validate transfer data before activation (ADR 171).
 
 Retain bounded output with absolute line sequences so polling clients neither
 duplicate lines nor confuse a rotated tail with new output. Coalesce persistence

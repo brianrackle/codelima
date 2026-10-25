@@ -37,6 +37,7 @@ const (
 	// They travel separately from legacy raw replay and never inflate a manifest.
 	MaxHandoffRecoveryBytesPerTerminal = 24 << 20
 	MaxHandoffTotalRecoveryBytes       = 64 << 20
+	MaxHandoffActivityBytes            = 8 << 20
 )
 
 type HandoffFraming uint8
@@ -181,7 +182,7 @@ func ValidateHandoffRecoverySizes(manifest HandoffManifest) error {
 		if runtime.RecoverySize < 0 || runtime.RecoverySize > MaxHandoffRecoveryBytesPerTerminal {
 			return errors.New("handoff terminal recovery size is invalid")
 		}
-		if manifest.Version != HandoffVersion && runtime.RecoverySize != 0 {
+		if manifest.Version < PreviousRecoveryHandoffVersion && runtime.RecoverySize != 0 {
 			return errors.New("legacy handoff contains recovery payload")
 		}
 		if runtime.RecoverySize > MaxHandoffTotalRecoveryBytes-total {
@@ -190,6 +191,27 @@ func ValidateHandoffRecoverySizes(manifest HandoffManifest) error {
 		total += runtime.RecoverySize
 	}
 	return nil
+}
+
+func ValidateHandoffActivitySize(manifest HandoffManifest) error {
+	if manifest.Version < HandoffVersion {
+		if manifest.ActivitySize != 0 {
+			return errors.New("legacy handoff contains Activity payload")
+		}
+		return nil
+	}
+	if manifest.ActivitySize <= 0 || manifest.ActivitySize > MaxHandoffActivityBytes {
+		return errors.New("handoff Activity size is invalid")
+	}
+	return nil
+}
+
+func (c *HandoffConnection) WriteActivity(data []byte) error {
+	return c.writeHandoffBlob("activity", "native-activity", data, MaxHandoffActivityBytes)
+}
+
+func (c *HandoffConnection) ReadActivity(size int) ([]byte, error) {
+	return c.readHandoffBlob("activity", "native-activity", size, MaxHandoffActivityBytes)
 }
 
 func (c *HandoffConnection) WriteReplay(terminalID string, replay []byte) error {

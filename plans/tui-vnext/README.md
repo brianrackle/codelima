@@ -28,7 +28,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native route/capacity/update/terminal events, controls and typed/exact-session navigation; pending-event handoff and final qualification remain |
+| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, controls and typed/exact-session navigation; final presentation/native qualification remain |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -308,7 +308,22 @@ and late replies have automated coverage; delayed live attachment and final
 native/artboard qualification remain. The two TUIs, shells, renderers and daemon
 are stopped; the isolated `tmp/naq` home, 21 journal fixtures and 46 slice scratch
 files are removed. The reusable base QA environment remains in the cleanup ledger.
-Review found that memory-only native events pending at the handoff boundary can
+Review found that memory-only native events pending at the handoff boundary could
 be lost: the predecessor cannot flush under the update barrier and the successor
-correctly suppresses old metadata. Stable queue transfer or a final owned drain
-and corresponding rollback tests are required follow-up in TODO #57.
+correctly suppresses old metadata. ADR 171 resolves that pending-queue gap below.
+
+Handoff version 6 transfers pending native messages, stable IDs, overflow counts
+and terminal/route/capacity baselines at one observation boundary (ADR 171).
+The real-socket regression reproduced loss before the fix. A live storage outage
+then exposed a permanently cached journal-open error; its regression now keeps
+storage unavailable through commit, and initialization retries at most once per
+second. Focused, full verify, race, integration and gopls checks pass. The combined
+verification command exited 143 during race without a test failure; the standalone
+rerun completed successfully. Live checks recovered four previously queued notices
+without restarting the shell, then verified a fresh blocked-journal update and
+injected rollback, each retaining its two notices exactly once. An identical new
+notice created a new record. Wide/compact Activity rendered the recovered history;
+Enter attached the original PID and detach restored its filter. The isolated
+TUI, shell, renderer, daemon, home, 13 journal fixtures and slice scratch evidence
+are removed. Final presentation/native qualification, post-commit reply-loss
+reconciliation and the reusable base QA cleanup remain in TODO #57.

@@ -81,6 +81,7 @@ type daemonHost struct {
 	activityMu            sync.Mutex
 	activity              *activityJournal
 	activityErr           error
+	activityRetryAt       time.Time
 	operationsMu          sync.Mutex
 	operations            *nodeOperations
 	operationsErr         error
@@ -1616,7 +1617,7 @@ func (h *daemonHost) adoptHandoffTerminals(
 			release()
 			return nil, err
 		}
-		activity := terminalActivityState{metadata: baseline, nodeSlug: h.terminalActivitySlug(state)}
+		activity := terminalActivityState{metadata: h.activityEvents.adoptedBaseline(state.TerminalID, baseline), nodeSlug: h.terminalActivitySlug(state)}
 		h.mu.Lock()
 		h.terminals[state.TerminalID] = h.newTerminalEntry(state, term, activity)
 		h.mu.Unlock()
@@ -1669,6 +1670,14 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 	}
 	h.mu.RUnlock()
 	quiesced := make([]quiescedTerminal, 0, len(entries))
+	defer func() {
+		if !h.replaced.Load() {
+			h.activityEvents.resumeAfterHandoff()
+			for _, entry := range entries {
+				entry.requestSnapshot()
+			}
+		}
+	}()
 	rollback := func(cause error, prepared bool, process *os.Process) error {
 		if process != nil {
 			_ = process.Kill()
@@ -1708,6 +1717,10 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 			return nil, rollback(state.Err, false, nil)
 		}
 		quiesced = append(quiesced, quiescedTerminal{id: entry.state.TerminalID, entry: entry, term: term, state: state})
+	}
+	activity, err := h.activityEvents.prepareHandoff(entries)
+	if err != nil {
+		return nil, rollback(err, false, nil)
 	}
 
 	token := strings.ReplaceAll(newID(), "-", "")
@@ -1750,7 +1763,7 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 		}
 		return nil, rollback(err, false, process)
 	}
-	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}}
+	manifest := daemon.HandoffManifest{Version: daemon.HandoffVersion, BinaryVersion: Version, Token: token, Session: daemon.Session{Version: daemon.SessionVersion, Terminals: h.list()}, ActivitySize: len(activity)}
 	totalReplayBytes := 0
 	totalRecoveryBytes := 0
 	for _, item := range quiesced {
@@ -1796,6 +1809,9 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 		if err := peer.WriteRecovery(item.id, item.state.Recovery); err != nil {
 			return nil, rollback(err, false, process)
 		}
+	}
+	if err := peer.WriteActivity(activity); err != nil {
+		return nil, rollback(err, false, process)
 	}
 	for start := 0; start < len(quiesced); start += daemon.MaxHandoffFDsPerFrame {
 		end := min(start+daemon.MaxHandoffFDsPerFrame, len(quiesced))
@@ -1875,7 +1891,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	}
 	validHandoffVersion := manifest.Version == daemon.HandoffVersion
 	if peer.Framing == daemon.HandoffFramingLengthPrefixed {
-		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion || manifest.Version == daemon.PreviousChunkedHandoffVersion
+		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion || manifest.Version == daemon.PreviousChunkedHandoffVersion || manifest.Version == daemon.PreviousRecoveryHandoffVersion
 	} else {
 		validHandoffVersion = manifest.Version == daemon.LegacyHandoffVersion
 	}
@@ -1886,6 +1902,9 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	runtimeIDs := make(map[string]struct{}, len(manifest.Runtimes))
 	totalReplayBytes := 0
 	if err := daemon.ValidateHandoffRecoverySizes(manifest); err != nil {
+		return err
+	}
+	if err := daemon.ValidateHandoffActivitySize(manifest); err != nil {
 		return err
 	}
 	for index := range manifest.Runtimes {
@@ -1931,7 +1950,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			runtimeState.Replay = replay
 		}
 	}
-	if manifest.Version == daemon.HandoffVersion {
+	if manifest.Version >= daemon.PreviousRecoveryHandoffVersion {
 		for index := range manifest.Runtimes {
 			runtimeState := &manifest.Runtimes[index]
 			recovery, readErr := peer.ReadRecovery(runtimeState.TerminalID, runtimeState.RecoverySize)
@@ -1939,6 +1958,12 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 				return readErr
 			}
 			runtimeState.Recovery = recovery
+		}
+	}
+	if manifest.Version == daemon.HandoffVersion {
+		manifest.Activity, err = peer.ReadActivity(manifest.ActivitySize)
+		if err != nil {
+			return err
 		}
 	}
 	fdsByID := map[string]int{}
@@ -1988,6 +2013,9 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 		defer func() { _ = closeLog() }()
 	}
 	host := newDaemonHost(service)
+	if err := host.activityEvents.restoreHandoff(manifest); err != nil {
+		return err
+	}
 	// The server links are published before the first terminal entry exists.
 	// newTerminalEntry starts a publisher goroutine that reads host.broadcast
 	// without further synchronization, so assigning it afterwards would let a

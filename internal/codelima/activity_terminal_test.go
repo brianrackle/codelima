@@ -120,6 +120,54 @@ func TestActivityNativeAdoptedPublisherRecordsOnlyNewOutput(t *testing.T) {
 	}
 }
 
+func TestActivityNativeAdoptionPublishesUnobservedHandoffTail(t *testing.T) {
+	s, _ := newHandoffTestService(t)
+	old, next := newDaemonHost(s), newDaemonHost(s)
+	t.Cleanup(func() { _ = next.Close() })
+	manifest := handoffManifestFor([]string{"term_tail"}, "token")
+	manifest.Session.Terminals[0].Target = "node:" + newID()
+	entry := &daemonTerminalEntry{state: manifest.Session.Terminals[0]}
+	entry.activity.observe(old.activityEvents, entry.state, daemon.Snapshot{Metadata: TerminalMetadata{BellCount: 1, NotificationCount: 1, NotificationBody: "same text"}})
+	data, err := old.activityEvents.prepareHandoff([]*daemonTerminalEntry{entry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Activity = data
+	if err := next.activityEvents.restoreHandoff(manifest); err != nil {
+		t.Fatal(err)
+	}
+	published := make(chan struct{}, 1)
+	next.broadcast = func(kind string, _ any) {
+		if kind == daemon.EventTerminalDirty {
+			select {
+			case published <- struct{}{}:
+			default:
+			}
+		}
+	}
+	adopt := func(_ string, _ func(vaxis.Event), pty *os.File, _, _, _ int, _ []byte, _ bool, _ []byte) (daemonTerminal, error) {
+		return &adoptedNoticeTerminal{fakeHandoffTerminal: adoptFakeHandoffTerminal(pty), metadata: TerminalMetadata{BellCount: 2, NotificationCount: 2, NotificationBody: "same text"}}, nil
+	}
+	if _, err := next.adoptHandoffTerminals(context.Background(), manifest, handoffFDs(t, []string{"term_tail"}), adopt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("adopted snapshot was not observed")
+	}
+	next.activityEvents.mu.Lock()
+	defer next.activityEvents.mu.Unlock()
+	if len(next.activityEvents.pending) != 4 {
+		t.Fatal("restored baseline suppressed unobserved output", next.activityEvents.pending)
+	}
+	for i := range 2 {
+		if next.activityEvents.pending[i] != old.activityEvents.pending[i] || next.activityEvents.pending[i+2].ID == old.activityEvents.pending[i].ID {
+			t.Fatal("adopted observer changed admitted IDs or reused them for new output")
+		}
+	}
+}
+
 func TestActivityNativePublisherRunsWhileGeometryChanges(t *testing.T) {
 	s, _ := newTestService(t)
 	h := newDaemonHost(s)

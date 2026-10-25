@@ -460,9 +460,11 @@ footer for six seconds. Unchanged observations do not repeat notices.
 Capacity notices follow the daemon's runtime observations, so a delayed runtime
 refresh can delay the notice even when a VM has already started or stopped.
 Up to 256 native events can await persistence in memory; retries keep their IDs.
-A full queue omits newer events and later records the omitted count. Pending
-events can be lost on daemon exit, including live replacement; committed events
-follow normal retention.
+A full queue omits newer events and later records the omitted count.
+Successful live updates transfer pending events and observation baselines.
+Crashes before persistence can still lose pending events; committed events
+follow normal retention. Older daemons that do not transfer this queue cannot
+recover those pending notices during their first upgrade.
 Running rows show current phase/step text and completed/total phases. The bar
 counts observed phase boundaries, including skipped work; it does not predict
 time remaining. Compact terminals put progress on a second line. Older receipts
@@ -744,7 +746,7 @@ by the old daemon. Inspect `terminal_runtimes.*.journal_bytes` in `daemon
 snapshot`. To preserve as many live shells as possible, close only expendable
 high-history tabs until the old inline manifest fits, then retry the update.
 The alternative is `daemon stop` followed by `daemon start`, which deploys the
-new binary but restarts terminal child processes. Handoff versions 4 and 5
+new binary but restarts terminal child processes. Handoff versions 4 and later
 chunk replay so later updates do not have this limitation.
 
 ### Embedded terminal features

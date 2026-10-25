@@ -1,6 +1,9 @@
 package codelima
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 type activityMessageAck struct {
 	Message ActivityMessage `json:"message"`
@@ -10,8 +13,11 @@ type activityMessageAck struct {
 func (h *daemonHost) activityJournal() (*activityJournal, error) {
 	h.activityMu.Lock()
 	defer h.activityMu.Unlock()
-	if h.activity == nil && h.activityErr == nil {
+	// Opening can fail transiently during an outage. Bound repeated directory
+	// scans, but do not cache that failure for the daemon's entire lifetime.
+	if h.activity == nil && (h.activityErr == nil || !time.Now().Before(h.activityRetryAt)) {
 		h.activity, h.activityErr = newActivityJournal(h.service)
+		h.activityRetryAt = time.Now().Add(time.Second)
 	}
 	return h.activity, h.activityErr
 }
@@ -23,6 +29,7 @@ func (h *daemonHost) invalidateActivityJournal() {
 	h.activityMu.Lock()
 	defer h.activityMu.Unlock()
 	h.activity, h.activityErr = nil, nil
+	h.activityRetryAt = time.Time{}
 }
 
 func (h *daemonHost) handleActivity(method string, raw json.RawMessage) (any, error) {
