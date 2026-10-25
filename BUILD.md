@@ -64,7 +64,11 @@ and both boot output streams without duplication (ADR 163).
 `make test-activity` checks the private bounded journal, restart/idempotency,
 retention, concurrent writes, mixed receipt/message pagination, degraded reads,
 replacement admission, two independent socket clients, lost acknowledgements,
-snapshot watermarks and footer expiration. Protocol 14 adds `activity.append`
+snapshot watermarks and footer expiration. It also checks Activity's aligned
+history columns, request/status glyphs, full-row ANSI/truecolor selection,
+compact date/range context, rendered mouse controls, typed row actions and
+header running counts (ADR 172). Inspect both 150×38 and 80×24 live views.
+Protocol 14 adds `activity.append`
 and `activity.list`, and optional operation origin; keep the exact handshake
 and update-only compatibility path. Verify two real TUIs and a daemon restart
 using QA.md before qualifying the shared Activity surface.

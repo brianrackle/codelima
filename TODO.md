@@ -487,18 +487,25 @@ all native lifecycle flows. For future constrained-host QA, use one guest at a
 time and bound QEMU's TCG translation cache; two 1 GiB guests consumed more
 than their assigned RAM and exceeded this 3.8 GiB VM's available memory.
 
-Activity presentation follow-up: compare the actual 150×38 and 80×24 views with
-`reference/Activity.dc.html` and the fleet-wide canvas notes. The current history
-concatenates variable-width fields, applies one style to the whole record, lacks
-per-row action hints and uses interior panel headings. Implement the reference's
-aligned timestamp/icon/node/message/action columns, distinct glyph colors,
-full-row selection, panel-title borders and severity choices. Keep compact
-truncation usable, expose visible row position and date context across retained
-days, and qualify footer/header mouse controls and running-count badges. Use
-real or explicitly identified fixtures for each state. This makes dense history
-scan like the artboard and clarifies navigation; responsive columns and hit
-regions add layout cases that need automated and live checks. Final design
-qualification cannot be inferred from the producer and persistence tests.
+Activity presentation is implemented in ADR 172: aligned cell columns, distinct
+status/request glyphs, full-row selection in ANSI/truecolor, panel-border titles,
+focused panels, clickable severity choices, per-row actions and footer controls,
+amber running header counts, older dates and visible row/page position. Compact
+rows retain their action and measured progress controls. Focused regression
+checks, full verify and gopls passed. Live 150×38 and 80×24 inspection used labeled
+history fixtures and a real boot; severity/search/cancel, clipboard copy, help,
+older/newer pages, scroll position, running-row open, Host/Ports actions and
+header return worked. Clicking the running row’s cancel action stopped the VM,
+retained the canceled receipt and cleared the running badge. Lima used its
+three-minute force-stop fallback because cancellation preceded guest readiness;
+the final runtime and receipt both confirmed stopped. The compact empty-filter
+state also passed. The disposable daemon/TUI, 67 message records, 4 operation
+receipts, homes, clipboard buffer and slice scratch files were removed.
+Remaining work: finish cross-view/native artboard review,
+including the System warning badge, general footer controls, empty/disconnected
+states and lifecycle presentation. Reuse rendered hit regions and typed actions;
+this keeps behavior consistent but expands responsive/native QA cases. The
+ambiguous committed-reply handoff case above remains independent and unresolved.
 
 
 Baseline `make verify` passed on Linux/aarch64. A temporary, checksum-verified

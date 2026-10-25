@@ -601,8 +601,15 @@ For shared lifecycle operations, use an isolated home and disposable guest:
   preserve the selected receipt as it completes or newer records arrive.
   Running rows must show current phase/source/step detail and a measured phase
   fraction/bar. Verify compact two-line rows remain selectable by either line,
-  and scrolling follows the selected operation when several are running. The
-  fraction includes skipped phases but is not a time estimate. Legacy receipts
+  and scrolling follows the selected operation when several are running.
+  At both sizes inspect aligned timestamp/glyph/node/message/action columns,
+  full-width selected backgrounds, request/error/warning/success colors and
+  titles on the panel borders. Click all/warnings/errors, footer filter/cancel,
+  copy, open and help; click a row action and the Activity header. Ordinary row
+  clicks only select. Confirm completion removes the amber header count.
+  Add explicitly labeled disposable records from yesterday and enough rows to
+  scroll; verify dates, visible row range and page number, then remove them.
+  The fraction includes skipped phases but is not a time estimate. Legacy receipts
   without phases show unavailable progress. Completed durations must match
   observed receipt times; interruption must not invent a finish.
 - Press `K` on a running start/retry. Wait for cancellation to finish and confirm

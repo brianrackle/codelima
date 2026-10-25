@@ -432,7 +432,11 @@ Press `4` for shared Activity history. Select a record with the arrows;
 `Enter` opens its node and `K` requests cancellation. Canceling start or retry
 also stops the VM. `f` cycles all/warnings/errors, `/` filters the current
 history page, and `y` copies the selected record. Use `[`/`]` for newer/older
-pages and `g` to return to newest. Lifecycle requests and completions share
+pages and `g` to return to newest. Click the severity choices, footer controls,
+or a row's action hint to use the same actions with the mouse. History keeps
+its columns aligned; older dates and the visible row range identify where you
+are in retained history. At compact widths, row actions use `⏎` and the footer
+keeps the main controls visible. Lifecycle requests and completions share
 history with notifications from every TUI. New requests identify CLI/TUI origin;
 older receipts omit unknown origin. Operation receipts are retained for seven
 days. General messages retain up to seven days or 10,000 entries, whichever

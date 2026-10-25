@@ -28,7 +28,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Templates · edit](reference/TemplateEdit.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · environments](reference/Environments.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, controls and typed/exact-session navigation; final presentation/native qualification remain |
+| [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Help · keymap](reference/Help.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -327,3 +327,21 @@ Enter attached the original PID and detach restored its filter. The isolated
 TUI, shell, renderer, daemon, home, 13 journal fixtures and slice scratch evidence
 are removed. Final presentation/native qualification, post-commit reply-loss
 reconciliation and the reusable base QA cleanup remain in TODO #57.
+
+Activity presentation now uses cell-aligned timestamp/glyph/node/message/action
+columns, full-row ANSI/truecolor selection, border titles, focused panels and
+clickable severity choices (ADR 172). Request glyphs use canonical IDs. Compact
+history preserves a one-cell action hint; running rows retain two-line observed
+progress. Older dates and a visible filtered row range identify retained history.
+Footer and per-row mouse actions reuse existing input/navigation paths; running
+header counts are amber. Focused regressions, full verify and gopls checks passed.
+Live 150×38 and 80×24 inspection used explicitly labeled disposable history
+fixtures plus a real VM start. Severity, filtering/cancel, copy to the tmux
+clipboard, help, paging, scrolling, running-row open, Host/Ports row actions and
+header return worked. Clicking the running row’s cancel action stopped the VM,
+retained the canceled receipt and cleared the running badge. Lima used its
+three-minute force-stop fallback because cancellation preceded guest readiness;
+the final runtime and receipt both confirmed stopped. The compact empty-filter
+state also passed. The disposable daemon/TUI, 67 message records, 4 operation
+receipts, homes, clipboard buffer and slice scratch files were removed.
+Final native/cross-view qualification remains open.

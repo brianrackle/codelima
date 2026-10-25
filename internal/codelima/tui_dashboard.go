@@ -163,7 +163,11 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	}
 	bar := window.New(0, height-1, width, 1)
 	tuiFill(bar, theme.chrome)
-	tuiLine(bar, 0, " "+footer, theme.chrome)
+	if a.view == tuiViewActivity && a.overlay == nil {
+		a.drawActivityFooter(bar, theme)
+	} else {
+		tuiLine(bar, 0, " "+footer, theme.chrome)
+	}
 }
 
 func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
@@ -192,6 +196,13 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 		label = " " + label + " "
 		cells := renderedTextWidth(a.vx, label)
 		tuiLine(bar.New(col, 0, cells, 1), 0, label, style)
+		if i == int(tuiViewActivity) && len(a.activity.page.Running) > 0 {
+			badge := fmt.Sprintf("◐%d", len(a.activity.page.Running))
+			badgeWidth := renderedTextWidth(a.vx, badge)
+			badgeStyle := style
+			badgeStyle.Foreground = theme.amber.Foreground
+			tuiLine(bar.New(col+cells-badgeWidth-1, 0, badgeWidth, 1), 0, badge, badgeStyle)
+		}
 		a.viewRegions = append(a.viewRegions, tuiRect{col: col, row: 0, width: cells, height: 1})
 		col += cells
 	}

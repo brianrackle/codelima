@@ -32,6 +32,7 @@ type tuiActivityState struct {
 	runningScroll, historyScroll int
 	viewport                     int
 	mouseRows                    []tuiActivityMouseRow
+	controls                     []tuiActivityControl
 	canceling                    map[string]bool
 }
 
@@ -55,13 +56,15 @@ type tuiActivityRow struct {
 	level                  slog.Level
 	operation              bool
 	success                bool
+	requested              bool
 	kind, state            string
 	progress               *NodeOperationProgress
 }
 
 type tuiActivityMouseRow struct {
-	id   string
-	rect tuiRect
+	id           string
+	rect         tuiRect
+	open, cancel tuiRect
 }
 
 // This projection is global, including when the fleet is scoped or another
@@ -134,7 +137,7 @@ func activityRecordRow(record ActivityRecord) tuiActivityRow {
 	if record.OperationID != "" && record.Source != "" {
 		text += " · via " + strings.ToUpper(record.Source)
 	}
-	return tuiActivityRow{id: record.ID, nodeID: record.NodeID, node: coalesce(record.NodeSlug, record.NodeID, record.Source), text: plainLogText(text), at: record.Time, level: record.Level, operation: record.OperationID != "", success: record.Success, action: record.Action, terminalID: record.TerminalID}
+	return tuiActivityRow{id: record.ID, nodeID: record.NodeID, node: coalesce(record.NodeSlug, record.NodeID, record.Source), text: plainLogText(text), at: record.Time, level: record.Level, operation: record.OperationID != "", success: record.Success, requested: record.OperationID != "" && record.ID == record.OperationID+":requested", action: record.Action, terminalID: record.TerminalID}
 }
 
 func (a *vaxisTUIApp) activityRows() (running, history []tuiActivityRow) {

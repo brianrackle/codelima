@@ -16,6 +16,17 @@ one history page is not evidence that a message has not been committed. Fence
 late replies, retry the same ID after a lost acknowledgement, and bound the
 pending queue. Do not write journal failures back into the journal (ADR 165).
 
+## Interactive table rendering
+
+Allocate table fields in terminal cells before rendering text, keeping action
+columns reachable even when names or messages are truncated. Fill the complete
+selected row and apply its background/reverse attribute to each field style;
+retain semantic foreground colors. Compute hit regions from the same rendered
+windows, clear them each draw, and omit targets for clipped controls. Dispatch
+mouse controls through existing key handlers or typed row actions so search,
+modal and navigation ownership remain consistent. Derive request glyphs from
+the canonical request/completion ID contract, never from message text (ADR 172).
+
 ## Durable operation admission
 
 Persist an idempotent admission receipt before launching slow work on a
