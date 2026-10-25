@@ -21,6 +21,7 @@ type tuiPaletteCommand struct {
 }
 
 type tuiPalette struct {
+	tuiOverlayKeys
 	title                 string
 	app                   *vaxisTUIApp
 	input                 *textinput.Model
@@ -186,7 +187,7 @@ func (p *tuiPalette) Update(event vaxis.Event) (bool, error) {
 		case vaxis.MouseLeftButton:
 			for _, control := range p.controls {
 				if control.rect.contains(mouse.Col, mouse.Row) {
-					return p.Update(control.key)
+					return p.updateKeyAction(control.action, vaxis.Key{})
 				}
 			}
 			for _, row := range p.rows {
@@ -216,23 +217,27 @@ func (p *tuiPalette) Update(event vaxis.Event) (bool, error) {
 	if !tuiKeyActivates(key, false) {
 		return false, nil
 	}
+	return p.updateKeyAction(overlayKeyAction(p, key), key)
+}
+
+func (p *tuiPalette) updateKeyAction(action string, key vaxis.Key) (bool, error) {
 	switch {
-	case key.Matches(vaxis.KeyEsc):
+	case action == "dialog.cancel":
 		return tuiKeyActivates(key, true), nil
-	case key.Matches(vaxis.KeyUp):
+	case action == "dialog.up":
 		p.index = max(0, p.index-1)
-	case key.Matches(vaxis.KeyDown):
+	case action == "dialog.down":
 		p.index = min(max(0, len(p.matches)-1), p.index+1)
-	case key.Matches(vaxis.KeyPgUp):
+	case action == "overlay.page_up":
 		p.index = max(0, p.index-max(1, p.height/2))
-	case key.Matches(vaxis.KeyPgDown):
+	case action == "overlay.page_down":
 		p.index = min(max(0, len(p.matches)-1), p.index+max(1, p.height/2))
-	case key.Matches(vaxis.KeyTab):
+	case action == "palette.complete":
 		if tuiKeyActivates(key, true) && len(p.matches) > 0 {
 			p.input.SetContent(p.matches[p.index].label)
 			p.filter()
 		}
-	case key.Matches(vaxis.KeyEnter):
+	case action == "dialog.accept":
 		if tuiKeyActivates(key, true) {
 			return p.choose()
 		}
@@ -244,7 +249,7 @@ func (p *tuiPalette) Update(event vaxis.Event) (bool, error) {
 }
 
 func (p *tuiPalette) FooterHint() string {
-	return "Enter run · ↑↓ move · Tab complete · Esc close · empty query: recent"
+	return p.bindingHints("{dialog.accept} run · {dialog.up dialog.down} move · {palette.complete} complete · {dialog.cancel} close · empty query: recent")
 }
 func (p *tuiPalette) PreferredSize() (int, int) {
 	p.filter()

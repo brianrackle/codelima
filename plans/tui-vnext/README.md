@@ -31,12 +31,56 @@ All example identities, metrics and timestamps in those files are reference data
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–181 responsive capacity, retained Doctor findings, cached daemon status and explicit actions | Partial; Doctor, overview and action flows verified; macOS sampling and full artboard/native qualification remain |
 | [Command palette](reference/Palette.dc.html) | Grouped fuzzy results, live context, recents and captured actions | Partial: result spans/counts, responsive modal, session recents, identity guards and directory Start/Retry (ADR 193); final whole-design/native qualification remains |
-| [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping and final native qualification remain |
+| [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping, effective hints, full automated gates and wide/compact Linux checks passed (ADR 200); final native qualification remains |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Grouped new/existing sessions, availability, captured attachment and saved defaults | Partial: dedicated responsive chooser and stable session shortcuts (ADR 194); live guest/host/window/tmux/embedded checks pass; final native/whole-design qualification remains |
 | [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+Configurable-key checkpoint (ADR 200), 2026-10-25: a strict immutable registry
+now drives manager/detail commands, every overlay, embedded focus, Help,
+palette and rendered controls. Settings inspection/update/reset preserve
+comments and unknown data; invalid startup uses defaults, invalid refresh keeps
+the last valid map, and physical press/repeat/release ownership survives reload.
+The original key event reaches text and terminal owners without rewriting.
+
+Regressions cover parser aliases/case/Unicode and alternate physical codes,
+overlapping contexts, required/disabled actions, immutable copies, concurrent
+conflicting writes, recovery, captured destructive review targets, menus/forms,
+embedded payload, pointer cancellation and effective hints. The unshifted
+alternate-code regression failed before its fix. Targeted gopls checks are clean.
+Final `make fmt build verify test-race test-integration` completed with exit 0:
+core unit 94.930s, core race 128.328s and CLI integration 18.330s, plus format,
+lint, Vaxis and normal VCS-stamped builds. Focused final key tests passed
+(0.907s); the full gates include the final Help-context hint regression.
+
+Live Linux/tmux checks used an isolated metadata fixture and real host shells at
+80×24 ANSI and 150×38 truecolor, with captured screens rendered and inspected.
+Custom Delete/Save/Cancel/view/focus/host/guest/previous-tab mappings worked;
+old keys became inactive. Template/environment/command editors, directory and
+template pickers, chooser, palette, Help search, bracketed paste and a pointer
+Cancel were exercised. A disabled Delete shortcut still opened its review from
+the palette. Reviews were canceled and no VM was created or started.
+
+External valid edits applied on System refresh. A conflicting edit retained the
+last valid binding and recorded its diagnostic; restart used safe defaults.
+Single/all reset preserved comments and unrelated settings. A raw host shell
+ran a command and detached with Ctrl+]; the same session then worked embedded.
+A raw input probe received F6 (`ESC [17~`), Alt+Left/Right (`ESC [1;3D/C`) and
+ordinary text, while configured Ctrl+F6 changed focus without entering the probe.
+Final rebuilt frontends verified expanded host/guest controls and the remapped
+Ports hint at both sizes. This does not substitute for native terminal protocol
+and macOS qualification in the whole-design matrix.
+
+Owned shells/frontends and the daemon were stopped, a privileged process audit
+found no owned survivors, and the 32-MiB socket/store tmpfs was unmounted.
+All owned captures, stores, scripts, logs and Go/integration scratch were removed.
+Removed 47 new inactive exact-content inputrc files, preserving 1,015 older or
+nonmatching files and the active INPUTRC reference. No task commands entered the
+user’s guest shell history. Baseline VM, store and tool state were preserved.
+The earlier `tmp/countq/tmux` virtiofs entry still requires host-side removal;
+that separate count-stage cleanup remains open in TODO #57.
 
 Count wording checkpoint, 2026-10-25: shared explicit singular/plural forms
 now cover fleet/group counts, captured batch titles and deletion prompts,

@@ -276,15 +276,19 @@ func (a *vaxisTUIApp) changeLogSource(source int) {
 // Search owns every text key (including view numbers and bracketed paste)
 // before the manager's global actions. Escape restores the previous query.
 func (a *vaxisTUIApp) handleLogsSearchKey(key vaxis.Key) bool {
+	return a.handleLogsSearchAction(a.keyAction(key), key)
+}
+
+func (a *vaxisTUIApp) handleLogsSearchAction(action string, key vaxis.Key) bool {
 	if !a.logsVisible() || a.logs.input == nil {
 		return false
 	}
 	l := &a.logs
 	switch {
-	case key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true):
+	case action == "input.cancel" && tuiKeyActivates(key, true):
 		l.query, l.input = l.beforeQuery, nil
 		a.claimShortcutKey(key)
-	case key.Matches(vaxis.KeyEnter) && tuiKeyActivates(key, true):
+	case action == "input.accept" && tuiKeyActivates(key, true):
 		l.input = nil
 		a.claimShortcutKey(key)
 	default:
@@ -306,17 +310,17 @@ func (a *vaxisTUIApp) updateLogsSearchInput(event vaxis.Event) {
 	}
 }
 
-func (a *vaxisTUIApp) handleLogsKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleLogsAction(action string) bool {
 	if !a.logsVisible() {
 		return false
 	}
 	l := &a.logs
 	switch {
-	case key.MatchString("["):
+	case action == "logs.source_previous":
 		a.changeLogSource((l.source + len(nodeLogSources) - 1) % len(nodeLogSources))
-	case key.MatchString("]"):
+	case action == "logs.source_next":
 		a.changeLogSource((l.source + 1) % len(nodeLogSources))
-	case key.MatchString("f"):
+	case action == "logs.follow":
 		if l.follow {
 			a.pauseLogs()
 		} else {
@@ -324,44 +328,44 @@ func (a *vaxisTUIApp) handleLogsKey(key vaxis.Key) bool {
 			l.selectLast()
 			a.startLogsLoad(true)
 		}
-	case key.MatchString("/"):
+	case action == "logs.search":
 		a.pauseLogs()
 		l.beforeQuery = l.query
 		l.input = textinput.New()
 		l.input.SetContent(l.query)
-	case key.MatchString("n"), key.MatchString("N"):
+	case action == "logs.match_next", action == "logs.match_previous":
 		a.pauseLogs()
 		delta := 1
-		if key.MatchString("N") {
+		if action == "logs.match_previous" {
 			delta = -1
 		}
 		l.nextMatch(delta, false)
-	case key.MatchString("w"):
+	case action == "logs.wrap":
 		l.wrap, l.offset = !l.wrap, 0
 		l.selectedPart = 0
 		l.revealMatch = l.query != ""
-	case key.MatchString("L"):
+	case action == "logs.level":
 		l.level, l.offset = (l.level+1)%len(tuiLogLevels), 0
 		l.ensureSelection()
 		if l.follow {
 			l.selectLast()
 		}
-	case key.MatchString("g"), key.MatchString("Home"):
+	case action == "logs.first":
 		a.pauseLogs()
 		l.selected, l.offset = -1, 0
 		l.selectedPart = 0
 		l.ensureSelection()
-	case key.MatchString("G"), key.MatchString("End"):
+	case action == "logs.last":
 		l.follow = true
 		l.selectLast()
 		a.startLogsLoad(true)
-	case key.MatchString("Page_Up"), key.MatchString("Page_Down"):
+	case action == "navigation.page_up", action == "navigation.page_down":
 		delta := max(1, l.bodyRect.height-1)
-		if key.MatchString("Page_Up") {
+		if action == "navigation.page_up" {
 			delta = -delta
 		}
 		a.moveLogSelection(delta)
-	case key.MatchString("y"):
+	case action == "logs.copy":
 		if l.selected >= 0 && l.selected < len(l.snapshot.Lines) {
 			if err := a.copyToHostClipboard(logLineText(l.snapshot.Lines[l.selected])); err != nil {
 				a.setStatus(slog.LevelError, err.Error())
@@ -369,7 +373,7 @@ func (a *vaxisTUIApp) handleLogsKey(key vaxis.Key) bool {
 				a.setStatus(slog.LevelInfo, "Log line sent to host clipboard")
 			}
 		}
-	case key.MatchString("o"):
+	case action == "logs.pager":
 		if err := a.openLogPager(); err != nil {
 			a.setStatus(slog.LevelError, err.Error())
 		}

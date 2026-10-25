@@ -284,7 +284,7 @@ func TestTUIManagerPaletteHighlightsMatchesAndKeepsSelectionOnResize(t *testing.
 		}
 	}
 	for _, control := range p.controls {
-		if control.key.Keycode == vaxis.KeyTab {
+		if control.action == "palette.complete" {
 			a.handleMouse(vaxis.Mouse{Col: control.rect.col, Row: control.rect.row, Button: vaxis.MouseLeftButton, EventType: vaxis.EventPress})
 			if p.input.String() != "stop test-hardening" {
 				t.Fatal("mouse completion did not preserve command")

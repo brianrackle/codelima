@@ -57,6 +57,8 @@ type vaxisTUIApp struct {
 	detailScroll        int
 	launchScope         string
 	rawShellPending     bool
+	keys                *compiledKeyMap
+	keyBindingError     string
 	preferences         *Config
 	preferenceRevision  uint64
 	systemPanel         int
@@ -306,6 +308,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 		return err
 	}
 	app.preferences = &preferences
+	app.applyKeyboardConfig(preferences)
 	// The state decides terminal availability and the app owns the operation
 	// overlays the tree renders, so the two are joined here — the one place both
 	// exist.
@@ -793,7 +796,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 
 	if key, ok := event.(vaxis.Key); ok {
 		payload := a.overlay == nil && a.search == nil && a.state != nil &&
-			a.state.focus == tuiFocusTerminal && isTUITerminalPayloadKey(key)
+			a.state.focus == tuiFocusTerminal && a.isTerminalPayloadKey(key)
 		quit := a.handleKey(key)
 		if !payload {
 			a.draw()

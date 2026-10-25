@@ -16,6 +16,7 @@ import (
 // The editor is shared by Templates, Spec and the create-node picker. Values
 // stay on the event loop; workers return snapshots addressed to this instance.
 type tuiTemplateEditor struct {
+	tuiOverlayKeys
 	app                                             *vaxisTUIApp
 	parent                                          tuiOverlay
 	dialog                                          *tuiDialog
@@ -441,6 +442,6 @@ func builtInTemplateDefaults(slug string, cfg Config) (Configuration, bool) {
 func (e *tuiTemplateEditor) restoreDefaults() {
 	if c, ok := builtInTemplateDefaults(e.original.Slug, e.app.managerSettings()); ok && !e.creating {
 		e.applyValues(c)
-		e.notice = "Built-in defaults loaded · Ctrl+s saves them"
+		e.notice = e.bindingHints("Built-in defaults loaded · {dialog.submit} saves them")
 	}
 }

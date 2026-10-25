@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 	"go.rockorager.dev/vaxis"
@@ -21,6 +20,7 @@ type tuiShellChoice struct {
 }
 
 type tuiShellChooser struct {
+	tuiOverlayKeys
 	app                   *vaxisTUIApp
 	nodeID, name, err     string
 	choices               []tuiShellChoice
@@ -69,7 +69,7 @@ func (h *tuiShellChooser) refresh() {
 		{id: "window", key: 'w', label: "New window", hint: cfg.Shell.Window, mode: "window", fresh: true, saveDefault: true},
 		{id: "tmux", key: 't', label: "tmux window", hint: "$TMUX detected · new window in this server", mode: "tmux", fresh: true, saveDefault: true},
 		{id: "host", key: 'h', label: "Host shell here", hint: node.DirectoryPath + " · on this host", mode: "attach", host: true, fresh: true},
-		{id: "embedded", key: 'e', label: "Embedded tab", hint: "F6 returns to manager · other keys reach the shell", mode: "embedded", fresh: true},
+		{id: "embedded", key: 'e', label: "Embedded tab", hint: a.keyHints("{terminal.focus} returns to manager · other keys reach the shell"), mode: "embedded", fresh: true},
 	}
 	for i := range h.choices {
 		choice := &h.choices[i]
@@ -200,42 +200,44 @@ func (h *tuiShellChooser) Update(event vaxis.Event) (bool, error) {
 	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	switch {
-	case key.Matches(vaxis.KeyUp):
+	action := overlayKeyAction(h, key)
+	switch action {
+	case "dialog.up":
 		h.index = max(0, h.index-1)
-	case key.Matches(vaxis.KeyDown):
+	case "dialog.down":
 		h.index = min(len(h.choices)-1, h.index+1)
-	case key.Matches(vaxis.KeyPgUp):
+	case "overlay.page_up":
 		h.index = max(0, h.index-max(1, h.height/2))
-	case key.Matches(vaxis.KeyPgDown):
+	case "overlay.page_down":
 		h.index = min(len(h.choices)-1, h.index+max(1, h.height/2))
-	case key.Matches(vaxis.KeyHome):
+	case "overlay.first":
 		h.index = 0
-	case key.Matches(vaxis.KeyEnd):
+	case "overlay.last":
 		h.index = len(h.choices) - 1
 	default:
 		if !tuiKeyActivates(key, true) {
 			return false, nil
 		}
-		if isOverlayCancelKey(key) {
+		if action == "dialog.cancel" {
 			return true, nil
 		}
-		shift := key.Modifiers&vaxis.ModShift != 0 || unicode.IsUpper(key.Keycode)
-		if key.Matches(vaxis.KeyEnter) || key.Matches(vaxis.KeyEnter, vaxis.ModShift) {
-			return h.choose(h.choices[h.index].id, shift)
+		if action == "dialog.accept" || action == "chooser.save_selected" {
+			return h.choose(h.choices[h.index].id, action == "chooser.save_selected")
 		}
-		if key.Modifiers & ^vaxis.ModShift != 0 {
-			return false, nil
-		}
-		for _, c := range h.choices {
-			if c.key != 0 && (unicode.ToLower(key.Keycode) == c.key || strings.EqualFold(key.Text, string(c.key))) {
-				return h.choose(c.id, shift)
+		if id, ok := strings.CutPrefix(action, "chooser."); ok {
+			id, save := strings.CutPrefix(id, "save_")
+			if ordinal, ok := strings.CutPrefix(id, "session_"); ok {
+				for _, choice := range h.choices {
+					if string(choice.key) == ordinal {
+						return h.choose(choice.id, false)
+					}
+				}
+			} else {
+				return h.choose(id, save)
 			}
 		}
-		if unicode.ToLower(key.Keycode) == 'a' || unicode.ToLower(key.Keycode) == 'n' {
-			return h.choose("attach", shift)
-		}
 	}
+
 	return false, nil
 }
 
@@ -255,15 +257,15 @@ func (a *vaxisTUIApp) runShellChoice(nodeID string, c tuiShellChoice, save bool)
 }
 
 func (h *tuiShellChooser) FooterHint() string {
-	return "↑↓ choose · Enter open · w window · t tmux · h host · 1–9 existing · Esc close"
+	return h.bindingHints("{dialog.up dialog.down} choose · {dialog.accept} open · {chooser.window} window · {chooser.tmux} tmux · {chooser.host} host · {dialog.cancel} close")
 }
 
 func (h *tuiShellChooser) defaultHint() string {
 	mode := h.app.managerSettings().Shell.Mode
 	for _, c := range h.choices[:5] {
 		if c.mode == mode && !c.host {
-			return "x does " + strings.ToLower(c.label)
+			return h.app.keyHint("node.shell") + " does " + strings.ToLower(c.label)
 		}
 	}
-	return fmt.Sprintf("x does %s", mode)
+	return fmt.Sprintf("%s does %s", h.app.keyHint("node.shell"), mode)
 }

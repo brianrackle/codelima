@@ -118,7 +118,7 @@ func TestTUISpecLongCommandsAndMouseActions(t *testing.T) {
 	var copied string
 	a.clipboardPush = func(value string) error { copied = value; return nil }
 	for i, row := range a.spec.rows[2] {
-		if row.action != 'y' {
+		if row.action != "spec.copy_path" {
 			continue
 		}
 		a.spec.cursor[2] = i

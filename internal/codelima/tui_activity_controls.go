@@ -8,7 +8,7 @@ import (
 
 type tuiActivityControl struct {
 	rect     tuiRect
-	key      vaxis.Key
+	action   string
 	severity bool
 	level    int
 }
@@ -37,31 +37,32 @@ func (a *vaxisTUIApp) drawActivityHistoryTitle(win vaxis.Window, title string, t
 		a.activity.controls = append(a.activity.controls, tuiActivityControl{rect: tuiRect{col: col + left, row: row, width: cells, height: 1}, severity: true, level: i})
 		left += cells
 	}
-	tuiLine(win.New(left, 0, max(0, width-left-1), 1), 0, "· f ", theme.dim)
+	tuiLine(win.New(left, 0, max(0, width-left-1), 1), 0, a.keyHints("· {activity.level} "), theme.dim)
 	if left+3 < width {
-		a.activity.controls = append(a.activity.controls, tuiActivityControl{rect: tuiRect{col: col + left, row: row, width: 3, height: 1}, key: vaxis.Key{Keycode: 'f', Text: "f"}})
+		a.activity.controls = append(a.activity.controls, tuiActivityControl{rect: tuiRect{col: col + left, row: row, width: 3, height: 1}, action: "activity.level"})
 	}
 }
 
 func (a *vaxisTUIApp) drawActivityFooter(win vaxis.Window, theme tuiTheme) {
 	type item struct {
-		label string
-		key   rune
+		label  string
+		action string
 	}
 	items := []item{
-		{"↑", vaxis.KeyUp}, {"↓ move", vaxis.KeyDown}, {"⏎ open", vaxis.KeyEnter},
-		{"K cancel", 'K'}, {"f level", 'f'}, {"/ filter", '/'}, {"y copy", 'y'}, {"? help", '?'},
+		{"", "navigation.up"}, {"move", "navigation.down"}, {"open", "activity.open"},
+		{"cancel", "activity.cancel"}, {"level", "activity.level"}, {"filter", "activity.filter"}, {"copy", "activity.copy"}, {"help", "help.open"},
 	}
 	width, _ := win.Size()
 	if width >= 118 {
-		items = append(items, item{"[ newer", '['}, item{"] older", ']'}, item{"g top", 'g'})
+		items = append(items, item{"newer", "activity.newer"}, item{"older", "activity.older"}, item{"top", "activity.first"})
 	}
 	if a.activity.input != nil {
-		items = []item{{"Enter keep filter", vaxis.KeyEnter}, {"Esc cancel", vaxis.KeyEsc}}
+		items = []item{{"keep filter", "input.accept"}, {"cancel", "input.cancel"}}
 	}
 	col, row := win.Origin()
 	left := 1
 	for _, item := range items {
+		item.label = strings.TrimSpace(a.activityControlKey(item.action) + " " + item.label)
 		cells := renderedTextWidth(a.vx, item.label)
 		if left+cells > width {
 			break // Never expose a target for a clipped or invisible control.
@@ -73,11 +74,15 @@ func (a *vaxisTUIApp) drawActivityFooter(win vaxis.Window, theme tuiTheme) {
 			rest = " " + rest
 		}
 		win.New(left, 0, cells, 1).PrintTruncate(0, vaxis.Segment{Text: label, Style: keyStyle}, vaxis.Segment{Text: rest, Style: theme.chrome})
-		key := vaxis.Key{Keycode: item.key}
-		if item.key < 128 {
-			key.Text = string(item.key)
-		}
-		a.activity.controls = append(a.activity.controls, tuiActivityControl{rect: tuiRect{col: col + left, row: row, width: cells, height: 1}, key: key})
+		a.activity.controls = append(a.activity.controls, tuiActivityControl{rect: tuiRect{col: col + left, row: row, width: cells, height: 1}, action: item.action})
 		left += cells + 2
 	}
+}
+
+func (a *vaxisTUIApp) activityControlKey(action string) string {
+	keys := a.keyMap()
+	if action == "activity.open" && len(keys.actions[action]) > 0 && keys.actions[action][0] == (keyBindingIdentity{code: vaxis.KeyEnter}) {
+		return "⏎"
+	}
+	return keys.PrimaryHint(action)
 }

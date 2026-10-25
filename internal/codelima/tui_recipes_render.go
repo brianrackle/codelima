@@ -184,7 +184,7 @@ func (a *vaxisTUIApp) drawRecipeList(win vaxis.Window, t tuiTheme) {
 	if count > 0 {
 		position = fmt.Sprintf("%d–%d/%d", *scroll+1, min(count, *scroll+visible), count)
 	}
-	tuiLine(body.New(1, h-1, w-2, 1), 0, position+" · → details · PgUp/PgDn page", t.dim)
+	tuiLine(body.New(1, h-1, w-2, 1), 0, position+a.keyHints(" · {recipe.focus_details} details · {navigation.page_up navigation.page_down} page"), t.dim)
 }
 func compactRecipeSize(v uint32) string {
 	if v%1024 == 0 {
@@ -238,7 +238,7 @@ func (a *vaxisTUIApp) recipeDetailRows(t tuiTheme) (string, []tuiRecipeDetailRow
 					rows = append(rows, tuiRecipeDetailRow{text: "    │ Can run after: " + names + " (curl install).", command: i, style: t.dim})
 				}
 				if warning.Fix != nil {
-					rows = append(rows, tuiRecipeDetailRow{text: fmt.Sprintf("    │ ⏎ add curl to line %d · review before saving", warning.Fix.Command+1), command: i, style: t.mint, action: "dependency"})
+					rows = append(rows, tuiRecipeDetailRow{text: a.keyHintsFormat("    │ {recipe.open} add curl to line %d · review before saving", warning.Fix.Command+1), command: i, style: t.mint, action: "dependency"})
 				}
 			}
 		}
@@ -270,7 +270,7 @@ func (a *vaxisTUIApp) recipeDetailRows(t tuiTheme) (string, []tuiRecipeDetailRow
 		add("Edits affect future nodes. Existing nodes keep frozen commands.", t.dim)
 		add("", t.dim)
 		add("TEST RUN", t.muted)
-		add("t tests these commands on a disposable xsmall VM; output in Activity.", t.dim)
+		add(a.keyHints("{environment.test} tests these commands on a disposable xsmall VM; output in Activity."), t.dim)
 		add("The VM is deleted afterward. Real nodes are unaffected.", t.dim)
 		if _, ok := builtInEnvironment(e.Slug); ok {
 			add("R restores the shipped commands for review.", t.dim)
@@ -382,25 +382,25 @@ func (a *vaxisTUIApp) drawRecipeDetails(win vaxis.Window, t tuiTheme) {
 			s.controls = append(s.controls, tuiRecipeControl{tuiRect{col: rx, row: ry, width: w - 2, height: 1}, coalesce(r.action, "command"), r.command})
 		}
 	}
-	tuiLine(body.New(1, h-1, w-2, 1), 0, fmt.Sprintf("%d/%d · ← list · ↑↓/PgUp/PgDn scroll", min(len(rows), s.detailScroll+1), len(rows)), t.dim)
+	tuiLine(body.New(1, h-1, w-2, 1), 0, a.keyHintsFormat("%d/%d · {recipe.focus_list} list · {navigation.up navigation.down navigation.page_up navigation.page_down} scroll", min(len(rows), s.detailScroll+1), len(rows)), t.dim)
 }
 func (a *vaxisTUIApp) drawRecipeActions(win vaxis.Window, t tuiTheme) {
-	items := [][2]string{{"e", "edit"}, {"n", "new"}, {"c", "clone"}, {"d", "delete"}, {"R", "restore"}, {"details", "details"}}
+	items := [][2]string{{"recipe.edit", "edit"}, {"recipe.new", "new"}, {"recipe.clone", "clone"}, {"recipe.delete", "delete"}, {"recipe.restore", "restore"}, {"details", "details"}}
 	switch {
 	case !a.environmentsView:
-		items = append(items, [2]string{"N", "new node"})
+		items = append(items, [2]string{"recipe.new_node", "new node"})
 	case a.recipes.details:
-		items = [][2]string{{"e", "edit"}, {"t", "test"}, {"o", "add"}, {"D", "remove"}, {"E", "$EDITOR"}, {"R", "restore"}, {"details", "details"}}
+		items = [][2]string{{"recipe.edit", "edit"}, {"environment.test", "test"}, {"environment.command_add", "add"}, {"environment.command_delete", "remove"}, {"environment.command_editor", "$EDITOR"}, {"recipe.restore", "restore"}, {"details", "details"}}
 	default:
-		items = slices.Insert(items, 1, [2]string{"t", "test"})
-		items = append(items, [2]string{"o", "add"}, [2]string{"D", "remove"}, [2]string{"E", "$EDITOR"})
+		items = slices.Insert(items, 1, [2]string{"environment.test", "test"})
+		items = append(items, [2]string{"environment.command_add", "add"}, [2]string{"environment.command_delete", "remove"}, [2]string{"environment.command_editor", "$EDITOR"})
 	}
 	w, _ := win.Size()
 	x := 0
 	for _, item := range items {
-		text := item[0] + " " + item[1]
+		text := a.keyHint(item[0]) + " " + item[1]
 		if item[0] == "details" {
-			text = "←→ details"
+			text = a.keyHint("recipe.focus_toggle") + " details"
 		}
 		width := len([]rune(text)) + 2
 		if x+width > w {

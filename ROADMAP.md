@@ -14,7 +14,7 @@ This roadmap tracks the current prioritized plan documents for CodeLima. Every l
 6 (was 5; originally 0.12): support CodeLima node renaming through the command line, including an explicit Lima clone/rename policy
 7 (was 6; originally 0.15) [superseded by the major-version fleet manager, ADR 150]: terminal is the default view whenever the selected VM is running and its first guest tab is ensured; stopped nodes remain info-first, while `i` remains explicit for the current node (ADRs 87 and 106; native interactive QA remains in TODO #0)
 8 (was 7; originally 0.22) [partially complete]: open daemon terminal sessions and surviving terminal IDs reconnect after the TUI reopens, exited sessions are absent, per-node operator-defined order is preserved across TUI restart, daemon persistence, and live update, and disjoint path-scoped TUI processes no longer close one another's restored tabs (ADRs 88, 89, 91, and 104); restoring the previously active tab remains in TODO #34
-9 (was 8; originally 1): Configurable key bindings
+9 (was 8; originally 1) [complete]: Configurable key bindings — shared action/context compilation, settings inspection/update/reset, frontend dispatch and effective help/hints are implemented (ADR 200). Full gates and wide/compact Linux interaction checks passed; checkpoint cleanup is complete. Native transport and whole-design qualification remain tracked in TODO #57.
    Plan: [plans/KEY_BINDINGS_PLAN.md](plans/KEY_BINDINGS_PLAN.md)
 10 (was 9; originally 3): Unmanaged localhost or SSH nodes [needs a new node-scoped design]
 11 (was 10; originally 4): Configuration overall for worktree support

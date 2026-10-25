@@ -229,10 +229,10 @@ func (a *vaxisTUIApp) applyDaemonLog(e tuiDaemonLogEvent) {
 func (v *tuiDaemonLogView) Update(event vaxis.Event) (bool, error) {
 	if key, ok := event.(vaxis.Key); ok && tuiKeyActivates(key, true) {
 		switch {
-		case key.MatchString("C"):
+		case overlayKeyAction(v, key) == "daemon.log_reload":
 			v.load()
 			return false, nil
-		case key.MatchString("o"):
+		case overlayKeyAction(v, key) == "daemon.log_pager":
 			if err := v.app.openFilePager(v.path); err != nil {
 				v.app.setStatus(slog.LevelError, err.Error())
 			}
@@ -243,7 +243,7 @@ func (v *tuiDaemonLogView) Update(event vaxis.Event) (bool, error) {
 }
 
 func (v *tuiDaemonLogView) FooterHint() string {
-	return "↑↓ scroll · Home/End · C reload · o pager · Esc close"
+	return v.bindingHints("{reader.up reader.down} scroll · {overlay.first overlay.last} · {daemon.log_reload} reload · {daemon.log_pager} pager · {dialog.cancel} close")
 }
 
 type tuiDaemonCaptureView struct {
@@ -274,7 +274,7 @@ func (a *vaxisTUIApp) openDaemonCapture() {
 	}
 	ctx, cancel := a.daemonWorkContext(2 * time.Minute)
 	v := &tuiDaemonCaptureView{loading: true, cancel: cancel}
-	v.title, v.text = "Diagnose terminal freeze", "Capturing local evidence…\n\nEach daemon probe has a five-second deadline.\nEsc closes this view while capture continues; D reopens it.\nThe saved bundle includes logs, local paths and terminal contents."
+	v.title, v.text = "Diagnose terminal freeze", a.keyHints("Capturing local evidence…\n\nEach daemon probe has a five-second deadline.\n{dialog.cancel} closes this view while capture continues; {system.diagnose} reopens it.\nThe saved bundle includes logs, local paths and terminal contents.")
 	s.capture, a.overlay = v, v
 	load := func() tuiDaemonCaptureEvent {
 		defer cancel()

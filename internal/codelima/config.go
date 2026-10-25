@@ -32,12 +32,14 @@ const (
 var legacyGuessedDefaultPorts = []string{"3000:3000", "5173:5173", "8000:8000", "8080:8080"}
 
 type Config struct {
-	MetadataRoot        string                  `json:"metadata_root" yaml:"metadata_root"`
-	DefaultAgentProfile string                  `json:"default_agent_profile" yaml:"default_agent_profile"`
-	DefaultImage        string                  `json:"default_image" yaml:"default_image"`
-	DefaultPorts        []string                `json:"default_ports" yaml:"default_ports"`
-	RuntimeCommands     RuntimeCommandTemplates `json:"runtime_commands" yaml:"runtime_commands"`
-	AgentProfilesDir    string                  `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
+	keyBindingDecodeError string
+	MetadataRoot          string                  `json:"metadata_root" yaml:"metadata_root"`
+	DefaultAgentProfile   string                  `json:"default_agent_profile" yaml:"default_agent_profile"`
+	DefaultImage          string                  `json:"default_image" yaml:"default_image"`
+	DefaultPorts          []string                `json:"default_ports" yaml:"default_ports"`
+	RuntimeCommands       RuntimeCommandTemplates `json:"runtime_commands" yaml:"runtime_commands"`
+	AgentProfilesDir      string                  `json:"agent_profiles_dir" yaml:"agent_profiles_dir"`
+	Keys                  KeyBindingConfig        `json:"keys,omitempty" yaml:"keys,omitempty"`
 	// ImportHostAuth is the default answer to "copy my git identity and agent
 	// credentials into new nodes". It is a DEFAULT, not a live switch: node
 	// creation freezes the resolved answer onto the node record, so flipping it
@@ -139,6 +141,7 @@ func (c Config) Summary() map[string]any {
 		"confirm_stop":       c.ConfirmStop,
 		"group_by_directory": c.GroupByDirectory,
 		"color":              c.Color,
+		"keys":               cloneKeyBindingConfig(c.Keys),
 		"daemon": map[string]any{
 			"autostart":        c.Daemon.Autostart,
 			"restore":          c.Daemon.Restore,

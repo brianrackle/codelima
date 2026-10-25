@@ -17,7 +17,7 @@ const (
 
 func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
 	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "System · Tab/Shift-Tab panel · ↑↓ scroll · C check · R repair", theme.mint)
+	tuiLine(win.New(2, 2, width-4, 1), 0, a.keyHints("System · {navigation.next_tab navigation.previous_tab} panel · {navigation.up navigation.down} scroll · {system.refresh} check · {system.repair} repair"), theme.mint)
 	a.systemRects = [tuiSystemPanelCount]tuiRect{}
 	a.doctor.controls = nil
 	a.systemDaemon.controls = nil

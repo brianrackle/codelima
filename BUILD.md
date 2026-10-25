@@ -10,6 +10,14 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-key-bindings KEY_BINDING_TEST_FLAGS=-race` covers strict parsing,
+context collisions, case/legacy aliases, immutable snapshots, settings recovery,
+remapped reviews/forms/menu actions, embedded payload and physical key claims,
+and effective help/hints (ADR 200). Override `KEY_BINDING_TEST_PATTERN` to run
+related TUI cases. The CLI integration suite also checks inspection, validated
+updates and reset. Run QA.md Flow 7's configurable-key section at both widths,
+then the full build, verify, race and integration gates.
+
 `make test-node-batch NODE_BATCH_TEST_FLAGS=-race` covers atomic admission,
 captured identity, parallel/global limits, requester disconnect, partial results,
 parent/child cancellation, recovery and bounded projections, plus the batch

@@ -12,6 +12,7 @@ import (
 // Each buffer is one command, including embedded newlines. Editing a script
 // never silently changes its execution boundary into several shell commands.
 type tuiCommandEditor struct {
+	tuiOverlayKeys
 	app                  *vaxisTUIApp
 	parent               tuiOverlay
 	initial              []string
@@ -51,9 +52,9 @@ func (e *tuiCommandEditor) commands() []string {
 }
 func (e *tuiCommandEditor) FooterHint() string {
 	if e.confirmDiscard {
-		return "Discard command edits? y discard · n keep editing"
+		return e.bindingHints("Discard command edits? {discard.confirm} discard · {discard.cancel} keep editing")
 	}
-	return "Tab command · Ctrl+n add · Ctrl+x remove · Alt+↑↓ order · Ctrl+s use · Esc back"
+	return e.bindingHints("{dialog.next} command · {command.add} add · {command.delete} remove · {command.move_up command.move_down} order · {dialog.submit} use · {dialog.cancel} back")
 }
 func (e *tuiCommandEditor) Update(event vaxis.Event) (bool, error) {
 	if !e.confirmDiscard {
@@ -95,16 +96,16 @@ func (e *tuiCommandEditor) Update(event vaxis.Event) (bool, error) {
 			if !tuiKeyActivates(key, true) {
 				return false, nil
 			}
-			if key.Matches('y') {
+			if overlayKeyAction(e, key) == "discard.confirm" {
 				return true, nil
 			}
-			if key.Matches('n') || key.Matches(vaxis.KeyEsc) {
+			if overlayKeyAction(e, key) == "discard.cancel" {
 				e.confirmDiscard = false
 			}
 			return false, nil
 		}
 		switch {
-		case key.Matches(vaxis.KeyEsc):
+		case overlayKeyAction(e, key) == "dialog.cancel":
 			if !tuiKeyActivates(key, true) {
 				return false, nil
 			}
@@ -113,20 +114,18 @@ func (e *tuiCommandEditor) Update(event vaxis.Event) (bool, error) {
 				return false, nil
 			}
 			return true, nil
-		case key.Matches('s', vaxis.ModCtrl):
+		case overlayKeyAction(e, key) == "dialog.submit":
 			if tuiKeyActivates(key, true) {
 				e.onSave(e.commands())
 				return true, nil
 			}
 			return false, nil
-		case key.Matches('n', vaxis.ModCtrl):
+		case overlayKeyAction(e, key) == "command.add":
 			if tuiKeyActivates(key, true) {
-				e.buffers = append(e.buffers, newTUICommandBuffer(""))
-				e.index = len(e.buffers) - 1
-				e.scroll = 0
+				e.addCommand()
 			}
 			return false, nil
-		case key.Matches('x', vaxis.ModCtrl):
+		case overlayKeyAction(e, key) == "command.delete":
 			if tuiKeyActivates(key, true) {
 				e.buffers = slices.Delete(e.buffers, e.index, e.index+1)
 				if len(e.buffers) == 0 {
@@ -136,17 +135,17 @@ func (e *tuiCommandEditor) Update(event vaxis.Event) (bool, error) {
 				e.scroll = 0
 			}
 			return false, nil
-		case key.Matches(vaxis.KeyTab, vaxis.ModShift):
+		case overlayKeyAction(e, key) == "dialog.previous":
 			e.index = (e.index + len(e.buffers) - 1) % len(e.buffers)
 			e.scroll = 0
 			return false, nil
-		case key.Matches(vaxis.KeyTab):
+		case overlayKeyAction(e, key) == "dialog.next":
 			e.index = (e.index + 1) % len(e.buffers)
 			e.scroll = 0
 			return false, nil
-		case key.Matches(vaxis.KeyUp, vaxis.ModAlt), key.Matches(vaxis.KeyDown, vaxis.ModAlt):
+		case overlayKeyAction(e, key) == "command.move_up", overlayKeyAction(e, key) == "command.move_down":
 			delta := -1
-			if key.Keycode == vaxis.KeyDown {
+			if overlayKeyAction(e, key) == "command.move_down" {
 				delta = 1
 			}
 			j := e.index + delta
@@ -277,9 +276,14 @@ func (e *tuiCommandEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		}
 		area.ShowCursor(min(col, e.width-1), current-e.scroll, vaxis.CursorBlock)
 	}
-	status := fmt.Sprintf("Command %d/%d · Enter newline · Ctrl+s applies these command edits", e.index+1, len(e.buffers))
+	status := e.bindingHintsFormat("Command %d/%d · Enter newline · {dialog.submit} applies these command edits", e.index+1, len(e.buffers))
 	if e.confirmDiscard {
-		status = "Discard command edits? y discard · n keep editing"
+		status = e.FooterHint()
 	}
 	tuiLine(body.New(1, h-3, w-4, 1), 0, status, t.mint)
+}
+
+func (e *tuiCommandEditor) addCommand() {
+	e.buffers = append(e.buffers, newTUICommandBuffer(""))
+	e.index, e.scroll = len(e.buffers)-1, 0
 }

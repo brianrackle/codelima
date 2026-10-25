@@ -161,7 +161,7 @@ func (a *vaxisTUIApp) drawLifecycleFailure(win vaxis.Window, record tuiFleetReco
 	}
 	actions := border.All(lower.New(stateCol, stateHeight+1, stateWidth, max(1, lowerHeight-stateHeight-1)), theme.mint)
 	tuiLine(actions, 0, "Actions", theme.muted)
-	for i, line := range []string{a.lifecycleRetryHint(), "x shell in to inspect", "e edit source environment · future nodes", "E edit source template · future nodes", "s stop/start VM · d delete node", "l captured output · Tab Spec for full steps"} {
+	for i, line := range []string{a.lifecycleRetryHint(), a.keyHints("{node.shell} shell in to inspect"), a.keyHints("{failure.edit_environment} edit source environment · future nodes"), a.keyHints("{failure.edit_template} edit source template · future nodes"), a.keyHints("{node.toggle} stop/start VM · {node.delete} delete node"), a.keyHints("{node.logs} captured output · {navigation.next_tab} Spec for full steps")} {
 		style := theme.text
 		switch {
 		case i == 1 && !nodeGuestShellReady(record.Node):
@@ -177,28 +177,28 @@ func (a *vaxisTUIApp) drawLifecycleFailure(win vaxis.Window, record tuiFleetReco
 
 func (a *vaxisTUIApp) lifecycleRetryHint() string {
 	if a.state.selectedEntry().node.Status == NodeStatusFailed && a.lifecycleFailure().step != nil {
-		return "r retry failed step"
+		return a.keyHints("{node.restart} retry failed step")
 	}
-	return "s start/stop VM"
+	return a.keyHints("{node.toggle} start/stop VM")
 }
 
-func (a *vaxisTUIApp) handleFailureKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleFailureAction(action string) bool {
 	if a.detailTab != tuiDetailOverview || !a.nodeLifecycleFailed() {
 		return false
 	}
 	info := a.lifecycleFailure()
 	switch {
-	case key.MatchString("x") && !nodeIsRunning(a.state.selectedEntry().node):
+	case action == "node.shell" && !nodeIsRunning(a.state.selectedEntry().node):
 		a.setStatus(slog.LevelWarn, "The VM must be running before opening an inspection shell")
-	case key.MatchString("l") && info.step != nil:
+	case action == "node.logs" && info.step != nil:
 		a.openSpecCommandLogs(info.step.Command, info.step.AttemptID)
-	case key.MatchString("E"):
+	case action == "failure.edit_template":
 		if a.spec.nodeID != a.state.selectedEntry().node.ID || a.spec.snapshot.Template == nil {
 			a.setStatus(slog.LevelWarn, "The source template is unavailable")
 			return true
 		}
 		a.openUpdateConfigurationDialog(*a.spec.snapshot.Template)
-	case key.MatchString("e"):
+	case action == "failure.edit_environment":
 		if info.step == nil || info.step.SourceKind != "environment" || info.step.SourceID == "" || a.service == nil {
 			a.setStatus(slog.LevelWarn, "No source environment is available for this failure")
 			return true

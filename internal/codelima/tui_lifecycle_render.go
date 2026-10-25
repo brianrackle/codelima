@@ -82,11 +82,11 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 			tuiLine(actions, 1, "Waiting for VM shutdown", theme.amber)
 			tuiLine(actions, 3, "Attachment is unavailable during cancellation.", theme.dim)
 		} else {
-			tuiLine(actions, 1, "x attach when ready · Esc cancels queue", theme.text)
-			tuiLine(actions, 3, "s cancel start and stop the VM", theme.amber)
+			tuiLine(actions, 1, a.keyHints("{node.shell} attach when ready · {navigation.back} cancels queue"), theme.text)
+			tuiLine(actions, 3, a.keyHints("{node.toggle} cancel start and stop the VM"), theme.amber)
 		}
-		tuiLine(actions, 2, "T host shell · l full logs", theme.text)
-		tuiLine(actions, 4, "Esc back · operation continues", theme.dim)
+		tuiLine(actions, 2, a.keyHints("{session.host} host shell · l ful{node.logs} logs"), theme.text)
+		tuiLine(actions, 4, a.keyHints("{navigation.back} back · operation continues"), theme.dim)
 	} else {
 		drawLifecycleOutput(win.New(0, progressHeight, width, max(1, height-progressHeight)), operation, theme)
 	}

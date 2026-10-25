@@ -185,6 +185,7 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 		// Reuse existing form/selector behavior inside a centered modal. The
 		// underlying manager retains both its selection and navigation state.
 		drawOverlay := func(overlay tuiOverlay) {
+			bindOverlayKeys(overlay, a.keyMap())
 			if full, ok := overlay.(interface{ FullScreen() bool }); ok && full.FullScreen() {
 				overlay.Draw(window.New(0, 1, width, height-2), theme.mint, theme.muted, theme.coral)
 				return
@@ -227,11 +228,15 @@ func (a *vaxisTUIApp) drawManagerHeader(win vaxis.Window, theme tuiTheme) {
 	}
 	tuiLine(bar.New(0, 0, 9, 1), 0, a.headerLogoText(), logo)
 	col := 10
-	views := []string{"1 Nodes", "2 Templates", "3 Ports", "4 Activity", "5 System"}
+	viewActions := []string{"view.nodes", "view.recipes", "view.ports", "view.activity", "view.system"}
+	views := []string{"Nodes", "Templates", "Ports", "Activity", "System"}
+	for i := range views {
+		views[i] = a.keyMap().PrimaryHint(viewActions[i]) + " " + views[i]
+	}
 	if width < 100 {
 		for i := range views {
 			if tuiView(i) != a.view {
-				views[i] = strconv.Itoa(i + 1)
+				views[i] = a.keyMap().PrimaryHint(viewActions[i])
 			}
 		}
 	}
@@ -384,7 +389,7 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 	if len(a.fleet.visible) == 0 {
 		message := "No nodes yet.  n Create node   a Browse configurations"
 		if len(a.fleet.records) > 0 || a.fleet.filter != "" || a.filterInput != nil {
-			message = "No matching nodes.  / Edit filter   Esc Clear filter"
+			message = a.keyHints("No matching nodes.  {fleet.filter} Edit filter   {navigation.back} Clear filter")
 		}
 		tuiLine(content, 0, message, theme.muted)
 	}
@@ -400,7 +405,7 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 		} else {
 			uptime, _ := a.fleetCell(selected, tuiFleetSortUptime, true, 8, theme)
 			ports, _ := a.fleetCell(selected, tuiFleetSortPorts, true, 16, theme)
-			text := fmt.Sprintf("%s · up %s · ports %s · Enter details", selected.Node.Slug, uptime, ports)
+			text := a.keyHintsFormat("%s · up %s · ports %s · {node.open} details", selected.Node.Slug, uptime, ports)
 			tuiLine(win.New(layout.Summary.col, layout.Summary.row, layout.Summary.width, 1), 0, text, theme.muted)
 		}
 	}
@@ -483,11 +488,11 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 			text := ""
 			switch record.Status {
 			case "created":
-				text = "never started · s to start"
+				text = a.keyHints("never started · {node.toggle} to start")
 			case "stopped":
 				text = "stopped · " + nodeWorkspaceMode(record.Node) + " workspace · s to start"
 			case "failed", "broken":
-				text = "failed · Enter details · l logs"
+				text = a.keyHints("failed · {node.open} details · {node.logs} logs")
 			default:
 				text = record.Status
 			}
@@ -571,7 +576,7 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 func (a *vaxisTUIApp) drawNodePreview(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
 	inner := border.All(win, theme.border)
 	width, height := inner.Size()
-	tuiLine(win.New(2, 0, width-2, 1), 0, " "+record.Node.Slug+" preview · Enter open detail ", theme.text)
+	tuiLine(win.New(2, 0, width-2, 1), 0, " "+record.Node.Slug+a.keyHints(" preview · {node.open} open detail "), theme.text)
 	third := width / 3
 	identity := inner.New(1, 0, third-2, height)
 	resources := inner.New(third+1, 0, third-2, height)
@@ -585,81 +590,81 @@ func (a *vaxisTUIApp) drawNodePreview(win vaxis.Window, record tuiFleetRecord, t
 
 func (a *vaxisTUIApp) managerFooter() string {
 	if a.emptyNodesVisible() {
-		return "n new · 2 templates · 5 doctor · 0 scope · R re-check · : commands · ? help"
+		return a.keyHints("{node.create} new · {view.recipes} templates · {view.system} doctor · {scope.toggle} scope · {fleet.recheck} re-check · {palette.open} commands · {help.open} help")
 	}
 	if a.state.focus == tuiFocusTerminal {
-		return "F6 back to TUI · all other keys, including Alt+←/→, reach the shell"
+		return a.keyHints("{terminal.focus} back to TUI · all other keys, including Alt+←/→, reach the shell")
 	}
 	if a.filterInput != nil {
-		return "status: template: dir: port: · Enter apply · Esc cancel"
+		return a.keyHints("status: template: dir: port: · {input.accept} apply · {input.cancel} cancel")
 	}
 	if a.nodeDetail && a.detailTab == tuiDetailShell {
-		return "F6 focus shell · [ ] tabs · t new guest · T new host · w close · F7 search · Esc overview"
+		return a.keyHints("{terminal.focus} focus shell · {terminal.previous_tab terminal.next_tab} tabs · {session.guest} new guest · {session.host} new host · {terminal.close_tab} close · {terminal.search} search · {navigation.back} overview")
 	}
 	if a.metricsVisible() {
-		return "+ − window · p sort · Space pause · y PID · Tab view · x shell · Esc nodes"
+		return a.keyHints("{metrics.window_more metrics.window_less} window · {metrics.sort} sort · {metrics.pause} pause · {metrics.copy_pid} PID · {navigation.next_tab} view · {node.shell} shell · {navigation.back} nodes")
 	}
 	if a.logsVisible() {
 		if a.logs.input != nil {
-			return "Enter keep search · Esc cancel · search pauses follow"
+			return a.keyHints("{input.accept} keep search · {input.cancel} cancel · search pauses follow")
 		}
-		return "[] source · f follow · / search · w wrap · L level · Tab view · Esc nodes"
+		return a.keyHints("{logs.source_previous logs.source_next} source · {logs.follow} follow · {logs.search} search · {logs.wrap} wrap · {logs.level} level · {navigation.next_tab} view · {navigation.back} nodes")
 	}
 	if a.specVisible() {
-		return "N new from template · e edit · v YAML · y path · c clone · Tab view · Esc nodes"
+		return a.keyHints("{spec.new_node} new from template · {spec.edit} edit · {spec.pager} YAML · {spec.copy_path} path · {node.clone} clone · {navigation.next_tab} view · {navigation.back} nodes")
 	}
 	if a.nodeDetail {
 		if a.nodeStarting() {
 			if operation, ok := a.activeStartOperation(); ok && operation.State == "canceling" {
-				return "Canceling start · l logs · T host shell · Esc nodes"
+				return a.keyHints("Canceling start · {node.logs} logs · {session.host} host shell · {navigation.back} nodes")
 			}
 			if a.lifecycle.queuedOperation != "" {
-				return "Attachment queued · Esc cancels queue · s cancel start · l logs · T host shell"
+				return a.keyHints("Attachment queued · {navigation.back} cancels queue · {node.toggle} cancel start · {node.logs} logs · {session.host} host shell")
 			}
-			return "x attach when ready · s cancel start · l logs · T host shell · Esc nodes"
+			return a.keyHints("{node.shell} attach when ready · {node.toggle} cancel start · {node.logs} logs · {session.host} host shell · {navigation.back} nodes")
 		}
 		if a.nodeLifecycleFailed() {
 			if a.state.selectedEntry().node.Status == NodeStatusFailed && a.lifecycleFailure().step != nil {
-				return "r retry · x inspect · e env · E template · s stop/start · l logs · Esc nodes"
+				return a.keyHints("{node.restart} retry · {node.shell} inspect · {failure.edit_environment} env · {failure.edit_template} template · {node.toggle} stop/start · {node.logs} logs · {navigation.back} nodes")
 			}
-			return "s start/stop · x inspect · E template · l logs · Esc nodes"
+			return a.keyHints("{node.toggle} start/stop · {node.shell} inspect · {failure.edit_template} template · {node.logs} logs · {navigation.back} nodes")
 		}
-		return "Esc nodes · Tab view · ctrl+↑↓ panels · t/T new shell · s start/stop · r restart · l logs"
+		return a.keyHints("{navigation.back} nodes · {navigation.next_tab} view · {overview.previous_panel overview.next_panel} panels · {session.guest session.host} new shell · {node.toggle} start/stop · {node.restart} restart · {node.logs} logs")
 	}
 	switch a.view {
 	case tuiViewTemplates:
 		return a.recipeFooter()
 	case tuiViewPorts:
 		if a.ports.input != nil {
-			return "Enter keep filter · Esc restore filter"
+			return a.keyHints("{input.accept} keep filter · {input.cancel} restore filter")
 		}
-		return "↑↓ move · o open · y copy · p pin · Enter node · / filter · ? help"
+		return a.keyHints("{navigation.up navigation.down} move · {route.open} open · {route.copy} copy · {ports.pin} pin · {ports.open_node} node · {ports.filter} filter · {help.open} help")
 	case tuiViewActivity:
 		if a.activity.input != nil {
-			return "Enter keep filter · Esc cancel · [] pages search older history"
+			return a.keyHints("{input.accept} keep filter · {input.cancel} cancel · {activity.newer activity.older} pages search older history")
 		}
-		return "↑↓ move · ⏎ open · K cancel · f level · / filter · y copy · [] pages · g top"
+		return a.keyHints("{navigation.up navigation.down} move · {activity.open} open · {activity.cancel} cancel · {activity.level} level · {activity.filter} filter · {activity.copy} copy · {activity.newer activity.older} pages · {activity.first} top")
 	case tuiViewSystem:
 		if a.systemPanel == tuiSystemDaemon {
-			return "u update · S restart · L log · D diagnose · Tab panel · Enter details"
+			return a.keyHints("{system.update} update · {system.restart} restart · {system.logs} log · {system.diagnose} diagnose · {navigation.next_tab} panel · {system.open} details")
 		}
-		return "Tab panel · ↑↓ move · Enter details/edit · C check · R repair · Esc nodes"
+		return a.keyHints("{navigation.next_tab} panel · {navigation.up navigation.down} move · {system.open} details/edit · {system.refresh} check · {system.repair} repair · {navigation.back} nodes")
 	}
 	if len(a.fleet.marks) > 0 {
-		return "Space mark · s start/stop · r restart · d delete · Esc clear · ? help"
+		return a.keyHints("{fleet.mark} mark · {node.toggle} start/stop · {node.restart} restart · {node.delete} delete · {navigation.back} clear · {help.open} help")
 	}
 	failed := a.state.selectedEntry().node.Status == NodeStatusFailed
 	if a.vx != nil {
 		if width, _ := a.vx.Window().Size(); width < 100 {
 			if failed {
-				return "↑↓ select · Enter detail · r retry · s stop/start · l logs · ? help"
+				return a.keyHints("{navigation.up navigation.down} select · {node.open} detail · {node.restart} retry · {node.toggle} stop/start · {node.logs} logs · {help.open} help")
 			}
-			return "↑↓ select  Enter detail  x shell  s start/stop  n new  / filter  ? help"
+			return a.keyHints("{navigation.up navigation.down} select  {node.open} detail  {node.shell} shell  {node.toggle} start/stop  {node.create} new  {fleet.filter} filter  {help.open} help")
 		}
 	}
-	restart := "r restart"
+	restart := a.keyHints("{node.restart} restart")
 	if failed {
-		restart = "r retry"
+		restart = a.keyHints("{node.restart} retry")
 	}
-	return "↑↓ select · Enter detail · s start/stop · " + restart + " · x shell · o port · n new · / filter · : commands · ? help · q quit"
+	return a.keyHints("{navigation.up navigation.down} select · {node.open} detail · {node.toggle} start/stop · ") + restart + a.keyHints(" · {node.shell} shell · {node.open_port} port · {node.create} new · {fleet.filter} filter · {palette.open} commands · {help.open} help · {navigation.leave} quit")
 }

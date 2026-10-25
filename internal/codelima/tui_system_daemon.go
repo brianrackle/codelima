@@ -98,7 +98,7 @@ func (a *vaxisTUIApp) applyDaemonOverview(e tuiDaemonOverviewEvent) {
 func (a *vaxisTUIApp) daemonOverviewRows() []string {
 	s := &a.systemDaemon
 	if s.checkedAt.IsZero() {
-		return []string{"Daemon status unavailable · C re-check"}
+		return []string{a.keyHints("Daemon status unavailable · {system.refresh} re-check")}
 	}
 	status := s.overview.Status
 	state := "unavailable"
@@ -141,7 +141,7 @@ func (a *vaxisTUIApp) daemonOverviewRows() []string {
 		rows = append(rows, fmt.Sprintf("            %s degraded · %s lapsed", countLabel(f.DegradedPorts, "port", "ports"), countLabel(f.LapsedRoutes, "route", "routes")))
 	}
 	if f.InventoryError != "" {
-		rows = append(rows, "            node inventory unavailable · Enter details")
+		rows = append(rows, a.keyHints("            node inventory unavailable · {system.open} details"))
 	}
 	rows = append(rows, "telemetry   "+telemetry)
 	r := runtime.Reclaim
@@ -159,7 +159,7 @@ func (a *vaxisTUIApp) daemonOverviewRows() []string {
 		rows = append(rows, fmt.Sprintf("            last %s · %s", r.LastRunAt.Local().Format("15:04:05"), countLabel(r.LastReclaimedNodes, "node", "nodes")))
 	}
 	if r.LastError != "" {
-		rows = append(rows, "            reclaim failed · Enter details")
+		rows = append(rows, a.keyHints("            reclaim failed · {system.open} details"))
 	}
 	return rows
 }
@@ -180,10 +180,10 @@ func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, t tuiTheme) {
 	case s.loading:
 		message += " · refreshing…"
 	case s.checkedAt.IsZero() && (a.service == nil || a.service.daemonClient == nil):
-		message = "No daemon connection · C re-check"
+		message = a.keyHints("No daemon connection · {system.refresh} re-check")
 	}
 	if s.lifecycle != "" {
-		message, style = "Daemon "+s.lifecycle+" running… · L log · D diagnose", t.amber
+		message, style = "Daemon "+s.lifecycle+a.keyHints(" running… · {system.logs} log · {system.diagnose} diagnose"), t.amber
 	}
 	tuiLine(win, 1, plainLogText(message), style)
 	type button struct {
@@ -192,7 +192,8 @@ func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, t tuiTheme) {
 	}
 	var buttons []button
 	col, controlRow := 0, 0
-	for _, action := range [][2]string{{"update", "u update, keep sessions"}, {"restart", "S restart"}, {"log", "L daemon log"}, {"diagnose", "D diagnose freeze"}, {"details", "Enter details"}, {"check", "C re-check"}} {
+	for _, action := range [][2]string{{"update", "{system.update} update, keep sessions"}, {"restart", "{system.restart} restart"}, {"log", "{system.logs} daemon log"}, {"diagnose", "{system.diagnose} diagnose freeze"}, {"details", "{system.open} details"}, {"check", "{system.refresh} re-check"}} {
+		action[1] = a.keyHints(action[1])
 		if col > 0 && col+len(action[1]) > w {
 			col, controlRow = 0, controlRow+1
 		}
@@ -223,7 +224,7 @@ func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, t tuiTheme) {
 		s.controls = append(s.controls, tuiSystemDaemonControl{tuiRect{col: x, row: y, width: min(w-b.col, len(b.text)), height: 1}, b.action})
 	}
 	if len(rows) > controlStart-2 {
-		tuiLine(win.New(col, h-1, max(0, w-col), 1), 0, "↑↓ more", t.dim)
+		tuiLine(win.New(col, h-1, max(0, w-col), 1), 0, a.keyHints("{navigation.up navigation.down} more"), t.dim)
 	}
 }
 

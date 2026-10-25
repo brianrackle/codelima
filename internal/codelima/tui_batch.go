@@ -13,6 +13,7 @@ import (
 )
 
 type tuiBatchReview struct {
+	tuiOverlayKeys
 	app            *vaxisTUIApp
 	targets        []NodeBatchTarget
 	dialog         *tuiDialog
@@ -237,15 +238,15 @@ func (d *tuiBatchReview) Update(event vaxis.Event) (bool, error) {
 		return false, nil
 	}
 	switch {
-	case isOverlayCancelKey(key):
+	case overlayKeyAction(d, key) == "dialog.cancel":
 		if tuiKeyActivates(key, true) {
 			return true, nil
 		}
-	case key.Matches(vaxis.KeyPgUp):
+	case overlayKeyAction(d, key) == "overlay.page_up":
 		d.scroll = max(0, d.scroll-max(1, d.height-1))
-	case key.Matches(vaxis.KeyPgDown):
+	case overlayKeyAction(d, key) == "overlay.page_down":
 		d.scroll += max(1, d.height-1)
-	case key.Matches(vaxis.KeyEnter), key.Matches('s', vaxis.ModCtrl), len(d.dialog.Fields) == 0 && key.Matches('s'):
+	case overlayKeyAction(d, key) == "dialog.accept", overlayKeyAction(d, key) == "dialog.submit", len(d.dialog.Fields) == 0 && overlayKeyAction(d, key) == "review.run":
 		if tuiKeyActivates(key, true) {
 			return d.activate("submit")
 		}
@@ -257,7 +258,7 @@ func (d *tuiBatchReview) Update(event vaxis.Event) (bool, error) {
 
 func (d *tuiBatchReview) PreferredSize() (int, int) { return 84, min(30, 14+len(d.targets)*2) }
 func (d *tuiBatchReview) FooterHint() string {
-	return "Ctrl+s run · PgUp/PgDn review all targets · Esc cancel"
+	return d.bindingHints("{dialog.submit} run · {overlay.page_up overlay.page_down} review all targets · {dialog.cancel} cancel")
 }
 
 func (d *tuiBatchReview) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
@@ -273,7 +274,7 @@ func (d *tuiBatchReview) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	tuiLine(win.New(2, 0, max(0, w-2), 1), 0, " "+plainLogText(d.dialog.Title)+" ", accent)
 	d.tooSmall = w < 28 || h < 10
 	if d.tooSmall {
-		tuiLine(body, 1, "Resize to review · Esc cancel", t.text)
+		tuiLine(body, 1, d.bindingHints("Resize to review · {dialog.cancel} cancel"), t.text)
 		return
 	}
 	content := body.New(1, 0, w-2, h)
@@ -294,7 +295,7 @@ func (d *tuiBatchReview) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		tuiLine(content, i, row.text, row.style)
 	}
 	if len(rows) > d.height {
-		tuiLine(content, h-6, fmt.Sprintf("PgUp/PgDn · %d–%d/%d", d.scroll+1, min(len(rows), d.scroll+d.height), len(rows)), t.dim)
+		tuiLine(content, h-6, d.bindingHintsFormat("{overlay.page_up overlay.page_down} · %d–%d/%d", d.scroll+1, min(len(rows), d.scroll+d.height), len(rows)), t.dim)
 	}
 	if len(d.dialog.Fields) > 0 {
 		tuiLine(content, h-5, d.deletePrompt(), t.muted)
@@ -303,21 +304,24 @@ func (d *tuiBatchReview) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		input.Draw(content.New(0, h-4, min(36, cw), 1))
 	}
 	tuiLine(content, h-3, plainLogText(d.dialog.Error), t.coral)
-	button := fmt.Sprintf("[Ctrl+s Run %d]", len(d.targets))
+	button := d.bindingHintsFormat("[{dialog.submit} Run %d]", len(d.targets))
 	kind := d.targets[0].Kind
 	if !slices.ContainsFunc(d.targets, func(target NodeBatchTarget) bool { return target.Kind != kind }) {
-		button = fmt.Sprintf("[Ctrl+s %s %d]", kind, len(d.targets))
+		button = d.bindingHintsFormat("[{dialog.submit} %s %d]", kind, len(d.targets))
 	}
+	cancelLabel := d.bindingHints("[{dialog.cancel} Cancel]")
+	cancelWidth := min(cw/2, renderedTextWidth(d.app.vx, cancelLabel))
+	submitWidth := min(max(1, cw-cancelWidth-2), renderedTextWidth(d.app.vx, button))
 	for _, c := range []struct {
-		id, text string
-		col      int
-	}{{"submit", button, max(0, cw-len(button)-16)}, {"cancel", "[Esc Cancel]", cw - 12}} {
+		id, text   string
+		col, width int
+	}{{"submit", button, max(0, cw-cancelWidth-submitWidth-2), submitWidth}, {"cancel", cancelLabel, cw - cancelWidth, cancelWidth}} {
 		style := t.muted
 		if c.id == "submit" && d.validate() == nil && (len(d.dialog.Fields) == 0 || d.dialog.Fields[0].Input.String() == strconv.Itoa(len(d.targets))) {
 			style = accent
 		}
-		tuiLine(content.New(c.col, h-1, len(c.text), 1), 0, c.text, style)
+		tuiLine(content.New(c.col, h-1, c.width, 1), 0, c.text, style)
 		x, y := content.Origin()
-		d.controls = append(d.controls, tuiCommandTarget{rect: tuiRect{col: x + c.col, row: y + h - 1, width: len(c.text), height: 1}, id: c.id})
+		d.controls = append(d.controls, tuiCommandTarget{rect: tuiRect{col: x + c.col, row: y + h - 1, width: c.width, height: 1}, id: c.id})
 	}
 }

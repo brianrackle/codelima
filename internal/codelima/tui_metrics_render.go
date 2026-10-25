@@ -75,7 +75,7 @@ func (a *vaxisTUIApp) drawNodeMetrics(win vaxis.Window, theme tuiTheme) {
 	if m.latest != nil && now.Sub(m.latest.SampledAt) > 5*time.Second {
 		state += " · stale"
 	}
-	tuiLine(win, 0, "window "+tuiMetricWindowLabels[m.window]+" · + / − · Space "+state, theme.mint)
+	tuiLine(win, 0, "window "+tuiMetricWindowLabels[m.window]+a.keyHints(" · + / − · {metrics.pause} ")+state, theme.mint)
 	points := m.history.after(now, now.Add(-window).Add(-time.Nanosecond))
 	latest := nodeUsageEvent{}
 	if m.latest != nil {
@@ -210,7 +210,7 @@ func (a *vaxisTUIApp) drawMetricProcesses(win vaxis.Window, theme tuiTheme, fram
 	if m.processSort == "memory" {
 		order = "memory"
 	}
-	tuiLine(win, 0, "Processes · top by "+order+" ↓ · p sort", theme.text)
+	tuiLine(win, 0, "Processes · top by "+order+a.keyHints(" ↓ · {metrics.sort} sort"), theme.text)
 	if m.processError != "" {
 		tuiLine(win, 1, m.processError, theme.amber)
 		return
@@ -265,7 +265,7 @@ func (a *vaxisTUIApp) drawMetricProcesses(win vaxis.Window, theme tuiTheme, fram
 		tuiLine(win, height-3, "CPU% uses one core = 100%", theme.dim)
 		tuiLine(win, height-2, "Sampled over SSH while this tab is open", theme.dim)
 	}
-	status := "↑↓ select · y copy PID · Space pause"
+	status := a.keyHints("{navigation.up navigation.down} select · {metrics.copy_pid} copy PID · {metrics.pause} pause")
 	if m.processes.Truncated {
 		status = strings.TrimSpace(fmt.Sprintf("top %d · ", len(m.processes.Rows))) + " " + status
 	}

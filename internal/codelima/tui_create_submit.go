@@ -102,7 +102,7 @@ func (a *vaxisTUIApp) applyCreateAdmission(e tuiCreateAdmissionEvent) {
 			f.loadData()
 		} else {
 			f.request = &e.request
-			f.dialog.Error = "Admission unconfirmed · " + e.request.ID + " · Ctrl+s retries this same request"
+			f.dialog.Error = "Admission unconfirmed · " + e.request.ID + f.bindingHints(" · {dialog.submit} retries this same request")
 		}
 		return
 	}

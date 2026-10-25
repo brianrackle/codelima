@@ -134,19 +134,19 @@ func (a *vaxisTUIApp) applyMetricsData(event tuiMetricsDataEvent) {
 	a.ensureMetricProcessSelection()
 }
 
-func (a *vaxisTUIApp) handleMetricsKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleMetricsAction(action string) bool {
 	if !a.metricsVisible() {
 		return false
 	}
 	switch {
-	case key.MatchString("+"), key.MatchString("-"):
+	case action == "metrics.window_more", action == "metrics.window_less":
 		delta := 1
-		if key.MatchString("-") {
+		if action == "metrics.window_less" {
 			delta = -1
 		}
 		a.metrics.window = max(0, min(len(tuiMetricWindows)-1, a.metrics.window+delta))
 		return true
-	case key.Matches(' '):
+	case action == "metrics.pause":
 		a.metrics.paused = !a.metrics.paused
 		if a.metrics.paused {
 			a.cancelMetricsLoad()
@@ -155,7 +155,7 @@ func (a *vaxisTUIApp) handleMetricsKey(key vaxis.Key) bool {
 			a.startMetricsLoad()
 		}
 		return true
-	case key.MatchString("p"):
+	case action == "metrics.sort":
 		if a.metrics.processSort == "memory" {
 			a.metrics.processSort = "cpu"
 		} else {
@@ -169,7 +169,7 @@ func (a *vaxisTUIApp) handleMetricsKey(key vaxis.Key) bool {
 		a.cancelMetricsLoad()
 		a.startMetricsLoad()
 		return true
-	case key.MatchString("y"):
+	case action == "metrics.copy_pid":
 		if a.metrics.processPID > 0 {
 			if err := a.copyToHostClipboard(strconv.Itoa(a.metrics.processPID)); err != nil {
 				a.setStatus(slog.LevelError, err.Error())

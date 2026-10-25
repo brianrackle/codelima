@@ -374,9 +374,12 @@ terminals show one group at a time. Tab/Shift-Tab or Left/Right changes groups;
 Up/Down, PgUp/PgDn, Home/End or the mouse wheel scrolls the focused group.
 Click a column to focus it. `/` searches all groups by key, context or description
 (for example `overview session` or `system restart`). Search accepts pasted
-text; Enter never runs a binding. Tab returns to columns, and Esc or `?` closes
-help while preserving the underlying view. Keys act once per press; navigation
-and text editing repeat while held. Key remapping is not implemented yet.
+text; Enter never runs a binding. Tab returns to columns. Esc closes help; `?`
+also closes it while browsing and remains text during search. Closing preserves
+the underlying view. Action shortcuts run once per press; navigation and text
+editing repeat while held. The keys documented here are defaults. Configure
+overrides in `_config/settings.yaml` under `keys`; Help, buttons and footers show
+the effective bindings.
 
 Press `n` for the create form. Names, directories and optional `HOST:GUEST`
 ports validate inline; Tab accepts a suggested name when one is already used.
@@ -720,6 +723,35 @@ codelima settings set shell.mode tmux
 codelima settings set shell.window 'ghostty -e {cmd}'
 codelima settings set color ansi
 ```
+
+Keyboard settings use stable action IDs; inspect the complete list, contexts,
+defaults and effective bindings with `settings keys`:
+
+```sh
+codelima settings keys
+codelima settings set keys.node.delete '[ctrl+d, alt+d]'
+codelima settings set keys.dialog.submit '[alt+s]'
+codelima settings set keys.terminal.focus '[ctrl+f6]'
+codelima settings set keys.node.clone '[]' # disable this keyboard shortcut
+codelima settings reset keys node.clone
+```
+
+To restore one action, run `codelima settings reset keys node.clone`; to restore
+all defaults, run `codelima settings reset keys`. Reset preserves other settings.
+An override applies everywhere the action is available; unrelated contexts can
+reuse a key. Printable keys are case-sensitive (`t` and `T` differ), while key
+and modifier names are case-insensitive. Use `plus` in modified bindings, such
+as `ctrl+plus`, and quote numeric keys in YAML lists, such as `'["9"]'`.
+A missing override inherits its default. An empty list disables an optional
+shortcut; required exit/focus bindings cannot be empty. Ordinary text editing
+and raw attached-shell Ctrl+] detachment remain separate.
+
+Restart the TUI or refresh System (`C` by default) after editing settings outside
+it. Invalid bindings show a diagnostic: startup uses safe defaults, and a running
+frontend keeps its last valid map. `settings keys` reports the error and the
+startup fallback; Help describes that frontend's effective map. Invalid key
+preferences do not prevent other CLI commands from starting. Recovery refuses
+malformed YAML rather than overwriting the authored document.
 
 The window command is a quoted argument list; `{cmd}` must be a standalone
 argument and expands to the managed session's attach command. Use an executable

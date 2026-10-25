@@ -526,6 +526,34 @@ Contextual key help (ADR 192), in the disposable home:
    can still execute ordinary navigation. Close both frontends and stop the
    disposable daemon; remove this flow's stores, sockets, captures and mount.
 
+Configurable keys (ADR 200), in the disposable home, at 80×24 ANSI and
+150×38 truecolor:
+
+1. Inspect `settings keys`. Set `keys.node.delete` to `[alt+d, ctrl+d]`,
+   `keys.dialog.submit` to `[alt+s]`, `keys.dialog.cancel` to `[alt+q]`,
+   `keys.view.ports` to `[alt+p]` and `keys.terminal.focus` to `[ctrl+f6]`.
+   Restart the TUI. Check header, footer, palette, review buttons and Help
+   (including search by `node.delete`) show effective bindings. Old `d` and `3`
+   must be inactive. Alt+d must open the captured deletion review; cancel it.
+2. Type and paste ordinary letters, numbers and question marks in a form and
+   Help search. Configured submit/cancel work; old Ctrl+s/Esc no longer submit
+   or cancel. Hold/release a transition key across a newly exposed input and
+   confirm no trailing letter is inserted. Exercise menus, template/environment
+   editors, the command editor, a selector, shell chooser and review scrolling.
+   Disable an optional shortcut and verify its mouse/palette action still works.
+3. Enable embedded mode. Ctrl+F6 changes focus; F6 now reaches the shell.
+   Check Alt+Left/Right, ordinary input, paste, repeat and release. Return to
+   manager focus and test configured detail tab/navigation commands. Raw attach
+   still detaches with Ctrl+] and preserves the session.
+4. Change an override externally, refresh System and verify Help/hints update.
+   Author a conflicting binding, refresh again and verify the last valid map
+   remains active with one diagnostic. Restart with that invalid map and verify
+   defaults plus a visible error. Use `settings reset keys ACTION` and
+   `settings reset keys` to recover without dropping comments or other settings.
+5. Close the owned frontends/shells and daemon. Remove captures, stores, scratch
+   data and processes. Keep tmux/daemon sockets on project-rooted native/tmpfs
+   storage; unmount it after stopping its services. Do not remove baseline state.
+
 Overview panels (ADR 191), in the disposable home:
 
 1. At 150×38 open a ready node's Overview. Inspect Identity/Resources on the

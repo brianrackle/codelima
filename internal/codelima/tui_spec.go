@@ -110,36 +110,36 @@ func (a *vaxisTUIApp) moveSpecSelection(delta int) {
 	s.cursor[s.panel] = max(0, min(len(s.rows[s.panel])-1, s.cursor[s.panel]+delta))
 }
 
-func (a *vaxisTUIApp) handleSpecKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleSpecAction(action string) bool {
 	if !a.specVisible() {
 		return false
 	}
 	s := &a.spec
 	var err error
 	switch {
-	case key.Matches(vaxis.KeyLeft), key.Matches(vaxis.KeyUp, vaxis.ModCtrl):
+	case action == "spec.previous_panel":
 		s.panel = (s.panel + tuiSpecPanelCount - 1) % tuiSpecPanelCount
-	case key.Matches(vaxis.KeyRight), key.Matches(vaxis.KeyDown, vaxis.ModCtrl):
+	case action == "spec.next_panel":
 		s.panel = (s.panel + 1) % tuiSpecPanelCount
-	case key.Matches(vaxis.KeyPgUp):
+	case action == "navigation.page_up":
 		a.moveSpecSelection(-max(1, s.rects[s.panel].height-1))
-	case key.Matches(vaxis.KeyPgDown):
+	case action == "navigation.page_down":
 		a.moveSpecSelection(max(1, s.rects[s.panel].height-1))
-	case key.Matches(vaxis.KeyHome):
+	case action == "spec.first":
 		s.cursor[s.panel] = 0
-	case key.Matches(vaxis.KeyEnd):
+	case action == "spec.last":
 		s.cursor[s.panel] = max(0, len(s.rows[s.panel])-1)
-	case key.MatchString("N"), key.MatchString("e"):
+	case action == "spec.new_node", action == "spec.edit":
 		if s.snapshot.Template == nil {
 			err = errors.New("the source template is unavailable; clone the frozen node with c")
 			break
 		}
-		if key.MatchString("e") {
+		if action == "spec.edit" {
 			a.openUpdateConfigurationDialog(*s.snapshot.Template)
 			break
 		}
 		err = a.openCreateNodeDialogWithDefaults(s.snapshot.Node.DirectoryPath, s.snapshot.Template.Slug)
-	case key.MatchString("y"):
+	case action == "spec.copy_path":
 		if s.snapshot.LimaPath == "" {
 			err = errors.New("Lima YAML path is not available yet")
 			break
@@ -148,16 +148,16 @@ func (a *vaxisTUIApp) handleSpecKey(key vaxis.Key) bool {
 		if err == nil {
 			a.setStatus(slog.LevelInfo, "sent Lima YAML path copy request to host")
 		}
-	case key.MatchString("v"):
+	case action == "spec.pager":
 		err = a.openFilePager(s.snapshot.LimaPath)
-	case key.Matches(vaxis.KeyEnter):
+	case action == "spec.open":
 		rows, cursor := s.rows[s.panel], s.cursor[s.panel]
 		if cursor >= 0 && cursor < len(rows) {
 			if rows[cursor].command != "" {
 				a.openSpecCommandLogs(rows[cursor].command, rows[cursor].logQuery)
 			}
-			if action := rows[cursor].action; action != 0 {
-				a.dispatchManagerKey(vaxis.Key{Keycode: action, Text: string(action)})
+			if action := rows[cursor].action; action != "" {
+				a.dispatchManagerAction(action, vaxis.Key{})
 			}
 		}
 	default:
@@ -208,8 +208,8 @@ func (a *vaxisTUIApp) handleSpecMouse(mouse vaxis.Mouse) bool {
 		case vaxis.MouseLeftButton:
 			s.cursor[i] = max(0, min(len(s.rows[i])-1, s.offset[i]+mouse.Row-rect.row))
 			if len(s.rows[i]) > 0 {
-				if action := s.rows[i][s.cursor[i]].action; action != 0 {
-					a.dispatchManagerKey(vaxis.Key{Keycode: action, Text: string(action)})
+				if action := s.rows[i][s.cursor[i]].action; action != "" {
+					a.dispatchManagerAction(action, vaxis.Key{})
 				}
 			}
 		}

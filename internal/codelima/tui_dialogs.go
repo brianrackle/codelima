@@ -64,7 +64,7 @@ func (a *vaxisTUIApp) openEnvironmentConfigSelector(title string, description []
 		return fmt.Errorf("no environments configured")
 	}
 	if multi && len(options) == 0 {
-		description = append(description, "No reusable environments configured. Press Enter to keep none assigned.")
+		description = append(description, a.keyHints("No reusable environments configured. Press {dialog.accept} to keep none assigned."))
 	}
 	selector := newTUISelector(title, description, options, current, multi, onSubmit)
 	selector.EmptyText = "No environments configured."
@@ -172,9 +172,9 @@ func (a *vaxisTUIApp) openConfigurationsMenu() error {
 	for _, configuration := range configurations {
 		description = append(description, fmt.Sprintf("- %s: %d CPU, %d MiB memory, %d MiB disk", configuration.Slug, configuration.VCPUs, configuration.MemoryMiB, configuration.DiskMiB))
 	}
-	entries := []tuiMenuEntry{{Key: 'c', Label: "Create Configuration", Action: func() error { a.openCreateConfigurationDialog(); return nil }}}
+	entries := []tuiMenuEntry{{Key: 'c', Label: "Create Configuration", BindingAction: "menu.configuration_create", Action: func() error { a.openCreateConfigurationDialog(); return nil }}}
 	if len(configurations) != 0 {
-		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Configuration", Action: func() error {
+		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Configuration", BindingAction: "menu.configuration_manage", Action: func() error {
 			return a.openManageConfigurationSelector(configurations[0].Slug)
 		}})
 	}
@@ -232,11 +232,11 @@ func (a *vaxisTUIApp) openManageConfigurationSelector(current string) error {
 
 func (a *vaxisTUIApp) openConfigurationMenu(configuration Configuration) {
 	entries := []tuiMenuEntry{
-		{Key: 'u', Label: "Update Configuration", Action: func() error { a.openUpdateConfigurationDialog(configuration); return nil }},
-		{Key: 'c', Label: "Clone Configuration", Action: func() error { a.openCloneConfigurationDialog(configuration); return nil }},
+		{Key: 'u', Label: "Update Configuration", BindingAction: "menu.configuration_edit", Action: func() error { a.openUpdateConfigurationDialog(configuration); return nil }},
+		{Key: 'c', Label: "Clone Configuration", BindingAction: "menu.configuration_clone", Action: func() error { a.openCloneConfigurationDialog(configuration); return nil }},
 	}
 	if configuration.Slug != DefaultConfigurationSlug {
-		entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Delete Configuration", Action: func() error { a.openDeleteConfigurationDialog(configuration); return nil }})
+		entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Delete Configuration", BindingAction: "menu.configuration_delete", Action: func() error { a.openDeleteConfigurationDialog(configuration); return nil }})
 	}
 	a.overlay = &tuiMenu{
 		Title: "Configuration: " + configuration.Slug,
@@ -369,10 +369,10 @@ func (a *vaxisTUIApp) openEnvironmentConfigsMenu() error {
 	}
 
 	entries := []tuiMenuEntry{
-		{Key: 'c', Label: "Create Environment", Action: func() error { a.openCreateEnvironmentConfigDialog(); return nil }},
+		{Key: 'c', Label: "Create Environment", BindingAction: "menu.environment_create", Action: func() error { a.openCreateEnvironmentConfigDialog(); return nil }},
 	}
 	if len(configs) > 0 {
-		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Environment", Action: func() error { return a.openManageEnvironmentConfigDialog(configs[0].Slug) }})
+		entries = append(entries, tuiMenuEntry{Key: 'm', Label: "Manage Environment", BindingAction: "menu.environment_manage", Action: func() error { return a.openManageEnvironmentConfigDialog(configs[0].Slug) }})
 	}
 
 	a.overlay = &tuiMenu{
@@ -452,11 +452,11 @@ func (a *vaxisTUIApp) openEnvironmentConfigCommandMenu(config EnvironmentConfig)
 		Title:       "Environment: " + config.Slug,
 		Description: description,
 		Entries: []tuiMenuEntry{
-			{Key: 'a', Label: "Add Bootstrap Command", Action: func() error { a.openAddEnvironmentConfigCommandDialog(config); return nil }},
-			{Key: 'r', Label: "Remove Bootstrap Command", Action: func() error { return a.openRemoveEnvironmentConfigCommandDialog(config) }},
-			{Key: 'm', Label: "Move Bootstrap Command", Action: func() error { return a.openMoveEnvironmentConfigCommandDialog(config) }},
-			{Key: 'c', Label: "Clear Bootstrap Commands", Action: func() error { a.openClearEnvironmentConfigCommandsDialog(config); return nil }},
-			{Key: 'd', Label: "Delete Environment", Action: func() error { a.openDeleteEnvironmentConfigDialog(config); return nil }},
+			{Key: 'a', Label: "Add Bootstrap Command", BindingAction: "menu.command_add", Action: func() error { a.openAddEnvironmentConfigCommandDialog(config); return nil }},
+			{Key: 'r', Label: "Remove Bootstrap Command", BindingAction: "menu.command_remove", Action: func() error { return a.openRemoveEnvironmentConfigCommandDialog(config) }},
+			{Key: 'm', Label: "Move Bootstrap Command", BindingAction: "menu.command_move", Action: func() error { return a.openMoveEnvironmentConfigCommandDialog(config) }},
+			{Key: 'c', Label: "Clear Bootstrap Commands", BindingAction: "menu.command_clear", Action: func() error { a.openClearEnvironmentConfigCommandsDialog(config); return nil }},
+			{Key: 'd', Label: "Delete Environment", BindingAction: "menu.environment_delete", Action: func() error { a.openDeleteEnvironmentConfigDialog(config); return nil }},
 		},
 	}
 }
@@ -544,13 +544,13 @@ func (a *vaxisTUIApp) openMoveEnvironmentConfigCommandDialog(config EnvironmentC
 			moveTitle := "Moving command in environment " + config.Slug
 			entries := []tuiMenuEntry{}
 			if index > 0 {
-				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", Action: func() error {
+				entries = append(entries, tuiMenuEntry{Key: 'u', Label: "Move Up", BindingAction: "menu.command_up", Action: func() error {
 					return a.startEnvironmentConfigUpdate(config, moveTitle, "updated",
 						EnvironmentConfigUpdateInput{BootstrapCommands: moveCommand(config.BootstrapCommands, index, -1)})
 				}})
 			}
 			if index < len(config.BootstrapCommands)-1 {
-				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", Action: func() error {
+				entries = append(entries, tuiMenuEntry{Key: 'd', Label: "Move Down", BindingAction: "menu.command_down", Action: func() error {
 					return a.startEnvironmentConfigUpdate(config, moveTitle, "updated",
 						EnvironmentConfigUpdateInput{BootstrapCommands: moveCommand(config.BootstrapCommands, index, 1)})
 				}})

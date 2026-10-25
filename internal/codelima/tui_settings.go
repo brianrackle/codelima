@@ -44,7 +44,7 @@ func (a *vaxisTUIApp) drawManagerSettings(win vaxis.Window, theme tuiTheme) {
 		style = theme.mint
 	}
 	inner := border.All(win, style)
-	tuiLine(inner, 0, "Settings · Enter edit", theme.muted)
+	tuiLine(inner, 0, a.keyHints("Settings · {system.open} edit"), theme.muted)
 	_, height := inner.Size()
 	rows := a.managerSettingRows()
 	start, visible := a.managerSettingsViewport(height)
@@ -59,7 +59,7 @@ func (a *vaxisTUIApp) drawManagerSettings(win vaxis.Window, theme tuiTheme) {
 		tuiLine(inner, 2+i-start, fmt.Sprintf("%-20s %s", rows[i].label, rows[i].value), style)
 	}
 	tuiLine(inner, height-2, "Changes preserve comments and unknown keys.", theme.dim)
-	tuiLine(inner, height-1, "Host credentials: new nodes only · Tab panel", theme.dim)
+	tuiLine(inner, height-1, a.keyHints("Host credentials: new nodes only · {navigation.next_tab} panel"), theme.dim)
 }
 
 func (a *vaxisTUIApp) managerSettingsViewport(height int) (start, visible int) {
@@ -100,6 +100,7 @@ func (a *vaxisTUIApp) saveManagerSetting(key, value string, after func(*vaxisTUI
 		cfg, err := service.SettingsUpdate(ctx, key, value)
 		return tuiOperationResult{Status: "Saved " + key + " · " + value, Apply: func(app *vaxisTUIApp) error {
 			app.preferences = &cfg
+			app.applyKeyboardConfig(cfg)
 			app.preferenceRevision++
 			if key == "group_by_directory" && app.fleet != nil {
 				app.fleet.groupByDir = app.treeWorkspaceRoot == "" && cfg.GroupByDirectory

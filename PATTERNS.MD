@@ -1,5 +1,17 @@
 # Patterns
 
+## Contextual keyboard actions
+
+Declare stable actions, defaults and finite focused contexts in the shared key
+registry. Resolve an action while retaining the original physical event for
+press/repeat/release claims. Dispatch pointer controls by action ID, never by a
+synthetic default key. Keep text editing in its widget and terminal payload in
+its terminal. Compile and validate a complete replacement before publishing it;
+retain the last valid snapshot on errors. Use registry-backed hint tokens and
+the format-aware helper when inserting bindings into formatted strings, so a
+percent key remains literal. Inspectable metadata must return owned copies
+(ADR 200).
+
 ## Live commands with captured identities
 
 Build search catalogues from immutable frontend snapshots and store canonical
@@ -19,7 +31,8 @@ bindings at terminal-cell boundaries so compact layouts retain access to the
 same information. Route paste framing through the existing input widget; do
 not treat pasted text, inherited releases or repeats as activation. A catalogue
 entry must describe a supported dispatcher, including focus restrictions.
-Keep unimplemented remapping claims out of the help surface (ADR 192).
+Resolve displayed bindings from the immutable effective registry; keep help
+read-only even when settings change (ADRs 192 and 200).
 
 ## Validated asynchronous forms
 

@@ -14,7 +14,7 @@ type tuiSpecRow struct {
 	logQuery      string
 	step          int
 	style         vaxis.Style
-	action        rune
+	action        string
 }
 
 func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
@@ -43,11 +43,11 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 		}
 	}
 	field := func(name, value string) { add(fmt.Sprintf("%-15s %s", name, coalesce(value, "none")), theme.text, "") }
-	action := func(key rune, label string) {
+	action := func(id string, label string) {
 		start := len(rows)
-		add(string(key)+" "+label, theme.mint, "")
+		add(a.keyHint(id)+" "+label, theme.mint, "")
 		for i := start; i < len(rows); i++ {
-			rows[i].action = key
+			rows[i].action = id
 		}
 	}
 	switch panel {
@@ -91,7 +91,7 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 			add("Bootstrap metadata: "+s.BootstrapError.Error(), theme.coral, "")
 		}
 		if len(s.Bootstrap.Steps) > 0 {
-			add("Enter opens command output · — means timing was not recorded", theme.dim, "")
+			add(a.keyHints("{spec.open} opens command output · — means timing was not recorded"), theme.dim, "")
 			for i, step := range s.Bootstrap.Steps {
 				first := len(rows)
 				label, style := bootstrapStepDisplay(step, i, n.ID, theme)
@@ -105,7 +105,7 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 				}
 			}
 		} else {
-			add("Per-step source/timing not recorded. Enter opens captured output.", theme.dim, "")
+			add(a.keyHints("Per-step source/timing not recorded. {spec.open} opens captured output."), theme.dim, "")
 			if len(n.BootstrapCommands) == 0 {
 				add("No bootstrap commands.", theme.dim, "")
 			}
@@ -137,9 +137,9 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 			add("  now        "+coalesce(diff.Current, "none"), theme.amber, "")
 		}
 		add("", theme.text, "")
-		action('N', "new from current template")
-		action('c', "clone this frozen node")
-		action('e', "edit template")
+		action("spec.new_node", "new from current template")
+		action("node.clone", "clone this frozen node")
+		action("spec.edit", "edit template")
 	case 2:
 		add("instance.lima.yaml", theme.dim, "")
 		if s.LimaError != nil {
@@ -149,8 +149,8 @@ func (a *vaxisTUIApp) specRows(panel, width int, theme tuiTheme) []tuiSpecRow {
 			field(f.Name, f.Value)
 		}
 		add("", theme.text, "")
-		action('v', "view full YAML")
-		action('y', "copy path")
+		action("spec.pager", "view full YAML")
+		action("spec.copy_path", "copy path")
 		add(s.LimaPath, theme.dim, "")
 	}
 	return rows
@@ -225,7 +225,7 @@ func (a *vaxisTUIApp) drawNodeSpec(win vaxis.Window, theme tuiTheme) {
 		a.drawSpecPanel(win.New(left+1, 0, width-left-1, top), 1, titles[1], theme)
 		a.drawSpecPanel(win.New(left+1, top+1, width-left-1, height-top-2), 2, titles[2], theme)
 	}
-	tuiLine(win, height-1, "← → panel · ↑ ↓ scroll · Enter step output · frozen values are read-only", theme.dim)
+	tuiLine(win, height-1, a.keyHints("{spec.previous_panel spec.next_panel} panel · {navigation.up navigation.down} scroll · {spec.open} step output · frozen values are read-only"), theme.dim)
 }
 
 func (a *vaxisTUIApp) drawSpecPanel(win vaxis.Window, panel int, title string, theme tuiTheme) {

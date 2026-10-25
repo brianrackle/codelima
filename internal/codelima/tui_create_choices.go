@@ -22,7 +22,7 @@ type tuiCreateDirectoryEvent struct {
 }
 
 func (f *tuiCreateNodeForm) browseDirectory(path string) {
-	selector := newTUISelector("Browse directory", []string{path, "Enter opens a folder; choose ‘Use this directory’ to select it."}, nil, nil, false, nil)
+	selector := newTUISelector("Browse directory", []string{path, f.bindingHints("{dialog.accept} opens a folder; choose ‘Use this directory’ to select it.")}, nil, nil, false, nil)
 	selector.Parent, selector.EmptyText = f, "Loading directories…"
 	f.app.overlay = selector
 	load := func() tuiCreateDirectoryEvent {
@@ -84,6 +84,7 @@ func (a *vaxisTUIApp) applyCreateDirectory(e tuiCreateDirectoryEvent) {
 }
 
 type tuiTemplatePicker struct {
+	tuiOverlayKeys
 	form          *tuiCreateNodeForm
 	filter        *textinput.Model
 	selected      string
@@ -100,7 +101,7 @@ func (f *tuiCreateNodeForm) openTemplatePicker() {
 func (p *tuiTemplatePicker) ParentOverlay() tuiOverlay { return p.form }
 func (p *tuiTemplatePicker) PreferredSize() (int, int) { return 102, 20 }
 func (p *tuiTemplatePicker) FooterHint() string {
-	return "Type filter · ↑↓ move · Enter choose · → details · Esc back"
+	return p.bindingHints("Type filter · {dialog.up dialog.down} move · {dialog.accept} choose · {dialog.right} details · {dialog.cancel} back")
 }
 
 func (p *tuiTemplatePicker) choices() []Configuration {
@@ -138,7 +139,7 @@ func (p *tuiTemplatePicker) Update(event vaxis.Event) (bool, error) {
 			return false, nil
 		}
 		switch {
-		case key.Matches(vaxis.KeyEsc):
+		case overlayKeyAction(p, key) == "dialog.cancel":
 			if !tuiKeyActivates(key, true) {
 				return false, nil
 			}
@@ -147,14 +148,14 @@ func (p *tuiTemplatePicker) Update(event vaxis.Event) (bool, error) {
 				return false, nil
 			}
 			return true, nil
-		case key.Matches(vaxis.KeyDown), key.Matches(vaxis.KeyTab):
+		case overlayKeyAction(p, key) == "dialog.down", overlayKeyAction(p, key) == "dialog.next":
 			p.index = (p.index + 1) % (len(rows) + 1)
-		case key.Matches(vaxis.KeyUp):
+		case overlayKeyAction(p, key) == "dialog.up":
 			p.index = (p.index + len(rows)) % (len(rows) + 1)
-		case key.Matches(vaxis.KeyRight):
+		case overlayKeyAction(p, key) == "dialog.right":
 			p.details = true
 			return false, nil
-		case key.Matches(vaxis.KeyEnter):
+		case overlayKeyAction(p, key) == "dialog.accept":
 			if !tuiKeyActivates(key, true) {
 				return false, nil
 			}
@@ -224,7 +225,7 @@ func (p *tuiTemplatePicker) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		for i, text := range lines[:min(len(lines), h-3)] {
 			tuiLine(body.New(1, i+2, w-2, 1), 0, text, t.text)
 		}
-		tuiLine(body, h-1, "Esc back to choices · Enter selects", t.dim)
+		tuiLine(body, h-1, p.bindingHints("{dialog.cancel} back to choices · {dialog.accept} selects"), t.dim)
 		return
 	}
 	envWidth := max(0, w-66)
@@ -289,7 +290,7 @@ func (p *tuiTemplatePicker) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		c := rows[p.index]
 		tuiLine(body.New(1, h-3, w-2, 1), 0, c.Slug+" · "+c.Image+" · agent "+c.AgentProfileName, t.dim)
 	}
-	tuiLine(body.New(1, h-1, w-2, 1), 0, "Capacity warnings never block selection · Enter choose · Esc back", t.dim)
+	tuiLine(body.New(1, h-1, w-2, 1), 0, p.bindingHints("Capacity warnings never block selection · {dialog.accept} choose · {dialog.cancel} back"), t.dim)
 }
 
 func (p *tuiTemplatePicker) openNewTemplate() {

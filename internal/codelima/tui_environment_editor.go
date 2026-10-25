@@ -11,6 +11,7 @@ import (
 )
 
 type tuiEnvironmentEditor struct {
+	tuiOverlayKeys
 	app               *vaxisTUIApp
 	dialog            *tuiDialog
 	original          EnvironmentConfig
@@ -50,7 +51,7 @@ func (e *tuiEnvironmentEditor) FooterHint() string {
 	if e.dialog.confirmDiscard {
 		return e.dialog.FooterHint()
 	}
-	return "Tab field · Enter edit commands · Ctrl+s save · Ctrl+r restore built-in · Esc cancel"
+	return e.bindingHints("{dialog.next} field · {dialog.accept} edit commands · {dialog.submit} save · {form.restore} restore built-in · {dialog.cancel} cancel")
 }
 func (e *tuiEnvironmentEditor) commands() []string {
 	commands := []string{}
@@ -102,7 +103,7 @@ func (e *tuiEnvironmentEditor) Update(event vaxis.Event) (bool, error) {
 					case "save":
 						e.save()
 					case "cancel":
-						return e.dialog.Update(vaxis.Key{Keycode: vaxis.KeyEsc})
+						return e.dialog.cancel()
 					}
 					break
 				}
@@ -114,26 +115,26 @@ func (e *tuiEnvironmentEditor) Update(event vaxis.Event) (bool, error) {
 		if !tuiKeyActivates(key, false) {
 			return false, nil
 		}
-		if key.Matches('s', vaxis.ModCtrl) {
+		if overlayKeyAction(e, key) == "dialog.submit" {
 			if tuiKeyActivates(key, true) {
 				e.save()
 			}
 			return false, nil
 		}
-		if key.Matches('r', vaxis.ModCtrl) {
+		if overlayKeyAction(e, key) == "form.restore" {
 			if tuiKeyActivates(key, true) {
 				e.restoreDefaults()
 			}
 			return false, nil
 		}
-		if key.Matches(vaxis.KeyEnter) && e.dialog.FieldIndex == 0 {
+		if overlayKeyAction(e, key) == "dialog.accept" && e.dialog.FieldIndex == 0 {
 			if tuiKeyActivates(key, true) {
 				e.dialog.FieldIndex = 1
 				e.openCommands(0)
 			}
 			return false, nil
 		}
-		if !e.creating && e.dialog.FieldIndex == 0 && key.Text != "" && !isOverlayCancelKey(key) {
+		if !e.creating && e.dialog.FieldIndex == 0 && key.Text != "" && overlayKeyAction(e, key) != "dialog.cancel" {
 			return false, nil
 		}
 	}
@@ -241,11 +242,11 @@ func (e *tuiEnvironmentEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		tuiLine(body.New(14, 3, max(1, w-16), 1), 0, f.Value+" · clone to use a new name", t.text)
 	}
 	e.controls = append(e.controls, tuiRecipeControl{tuiRect{col: x + 1, row: y + 3, width: w - 2, height: 1}, "name", 0})
-	tuiLine(body.New(1, 5, w-2, 1), 0, "Commands · Enter opens the multiline editor", t.mint)
+	tuiLine(body.New(1, 5, w-2, 1), 0, e.bindingHints("Commands · {dialog.accept} opens the multiline editor"), t.mint)
 	commands := e.commands()
 	visible := max(1, h-10)
 	if len(commands) == 0 {
-		tuiLine(body.New(1, 6, w-2, 1), 0, "(none) · click or press Enter to add", t.dim)
+		tuiLine(body.New(1, 6, w-2, 1), 0, e.bindingHints("(none) · click or press {dialog.accept} to add"), t.dim)
 	}
 	for i, command := range commands[:min(len(commands), visible)] {
 		tuiLine(body.New(1, 6+i, w-2, 1), 0, fmt.Sprintf("%d │ %s", i+1, templateCommandLine(command)), t.text)
@@ -253,7 +254,7 @@ func (e *tuiEnvironmentEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	for i := 0; i < max(1, min(len(commands), visible)); i++ {
 		e.controls = append(e.controls, tuiRecipeControl{tuiRect{col: x + 1, row: y + 6 + i, width: w - 2, height: 1}, "commands", i})
 	}
-	status := fmt.Sprintf("%d command blocks · Ctrl+s saves this environment", len(commands))
+	status := e.bindingHintsFormat("%d command blocks · {dialog.submit} saves this environment", len(commands))
 	style := t.muted
 	if e.pending {
 		status, style = "Saving environment…", t.amber
@@ -262,14 +263,16 @@ func (e *tuiEnvironmentEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		status, style = e.dialog.Error, t.coral
 	}
 	if e.dialog.confirmDiscard {
-		status, style = "Discard unsaved changes? y discard · n keep editing", t.coral
+		status, style = e.bindingHints("Discard unsaved changes? {discard.confirm} discard · {discard.cancel} keep editing"), t.coral
 	}
 	tuiLine(body.New(1, h-3, w-2, 1), 0, status, style)
+	col := 1
 	for _, c := range []struct {
-		x, width      int
 		label, action string
-	}{{1, 18, "Ctrl+s save", "save"}, {22, 16, "Esc cancel", "cancel"}} {
-		tuiLine(body.New(c.x, h-1, c.width, 1), 0, c.label, t.mint)
-		e.controls = append(e.controls, tuiRecipeControl{tuiRect{col: x + c.x, row: y + h - 1, width: c.width, height: 1}, c.action, 0})
+	}{{e.bindingHints("{dialog.submit} save"), "save"}, {e.bindingHints("{dialog.cancel} cancel"), "cancel"}} {
+		width := min(max(0, (w-4)/2), renderedTextWidth(e.app.vx, c.label))
+		tuiLine(body.New(col, h-1, width, 1), 0, c.label, t.mint)
+		e.controls = append(e.controls, tuiRecipeControl{tuiRect{col: x + col, row: y + h - 1, width: width, height: 1}, c.action, 0})
+		col += width + 2
 	}
 }

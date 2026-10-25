@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"time"
-
-	"go.rockorager.dev/vaxis"
 )
 
 type tuiLifecycleState struct {
@@ -206,21 +204,21 @@ func (a *vaxisTUIApp) finishQueuedLifecycleAttach() {
 	}
 }
 
-func (a *vaxisTUIApp) handleLifecycleKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleLifecycleAction(action string) bool {
 	if !a.lifecycleVisible() {
 		return false
 	}
-	if key.Matches(vaxis.KeyEsc) && a.lifecycle.queuedOperation != "" {
+	if action == "navigation.back" && a.lifecycle.queuedOperation != "" {
 		a.clearQueuedLifecycleAttach()
 		a.setStatus(slog.LevelInfo, "Queued attachment canceled; startup continues")
 		return true
 	}
 	if !a.nodeStarting() {
-		return a.handleFailureKey(key)
+		return a.handleFailureAction(action)
 	}
 	operation, active := a.activeStartOperation()
 	switch {
-	case key.MatchString("x"):
+	case action == "node.shell":
 		if !active || operation.ID == "" || operation.State == "canceling" {
 			a.setStatus(slog.LevelWarn, "Wait for an active startup receipt before queuing attachment")
 			return true
@@ -233,8 +231,8 @@ func (a *vaxisTUIApp) handleLifecycleKey(key vaxis.Key) bool {
 			a.lifecycle.loaded = false
 			a.startLifecycleLoad()
 		}
-		a.setStatus(slog.LevelInfo, "Attachment queued for this startup · Esc cancels the queue")
-	case key.MatchString("s"):
+		a.setStatus(slog.LevelInfo, a.keyHints("Attachment queued for this startup · {navigation.back} cancels the queue"))
+	case action == "node.toggle":
 		if operation.State == "canceling" {
 			a.setStatus(slog.LevelInfo, "Cancellation is in progress; waiting for VM shutdown")
 			return true
@@ -254,11 +252,11 @@ func (a *vaxisTUIApp) handleLifecycleKey(key vaxis.Key) bool {
 		} else {
 			_ = cancel(nil)
 		}
-	case key.MatchString("T"):
+	case action == "session.host":
 		if err := a.startShellMode(a.managerSettings().Shell.Mode, true, false, ""); err != nil {
 			a.setStatus(slog.LevelError, err.Error())
 		}
-	case key.MatchString("c"), key.MatchString("d"):
+	case action == "node.clone", action == "node.delete":
 		a.setStatus(slog.LevelWarn, "Wait for startup to finish or cancel it before cloning or deleting")
 	default:
 		return false

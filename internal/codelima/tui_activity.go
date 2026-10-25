@@ -226,6 +226,10 @@ func (a *vaxisTUIApp) updateActivityInput(event vaxis.Event) {
 }
 
 func (a *vaxisTUIApp) handleActivitySearchKey(key vaxis.Key) bool {
+	return a.handleActivitySearchAction(a.keyAction(key), key)
+}
+
+func (a *vaxisTUIApp) handleActivitySearchAction(action string, key vaxis.Key) bool {
 	s := &a.activity
 	if a.view != tuiViewActivity || s.input == nil {
 		return false
@@ -233,10 +237,10 @@ func (a *vaxisTUIApp) handleActivitySearchKey(key vaxis.Key) bool {
 	switch {
 	case key.EventType == vaxis.EventPaste:
 		a.updateActivityInput(key)
-	case key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true):
+	case action == "input.cancel" && tuiKeyActivates(key, true):
 		s.query, s.input = s.beforeQuery, nil
 		a.reconcileActivitySelection()
-	case key.Matches(vaxis.KeyEnter) && tuiKeyActivates(key, true):
+	case action == "input.accept" && tuiKeyActivates(key, true):
 		s.input = nil
 	default:
 		a.updateActivityInput(key)
@@ -269,29 +273,29 @@ func (a *vaxisTUIApp) changeActivityPage(direction int) {
 	a.startActivityLoad(true)
 }
 
-func (a *vaxisTUIApp) handleActivityKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleActivityAction(action string) bool {
 	if a.view != tuiViewActivity {
 		return false
 	}
 	s := &a.activity
 	switch {
-	case key.MatchString("/"):
+	case action == "activity.filter":
 		s.beforeQuery, s.input = s.query, textinput.New()
 		s.input.SetContent(s.query)
-	case key.MatchString("f"):
+	case action == "activity.level":
 		s.level = (s.level + 1) % 3
 		a.reconcileActivitySelection()
-	case key.MatchString("["):
+	case action == "activity.newer":
 		a.changeActivityPage(-1)
-	case key.MatchString("]"):
+	case action == "activity.older":
 		a.changeActivityPage(1)
-	case key.MatchString("g"), key.Matches(vaxis.KeyHome):
+	case action == "activity.first":
 		a.changeActivityPage(0)
-	case key.Matches(vaxis.KeyPgUp):
+	case action == "navigation.page_up":
 		a.moveActivitySelection(-max(1, s.viewport))
-	case key.Matches(vaxis.KeyPgDown):
+	case action == "navigation.page_down":
 		a.moveActivitySelection(max(1, s.viewport))
-	case key.MatchString("y"):
+	case action == "activity.copy":
 		if row, ok := a.activitySelection(); ok {
 			if err := a.copyToHostClipboard(row.at.Format(time.RFC3339) + " " + row.node + " " + row.text); err != nil {
 				a.setStatus(slog.LevelError, err.Error())
@@ -299,11 +303,11 @@ func (a *vaxisTUIApp) handleActivityKey(key vaxis.Key) bool {
 				a.setStatus(slog.LevelInfo, "Copied activity record")
 			}
 		}
-	case key.MatchString("K"):
+	case action == "activity.cancel":
 		a.cancelActivityOperation()
-	case key.Matches(vaxis.KeyEnter):
+	case action == "activity.open":
 		a.openActivityNode()
-	case key.Matches(vaxis.KeyEsc) && s.attachCancel != nil:
+	case action == "navigation.back" && s.attachCancel != nil:
 		a.cancelActivityAttachment()
 		a.setFooterStatus(slog.LevelInfo, "Session attachment canceled")
 	default:

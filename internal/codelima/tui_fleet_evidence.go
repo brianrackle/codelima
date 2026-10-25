@@ -205,7 +205,7 @@ func (a *vaxisTUIApp) fleetEvidenceLine(record tuiFleetRecord) string {
 		if a.fleetPhase(record.Node.ID) != "" {
 			return ""
 		}
-		return "evidence unavailable · Enter details"
+		return a.keyHints("evidence unavailable · {node.open} details")
 	}
 	text := ""
 	switch {

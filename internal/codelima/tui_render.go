@@ -97,6 +97,7 @@ func (l *tuiMessageLog) Len() int {
 // Up/Down (or j/k) and PageUp/PageDown scroll; Esc closes it (Ctrl+c/q still
 // quit the app, matching the other overlays).
 type tuiMessagesView struct {
+	tuiOverlayKeys
 	messages     []tuiMessage
 	scroll       int
 	pinToBottom  bool
@@ -116,29 +117,29 @@ func (v *tuiMessagesView) Update(event vaxis.Event) (done bool, err error) {
 	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	if isOverlayCancelKey(key) {
+	if overlayKeyAction(v, key) == "dialog.cancel" {
 		return tuiKeyActivates(key, true), nil
 	}
 	switch {
-	case key.MatchString("Up"), key.MatchString("k"):
+	case overlayKeyAction(v, key) == "reader.up":
 		v.scrollBy(-1)
-	case key.MatchString("Down"), key.MatchString("j"):
+	case overlayKeyAction(v, key) == "reader.down":
 		v.scrollBy(1)
-	case key.MatchString("Page_Up"), key.Matches('b', vaxis.ModCtrl):
+	case overlayKeyAction(v, key) == "overlay.page_up", overlayKeyAction(v, key) == "messages.page_back":
 		v.scrollBy(-v.pageStep())
-	case key.MatchString("Page_Down"), key.Matches('f', vaxis.ModCtrl), key.MatchString(" "):
+	case overlayKeyAction(v, key) == "overlay.page_down", overlayKeyAction(v, key) == "messages.page_forward":
 		v.scrollBy(v.pageStep())
-	case key.MatchString("Home"), key.MatchString("g"):
+	case overlayKeyAction(v, key) == "overlay.first", overlayKeyAction(v, key) == "reader.top":
 		v.pinToBottom = false
 		v.scroll = 0
-	case key.MatchString("End"), key.MatchString("G"):
+	case overlayKeyAction(v, key) == "overlay.last", overlayKeyAction(v, key) == "reader.follow":
 		v.pinToBottom = true
 	}
 	return false, nil
 }
 
 func (v *tuiMessagesView) FooterHint() string {
-	return "Up/Down scroll   PgUp/PgDn page   g/G top/bottom   Esc close   Ctrl+c quit"
+	return v.bindingHints("{reader.up reader.down} scroll   {overlay.page_up overlay.page_down} page   {reader.top reader.follow} top/bottom   {dialog.cancel} close   {app.quit} quit")
 }
 
 func (v *tuiMessagesView) pageStep() int {
@@ -195,7 +196,7 @@ func (v *tuiMessagesView) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxi
 		}
 	}
 
-	body.Println(footerRow, vaxis.Segment{Text: "Up/Down scroll  PgUp/PgDn page  g/G top/bottom  Esc close", Style: mutedStyle})
+	body.Println(footerRow, vaxis.Segment{Text: v.bindingHints("{reader.up reader.down} scroll  {overlay.page_up overlay.page_down} page  {reader.top reader.follow} top/bottom  {dialog.cancel} close"), Style: mutedStyle})
 }
 
 func tuiMessageLine(message tuiMessage) string {
@@ -731,16 +732,16 @@ func (a *vaxisTUIApp) drawTerminalSurface(win vaxis.Window, entry tuiTreeEntry, 
 			win.Println(row, vaxis.Segment{Text: err.Error(), Style: mutedStyle})
 			row++
 		} else if nodeGuestShellReady(entry.node) {
-			win.Println(row, vaxis.Segment{Text: fmt.Sprintf("No terminal tab is open. Press %s to open one.", terminalTabOpenFooterHint), Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: a.keyHints("No terminal tab is open. Press {session.guest} to open one."), Style: mutedStyle})
 			row++
 		} else if reason := nodeGuestShellBlocked(entry.node); reason != "" {
 			win.Println(row, vaxis.Segment{Text: reason + ".", Style: mutedStyle})
 			row++
 		} else {
-			win.Println(row, vaxis.Segment{Text: "Start the node with [s] before opening a terminal tab.", Style: mutedStyle})
+			win.Println(row, vaxis.Segment{Text: a.keyHints("Start the node with [{node.toggle}] before opening a terminal tab."), Style: mutedStyle})
 			row++
 		}
-		win.Println(row, vaxis.Segment{Text: fmt.Sprintf("Press %s to show node info.", infoViewToggleFooterHint), Style: mutedStyle})
+		win.Println(row, vaxis.Segment{Text: a.keyHints("Press {navigation.next_tab} to show node info."), Style: mutedStyle})
 		row++
 		a.drawEntryOperations(win, row, entry, headerStyle, mutedStyle)
 	default:

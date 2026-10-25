@@ -146,6 +146,33 @@ var cliCommands = []*cliCommand{
 	},
 
 	{
+		Group: "settings", Name: "keys", Summary: "inspect default and effective keyboard bindings",
+		Run: func(_ context.Context, service *Service, _ string, _ *flag.FlagSet, args []string) (any, error) {
+			if len(args) != 0 {
+				return nil, invalidArgument("usage: settings keys", nil)
+			}
+			return service.SettingsKeys()
+		},
+	},
+	{
+		Group: "settings", Name: "reset", Summary: "remove keyboard overrides for all actions or one action",
+		Run: func(ctx context.Context, service *Service, _ string, _ *flag.FlagSet, args []string) (any, error) {
+			if len(args) < 1 || len(args) > 2 || args[0] != "keys" {
+				return nil, invalidArgument("usage: settings reset keys [ACTION]", nil)
+			}
+			action := ""
+			if len(args) == 2 {
+				action = args[1]
+			}
+			cfg, err := service.SettingsResetKeys(ctx, action)
+			if err != nil {
+				return nil, err
+			}
+			return cfg.Summary(), nil
+		},
+	},
+
+	{
 		Group:   "environment",
 		Name:    "create",
 		Summary: "create an environment",

@@ -90,6 +90,10 @@ func TestTUIManagerHelpOwnsKeysAndSearchesEveryContext(t *testing.T) {
 		t.Fatal("empty result state missing")
 	}
 	a.handleKey(vaxis.Key{Keycode: '?', Text: "?"})
+	if a.overlay != h || !strings.HasSuffix(h.input.String(), "?") {
+		t.Fatal("help search interpreted printable text as a close command")
+	}
+	a.handleKey(vaxis.Key{Keycode: vaxis.KeyEsc})
 	if a.overlay != nil || a.view != tuiViewNodes || a.fleet.selectedID != selected {
 		t.Fatal("closing help did not restore its origin")
 	}

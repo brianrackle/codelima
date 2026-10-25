@@ -16,8 +16,8 @@ type tuiPaletteVisualRow struct {
 	hint  bool
 }
 type tuiPaletteControl struct {
-	rect tuiRect
-	key  vaxis.Key
+	rect   tuiRect
+	action string
 }
 
 func (p *tuiPalette) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
@@ -149,15 +149,15 @@ func paletteSegments(text string, positions []int, offset int, normal, match vax
 
 func (p *tuiPalette) drawFooter(win vaxis.Window, t tuiTheme) {
 	items := []struct {
-		key   rune
-		label string
-	}{{vaxis.KeyEnter, "Enter run"}, {vaxis.KeyUp, "↑"}, {vaxis.KeyDown, "↓ move"}, {vaxis.KeyTab, "Tab complete"}, {vaxis.KeyEsc, "Esc close"}}
+		action string
+		label  string
+	}{{"dialog.accept", "run"}, {"dialog.up", "up"}, {"dialog.down", "move"}, {"palette.complete", "complete"}, {"dialog.cancel", "close"}}
 	w, _ := win.Size()
 	left := 0
 	col, row := win.Origin()
 	for _, item := range items {
-		key, rest, _ := strings.Cut(item.label, " ")
-		width := utf8.RuneCountInString(item.label)
+		key, rest := p.bindingHint(item.action), item.label
+		width := utf8.RuneCountInString(key + " " + rest)
 		if left+width > w {
 			break
 		}
@@ -165,7 +165,7 @@ func (p *tuiPalette) drawFooter(win vaxis.Window, t tuiTheme) {
 			rest = " " + rest
 		}
 		win.New(left, 0, width, 1).PrintTruncate(0, vaxis.Segment{Text: key, Style: t.mint}, vaxis.Segment{Text: rest, Style: t.muted})
-		p.controls = append(p.controls, tuiPaletteControl{rect: tuiRect{col: col + left, row: row, width: width, height: 1}, key: vaxis.Key{Keycode: item.key}})
+		p.controls = append(p.controls, tuiPaletteControl{rect: tuiRect{col: col + left, row: row, width: width, height: 1}, action: item.action})
 		left += width + 2
 	}
 	if left+26 < w {

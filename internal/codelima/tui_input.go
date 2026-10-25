@@ -26,57 +26,30 @@ type tuiTerminalClick struct {
 	at              time.Time
 }
 
-// tuiKeyBinding pairs a key matcher with the app action it triggers.
-type tuiKeyBinding struct {
-	match     func(vaxis.Key) bool
-	run       func(a *vaxisTUIApp) error
-	pressOnly bool
-}
-
-// tuiKeyBindings is THE table of terminal-scope shortcuts: handleKey
-// dispatches from it and isTUITerminalPayloadKey derives payload-ness from
-// the same entries, so the shortcut set and the payload predicate can never
-// drift apart.
-var tuiKeyBindings = []tuiKeyBinding{
-	{match: func(key vaxis.Key) bool { return key.Matches(vaxis.KeyF06) }, run: func(a *vaxisTUIApp) error {
-		if a.state.focus == tuiFocusTerminal {
-			a.state.focusTree()
-			a.nodeDetail, a.detailTab = true, tuiDetailShell
-			return nil
-		}
-		return a.openEmbeddedShell(false)
-	}, pressOnly: true},
-}
-
-// isTUITerminalPayloadKey reports whether a key is terminal input rather than
-// a CodeLima shortcut: pasted input is always payload, and any key that
-// matches no entry in tuiKeyBindings is payload. Payload input is redrawn
-// only after the daemon publishes a fresh terminal snapshot; drawing
-// immediately would repaint stale state.
+// isTUITerminalPayloadKey describes the default map for callers without a frontend.
 func isTUITerminalPayloadKey(key vaxis.Key) bool {
-	if key.EventType == vaxis.EventPaste {
-		return true
-	}
-	for _, binding := range tuiKeyBindings {
-		if binding.match(key) {
-			return false
-		}
-	}
-	return true
+	return defaultTUIKeyMap().Action("terminal", key) != "terminal.focus"
+}
+
+func (a *vaxisTUIApp) isTerminalPayloadKey(key vaxis.Key) bool {
+	return a.keyMap().Action("terminal", key) != "terminal.focus"
 }
 
 func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 	if a.overlay != nil {
-		if key.EventType != vaxis.EventPaste && isQuitKey(key) {
+		if a.keyAction(key) == "app.quit" {
 			return tuiKeyActivates(key, true)
 		}
 		a.updateOverlay(key)
 		return false
 	}
-	if a.createIntent != nil && key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true) {
+	if a.createIntent != nil && a.keyAction(key) == "navigation.back" && tuiKeyActivates(key, true) {
 		a.createIntent = nil
 		a.setFooterStatus(slog.LevelInfo, "Queued navigation/attachment canceled; creation continues")
 		return false
+	}
+	if a.keyAction(key) == "app.quit" {
+		return tuiKeyActivates(key, true)
 	}
 	if a.search != nil {
 		a.handleSearchKey(key)
@@ -95,20 +68,19 @@ func (a *vaxisTUIApp) dispatchKey(key vaxis.Key) bool {
 		}
 		return false
 	}
-	for _, binding := range tuiKeyBindings {
-		if !binding.match(key) {
-			continue
-		}
-		// Vaxis matches identity independently of press/repeat/release.
-		// Consume the whole shortcut lifecycle even when its action runs
-		// only on press, including after the action changes tabs or focus.
-		if !tuiKeyActivates(key, binding.pressOnly) {
+	if a.keyAction(key) == "terminal.focus" {
+		if !tuiKeyActivates(key, true) {
 			return false
 		}
-		if binding.pressOnly {
-			a.claimShortcutKey(key)
+		a.claimShortcutKey(key)
+		var err error
+		if a.state.focus == tuiFocusTerminal {
+			a.state.focusTree()
+			a.nodeDetail, a.detailTab = true, tuiDetailShell
+		} else {
+			err = a.openEmbeddedShell(false)
 		}
-		if err := binding.run(a); err != nil {
+		if err != nil {
 			a.setStatus(slog.LevelError, err.Error())
 			return false
 		}
@@ -686,8 +658,4 @@ func hasTerminalModifier(modifiers vaxis.ModifierMask, extra vaxis.ModifierMask)
 
 func normalizedKeyModifiers(modifiers vaxis.ModifierMask) vaxis.ModifierMask {
 	return modifiers &^ vaxis.ModCapsLock &^ vaxis.ModNumLock
-}
-
-func isQuitKey(key vaxis.Key) bool {
-	return key.Matches('c', vaxis.ModCtrl)
 }

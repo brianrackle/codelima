@@ -19,6 +19,7 @@ type tuiHelpLine struct {
 }
 
 type tuiKeyHelp struct {
+	tuiOverlayKeys
 	app                             *vaxisTUIApp
 	groups                          []tuiHelpGroup
 	input                           *textinput.Model
@@ -39,9 +40,9 @@ func (h *tuiKeyHelp) PreferredSize() (int, int) { return 144, 36 }
 
 func (h *tuiKeyHelp) FooterHint() string {
 	if h.searching {
-		return "Type to search · ↑↓/PgUp/PgDn scroll · Tab browse · Esc/? close"
+		return h.bindingHints("Type to search · {dialog.up dialog.down}/{overlay.page_up overlay.page_down} scroll · {help.next} browse · {dialog.cancel} close")
 	}
-	return "Tab/←→ group · ↑↓/PgUp/PgDn scroll · / search · Esc/? close"
+	return h.bindingHints("{help.next help.left help.right} group · {reader.up reader.down}/{overlay.page_up overlay.page_down} scroll · {help.search} search · {dialog.cancel} close")
 }
 
 func (h *tuiKeyHelp) offset() *int {
@@ -72,10 +73,10 @@ func (h *tuiKeyHelp) Update(event vaxis.Event) (bool, error) {
 	if !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	if (key.Matches(vaxis.KeyEsc) || key.MatchString("?")) && tuiKeyActivates(key, true) {
+	if (overlayKeyAction(h, key) == "dialog.cancel" || overlayKeyAction(h, key) == "help.close") && tuiKeyActivates(key, true) {
 		return true, nil
 	}
-	if key.Matches(vaxis.KeyTab) || key.Matches(vaxis.KeyTab, vaxis.ModShift) || (!h.searching && (key.Matches(vaxis.KeyLeft) || key.Matches(vaxis.KeyRight))) {
+	if overlayKeyAction(h, key) == "help.next" || overlayKeyAction(h, key) == "help.previous" || (!h.searching && (overlayKeyAction(h, key) == "help.left" || overlayKeyAction(h, key) == "help.right")) {
 		if !tuiKeyActivates(key, true) {
 			return false, nil
 		}
@@ -84,7 +85,7 @@ func (h *tuiKeyHelp) Update(event vaxis.Event) (bool, error) {
 			return false, nil
 		}
 		delta := 1
-		if key.Matches(vaxis.KeyTab, vaxis.ModShift) || key.Matches(vaxis.KeyLeft) {
+		if overlayKeyAction(h, key) == "help.previous" || overlayKeyAction(h, key) == "help.left" {
 			delta = -1
 		}
 		h.focus = (h.focus + delta + len(h.groups)) % len(h.groups)
@@ -92,19 +93,19 @@ func (h *tuiKeyHelp) Update(event vaxis.Event) (bool, error) {
 	}
 	offset := h.offset()
 	switch {
-	case key.Matches(vaxis.KeyDown) || (!h.searching && key.MatchString("j")):
+	case overlayKeyAction(h, key) == "reader.down" || overlayKeyAction(h, key) == "dialog.down":
 		*offset = min(math.MaxInt-1, *offset) + 1
-	case key.Matches(vaxis.KeyUp) || (!h.searching && key.MatchString("k")):
+	case overlayKeyAction(h, key) == "reader.up" || overlayKeyAction(h, key) == "dialog.up":
 		*offset = max(0, *offset-1)
-	case key.Matches(vaxis.KeyPgDown):
+	case overlayKeyAction(h, key) == "overlay.page_down":
 		*offset = min(math.MaxInt-h.pageSize, *offset) + h.pageSize
-	case key.Matches(vaxis.KeyPgUp):
+	case overlayKeyAction(h, key) == "overlay.page_up":
 		*offset = max(0, *offset-h.pageSize)
-	case !h.searching && key.Matches(vaxis.KeyHome):
+	case !h.searching && overlayKeyAction(h, key) == "overlay.first":
 		*offset = 0
-	case !h.searching && key.Matches(vaxis.KeyEnd):
+	case !h.searching && overlayKeyAction(h, key) == "overlay.last":
 		*offset = math.MaxInt
-	case !h.searching && key.MatchString("/") && tuiKeyActivates(key, true):
+	case !h.searching && overlayKeyAction(h, key) == "help.search" && tuiKeyActivates(key, true):
 		h.searching, h.searchScroll = true, 0
 	case h.searching:
 		before := h.input.String()
@@ -160,7 +161,7 @@ func (h *tuiKeyHelp) searchLines() ([]tuiHelpLine, int) {
 			}
 			heading := false
 			for _, binding := range section.bindings {
-				text := strings.ToLower(label + " " + binding.key + " " + binding.description)
+				text := strings.ToLower(label + " " + binding.key + " " + binding.description + " " + binding.actions)
 				match := true
 				for _, term := range terms {
 					if !strings.Contains(text, term) {
@@ -181,4 +182,25 @@ func (h *tuiKeyHelp) searchLines() ([]tuiHelpLine, int) {
 		}
 	}
 	return lines, count
+}
+
+func (h *tuiKeyHelp) setKeyBindings(keys *compiledKeyMap) {
+	if h.bindings == keys {
+		return
+	}
+	h.bindings = keys
+	if len(h.groups) == 0 {
+		return
+	}
+	first := h.groups[0].title
+	groups := managerHelpGroups(keys)
+	for i := range groups {
+		if groups[i].title == first {
+			group := groups[i]
+			copy(groups[1:i+1], groups[:i])
+			groups[0] = group
+			break
+		}
+	}
+	h.groups = groups
 }

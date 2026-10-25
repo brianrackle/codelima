@@ -41,7 +41,7 @@ func (a *vaxisTUIApp) drawNodeOverview(win vaxis.Window, record tuiFleetRecord, 
 		a.drawOverviewPanel(win.New(0, 0, left, h-1), panel, record, theme)
 		a.drawOverviewPanel(win.New(left+1, 0, w-left-1, h-1), s.rightPanel, record, theme)
 	}
-	hint := "focus: " + tuiOverviewPanelNames[s.panel] + " · ctrl+↑↓ panels · ↑↓ rows · tab detail tabs"
+	hint := "focus: " + tuiOverviewPanelNames[s.panel] + a.keyHints(" · {overview.previous_panel overview.next_panel} panels · {navigation.up navigation.down} rows · {navigation.next_tab} detail tabs")
 	tuiLine(win, h-1, hint, theme.dim)
 }
 
@@ -49,6 +49,12 @@ func (a *vaxisTUIApp) overviewControl(win vaxis.Window, col, row int, label, key
 	w, h := win.Size()
 	if row < 0 || row >= h || col < 0 || col >= w {
 		return
+	}
+	if action := map[string]string{"t": "session.guest", "T": "session.host", "K": "session.end", "o": "route.open", "y": "route.copy", "attach": "overview.open"}[key]; action != "" {
+		if key != "attach" {
+			label = strings.Replace(label, key+" ", a.keyHint(action)+" ", 1)
+		}
+		key = action
 	}
 	width := min(w-col, renderedTextWidth(a.vx, label))
 	tuiLine(win.New(col, row, width, 1), 0, label, theme.muted)
@@ -97,7 +103,8 @@ func (a *vaxisTUIApp) drawOverviewPanel(win vaxis.Window, panel int, record tuiF
 		a.overviewControl(win, max(2, w-16), h-1, " all ports → ", "ports", theme)
 	case tuiOverviewRecent:
 		a.drawOverviewRecent(content, record.Node.ID, theme)
-		a.overviewControl(win, max(2, w-17), h-1, " l all events → ", "logs", theme)
+		label := a.keyHints(" {node.logs} all events → ")
+		a.overviewControl(win, max(2, w-renderedTextWidth(a.vx, label)-1), h-1, label, "logs", theme)
 	}
 }
 
@@ -261,7 +268,7 @@ func (a *vaxisTUIApp) drawOverviewSessions(win vaxis.Window, node Node, theme tu
 	index := slices.IndexFunc(rows, func(r tuiFleetSession) bool { return r.key == a.overview.session })
 	heading, headingStyle := "Daemon-owned · survive the TUI", theme.dim
 	if len(rows) > 0 && index < 0 {
-		heading, headingStyle = "Session ended · ↑↓ to select", theme.amber
+		heading, headingStyle = a.keyHints("Session ended · {navigation.up navigation.down} to select"), theme.amber
 	}
 	tuiLine(win, 0, heading, headingStyle)
 	compact := w < 58
@@ -311,7 +318,7 @@ func (a *vaxisTUIApp) drawOverviewSessions(win vaxis.Window, node Node, theme tu
 		}
 		tuiLine(win, 2, message, theme.dim)
 	}
-	a.overviewControl(win, 0, h-footer, "Enter attach", "attach", theme)
+	a.overviewControl(win, 0, h-footer, a.keyHints("{overview.open} attach"), "attach", theme)
 	a.overviewControl(win, 14, h-footer, "t new shell", "t", theme)
 	if compact {
 		a.overviewControl(win, 0, h-1, "T host shell", "T", theme)

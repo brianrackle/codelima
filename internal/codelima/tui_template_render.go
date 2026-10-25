@@ -32,7 +32,7 @@ func (e *tuiTemplateEditor) formRows() ([]tuiTemplateRow, int) {
 		}
 		rows = append(rows, tuiTemplateRow{kind: "field", field: i}, tuiTemplateRow{})
 	}
-	rows = append(rows, tuiTemplateRow{kind: "heading", text: "Environments · Space toggle · Shift+↑↓ order"})
+	rows = append(rows, tuiTemplateRow{kind: "heading", text: e.bindingHints("Environments · {dialog.toggle} toggle · {form.reorder_up form.reorder_down} order")})
 	envs := e.environmentRows()
 	if len(envs) == 0 {
 		if e.dialog.FieldIndex == 6 {
@@ -50,7 +50,7 @@ func (e *tuiTemplateEditor) formRows() ([]tuiTemplateRow, int) {
 	if e.dialog.FieldIndex == 7 {
 		focused = len(rows)
 	}
-	rows = append(rows, tuiTemplateRow{kind: "bootstrap", field: 7, text: "Bootstrap commands · Enter opens the multiline editor"})
+	rows = append(rows, tuiTemplateRow{kind: "bootstrap", field: 7, text: e.bindingHints("Bootstrap commands · {dialog.accept} opens the multiline editor")})
 	commands := e.commands()
 	if len(commands) == 0 {
 		rows = append(rows, tuiTemplateRow{kind: "empty", field: 7, text: "(none) · commands run after environments, as root"})
@@ -81,7 +81,7 @@ func (e *tuiTemplateEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	tuiLine(win.New(2, 0, w-4, 1), 0, title, t.mint)
 	kind := "custom"
 	if _, ok := builtInTemplateDefaults(e.original.Slug, e.app.managerSettings()); ok && !e.creating {
-		kind = "built-in · Ctrl+r restore defaults"
+		kind = e.bindingHints("built-in · {form.restore} restore defaults")
 	}
 	tuiLine(win.New(2, 1, w-4, 1), 0, kind+" · "+e.impactSummary(), t.dim)
 	e.controls = nil
@@ -96,7 +96,7 @@ func (e *tuiTemplateEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	default:
 		e.drawForm(body, t)
 	}
-	status, style := "Ctrl+s save · F2 resolved preview · Esc cancel", t.mint
+	status, style := e.bindingHints("{dialog.submit} save · {form.preview} resolved preview · {dialog.cancel} cancel"), t.mint
 	if _, err := e.draft(); err != nil {
 		status, style = err.Error(), t.coral
 	}
@@ -110,7 +110,7 @@ func (e *tuiTemplateEditor) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		status, style = "Saving template…", t.amber
 	}
 	if e.dialog.confirmDiscard {
-		status, style = "Discard unsaved changes? y discard · n keep editing", t.coral
+		status, style = e.bindingHints("Discard unsaved changes? {discard.confirm} discard · {discard.cancel} keep editing"), t.coral
 	}
 	tuiLine(win.New(2, h-2, w-4, 1), 0, status, style)
 	tuiLine(win.New(2, h-1, w-4, 1), 0, e.cliPreview(), t.dim)
@@ -203,7 +203,7 @@ func (e *tuiTemplateEditor) drawForm(win vaxis.Window, t tuiTheme) {
 		}
 	}
 	if len(rows) > visible {
-		tuiLine(body.New(1, h-1, w-2, 1), 0, fmt.Sprintf("Rows %d–%d/%d · focused field follows Tab/↑↓", e.scroll+1, min(len(rows), e.scroll+visible), len(rows)), t.dim)
+		tuiLine(body.New(1, h-1, w-2, 1), 0, e.bindingHintsFormat("Rows %d–%d/%d · focused field follows {dialog.next dialog.up dialog.down}", e.scroll+1, min(len(rows), e.scroll+visible), len(rows)), t.dim)
 	}
 }
 func (e *tuiTemplateEditor) fieldHint(index int) string {
@@ -214,19 +214,19 @@ func (e *tuiTemplateEditor) fieldHint(index int) string {
 		}
 		return "lowercase, unique"
 	case 1:
-		return "Enter list; or path/URL"
+		return e.bindingHints("{dialog.accept} list; or path/URL")
 	case 2:
-		return "Enter profiles"
+		return e.bindingHints("{dialog.accept} profiles")
 	case 3:
 		if e.app.host.Capacity.CPUs > 0 {
-			return fmt.Sprintf("host %d · ←→ step", e.app.host.Capacity.CPUs)
+			return e.bindingHintsFormat("host %d · {dialog.left dialog.right} step", e.app.host.Capacity.CPUs)
 		}
-		return "←→ step; or type"
+		return e.bindingHints("{dialog.left dialog.right} step; or type")
 	case 4:
 		if bytes := e.app.host.Capacity.MemoryBytes; bytes != nil {
 			return fmt.Sprintf("host %.1f GiB; type 20G", float64(*bytes)/(1<<30))
 		}
-		return "←→ step; or type 20G"
+		return e.bindingHints("{dialog.left dialog.right} step; or type 20G")
 	case 5:
 		return "thin; grows as used"
 	}
@@ -324,7 +324,7 @@ func (e *tuiTemplateEditor) drawSide(win vaxis.Window, t tuiTheme) {
 }
 func (e *tuiTemplateEditor) drawFullPreview(win vaxis.Window, t tuiTheme) {
 	w, h := win.Size()
-	box := templatePanel(win, "Preview · current definitions · F2 returns to form", t.mint, t)
+	box := templatePanel(win, e.bindingHints("Preview · current definitions · {form.preview} returns to form"), t.mint, t)
 	lines := append([]string{"New nodes will run"}, e.previewLines()...)
 	lines = append(lines, "", "When you save", e.impactSummary())
 	lines = append(lines, e.usedNodes()...)

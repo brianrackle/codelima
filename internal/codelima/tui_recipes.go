@@ -165,16 +165,16 @@ func environmentKind(e EnvironmentConfig) string {
 	return "custom"
 }
 
-func (a *vaxisTUIApp) handleRecipeKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleRecipeAction(action string, key vaxis.Key) bool {
 	if a.view != tuiViewTemplates {
 		return false
 	}
 	s := &a.recipes
-	if a.environmentsView && (key.Matches(vaxis.KeyUp, vaxis.ModShift) || key.Matches(vaxis.KeyDown, vaxis.ModShift)) {
+	if a.environmentsView && (action == "environment.command_up" || action == "environment.command_down") {
 		if s.details && tuiKeyActivates(key, true) && a.environmentIndex < len(a.managerData.environments) {
 			env := a.managerData.environments[a.environmentIndex]
 			delta := 1
-			if key.Keycode == vaxis.KeyUp {
+			if action == "environment.command_up" {
 				delta = -1
 			}
 			if s.command+delta >= 0 && s.command+delta < len(env.BootstrapCommands) {
@@ -185,29 +185,29 @@ func (a *vaxisTUIApp) handleRecipeKey(key vaxis.Key) bool {
 		}
 		return true
 	}
-	if key.Matches(vaxis.KeyRight) || key.Matches(vaxis.KeyLeft) || key.Matches(vaxis.KeyF02) {
+	if action == "recipe.focus_details" || action == "recipe.focus_list" || action == "recipe.focus_toggle" {
 		if !tuiKeyActivates(key, true) {
 			return true
 		}
-		if key.Keycode == vaxis.KeyF02 {
+		if action == "recipe.focus_toggle" {
 			s.details = !s.details
 		} else {
-			s.details = key.Keycode != vaxis.KeyLeft
+			s.details = action != "recipe.focus_list"
 		}
 		return true
 	}
-	if key.Matches(vaxis.KeyEsc) && s.details {
+	if action == "navigation.back" && s.details {
 		if tuiKeyActivates(key, true) {
 			s.details = false
 		}
 		return true
 	}
-	if key.Matches(vaxis.KeyPgDown) || key.Matches(vaxis.KeyPgUp) {
+	if action == "navigation.page_down" || action == "navigation.page_up" {
 		if !tuiKeyActivates(key, false) {
 			return true
 		}
 		delta := 10
-		if key.Keycode == vaxis.KeyPgUp {
+		if action == "navigation.page_up" {
 			delta = -10
 		}
 		if s.details {
@@ -280,7 +280,7 @@ func (a *vaxisTUIApp) handleRecipeMouse(m vaxis.Mouse) bool {
 						a.openRecipeDependencyFix(a.managerData.environments[a.environmentIndex], c.index)
 					}
 				default:
-					if err := a.handleTemplateAction(vaxis.Key{Keycode: []rune(c.action)[0], Text: c.action}); err != nil {
+					if err := a.handleTemplateActionID(c.action); err != nil {
 						a.setStatus(slog.LevelError, err.Error())
 					}
 				}
@@ -311,14 +311,14 @@ func (a *vaxisTUIApp) recipeFooter() string {
 		if a.recipes.details {
 			if a.environmentIndex < len(a.managerData.environments) {
 				if warning, ok := a.recipeDependencyWarning(a.managerData.environments[a.environmentIndex], a.recipes.command); ok && warning.Fix != nil {
-					return "Enter review curl fix · e edit · ↑↓ command · ← list"
+					return a.keyHints("{recipe.open} review curl fix · {recipe.edit} edit · {navigation.up navigation.down} command · {recipe.focus_list} list")
 				}
 			}
-			return "↑↓ command · Enter edit · Shift+↑↓ order · o add · D remove · E editor · ← list"
+			return a.keyHints("{navigation.up navigation.down} command · {recipe.open} edit · {environment.command_up environment.command_down} order · {environment.command_add} add · {environment.command_delete} remove · {environment.command_editor} editor · {recipe.focus_list} list")
 		}
-		return "↑↓ select · → details · e edit · n new · c clone · d delete · Tab configs"
+		return a.keyHints("{navigation.up navigation.down} select · {recipe.focus_details} details · {recipe.edit} edit · {recipe.new} new · {recipe.clone} clone · {recipe.delete} delete · {navigation.next_tab} configs")
 	}
-	return "↑↓ select · → details · e edit · n new · c clone · d delete · N new node · Tab envs"
+	return a.keyHints("{navigation.up navigation.down} select · {recipe.focus_details} details · {recipe.edit} edit · {recipe.new} new · {recipe.clone} clone · {recipe.delete} delete · {recipe.new_node} new node · {navigation.next_tab} envs")
 }
 
 func environmentRunText(run tuiEnvironmentRun, incomplete bool) string {

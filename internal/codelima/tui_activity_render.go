@@ -74,7 +74,7 @@ func (a *vaxisTUIApp) drawActivity(win vaxis.Window, theme tuiTheme) {
 	if len(history) > 0 {
 		first = s.historyScroll + 1
 	}
-	tuiLine(win.New(2, height-4, width-4, 1), 0, fmt.Sprintf("Rows %d–%d of %d · page %d · [] pages · g top", first, last, len(history), len(s.previous)+1), theme.dim)
+	tuiLine(win.New(2, height-4, width-4, 1), 0, a.keyHintsFormat("Rows %d–%d of %d · page %d · {activity.newer activity.older} pages · {activity.first} top", first, last, len(history), len(s.previous)+1), theme.dim)
 	status, style := "Footer notices last 6s · kept up to 7 days · local: this window", theme.dim
 	switch {
 	case s.err != nil:
@@ -131,19 +131,19 @@ func (a *vaxisTUIApp) drawActivityRows(win vaxis.Window, rows []tuiActivityRow, 
 		target := tuiActivityMouseRow{id: row.id, rect: tuiRect{col: col, row: top + y, width: width, height: rowHeight}}
 		content := rowWin.New(1, 0, width-2, rowHeight)
 		if running {
-			drawActivityRunningRow(content, row, rowTheme)
+			a.drawActivityRunningRow(content, row, rowTheme)
 			if width-2 >= 118 {
 				target.open = tuiRect{col: col + width - 19, row: top + y, width: 6, height: 1}
 				target.cancel = tuiRect{col: col + width - 10, row: top + y, width: 8, height: 1}
 			}
 		} else {
-			target.open = drawActivityHistoryRow(content, row, dates, row.id == a.activity.selected, rowTheme)
+			target.open = a.drawActivityHistoryRow(content, row, dates, row.id == a.activity.selected, rowTheme)
 		}
 		a.activity.mouseRows = append(a.activity.mouseRows, target)
 	}
 }
 
-func drawActivityHistoryRow(win vaxis.Window, row tuiActivityRow, dates, selected bool, theme tuiTheme) tuiRect {
+func (a *vaxisTUIApp) drawActivityHistoryRow(win vaxis.Window, row tuiActivityRow, dates, selected bool, theme tuiTheme) tuiRect {
 	width, _ := win.Size()
 	stampWidth, nodeWidth, actionWidth := 8, 16, 16
 	if dates {
@@ -182,39 +182,39 @@ func drawActivityHistoryRow(win vaxis.Window, row tuiActivityRow, dates, selecte
 	tuiLine(win.New(iconCol, 0, 2, 1), 0, icon, iconStyle)
 	tuiLine(win.New(nodeCol, 0, nodeWidth, 1), 0, plainLogText(row.node), nodeStyle)
 	tuiLine(win.New(messageCol, 0, max(0, actionCol-messageCol-2), 1), 0, row.text, messageStyle)
-	hint := activityRowActionHint(row)
+	hint := a.activityRowActionHint(row)
 	if hint == "" {
 		return tuiRect{}
 	}
 	if actionWidth == 1 {
-		hint = "⏎"
+		hint = a.activityControlKey("activity.open")
 	}
 	tuiLine(win.New(actionCol, 0, actionWidth, 1), 0, hint, theme.dim)
 	col, top := win.Origin()
 	return tuiRect{col: col + actionCol, row: top, width: actionWidth, height: 1}
 }
 
-func activityRowActionHint(row tuiActivityRow) string {
+func (a *vaxisTUIApp) activityRowActionHint(row tuiActivityRow) string {
 	switch row.action {
 	case activityOpenOperation:
-		return "⏎ output"
+		return a.activityControlKey("activity.open") + " output"
 	case activityOpenTerminal:
-		return "⏎ attach"
+		return a.activityControlKey("activity.open") + " attach"
 	case activityOpenHost, activityOpenDaemon:
-		return "5 system"
+		return a.keyHints("{view.system} system")
 	case activityOpenPorts:
-		return "3 ports"
+		return a.keyHints("{view.ports} ports")
 	}
 	if row.nodeID != "" {
 		if row.level >= slog.LevelError {
-			return "⏎ details"
+			return a.activityControlKey("activity.open") + " details"
 		}
-		return "⏎ open"
+		return a.activityControlKey("activity.open") + " open"
 	}
 	return ""
 }
 
-func drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, theme tuiTheme) {
+func (a *vaxisTUIApp) drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, theme tuiTheme) {
 	width, height := win.Size()
 	elapsed := "—"
 	if !row.at.IsZero() {
@@ -246,7 +246,7 @@ func drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, theme tuiTheme
 			tuiLine(win.New(width-40, 0, 12, 1), 0, count, theme.dim)
 		}
 		tuiLine(win.New(width-28, 0, 8, 1), 0, elapsed, theme.amber)
-		tuiLine(win.New(width-18, 0, 18, 1), 0, "⏎ open · K cancel", theme.dim)
+		tuiLine(win.New(width-18, 0, 18, 1), 0, a.activityControlKey("activity.open")+a.keyHints(" open · {activity.cancel} cancel"), theme.dim)
 		return
 	}
 	tuiLine(win.New(0, 0, 2, 1), 0, "◐", theme.amber)
@@ -281,7 +281,7 @@ func (a *vaxisTUIApp) handleActivityMouse(mouse vaxis.Mouse) bool {
 					a.activity.level = control.level
 					a.reconcileActivitySelection()
 				} else {
-					a.handleKey(control.key)
+					a.dispatchManagerAction(control.action, vaxis.Key{})
 				}
 				return true
 			}

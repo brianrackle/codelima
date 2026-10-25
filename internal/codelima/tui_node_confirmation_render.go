@@ -97,7 +97,7 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 		} else {
 			add(fmt.Sprintf("Frees %d vCPU and %s GiB of allocated memory.", allocation.AllocatedCPUs, tuiGiB(allocation.AllocatedMemoryBytes)), t.muted)
 		}
-		add("Disk, workspace and frozen values stay. s starts the node again.", t.muted)
+		add(d.bindingHints("Disk, workspace and frozen values stay. {node.toggle} starts the node again."), t.muted)
 		if hosts > 0 {
 			add(fmt.Sprintf("%d host sessions keep running.", hosts), t.dim)
 		}
@@ -125,7 +125,7 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	tuiLine(win.New(2, 0, max(0, w-2), 1), 0, " "+plainLogText(d.dialog.Title)+" ", title)
 	d.tooSmall = w < 28 || h < 10
 	if d.tooSmall {
-		tuiLine(body, 1, "Resize to review · Esc cancel", t.text)
+		tuiLine(body, 1, d.bindingHints("Resize to review · {dialog.cancel} cancel"), t.text)
 		return
 	}
 	content := body.New(1, 0, w-2, h)
@@ -164,7 +164,7 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	}
 	hint := ""
 	if len(rows) > d.height {
-		hint = fmt.Sprintf("PgUp/PgDn · %d–%d/%d", d.scroll+1, min(len(rows), d.scroll+d.height), len(rows))
+		hint = d.bindingHintsFormat("{overlay.page_up overlay.page_down} · %d–%d/%d", d.scroll+1, min(len(rows), d.scroll+d.height), len(rows))
 	}
 	tuiLine(content, h-6, hint, t.dim)
 	switch d.action {
@@ -192,7 +192,7 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		}
 		d.drawControl(content, 0, h-5, cw, "skip-idle", check+" Don't ask for idle guests", t.muted)
 		if d.attachID != "" {
-			d.drawControl(content, 0, h-4, cw, "attach", "x Attach to "+d.attachLabel+" first", t.mint)
+			d.drawControl(content, 0, h-4, cw, "attach", d.bindingHints("{review.attach} Attach to ")+d.attachLabel+" first", t.mint)
 		}
 	}
 	errText := d.dialog.Error
@@ -204,14 +204,17 @@ func (d *tuiNodeConfirmation) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	if !d.ready() {
 		buttonStyle = t.dim
 	}
-	button := "s Stop"
+	button := d.bindingHints("{review.run} Stop")
 	if d.action == tuiActionNodeDelete {
-		button = "Enter Delete"
+		button = d.bindingHints("{dialog.accept} Delete")
 	} else if d.clone != nil {
-		button = "Ctrl+s Clone"
+		button = d.bindingHints("{dialog.submit} Clone")
 	}
-	d.drawControl(content, cw-len(button)-16, h-1, len(button)+2, "submit", "["+button+"]", buttonStyle)
-	d.drawControl(content, cw-12, h-1, 12, "cancel", "[Esc Cancel]", t.muted)
+	cancelLabel := d.bindingHints("[{dialog.cancel} Cancel]")
+	cancelWidth := min(cw/2, renderedTextWidth(d.app.vx, cancelLabel))
+	submitWidth := min(max(1, cw-cancelWidth-2), renderedTextWidth(d.app.vx, button)+2)
+	d.drawControl(content, max(0, cw-cancelWidth-submitWidth-2), h-1, submitWidth, "submit", "["+button+"]", buttonStyle)
+	d.drawControl(content, cw-cancelWidth, h-1, cancelWidth, "cancel", cancelLabel, t.muted)
 }
 
 func (d *tuiNodeConfirmation) drawControl(win vaxis.Window, col, row, width int, id, text string, style vaxis.Style) {

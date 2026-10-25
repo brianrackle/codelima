@@ -117,7 +117,7 @@ func (a *vaxisTUIApp) drawNodeLogs(win vaxis.Window, theme tuiTheme) {
 		col += len(label) + 1
 	}
 	if width-col > 12 {
-		tuiLine(win.New(col, 0, width-col, 1), 0, "[ ] cycle", theme.dim)
+		tuiLine(win.New(col, 0, width-col, 1), 0, a.keyHints("{logs.source_previous logs.source_next} cycle"), theme.dim)
 	}
 	status, style := "● following", theme.mint
 	if !l.follow {
@@ -225,9 +225,9 @@ func (a *vaxisTUIApp) drawNodeLogs(win vaxis.Window, theme tuiTheme) {
 				break
 			}
 		}
-		tuiLine(win.New(1, searchRow, width-2, 1), 0, fmt.Sprintf("/ %s  · %d/%d matching lines · n/N next/previous", l.query, current, len(matches)), theme.mint)
+		tuiLine(win.New(1, searchRow, width-2, 1), 0, a.keyHintsFormat("/ %s  · %d/%d matching lines · {logs.match_next logs.match_previous} next/previous", l.query, current, len(matches)), theme.mint)
 	default:
-		tuiLine(win.New(1, searchRow, width-2, 1), 0, "/ search · n/N match · g/G top/end · y copy · o pager", theme.dim)
+		tuiLine(win.New(1, searchRow, width-2, 1), 0, a.keyHints("/ search · {logs.match_next logs.match_previous} match · g/G top/end · y copy · o pager"), theme.dim)
 	}
 	path := l.snapshot.Path
 	if path == "" {

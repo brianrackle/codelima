@@ -2,7 +2,6 @@ package codelima
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"reflect"
 	"sync"
@@ -271,17 +270,18 @@ func (a *vaxisTUIApp) handleSearchKey(key vaxis.Key) {
 		a.closeTerminalSearch()
 		return
 	}
-	if key.Keycode == vaxis.KeyEsc || key.Keycode == vaxis.KeyF07 {
+	action := a.keyAction(key)
+	if action == "terminal.search_close" {
 		if tuiKeyActivates(key, true) {
 			a.closeTerminalSearch()
 		}
 		return
 	}
 	request := TerminalInteractionRequest{}
-	switch key.Keycode {
-	case vaxis.KeyEnter:
+	switch action {
+	case "terminal.search_next", "terminal.search_previous":
 		request.Action = "next"
-		if key.Modifiers&vaxis.ModShift != 0 {
+		if action == "terminal.search_previous" {
 			request.Action = "previous"
 		}
 	default:
@@ -329,5 +329,5 @@ func (a *vaxisTUIApp) drawTerminalSearch(win vaxis.Window) {
 	if a.search.status.CaughtUp {
 		progress = "caught up"
 	}
-	bar.Println(1, vaxis.Segment{Text: fmt.Sprintf("%d matches (%s) · Enter next · Shift+Enter previous · Esc close", a.search.status.Matches, progress)})
+	bar.Println(1, vaxis.Segment{Text: a.keyHintsFormat("%d matches (%s) · {terminal.search_next} next · {terminal.search_previous} previous · {terminal.search_close} close", a.search.status.Matches, progress)})
 }

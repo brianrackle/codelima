@@ -330,7 +330,13 @@ test-embedded-shell: init
 	@mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(EMBEDDED_SHELL_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUIEmbedded|TUIManager|TUIResize|TUIHostTerminal|TUIDrawActiveHost|TUITerminalTab|TUIShortcut|TUIHandleKeyOption|TUIFocusToggle|TUIHandleKeyF6|TUIBackgroundNodeOperation|TUIDrawTerminal)' -count=1 -timeout=120s
 
-.PHONY: test-node-confirmations test-clone test-node-batch test-node-delete-sessions
+.PHONY: test-node-confirmations test-clone test-node-batch test-node-delete-sessions test-key-bindings
+KEY_BINDING_TEST_FLAGS ?=
+KEY_BINDING_TEST_PATTERN ?= ^Test(KeyBindings|TUIKeyBindings|SettingsKeyBindings)
+test-key-bindings: init
+	@mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(KEY_BINDING_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '$(KEY_BINDING_TEST_PATTERN)' -count=1 -timeout=120s
+
 NODE_CONFIRMATION_TEST_FLAGS ?=
 CLONE_TEST_FLAGS ?=
 NODE_BATCH_TEST_FLAGS ?=

@@ -116,7 +116,7 @@ func (f *tuiCreateNodeForm) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		}
 	}
 	tuiLine(body.New(2, h-3, w-4, 1), 0, "cli · "+f.cliPreview(), t.dim)
-	status, style := "Ctrl+s create · Esc cancel", t.mint
+	status, style := f.bindingHints("{dialog.submit} create · {dialog.cancel} cancel"), t.mint
 	if problem := f.validationError(); problem != "" {
 		status, style = problem, t.coral
 	}
@@ -145,7 +145,7 @@ func (f *tuiCreateNodeForm) fieldDisplay(key string) string {
 	}
 	switch key {
 	case "configuration":
-		return "‹ " + f.value(key) + " ›  Enter list"
+		return "‹ " + f.value(key) + f.bindingHints(" ›  {dialog.accept} list")
 	case "workspace_mode":
 		if f.value(key) == WorkspaceModeCopy {
 			return "( ) mounted   (●) copy"
@@ -166,7 +166,7 @@ func (f *tuiCreateNodeForm) fieldHint(key string) string {
 	case "slug":
 		return "✓ available"
 	case "directory":
-		return "existing · outside CODELIMA_HOME · Enter browse"
+		return f.bindingHints("existing · outside CODELIMA_HOME · {dialog.accept} browse")
 	case "configuration":
 		if c, ok := f.template(); ok {
 			return fmt.Sprintf("%d vCPU · %s mem · %s disk · %s", c.VCPUs, createMiB(c.MemoryMiB), createMiB(c.DiskMiB), environmentConfigSelectionSummary(c.Environments))

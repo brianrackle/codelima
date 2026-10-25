@@ -134,6 +134,7 @@ func (a *vaxisTUIApp) applyManagerData(event tuiManagerDataEvent) {
 	}
 	if event.data.preferences != nil && event.preferenceRevision == a.preferenceRevision {
 		a.preferences = event.data.preferences
+		a.applyKeyboardConfig(*a.preferences)
 	}
 	if event.data.err != nil {
 		a.setStatus(slog.LevelError, event.data.err.Error())
@@ -144,7 +145,7 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 	width, height := win.Size()
 	record, ok := a.fleetSelected()
 	if !ok {
-		tuiLine(win, 2, "  Node is no longer available. Esc returns to nodes.", theme.muted)
+		tuiLine(win, 2, a.keyHints("  Node is no longer available. {navigation.back} returns to nodes."), theme.muted)
 		return
 	}
 	if a.state.focus == tuiFocusTerminal {

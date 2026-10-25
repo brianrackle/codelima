@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"strings"
 
 	"go.rockorager.dev/vaxis"
@@ -48,13 +47,17 @@ func (a *vaxisTUIApp) openNodeDetail(tab tuiDetailTab) {
 }
 
 func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
+	return a.dispatchManagerAction(a.keyAction(key), key)
+}
+
+func (a *vaxisTUIApp) dispatchManagerAction(action string, key vaxis.Key) bool {
 	a.createIntent = nil
 	defer a.cancelHiddenMetricsLoad()
 	defer a.cancelHiddenLogsLoad()
 	defer a.cancelHiddenSpecLoad()
 	defer a.cancelHiddenLifecycleLoad()
 	a.refreshFleet()
-	if a.handleLogsSearchKey(key) || a.handleActivitySearchKey(key) || a.handlePortsSearchKey(key) {
+	if a.handleLogsSearchAction(action, key) || a.handleActivitySearchAction(action, key) || a.handlePortsSearchAction(action, key) {
 		return false
 	}
 	if a.filterInput != nil {
@@ -62,10 +65,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		case key.EventType == vaxis.EventPaste:
 			a.filterInput.Update(key)
 			a.fleet.setFilter(a.filterInput.String())
-		case key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true):
+		case action == "input.cancel" && tuiKeyActivates(key, true):
 			a.fleet.setFilter(a.filterBefore)
 			a.filterInput = nil
-		case key.Matches(vaxis.KeyEnter) && tuiKeyActivates(key, true):
+		case action == "input.accept" && tuiKeyActivates(key, true):
 			a.filterInput = nil
 		default:
 			a.filterInput.Update(key)
@@ -77,9 +80,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	if !tuiKeyActivates(key, false) {
 		return false
 	}
-	if a.nodeDetail && a.detailTab == tuiDetailShell && (key.MatchString("[") || key.MatchString("]")) {
+	if a.nodeDetail && a.detailTab == tuiDetailShell && (action == "terminal.previous_tab" || action == "terminal.next_tab") {
 		delta := 1
-		if key.MatchString("[") {
+		if action == "terminal.previous_tab" {
 			delta = -1
 		}
 		if err := a.switchTerminalTab(delta); err != nil {
@@ -89,26 +92,26 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		return false
 	}
 	if tuiKeyActivates(key, true) {
-		for i := range 5 {
-			if key.MatchString(strconv.Itoa(i + 1)) {
+		for i, viewAction := range []string{"view.nodes", "view.recipes", "view.ports", "view.activity", "view.system"} {
+			if action == viewAction {
 				a.claimShortcutKey(key)
 				a.switchView(tuiView(i))
 				return false
 			}
 		}
 	}
-	if a.handleRecipeKey(key) {
+	if a.handleRecipeAction(action, key) {
 		return false
 	}
-	if a.handleEmptyNodesKey(key) {
+	if a.handleEmptyNodesAction(action, key) {
 		return false
 	}
-	if a.handleOverviewKey(key) {
+	if a.handleOverviewAction(action, key) {
 		return false
 	}
-	if key.MatchString("Up") || key.MatchString("k") || key.MatchString("Down") || key.MatchString("j") {
+	if action == "navigation.up" || action == "navigation.down" {
 		delta := 1
-		if key.MatchString("Up") || key.MatchString("k") {
+		if action == "navigation.up" {
 			delta = -1
 		}
 		a.moveManagerSelection(delta)
@@ -118,21 +121,23 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		return false
 	}
 	a.claimShortcutKey(key)
-	if a.handleLifecycleKey(key) {
+	if a.handleLifecycleAction(action) {
 		return false
 	}
-	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) || a.handleActivityKey(key) || a.handlePortsKey(key) {
+	if a.handleMetricsAction(action) || a.handleLogsAction(action) || a.handleSpecAction(action) || a.handleActivityAction(action) || a.handlePortsAction(action) {
 		return false
 	}
 	var err error
 	switch {
-	case key.MatchString("q"), isQuitKey(key):
+	case action == "app.quit":
+		return true
+	case action == "navigation.leave":
 		if a.nodeDetail {
 			a.nodeDetail = false
 		} else {
 			return true
 		}
-	case key.Matches(vaxis.KeyEsc):
+	case action == "navigation.back":
 		switch {
 		case a.nodeDetail:
 			a.nodeDetail = false
@@ -145,7 +150,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		default:
 			a.fleet.clearMarks()
 		}
-	case key.MatchString("0"):
+	case action == "scope.toggle":
 		a.emptyNodes.scroll = 0
 		if a.treeWorkspaceRoot != "" {
 			a.treeWorkspaceRoot = ""
@@ -158,23 +163,23 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		a.fleet.groupByDir = a.treeWorkspaceRoot == "" && a.managerSettings().GroupByDirectory
 		a.fleet.rebuild()
 		a.startDataRefresh("")
-	case key.MatchString("a"):
+	case action == "view.templates":
 		a.environmentsView = false
 		a.switchView(tuiViewTemplates)
-	case key.MatchString("g") && !a.nodeDetail:
+	case action == "view.environments" && !a.nodeDetail:
 		a.environmentsView = true
 		a.switchView(tuiViewTemplates)
-	case key.MatchString("m"):
+	case action == "view.activity":
 		a.switchView(tuiViewActivity)
-	case key.MatchString(":"):
+	case action == "palette.open":
 		a.openCommandPalette()
-	case key.MatchString("?"):
+	case action == "help.open":
 		a.openKeyHelp()
-	case key.MatchString("Tab"), key.Matches(vaxis.KeyTab, vaxis.ModShift):
+	case action == "navigation.next_tab", action == "navigation.previous_tab":
 		switch {
 		case a.view == tuiViewSystem:
 			delta := 1
-			if key.Modifiers&vaxis.ModShift != 0 {
+			if action == "navigation.previous_tab" {
 				delta = -1
 			}
 			a.systemPanel = (a.systemPanel + delta + tuiSystemPanelCount) % tuiSystemPanelCount
@@ -185,7 +190,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			if a.embeddedShellEnabled() {
 				count = 5
 			}
-			if key.Modifiers&vaxis.ModShift != 0 {
+			if action == "navigation.previous_tab" {
 				delta = -1
 			}
 			a.detailTab = tuiDetailTab((int(a.detailTab) + delta + count) % count)
@@ -200,87 +205,87 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 			a.loadManagerData(false)
 		}
 	case a.view == tuiViewTemplates:
-		err = a.handleTemplateAction(key)
-	case a.view == tuiViewSystem && (key.MatchString("C") || key.MatchString("R")):
-		a.loadManagerData(key.MatchString("R"))
-	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemSettings:
+		err = a.handleTemplateActionID(action)
+	case a.view == tuiViewSystem && (action == "system.refresh" || action == "system.repair"):
+		a.loadManagerData(action == "system.repair")
+	case a.view == tuiViewSystem && action == "system.open" && a.systemPanel == tuiSystemSettings:
 		err = a.editManagerSetting()
-	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemDoctor:
+	case a.view == tuiViewSystem && action == "system.open" && a.systemPanel == tuiSystemDoctor:
 		a.openDoctorDetails()
-	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemDaemon:
+	case a.view == tuiViewSystem && action == "system.open" && a.systemPanel == tuiSystemDaemon:
 		a.openDaemonDetails()
-	case a.view == tuiViewSystem && key.MatchString("u"):
+	case a.view == tuiViewSystem && action == "system.update":
 		a.runSystemDaemonAction("update")
-	case a.view == tuiViewSystem && key.MatchString("S"):
+	case a.view == tuiViewSystem && action == "system.restart":
 		a.runSystemDaemonAction("restart")
-	case a.view == tuiViewSystem && key.MatchString("L"):
+	case a.view == tuiViewSystem && action == "system.logs":
 		a.runSystemDaemonAction("log")
-	case a.view == tuiViewSystem && key.MatchString("D"):
+	case a.view == tuiViewSystem && action == "system.diagnose":
 		a.runSystemDaemonAction("diagnose")
 	case a.view != tuiViewNodes:
 		return false
-	case key.MatchString("/") && !a.nodeDetail:
+	case action == "fleet.filter" && !a.nodeDetail:
 		a.filterBefore = a.fleet.filter
 		a.filterInput = textinput.New()
 		a.filterInput.SetContent(a.fleet.filter)
-	case key.MatchString("G") && !a.nodeDetail:
+	case action == "fleet.group" && !a.nodeDetail:
 		a.fleet.groupByDir = !a.fleet.groupByDir
 		a.fleet.rebuild()
-	case (key.MatchString("<") || key.MatchString(">")) && !a.nodeDetail:
+	case (action == "fleet.sort_previous" || action == "fleet.sort_next") && !a.nodeDetail:
 		delta := 1
-		if key.MatchString("<") {
+		if action == "fleet.sort_previous" {
 			delta = -1
 		}
 		a.fleet.sort = tuiFleetSort((int(a.fleet.sort) + delta + int(tuiFleetSortCount)) % int(tuiFleetSortCount))
 		a.fleet.rebuild()
-	case key.MatchString("=") && !a.nodeDetail:
+	case action == "fleet.reverse" && !a.nodeDetail:
 		a.fleet.descending = !a.fleet.descending
 		a.fleet.rebuild()
-	case key.MatchString(" ") && !a.nodeDetail:
+	case action == "fleet.mark" && !a.nodeDetail:
 		a.fleet.toggleMark()
-	case key.MatchString("*") && !a.nodeDetail:
+	case action == "fleet.mark_all" && !a.nodeDetail:
 		a.fleet.markVisible()
-	case key.MatchString("Enter"):
+	case action == "node.open":
 		a.openNodeDetail(tuiDetailOverview)
-	case key.MatchString("l"):
+	case action == "node.logs":
 		a.openNodeDetail(tuiDetailLogs)
-	case key.MatchString("n"):
+	case action == "node.create":
 		err = a.openCreateNodeDialog()
-	case key.MatchString("c"):
+	case action == "node.clone":
 		err = a.performAction(tuiActionSpec{ID: tuiActionNodeClone})
-	case key.MatchString("d"):
+	case action == "node.delete":
 		err = a.fleetNodeAction(tuiActionNodeDelete)
-	case key.MatchString("s"):
+	case action == "node.toggle":
 		action := tuiActionNodeStart
 		if selected, ok := a.fleetSelected(); ok && nodeIsRunning(selected.Node) {
 			action = tuiActionNodeStop
 		}
 		err = a.fleetNodeAction(action)
-	case key.MatchString("r") && a.state.selectedEntry().node.Status == NodeStatusFailed && (a.nodeDetail || len(a.fleet.marks) == 0):
+	case action == "node.restart" && a.state.selectedEntry().node.Status == NodeStatusFailed && (a.nodeDetail || len(a.fleet.marks) == 0):
 		err = a.performAction(tuiActionSpec{ID: tuiActionNodeRetry})
-	case key.MatchString("r"):
+	case action == "node.restart":
 		err = a.fleetNodeAction(tuiActionNodeRestart)
-	case key.MatchString("y"):
+	case action == "node.copy_name":
 		err = a.copyToHostClipboard(a.state.selectedEntry().node.Slug)
-	case key.MatchString("o") && !a.nodeDetail:
+	case action == "node.open_port" && !a.nodeDetail:
 		err = a.openFleetPort()
-	case key.MatchString("X"):
+	case action == "node.shell_chooser":
 		a.openShellChooser()
-	case key.MatchString("x"):
+	case action == "node.shell":
 		err = a.startShellMode(a.managerSettings().Shell.Mode, false, false, "")
 	case a.nodeDetail && a.detailTab == tuiDetailShell:
 		switch {
-		case key.MatchString("t"):
+		case action == "session.guest":
 			err = a.openTerminalTab()
-		case key.MatchString("T"):
+		case action == "session.host":
 			err = a.openHostTerminalTab()
-		case key.MatchString("["):
+		case action == "terminal.previous_tab":
 			err = a.switchTerminalTab(-1)
-		case key.MatchString("]"):
+		case action == "terminal.next_tab":
 			err = a.switchTerminalTab(1)
-		case key.MatchString("w"):
+		case action == "terminal.close_tab":
 			err = a.closeTerminalTab()
-		case key.Matches(vaxis.KeyF07):
+		case action == "terminal.search":
 			err = a.openTerminalSearch()
 		}
 	}
@@ -333,50 +338,50 @@ func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 	}
 }
 
-func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
+func (a *vaxisTUIApp) handleTemplateActionID(action string) error {
 	if a.environmentsView {
-		if key.MatchString("n") {
+		if action == "recipe.new" {
 			a.openEnvironmentEditor(EnvironmentConfig{}, true)
 		} else if a.environmentIndex < len(a.managerData.environments) {
 			environment := a.managerData.environments[a.environmentIndex]
 			switch {
-			case key.MatchString("t"):
+			case action == "environment.test":
 				return a.submitEnvironmentTest(environment)
-			case key.MatchString("e"), key.MatchString("Enter"):
-				if key.MatchString("Enter") && a.recipes.details && a.openRecipeDependencyFix(environment, a.recipes.command) {
+			case action == "recipe.edit", action == "recipe.open":
+				if action == "recipe.open" && a.recipes.details && a.openRecipeDependencyFix(environment, a.recipes.command) {
 					break
 				}
 				e := a.openEnvironmentEditor(environment, false)
-				if key.MatchString("Enter") {
+				if action == "recipe.open" {
 					e.openCommands(a.recipes.command)
 				}
-			case key.MatchString("c"):
+			case action == "recipe.clone":
 				a.openEnvironmentEditor(environment, true)
-			case key.MatchString("d"):
+			case action == "recipe.delete":
 				a.openDeleteEnvironmentConfigDialog(environment)
-			case key.MatchString("R"):
+			case action == "recipe.restore":
 				if _, ok := builtInEnvironment(environment.Slug); ok {
 					a.openEnvironmentEditor(environment, false).restoreDefaults()
 				}
-			case key.MatchString("o"):
+			case action == "environment.command_add":
 				e := a.openEnvironmentEditor(environment, false)
 				e.openCommands(len(environment.BootstrapCommands))
-				_, _ = a.overlay.(*tuiCommandEditor).Update(vaxis.Key{Keycode: 'n', Modifiers: vaxis.ModCtrl})
-			case key.MatchString("D"):
+				a.overlay.(*tuiCommandEditor).addCommand()
+			case action == "environment.command_delete":
 				if !a.recipes.details {
-					return fmt.Errorf("focus a command with → before removing it")
+					return fmt.Errorf("focus a command with %s before removing it", a.keyHint("recipe.focus_details"))
 				}
 				if a.recipes.command < len(environment.BootstrapCommands) {
 					e := a.openEnvironmentEditor(environment, false)
 					e.setCommands(removeCommandsByIndex(environment.BootstrapCommands, []int{a.recipes.command}))
 				}
-			case key.MatchString("E"):
+			case action == "environment.command_editor":
 				return a.editEnvironmentCommandExternally(environment, a.recipes.command)
 			}
 		}
 		return nil
 	}
-	if key.MatchString("n") {
+	if action == "recipe.new" {
 		a.openCreateConfigurationDialog()
 		return nil
 	}
@@ -385,15 +390,15 @@ func (a *vaxisTUIApp) handleTemplateAction(key vaxis.Key) error {
 	}
 	configuration := a.managerData.configurations[a.templateIndex]
 	switch {
-	case key.MatchString("e"), key.MatchString("Enter"):
+	case action == "recipe.edit", action == "recipe.open":
 		a.openUpdateConfigurationDialog(configuration)
-	case key.MatchString("c"):
+	case action == "recipe.clone":
 		a.openCloneConfigurationDialog(configuration)
-	case key.MatchString("d"):
+	case action == "recipe.delete":
 		a.openDeleteConfigurationDialog(configuration)
-	case key.MatchString("N"):
+	case action == "recipe.new_node":
 		return a.openCreateNodeDialogWithDefaults("", configuration.Slug)
-	case key.MatchString("R"):
+	case action == "recipe.restore":
 		if _, ok := builtInTemplateDefaults(configuration.Slug, a.managerSettings()); ok {
 			editor := a.openTemplateEditor(configuration, false, nil, nil)
 			editor.restoreDefaults()

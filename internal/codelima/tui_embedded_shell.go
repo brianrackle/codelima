@@ -90,16 +90,16 @@ func (a *vaxisTUIApp) drawEmbeddedShell(win vaxis.Window, record tuiFleetRecord,
 	if _, ok := a.sessions.SessionTerminal(a.state.activeSessionKey()); ok {
 		a.drawTerminalSurface(surface, tuiTreeEntry{node: record.Node}, t.mint, t.muted, t.coral)
 	} else {
-		tuiLine(surface, 0, "No sessions · t guest · T host", t.muted)
+		tuiLine(surface, 0, a.keyHints("No sessions · {session.guest} guest · {session.host} host"), t.muted)
 		if err := a.sessions.SessionError(terminal.NodeTarget(record.Node.ID).String()); err != nil {
 			tuiLine(surface, 1, plainLogText(err.Error()), t.coral)
 		} else if !nodeGuestShellReady(record.Node) || record.Status != "running" {
-			tuiLine(surface, 1, "Guest unavailable while "+record.Status+" · T opens a host shell", t.dim)
+			tuiLine(surface, 1, "Guest unavailable while "+record.Status+a.keyHints(" · {session.host} opens a host shell"), t.dim)
 		}
 	}
-	focus := " TUI focus · F6 enters "
+	focus := a.keyHints(" TUI focus · {terminal.focus} enters ")
 	if a.state.focus == tuiFocusTerminal {
-		focus = " terminal focus · F6 returns "
+		focus = a.keyHints(" terminal focus · {terminal.focus} returns ")
 	}
 	focusWidth := min(w-4, renderedTextWidth(a.vx, focus))
 	focusWin := frame.New(w-focusWidth-2, 0, focusWidth, 1)
@@ -115,7 +115,11 @@ func (a *vaxisTUIApp) drawEmbeddedTabs(win vaxis.Window, node Node, t tuiTheme) 
 	keys := a.sessions.TargetSessionKeys(terminal.NodeTarget(node.ID).String())
 	active := a.state.activeSessionKey()
 	labels, widths := make([]string, len(keys)), make([]int, len(keys))
-	available := max(1, w-26)
+	guestLabel, hostLabel := a.keyHints("{session.guest} guest"), a.keyHints("{session.host} host")
+	guestWidth := min(max(1, w/4), renderedTextWidth(a.vx, guestLabel)+1)
+	hostWidth := min(max(1, w/4), renderedTextWidth(a.vx, hostLabel)+1)
+	controlsWidth := guestWidth + hostWidth + 10
+	available := max(1, w-controlsWidth)
 	for i, key := range keys {
 		labels[i], _ = a.terminalTabLabelForKey(key)
 		labels[i] = strings.Replace(labels[i], "host:", "host: ", 1)
@@ -172,7 +176,7 @@ func (a *vaxisTUIApp) drawEmbeddedTabs(win vaxis.Window, node Node, t tuiTheme) 
 		s.previous = control(0, 2, "‹", t.mint)
 	}
 	if last < len(keys) {
-		s.next = control(w-22, 2, "›", t.mint)
+		s.next = control(w-guestWidth-hostWidth-6, 2, "›", t.mint)
 	}
 	guest, host := t.mint, t.coral
 	if !nodeGuestShellReady(node) || a.fleetStatus(node) != "running" || a.daemonDisconnected {
@@ -181,15 +185,15 @@ func (a *vaxisTUIApp) drawEmbeddedTabs(win vaxis.Window, node Node, t tuiTheme) 
 	if a.daemonDisconnected {
 		host = t.dim
 	}
-	s.guest = control(w-19, 8, "t guest", guest)
-	s.host = control(w-9, 8, "T host", host)
+	s.guest = control(w-guestWidth-hostWidth-3, guestWidth, guestLabel, guest)
+	s.host = control(w-hostWidth-1, hostWidth, hostLabel, host)
 }
 
 func (a *vaxisTUIApp) drawEmbeddedRoute(win vaxis.Window, record tuiFleetRecord, t tuiTheme) {
 	w, _ := win.Size()
-	label, style := "No live forwarded ports · 3 Ports", t.dim
+	label, style := a.keyHints("No live forwarded ports · {view.ports} Ports"), t.dim
 	if !a.fleetPortsCurrent() {
-		label = "Forwarding unavailable / stale · 3 Ports"
+		label = a.keyHints("Forwarding unavailable / stale · {view.ports} Ports")
 	} else {
 		for _, route := range a.fleetRoutes(record.Node.ID) {
 			if a.fleetRouteOpenable(record, route) {

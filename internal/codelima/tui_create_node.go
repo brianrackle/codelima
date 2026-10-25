@@ -13,6 +13,7 @@ import (
 // The dialog owns editable values and discard confirmation. This presentation
 // owns domain validation and immutable asynchronous observations, on the UI loop.
 type tuiCreateNodeForm struct {
+	tuiOverlayKeys
 	app          *vaxisTUIApp
 	dialog       *tuiDialog
 	nodes        []Node
@@ -211,7 +212,7 @@ func (f *tuiCreateNodeForm) fieldError(key string) string {
 			return "checking names…"
 		}
 		if f.nameUsed(value) {
-			return "already used · Tab accepts " + f.suggestion()
+			return f.bindingHints("already used · {dialog.next} accepts ") + f.suggestion()
 		}
 	case "directory":
 		if value == "" {
@@ -292,10 +293,10 @@ func (f *tuiCreateNodeForm) Update(event vaxis.Event) (bool, error) {
 	defer f.checkPath()
 	if key, ok := event.(vaxis.Key); ok && key.EventType != vaxis.EventPaste && tuiKeyActivates(key, false) {
 		if f.pending || f.request != nil {
-			if key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true) {
+			if overlayKeyAction(f, key) == "dialog.cancel" && tuiKeyActivates(key, true) {
 				return true, nil // Accepted work, if any, still belongs to the daemon.
 			}
-			if !f.pending && key.Matches('s', vaxis.ModCtrl) && tuiKeyActivates(key, true) {
+			if !f.pending && overlayKeyAction(f, key) == "dialog.submit" && tuiKeyActivates(key, true) {
 				f.dialog.Error = ""
 				if err := f.submit(); err != nil {
 					f.dialog.Error = err.Error()
@@ -304,26 +305,26 @@ func (f *tuiCreateNodeForm) Update(event vaxis.Event) (bool, error) {
 			return false, nil
 		}
 		switch {
-		case key.Matches('s', vaxis.ModCtrl):
+		case overlayKeyAction(f, key) == "dialog.submit":
 			if tuiKeyActivates(key, true) {
 				if err := f.submit(); err != nil {
 					f.dialog.Error = err.Error()
 				}
 			}
 			return false, nil
-		case key.Matches(vaxis.KeyTab, vaxis.ModShift):
+		case overlayKeyAction(f, key) == "dialog.previous":
 			f.dialog.FieldIndex = (f.dialog.FieldIndex + len(f.dialog.Fields) - 1) % len(f.dialog.Fields)
 			return false, nil
-		case key.Matches(vaxis.KeyTab) && f.dialog.FieldIndex == 0:
+		case overlayKeyAction(f, key) == "dialog.next" && f.dialog.FieldIndex == 0:
 			if suggestion := f.suggestion(); suggestion != "" {
 				f.dialog.SetFieldValue("slug", suggestion)
 			}
-		case key.Matches(' ') && f.dialog.Fields[f.dialog.FieldIndex].Input == nil:
+		case overlayKeyAction(f, key) == "dialog.toggle" && f.dialog.Fields[f.dialog.FieldIndex].Input == nil:
 			if tuiKeyActivates(key, true) {
 				f.toggle(f.dialog.FieldIndex)
 			}
 			return false, nil
-		case key.Matches(vaxis.KeyEnter):
+		case overlayKeyAction(f, key) == "dialog.accept":
 			if !tuiKeyActivates(key, true) {
 				return false, nil
 			}
@@ -378,12 +379,12 @@ func (f *tuiCreateNodeForm) FooterHint() string {
 		return f.dialog.FooterHint()
 	}
 	if f.pending {
-		return "Submitting… · Esc close; accepted creation continues"
+		return f.bindingHints("Submitting… · {dialog.cancel} close; accepted creation continues")
 	}
 	if f.request != nil {
-		return "Admission unconfirmed · Ctrl+s retry same request · Esc close"
+		return f.bindingHints("Admission unconfirmed · {dialog.submit} retry same request · {dialog.cancel} close")
 	}
-	return "Tab/↑↓ fields · Enter choices · Space toggle · Ctrl+s create · Esc cancel"
+	return f.bindingHints("{dialog.next}/{dialog.up dialog.down} fields · {dialog.accept} choices · {dialog.toggle} toggle · {dialog.submit} create · {dialog.cancel} cancel")
 }
 
 func (f *tuiCreateNodeForm) cliPreview() string {

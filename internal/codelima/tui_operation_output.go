@@ -13,6 +13,7 @@ import (
 // Receipt output belongs to the operation, so it remains readable after its
 // disposable node has been deleted. Closing this view only cancels its query.
 type tuiOperationOutputView struct {
+	tuiOverlayKeys
 	app              *vaxisTUIApp
 	id               string
 	record           NodeOperation
@@ -86,32 +87,32 @@ func (v *tuiOperationOutputView) Update(event vaxis.Event) (bool, error) {
 	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	if isOverlayCancelKey(key) && tuiKeyActivates(key, true) {
+	if overlayKeyAction(v, key) == "dialog.cancel" && tuiKeyActivates(key, true) {
 		if v.cancel != nil {
 			v.cancel()
 		}
 		return true, nil
 	}
 	switch {
-	case key.MatchString("K") && tuiKeyActivates(key, true):
+	case overlayKeyAction(v, key) == "operation.cancel" && tuiKeyActivates(key, true):
 		if v.record.State == "running" || v.record.State == "canceling" {
 			v.app.requestOperationCancel(v.id)
 		}
-	case key.Matches(vaxis.KeyUp), key.MatchString("k"):
+	case overlayKeyAction(v, key) == "reader.up":
 		v.follow = false
 		v.scroll--
-	case key.Matches(vaxis.KeyDown), key.MatchString("j"):
+	case overlayKeyAction(v, key) == "reader.down":
 		v.follow = false
 		v.scroll++
-	case key.Matches(vaxis.KeyPgUp):
+	case overlayKeyAction(v, key) == "overlay.page_up":
 		v.follow = false
 		v.scroll -= max(1, v.viewport-1)
-	case key.Matches(vaxis.KeyPgDown):
+	case overlayKeyAction(v, key) == "overlay.page_down":
 		v.follow = false
 		v.scroll += max(1, v.viewport-1)
-	case key.Matches(vaxis.KeyHome), key.MatchString("g"):
+	case overlayKeyAction(v, key) == "overlay.first", overlayKeyAction(v, key) == "reader.top":
 		v.follow, v.scroll = false, 0
-	case key.Matches(vaxis.KeyEnd), key.MatchString("G"):
+	case overlayKeyAction(v, key) == "overlay.last", overlayKeyAction(v, key) == "reader.follow":
 		v.follow = true
 	}
 	v.scroll = max(0, v.scroll)
@@ -119,11 +120,11 @@ func (v *tuiOperationOutputView) Update(event vaxis.Event) (bool, error) {
 }
 
 func (v *tuiOperationOutputView) FooterHint() string {
-	hint := "↑↓ scroll · PgUp/PgDn page · G follow"
+	hint := v.bindingHints("{reader.up reader.down} scroll · {overlay.page_up overlay.page_down} page · {reader.follow} follow")
 	if v.record.State == "running" || v.record.State == "canceling" {
-		hint += " · K cancel"
+		hint += v.bindingHints(" · {operation.cancel} cancel")
 	}
-	return hint + " · Esc close"
+	return hint + v.bindingHints(" · {dialog.cancel} close")
 }
 
 func (v *tuiOperationOutputView) Draw(win vaxis.Window, _, _, _ vaxis.Style) {

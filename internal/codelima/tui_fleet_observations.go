@@ -50,14 +50,14 @@ func (a *vaxisTUIApp) openFleetPort() error {
 
 func (a *vaxisTUIApp) openFleetNodePort(record tuiFleetRecord) error {
 	if !a.fleetPortsCurrent() {
-		return fmt.Errorf("forwarding observation unavailable or stale; use 3 Ports to inspect")
+		return fmt.Errorf("forwarding observation unavailable or stale; use %s Ports to inspect", a.keyHint("view.ports"))
 	}
 	for _, route := range a.fleetRoutes(record.Node.ID) {
 		if a.fleetRouteOpenable(record, route) {
 			return a.openHyperlink(route.Address)
 		}
 	}
-	return fmt.Errorf("no live HTTP route for %s; use 3 Ports to inspect", record.Node.Slug)
+	return fmt.Errorf("no live HTTP route for %s; use %s Ports to inspect", record.Node.Slug, a.keyHint("view.ports"))
 }
 
 func (a *vaxisTUIApp) fleetRouteOpenable(record tuiFleetRecord, route daemon.PortRoute) bool {
@@ -97,7 +97,7 @@ func (a *vaxisTUIApp) fleetPhase(nodeID string) string {
 }
 
 func (a *vaxisTUIApp) drawFleetRoutes(win vaxis.Window, nodeID string, row, height int, theme tuiTheme) {
-	label := "Forwarded routes · o open"
+	label := a.keyHints("Forwarded routes · {node.open_port} open")
 	if !a.fleetPortsCurrent() {
 		label = "Routes unavailable / stale"
 	}
@@ -258,5 +258,5 @@ func (a *vaxisTUIApp) drawMarkedPreview(win vaxis.Window, theme tuiTheme) {
 	remaining := tuiHostSummary{Capacity: a.host.Capacity, AllocationsKnown: impact.known, AllocatedCPUs: impact.remaining.AllocatedCPUs, AllocatedMemoryBytes: impact.remaining.AllocatedMemoryBytes, UnknownNodes: impact.remaining.UnknownNodes}
 	tuiLine(inner.New(1, row+2, width-2, 1), 0, "After stop: "+strings.ReplaceAll(remaining.compactAllocation(), "G", " GiB"), theme.muted)
 	tuiLine(inner.New(1, row+3, width-2, 1), 0, impact.sessionWarning(), theme.amber)
-	tuiLine(inner.New(1, row+4, width-2, 1), 0, "s start/stop · r restart · d delete · Space mark · * mark shown · Esc clear", theme.muted)
+	tuiLine(inner.New(1, row+4, width-2, 1), 0, a.keyHints("{node.toggle} start/stop · {node.restart} restart · {node.delete} delete · {fleet.mark} mark · {fleet.mark_all} mark shown · {navigation.back} clear"), theme.muted)
 }

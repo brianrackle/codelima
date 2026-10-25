@@ -1,6 +1,7 @@
 package codelima
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -85,7 +86,7 @@ func (a *vaxisTUIApp) moveOverviewSelection(delta int) {
 	}
 }
 
-func (a *vaxisTUIApp) handleOverviewKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleOverviewAction(action string, key vaxis.Key) bool {
 	if !a.overviewVisible() || !tuiKeyActivates(key, false) {
 		return false
 	}
@@ -94,17 +95,17 @@ func (a *vaxisTUIApp) handleOverviewKey(key vaxis.Key) bool {
 		a.reconcileOverview(node)
 	}
 	s := &a.overview
-	if key.Matches(vaxis.KeyUp, vaxis.ModCtrl) || key.Matches(vaxis.KeyDown, vaxis.ModCtrl) {
+	if action == "overview.previous_panel" || action == "overview.next_panel" {
 		delta := 1
-		if key.Matches(vaxis.KeyUp, vaxis.ModCtrl) {
+		if action == "overview.previous_panel" {
 			delta = -1
 		}
 		s.panel = (s.panel + delta + tuiOverviewPanelCount) % tuiOverviewPanelCount
 		return true
 	}
-	if key.MatchString("Up") || key.MatchString("k") || key.MatchString("Down") || key.MatchString("j") {
+	if action == "navigation.up" || action == "navigation.down" {
 		delta := 1
-		if key.MatchString("Up") || key.MatchString("k") {
+		if action == "navigation.up" {
 			delta = -1
 		}
 		a.moveOverviewSelection(delta)
@@ -115,31 +116,31 @@ func (a *vaxisTUIApp) handleOverviewKey(key vaxis.Key) bool {
 	}
 	var err error
 	switch {
-	case key.MatchString("t"), key.MatchString("T"):
-		err = a.startRawShell(key.MatchString("T"), true, "")
-	case key.MatchString("Enter") && s.panel == tuiOverviewSessions:
+	case action == "session.guest", action == "session.host":
+		err = a.startRawShell(action == "session.host", true, "")
+	case action == "overview.open" && s.panel == tuiOverviewSessions:
 		var session *tuiSession
 		session, err = a.overviewSession()
 		if err == nil {
 			err = a.startRawShell(session.shellKind == terminal.NodeHostShell, false, string(session.terminalID))
 		}
-	case key.MatchString("K") && s.panel == tuiOverviewSessions:
+	case action == "session.end" && s.panel == tuiOverviewSessions:
 		err = a.confirmOverviewSessionEnd()
-	case key.MatchString("o") && s.panel == tuiOverviewPorts:
+	case action == "route.open" && s.panel == tuiOverviewPorts:
 		err = a.openOverviewRoute()
-	case key.MatchString("y") && s.panel == tuiOverviewPorts:
+	case action == "route.copy" && s.panel == tuiOverviewPorts:
 		var route daemon.PortRoute
 		route, err = a.overviewRoute()
 		if err == nil {
 			err = a.copyToHostClipboard(route.Address)
 		}
-	case key.MatchString("Enter") && s.panel == tuiOverviewPorts:
+	case action == "overview.open" && s.panel == tuiOverviewPorts:
 		err = a.openOverviewRoute()
-	case key.MatchString("Enter") && s.panel == tuiOverviewRecent:
+	case action == "overview.open" && s.panel == tuiOverviewRecent:
 		a.openNodeDetail(tuiDetailLogs)
-	case key.MatchString("Enter") && s.panel == tuiOverviewIdentity:
+	case action == "overview.open" && s.panel == tuiOverviewIdentity:
 		a.openNodeDetail(tuiDetailSpec)
-	case key.MatchString("Enter") && s.panel == tuiOverviewResources:
+	case action == "overview.open" && s.panel == tuiOverviewResources:
 		a.openNodeDetail(tuiDetailMetrics)
 	default:
 		return false
@@ -160,7 +161,7 @@ func (a *vaxisTUIApp) overviewSession() (*tuiSession, error) {
 			return session, nil
 		}
 	}
-	return nil, fmt.Errorf("selected session is no longer available; use ↑↓ to select a session")
+	return nil, errors.New(a.keyHints("selected session is no longer available; use {navigation.up navigation.down} to select a session"))
 }
 
 func (a *vaxisTUIApp) confirmOverviewSessionEnd() error {
@@ -172,7 +173,7 @@ func (a *vaxisTUIApp) confirmOverviewSessionEnd() error {
 	label := terminalTabLabel(session, a.terminalMetadata(key))
 	a.overlay = newTUIDialog("End session · "+label, "End session", []string{
 		"End this session and its running processes on " + a.state.selectedEntry().node.Slug + ".",
-		"Other sessions remain open. Esc cancels.",
+		a.keyHints("Other sessions remain open. {dialog.cancel} cancels."),
 	}, nil, func(map[string]string) error {
 		current, ok := a.sessions.Session(key)
 		if !ok || current.terminalID != id || current.target != target {
@@ -202,7 +203,7 @@ func (a *vaxisTUIApp) overviewRoute() (daemon.PortRoute, error) {
 			return route, nil
 		}
 	}
-	return daemon.PortRoute{}, fmt.Errorf("selected route is no longer available; use ↑↓ to select a route")
+	return daemon.PortRoute{}, errors.New(a.keyHints("selected route is no longer available; use {navigation.up navigation.down} to select a route"))
 }
 
 func (a *vaxisTUIApp) openOverviewRoute() error {
@@ -212,7 +213,7 @@ func (a *vaxisTUIApp) openOverviewRoute() error {
 	}
 	record, ok := a.fleetSelected()
 	if !ok || !a.fleetRouteOpenable(record, route) {
-		return fmt.Errorf("selected HTTP route is unavailable or stale; use 3 Ports to inspect")
+		return errors.New(a.keyHints("selected HTTP route is unavailable or stale; use {view.ports} Ports to inspect"))
 	}
 	return a.openHyperlink(route.Address)
 }
@@ -237,15 +238,15 @@ func (a *vaxisTUIApp) handleOverviewMouse(mouse vaxis.Mouse) bool {
 				selected := a.overview.route
 				a.switchView(tuiViewPorts)
 				a.ports.query, a.ports.selected = "", selected
-			case "attach":
+			case "overview.open":
 				a.overview.panel = tuiOverviewSessions
-				a.handleOverviewKey(vaxis.Key{Keycode: vaxis.KeyEnter})
+				a.handleOverviewAction("overview.open", vaxis.Key{})
 			default:
 				a.overview.panel = tuiOverviewSessions
-				if control.key == "o" || control.key == "y" {
+				if control.key == "route.open" || control.key == "route.copy" {
 					a.overview.panel = tuiOverviewPorts
 				}
-				a.handleOverviewKey(vaxis.Key{Keycode: rune(control.key[0]), Text: control.key})
+				a.handleOverviewAction(control.key, vaxis.Key{})
 			}
 			return true
 		}

@@ -62,7 +62,7 @@ func (a *vaxisTUIApp) paletteBatchCommands() []tuiPaletteCommand {
 		if len(plan) > 0 {
 			slices.Sort(ids)
 			label := "Restart selected/marked " + pluralForm(len(plan), "node", "nodes")
-			shortcut := "r"
+			shortcut := a.keyHint("node.restart")
 			if a.nodeDetail {
 				label = "Restart this node"
 			}

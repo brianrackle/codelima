@@ -107,11 +107,13 @@ func (h *tuiShellChooser) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		tuiLine(body.New(1, height-4, w-2, 1), 0, plainLogText(h.err), t.coral)
 	}
 	tuiLine(body.New(1, height-3, w-2, 1), 0, h.defaultHint(), t.text)
-	tuiLine(body.New(1, height-2, w-12, 1), 0, "Shift+Enter/W/T makes it x's default", t.dim)
-	close := body.New(w-10, height-2, 9, 1)
-	close.PrintTruncate(0, vaxis.Segment{Text: "Esc", Style: t.mint}, vaxis.Segment{Text: " close", Style: t.muted})
+	closeLabel := h.bindingHints("{dialog.cancel} close")
+	closeWidth := min(w/2, renderedTextWidth(h.app.vx, closeLabel))
+	tuiLine(body.New(1, height-2, max(0, w-closeWidth-3), 1), 0, h.bindingHints("{chooser.save_selected} opens and saves the mode"), t.dim)
+	close := body.New(w-closeWidth-1, height-2, closeWidth, 1)
+	close.PrintTruncate(0, vaxis.Segment{Text: h.bindingHint("dialog.cancel"), Style: t.mint}, vaxis.Segment{Text: " close", Style: t.muted})
 	col, row := close.Origin()
-	h.closeRect = tuiRect{col: col, row: row, width: 9, height: 1}
+	h.closeRect = tuiRect{col: col, row: row, width: closeWidth, height: 1}
 	tuiLine(body.New(1, height-1, w-2, 1), 0, "Sessions belong to the daemon; any window can attach later", t.dim)
 }
 
@@ -147,26 +149,31 @@ func (h *tuiShellChooser) drawChoice(win vaxis.Window, choice tuiShellChoice, co
 	}
 	shortcut := ""
 	if choice.key == vaxis.KeyEnter {
-		shortcut = "⏎"
+		shortcut = h.bindingHint("dialog.accept")
 	} else if choice.key != 0 {
-		shortcut = string(choice.key)
+		if choice.key >= '1' && choice.key <= '9' {
+			shortcut = h.bindingHint("chooser.session_" + string(choice.key))
+		} else {
+			shortcut = h.bindingHint("chooser." + choice.id)
+		}
 	}
-	tuiLine(win.New(2, 0, 3, 1), 0, shortcut, key)
+	keyWidth := max(3, min(18, renderedTextWidth(h.app.vx, shortcut)))
+	tuiLine(win.New(2, 0, keyWidth, 1), 0, shortcut, key)
 	label := choice.label
 	if choice.kind != "" {
 		kind := style
 		if choice.kind == "host" {
 			kind.Foreground = t.coral.Foreground
 		}
-		tuiLine(win.New(6, 0, 5, 1), 0, choice.kind, kind)
+		tuiLine(win.New(keyWidth+3, 0, 5, 1), 0, choice.kind, kind)
 	}
-	labelCol := 6
+	labelCol := keyWidth + 3
 	if choice.kind != "" {
-		labelCol = 12
+		labelCol = keyWidth + 9
 	}
 	labelWidth := w - labelCol
 	if !compact {
-		labelWidth = 26 - labelCol
+		labelWidth = max(8, 26-labelCol)
 		if choice.terminalID != "" {
 			labelWidth = w - labelCol - 28
 		}

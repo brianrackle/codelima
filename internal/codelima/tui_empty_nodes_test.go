@@ -126,10 +126,10 @@ func TestTUIManagerEmptyMouseActionsAndFullErrors(t *testing.T) {
 		a.draw()
 		var create, doctor tuiRect
 		for _, control := range a.emptyNodes.controls {
-			if control.key == "n" {
+			if control.key == "node.create" {
 				create = control.rect
 			}
-			if control.key == "5" {
+			if control.key == "view.system" {
 				doctor = control.rect
 			}
 		}

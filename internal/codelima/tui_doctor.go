@@ -246,7 +246,7 @@ func (a *vaxisTUIApp) drawDoctor(win vaxis.Window, t tuiTheme) {
 		title = fmt.Sprintf("Doctor · checked %s · %d open", s.checkedAt.Local().Format("15:04:05"), a.doctorIssueCount())
 	}
 	tuiLine(win, 0, title, t.muted)
-	status, style := "R repairs metadata; unreadable records move to _quarantine/.", t.dim
+	status, style := a.keyHints("{system.repair} repairs metadata; unreadable records move to _quarantine/."), t.dim
 	switch {
 	case s.queuedRepair:
 		status = "Checking… · repair queued"
@@ -289,7 +289,7 @@ func (a *vaxisTUIApp) drawDoctor(win vaxis.Window, t tuiTheme) {
 		s.controls = append(s.controls, tuiDoctorControl{tuiRect{col: x, row: y, width: w, height: 1}, "select", i})
 	}
 	col := 0
-	for _, action := range [][2]string{{"details", "Enter details"}, {"check", "C re-check"}, {"repair", "R repair"}} {
+	for _, action := range [][2]string{{"details", a.keyHints("{system.open} details")}, {"check", a.keyHints("{system.refresh} re-check")}, {"repair", a.keyHints("{system.repair} repair")}} {
 		text := action[1] + "  "
 		width := len(text)
 		if col+width > w {

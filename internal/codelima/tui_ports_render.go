@@ -73,7 +73,7 @@ func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {
 	detailHeight := max(3, h-detailY-5)
 	detailOuter := win.New(1, detailY, detailWidth, detailHeight)
 	detail := border.All(detailOuter, theme.border)
-	tuiLine(detailOuter.New(2, 0, detailWidth-4, 1), 0, " Selected route · PgUp/PgDn details ", theme.muted)
+	tuiLine(detailOuter.New(2, 0, detailWidth-4, 1), 0, a.keyHints(" Selected route · {navigation.page_up navigation.page_down} details "), theme.muted)
 	nodeLines := a.portNodeLines()
 	includeNodes := w < 120 || len(nodeLines) > detailHeight-2
 	if !includeNodes {
@@ -109,19 +109,15 @@ func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {
 			tuiLine(nodeBox.New(1, i, nw-2, 1), 0, line, theme.muted)
 		}
 	}
-	controls := []struct{ label, key string }{{"o Open", "o"}, {"y Copy", "y"}, {"p Pin", "p"}, {"Enter Node", "Enter"}, {"/ Filter", "/"}, {"C Refresh", "C"}}
+	controls := []struct{ label, action string }{{"Open", "route.open"}, {"Copy", "route.copy"}, {"Pin", "ports.pin"}, {"Node", "ports.open_node"}, {"Filter", "ports.filter"}, {"Refresh", "ports.refresh"}}
 	x := 2
 	for _, control := range controls {
-		label := "[" + control.label + "]"
+		label := "[" + a.keyMap().PrimaryHint(control.action) + " " + control.label + "]"
 		if x+len(label) > w-2 {
 			break
 		}
 		tuiLine(win.New(x, h-4, len(label), 1), 0, label, theme.mint)
-		key := vaxis.Key{Keycode: []rune(control.key)[0], Text: control.key}
-		if control.key == "Enter" {
-			key = vaxis.Key{Keycode: vaxis.KeyEnter}
-		}
-		s.controls = append(s.controls, tuiPortControl{key: key, rect: tuiRect{col: x, row: h - 4, width: len(label), height: 1}})
+		s.controls = append(s.controls, tuiPortControl{action: control.action, rect: tuiRect{col: x, row: h - 4, width: len(label), height: 1}})
 		x += len(label) + 1
 	}
 	status, style := fmt.Sprintf("%d shown · %d host listeners · live", len(rows), s.snapshot.Listeners), theme.dim
@@ -255,7 +251,7 @@ func (a *vaxisTUIApp) portDetailLines(includeNodes bool) []string {
 				lines = append(lines, candidate.Address+" → "+candidate.NodeSlug+" · "+portStatusText(candidate))
 			}
 		}
-		lines = append(lines, "p pins bare localhost to this node until its listener stops.", "$ curl "+row.Address, "Saved ownership survives daemon restarts; live connections reconnect.")
+		lines = append(lines, a.keyHints("{ports.pin} pins bare localhost to this node until its listener stops."), "$ curl "+row.Address, "Saved ownership survives daemon restarts; live connections reconnect.")
 	}
 	if row.Error != "" {
 		lines = append(lines, row.Error)

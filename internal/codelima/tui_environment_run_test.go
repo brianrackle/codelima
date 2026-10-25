@@ -163,7 +163,7 @@ func TestTUIEnvironmentTestOutputScrollingAndLateReply(t *testing.T) {
 		}
 		found := false
 		for _, c := range a.recipes.controls {
-			if c.action == "t" {
+			if c.action == "environment.test" {
 				found = true
 				a.handleMouse(vaxis.Mouse{Button: vaxis.MouseLeftButton, EventType: vaxis.EventPress, Col: c.rect.col, Row: c.rect.row})
 			}

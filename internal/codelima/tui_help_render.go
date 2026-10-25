@@ -1,10 +1,10 @@
 package codelima
 
 import (
-	"fmt"
+	"strings"
+
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
-	"strings"
 )
 
 func (h *tuiKeyHelp) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
@@ -18,7 +18,7 @@ func (h *tuiKeyHelp) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		tuiLine(body, 0, "Keys · resize to read", t.text)
 		return
 	}
-	tuiLine(body, 0, "Keys · opened from "+h.groups[0].title+" · / searches all keys", t.text)
+	tuiLine(body, 0, "Keys · opened from "+h.groups[0].title+h.bindingHints(" · {help.search} searches all keys"), t.text)
 	h.pageSize = max(1, height-5)
 	content := body.New(1, 3, w-2, h.pageSize)
 	if h.searching {
@@ -26,7 +26,7 @@ func (h *tuiKeyHelp) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		h.input.Content, h.input.Prompt = t.text, t.mint
 		h.input.Draw(body.New(1, 1, w-2, 1))
 		lines, count := h.searchLines()
-		tuiLine(body, 2, fmt.Sprintf("%d matching keys · Tab returns to columns", count), t.dim)
+		tuiLine(body, 2, h.bindingHintsFormat("%d matching keys · {help.next} returns to columns", count), t.dim)
 		if count == 0 {
 			lines = []tuiHelpLine{{text: "No matching keys · Ctrl+u clears the search"}}
 		}
@@ -36,19 +36,21 @@ func (h *tuiKeyHelp) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 	} else {
 		h.drawColumns(content, t)
 		last := h.columns[len(h.columns)-1].group + 1
-		tuiLine(body, 1, fmt.Sprintf("Groups %d–%d of %d · Tab/←→ changes focus · ↑↓ scrolls", h.columns[0].group+1, last, len(h.groups)), t.dim)
-		tuiLine(body.New(1, 2, w-2, 1), 0, "/ search keys", t.mint)
+		tuiLine(body, 1, h.bindingHintsFormat("Groups %d–%d of %d · {help.next help.left help.right} changes focus · {reader.up reader.down} scrolls", h.columns[0].group+1, last, len(h.groups)), t.dim)
+		tuiLine(body.New(1, 2, w-2, 1), 0, h.bindingHints("{help.search} search keys"), t.mint)
 		col, row := body.Origin()
 		h.findRect = tuiRect{col: col + 1, row: row + 2, width: 13, height: 1}
 	}
-	note := "Actions once per press · arrows/text repeat"
+	note := "Configure: settings.yaml › keys"
 	if w >= 100 {
-		note = "Keys act once per press; arrows and text editing repeat while held"
+		note = "Configure: settings.yaml › keys · inspect IDs with codelima settings keys"
 	}
-	tuiLine(body.New(1, height-1, w-16, 1), 0, note, t.dim)
-	tuiLine(body.New(w-13, height-1, 13, 1), 0, "Esc / ? close", t.mint)
+	closeLabel := h.bindingHints("{dialog.cancel} close")
+	closeWidth := min(w-2, renderedTextWidth(h.app.vx, closeLabel))
+	tuiLine(body.New(1, height-1, max(0, w-closeWidth-3), 1), 0, note, t.dim)
+	tuiLine(body.New(w-closeWidth-1, height-1, closeWidth, 1), 0, closeLabel, t.mint)
 	col, row := body.Origin()
-	h.closeRect = tuiRect{col: col + w - 13, row: row + height - 1, width: 13, height: 1}
+	h.closeRect = tuiRect{col: col + w - closeWidth - 1, row: row + height - 1, width: closeWidth, height: 1}
 }
 
 func (h *tuiKeyHelp) drawColumns(win vaxis.Window, t tuiTheme) {
@@ -87,7 +89,7 @@ func (h *tuiKeyHelp) drawColumns(win vaxis.Window, t tuiTheme) {
 			}
 		}
 		h.drawLines(column.New(0, 1, columnWidth, height-2), lines, &h.scroll[i], columnTheme)
-		tuiLine(column, height-1, fmt.Sprintf("↑↓ scroll · row %d", h.scroll[i]+1), columnTheme.dim)
+		tuiLine(column, height-1, h.bindingHintsFormat("{reader.up reader.down} scroll · row %d", h.scroll[i]+1), columnTheme.dim)
 	}
 }
 

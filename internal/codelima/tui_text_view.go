@@ -9,6 +9,7 @@ import (
 
 // tuiTextView displays a wrapped detail snapshot without I/O.
 type tuiTextView struct {
+	tuiOverlayKeys
 	title, text      string
 	scroll, viewport int
 	end              bool
@@ -31,28 +32,28 @@ func (v *tuiTextView) Update(event vaxis.Event) (bool, error) {
 	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	if isOverlayCancelKey(key) && tuiKeyActivates(key, true) {
+	if overlayKeyAction(v, key) == "dialog.cancel" && tuiKeyActivates(key, true) {
 		return true, nil
 	}
 	switch {
-	case key.Matches(vaxis.KeyUp), key.MatchString("k"):
+	case overlayKeyAction(v, key) == "reader.up":
 		v.scroll--
-	case key.Matches(vaxis.KeyDown), key.MatchString("j"):
+	case overlayKeyAction(v, key) == "reader.down":
 		v.scroll++
-	case key.Matches(vaxis.KeyPgUp):
+	case overlayKeyAction(v, key) == "overlay.page_up":
 		v.scroll -= max(1, v.viewport-1)
-	case key.Matches(vaxis.KeyPgDown):
+	case overlayKeyAction(v, key) == "overlay.page_down":
 		v.scroll += max(1, v.viewport-1)
-	case key.Matches(vaxis.KeyHome):
+	case overlayKeyAction(v, key) == "overlay.first":
 		v.scroll = 0
-	case key.Matches(vaxis.KeyEnd):
+	case overlayKeyAction(v, key) == "overlay.last":
 		v.end = true
 	}
 	return false, nil
 }
 
 func (v *tuiTextView) FooterHint() string {
-	return "↑↓ scroll · PgUp/PgDn page · Home/End · Esc close"
+	return v.bindingHints("{reader.up reader.down} scroll · {overlay.page_up overlay.page_down} page · {overlay.first overlay.last} · {dialog.cancel} close")
 }
 
 func (v *tuiTextView) Draw(win vaxis.Window, header, muted, _ vaxis.Style) {

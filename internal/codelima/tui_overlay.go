@@ -25,6 +25,7 @@ type tuiOverlay interface {
 
 func (a *vaxisTUIApp) updateOverlay(event vaxis.Event) {
 	overlay := a.overlay
+	bindOverlayKeys(overlay, a.keyMap())
 	done, err := overlay.Update(event)
 	if err != nil {
 		// Overlay errors are non-fatal and use the shared footer policy.
@@ -49,6 +50,7 @@ type tuiDialogField struct {
 }
 
 type tuiDialog struct {
+	tuiOverlayKeys
 	Title          string
 	Description    []string
 	SubmitLabel    string
@@ -156,10 +158,10 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 		if !ok || !tuiKeyActivates(key, true) {
 			return false, nil
 		}
-		if key.MatchString("y") {
+		if overlayKeyAction(d, key) == "discard.confirm" {
 			return true, nil
 		}
-		if key.MatchString("n") || key.Matches(vaxis.KeyEsc) || key.Matches(vaxis.KeyEnter) {
+		if overlayKeyAction(d, key) == "discard.cancel" || overlayKeyAction(d, key) == "discard.keep" {
 			d.confirmDiscard = false
 		}
 		return false, nil
@@ -177,26 +179,22 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 			return false, nil
 		}
 		switch {
-		case isOverlayCancelKey(event):
+		case overlayKeyAction(d, event) == "dialog.cancel":
 			if !tuiKeyActivates(event, true) {
 				return false, nil
 			}
-			if d.dirty() {
-				d.confirmDiscard = true
-				return false, nil
-			}
-			return true, nil
-		case event.Matches('s', vaxis.ModCtrl):
+			return d.cancel()
+		case overlayKeyAction(d, event) == "dialog.submit":
 			if tuiKeyActivates(event, true) {
 				return d.submit()
 			}
 			return false, nil
-		case event.MatchString("Tab"), event.MatchString("Down"):
+		case overlayKeyAction(d, event) == "dialog.next", overlayKeyAction(d, event) == "dialog.down":
 			if len(d.Fields) > 0 {
 				d.FieldIndex = (d.FieldIndex + 1) % len(d.Fields)
 			}
 			return false, nil
-		case event.MatchString("Up"):
+		case overlayKeyAction(d, event) == "dialog.up", overlayKeyAction(d, event) == "dialog.previous":
 			if len(d.Fields) > 0 {
 				d.FieldIndex--
 				if d.FieldIndex < 0 {
@@ -204,7 +202,7 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 				}
 			}
 			return false, nil
-		case event.MatchString("Right") && len(d.Fields) > 0 && d.Fields[d.FieldIndex].Activate != nil:
+		case overlayKeyAction(d, event) == "dialog.right" && len(d.Fields) > 0 && d.Fields[d.FieldIndex].Activate != nil:
 			if !tuiKeyActivates(event, true) {
 				return false, nil
 			}
@@ -213,7 +211,7 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 				d.Error = err.Error()
 			}
 			return false, nil
-		case event.MatchString("Enter"):
+		case overlayKeyAction(d, event) == "dialog.accept":
 			if !tuiKeyActivates(event, true) {
 				return false, nil
 			}
@@ -232,6 +230,14 @@ func (d *tuiDialog) Update(event vaxis.Event) (done bool, err error) {
 	default:
 		return false, nil
 	}
+}
+
+func (d *tuiDialog) cancel() (bool, error) {
+	if d.dirty() {
+		d.confirmDiscard = true
+		return false, nil
+	}
+	return true, nil
 }
 
 func (d *tuiDialog) dirty() bool {
@@ -273,9 +279,9 @@ func (d *tuiDialog) submit() (done bool, err error) {
 
 func (d *tuiDialog) FooterHint() string {
 	if d.confirmDiscard {
-		return "Discard unsaved changes? y discard · n/Enter/Esc keep editing"
+		return d.bindingHints("Discard unsaved changes? {discard.confirm} discard · {discard.cancel discard.keep} keep editing")
 	}
-	return "Tab/Up/Down move   Enter submit/open   Right choose   Ctrl+s submit   Esc cancel   Ctrl+c quit"
+	return d.bindingHints("{dialog.next}/{dialog.up dialog.down} move   {dialog.accept} submit/open   {dialog.right} choose   {dialog.submit} submit   {dialog.cancel} cancel   {app.quit} quit")
 }
 
 func (d *tuiDialog) Values() (map[string]string, error) {
@@ -353,20 +359,23 @@ func (d *tuiDialog) Draw(win vaxis.Window, headerStyle, mutedStyle, errorStyle v
 		row++
 	}
 	if d.confirmDiscard {
-		tuiLine(body, height-2, "Discard unsaved changes? y discard · n keep editing", errorStyle)
+		tuiLine(body, height-2, d.bindingHints("Discard unsaved changes? {discard.confirm} discard · {discard.cancel} keep editing"), errorStyle)
 	} else {
-		tuiLine(body, height-1, "Ctrl+s "+d.SubmitLabel+" · Tab/↑↓ fields · Enter/→ choose · Esc cancel", mutedStyle)
+		tuiLine(body, height-1, d.bindingHints("{dialog.submit} ")+d.SubmitLabel+d.bindingHints(" · {dialog.next dialog.up dialog.down} fields · {dialog.accept dialog.right} choose · {dialog.cancel} cancel"), mutedStyle)
 	}
 }
 
 type tuiMenuEntry struct {
-	Key         rune
-	Label       string
-	Action      func() error
-	ShiftAction func() error
+	BindingAction string
+	Key           rune
+	Label         string
+	Action        func() error
+	ShiftAction   func() error
 }
 
 type tuiMenu struct {
+	keyContext string
+	tuiOverlayKeys
 	Title       string
 	Description []string
 	Entries     []tuiMenuEntry
@@ -394,9 +403,9 @@ func (m *tuiMenu) Update(event vaxis.Event) (done bool, err error) {
 	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	if key.MatchString("Down") || key.MatchString("Up") {
+	if overlayKeyAction(m, key) == "dialog.down" || overlayKeyAction(m, key) == "dialog.up" {
 		delta := 1
-		if key.MatchString("Up") {
+		if overlayKeyAction(m, key) == "dialog.up" {
 			delta = -1
 		}
 		m.Index = max(0, min(len(m.Entries)-1, m.Index+delta))
@@ -405,15 +414,22 @@ func (m *tuiMenu) Update(event vaxis.Event) (done bool, err error) {
 	if !tuiKeyActivates(key, true) {
 		return false, nil
 	}
-	if isOverlayCancelKey(key) {
+	if overlayKeyAction(m, key) == "dialog.cancel" {
 		return true, nil
 	}
 	shifted := key.Modifiers&vaxis.ModShift != 0 || unicode.IsUpper(key.Keycode)
-	if key.Matches(vaxis.KeyEnter) {
+	if overlayKeyAction(m, key) == "dialog.accept" {
 		return m.choose(shifted)
 	}
 
 	for i, entry := range m.Entries {
+		if entry.BindingAction != "" {
+			if overlayKeyAction(m, key) == entry.BindingAction {
+				m.Index = i
+				return m.choose(false)
+			}
+			continue
+		}
 		if entry.Key == 0 || key.Modifiers & ^vaxis.ModShift != 0 {
 			continue
 		}
@@ -445,7 +461,7 @@ func (m *tuiMenu) choose(shifted bool) (bool, error) {
 }
 
 func (m *tuiMenu) FooterHint() string {
-	return "↑↓ select   Enter choose   Esc cancel"
+	return m.bindingHints("{dialog.up dialog.down} select   {dialog.accept} choose   {dialog.cancel} cancel")
 }
 
 func (m *tuiMenu) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style) {
@@ -474,7 +490,9 @@ func (m *tuiMenu) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style)
 	for i := m.Scroll; i < len(m.Entries) && i < m.Scroll+visible; i++ {
 		entry := m.Entries[i]
 		shortcut := "   "
-		if entry.Key != 0 {
+		if entry.BindingAction != "" {
+			shortcut = "[" + m.bindingHint(entry.BindingAction) + "]"
+		} else if entry.Key != 0 {
 			shortcut = "[" + string(entry.Key) + "]"
 		}
 		style := mutedStyle
@@ -493,6 +511,7 @@ type tuiSelectorOption struct {
 }
 
 type tuiSelector struct {
+	tuiOverlayKeys
 	Title       string
 	Description []string
 	Options     []tuiSelectorOption
@@ -540,28 +559,28 @@ func (s *tuiSelector) Update(event vaxis.Event) (done bool, err error) {
 	if !ok || !tuiKeyActivates(key, false) {
 		return false, nil
 	}
-	if isOverlayCancelKey(key) {
+	if overlayKeyAction(s, key) == "dialog.cancel" {
 		return tuiKeyActivates(key, true), nil
 	}
 
 	switch {
-	case key.MatchString("Tab"), key.MatchString("Down"):
+	case overlayKeyAction(s, key) == "dialog.next", overlayKeyAction(s, key) == "dialog.down":
 		s.move(1)
 		return false, nil
-	case key.MatchString("Up"):
+	case overlayKeyAction(s, key) == "dialog.up":
 		s.move(-1)
 		return false, nil
-	case s.Multi && key.Matches('u', vaxis.ModCtrl):
+	case s.Multi && overlayKeyAction(s, key) == "selector.clear":
 		if tuiKeyActivates(key, true) {
 			s.Selected = map[string]bool{}
 		}
 		return false, nil
-	case s.Multi && key.MatchString(" "):
+	case s.Multi && overlayKeyAction(s, key) == "dialog.toggle":
 		if tuiKeyActivates(key, true) {
 			s.toggleCurrent()
 		}
 		return false, nil
-	case key.MatchString("Enter"):
+	case overlayKeyAction(s, key) == "dialog.accept":
 		if !tuiKeyActivates(key, true) {
 			return false, nil
 		}
@@ -626,9 +645,9 @@ func (s *tuiSelector) selectedValues() []string {
 
 func (s *tuiSelector) FooterHint() string {
 	if s.Multi {
-		return "Up/Down move   Space toggle   Enter confirm   Ctrl+u clear   Esc cancel   Ctrl+c quit"
+		return s.bindingHints("{dialog.up dialog.down} move   {dialog.toggle} toggle   {dialog.accept} confirm   {selector.clear} clear   {dialog.cancel} cancel   {app.quit} quit")
 	}
-	return "Up/Down move   Enter confirm   Esc cancel   Ctrl+c quit"
+	return s.bindingHints("{dialog.up dialog.down} move   {dialog.accept} confirm   {dialog.cancel} cancel   {app.quit} quit")
 }
 
 func (s *tuiSelector) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.Style) {
@@ -683,13 +702,5 @@ func (s *tuiSelector) Draw(win vaxis.Window, headerStyle, mutedStyle, _ vaxis.St
 		}
 	}
 
-	help := "Up/Down move  Enter confirm  Esc cancel"
-	if s.Multi {
-		help = "Up/Down move  Space toggle  Enter confirm  Ctrl+u clear  Esc cancel"
-	}
-	body.Println(height-2, vaxis.Segment{Text: help, Style: mutedStyle})
-}
-
-func isOverlayCancelKey(key vaxis.Key) bool {
-	return key.Matches(vaxis.KeyEsc) || key.Matches('[', vaxis.ModCtrl)
+	body.Println(height-2, vaxis.Segment{Text: s.FooterHint(), Style: mutedStyle})
 }

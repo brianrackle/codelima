@@ -1,358 +1,168 @@
-# Key Bindings Plan
+# TUI Key Bindings Specification
 
-Status: Draft
+Status: Implementation in progress (Go; replaces the pre-manager draft).
+Purpose: make the design's `settings.yaml › keys` promise real across dispatch,
+contextual help, palettes and visible keyboard hints.
 
-## Goal
+## 1. Problem and scope
 
-Make TUI key bindings configurable through `CODELIMA_HOME/_config/config.yaml` with support for multiple bindings per action, while preserving the current default behavior out of the box.
+The current manager has fixed keys spread across view, overlay and terminal
+controllers. Its help catalogue repeats those keys. The earlier plan refers to
+retired project controls and `_config/config.yaml`, and its case-insensitive
+normalization would collapse distinct commands such as `t`/`T` and `x`/`X`.
 
-This plan covers:
+Required coverage includes manager/global navigation; fleet and node-detail
+commands; lifecycle, Metrics, Logs and Spec controls; Templates/Environments;
+Ports, Activity and System; dialogs, selectors, command editors, palette, help,
+confirmation/review overlays, and embedded-terminal focus/inspection controls.
+Matching, help, palette shortcuts, buttons and footers must describe the same
+effective bindings. Existing action guards and captured-target reviews remain
+responsible for whether an action may run.
 
-- tree and global TUI actions
-- focus and quit bindings
-- dialog, selector, and menu bindings
-- help/footer rendering for configured bindings
+Ordinary text editing and bytes sent to a focused shell are input, not manager
+commands. Raw attachment remains a separate real-terminal relay with its existing
+`Ctrl+]` detach contract. Mouse interaction does not depend on a keyboard binding.
 
-## Requirements
+## 2. Assumptions and compatibility
 
-- key binding configuration must live in `CODELIMA_HOME/_config/config.yaml`
-- current default bindings must be written into that file by default
-- the TUI must load bindings from config instead of hardcoding them in logic
-- an action may have multiple bindings
-- bindings must be validated at config load time
+* Use the current settings file and current manager action/context vocabulary.
+* Preserve current default behavior, including `q` backing out of node detail and
+  quitting at the top level. `Ctrl+c` is the separate application-quit action.
+* F6 is the default embedded-focus key. If explicitly remapped, only configured
+  focus keys are intercepted while the embedded shell owns input; other keys,
+  including Option+Left/Right, continue to the shell unchanged.
+* Missing overrides inherit catalog defaults. An explicit empty list disables an
+  optional action; required escape/quit/focus actions cannot be left unbound.
+* Keep authored overrides in settings, not a generated copy of every default.
+  An inspection command exposes the complete effective/default map. This follows
+  the existing minimal, comment-preserving settings writer and permits future
+  defaults to evolve without overwriting user choices.
+* No key-sequence/chord language or executable expressions are introduced. Each
+  configured item identifies one key plus modifiers.
 
-## Current State
+## 3. Domain model and identifiers
 
-The current TUI mixes three binding styles:
+`KeyBindingConfig` is a map from stable dotted action IDs to ordered key lists.
+An action definition contains its ID, description, defaults, active contexts,
+whether it is required, and whether it is available during text entry. Contexts
+identify actual focused surfaces, including detail panels and input modes; they
+must be explicit enough to represent mutually exclusive commands.
 
-- top-level project and node actions are hardcoded as a single `Hotkey rune` in `availableTUIActions`
-- terminal focus toggle and quit are hardcoded separately in helper functions
-- dialogs, selectors, and menus each handle their own fixed key matching inline
+The compiled keymap is immutable. It owns normalized bindings, indexes by context
+and key identity, and display metadata. Public inspection returns copies. Runtime
+controllers resolve semantic action IDs and retain the original `vaxis.Key` for
+press/repeat/release ownership; keys must not be rewritten into synthetic default
+keys. A new binding must not inherit accidental behavior from an old key's branch.
 
-Examples in the current code:
-
-- `project.create` -> `a`
-- `environment_config.manage` -> `g`
-- `node.start` and `node.stop` -> `s`
-- terminal focus toggle -> `Alt+\`` or `F6`
-- quit -> `q` or `Ctrl+C`
-- overlay cancel -> `Esc` or `Ctrl+[`
-
-The current design is not sufficient for configurable multi-binding support because:
-
-- `tuiActionSpec` stores only one `Hotkey rune`
-- `tuiMenuEntry` stores only one `Key rune`
-- footer and help text assume a single displayed binding per action in most places
-
-## Proposed Config Shape
-
-Add a root-level `key_bindings` section to `_config/config.yaml`.
-
-Recommended YAML shape:
+## 4. Settings and normalization contract
 
 ```yaml
-key_bindings:
-  tui:
-    app.quit:
-      - q
-      - ctrl+c
-    focus.toggle_terminal:
-      - alt+`
-      - f6
-    tree.move_up:
-      - up
-    tree.move_down:
-      - down
-    tree.collapse:
-      - left
-    tree.expand:
-      - right
-    project.create:
-      - a
-    environment_config.manage:
-      - g
-    project.create_node:
-      - n
-    project.update:
-      - u
-    project.delete:
-      - x
-    node.start:
-      - s
-    node.stop:
-      - s
-    node.delete:
-      - d
-    node.clone:
-      - c
-    dialog.cancel:
-      - esc
-      - ctrl+[
-    dialog.submit:
-      - enter
-      - ctrl+s
-    dialog.next_field:
-      - tab
-      - down
-    dialog.prev_field:
-      - up
-    dialog.activate_field:
-      - right
-    selector.cancel:
-      - esc
-      - ctrl+[
-    selector.move_next:
-      - tab
-      - down
-    selector.move_prev:
-      - up
-    selector.confirm:
-      - enter
-    selector.toggle:
-      - space
-    selector.clear:
-      - ctrl+u
-    menu.cancel:
-      - esc
-      - ctrl+[
+keys:
+  node.delete: [ctrl+d]
+  node.clone: [c, alt+c]
+  navigation.up: [up, k]
 ```
 
-This shape has three useful properties:
-
-- bindings are attached to stable action IDs
-- actions can have one or many bindings
-- defaults can be serialized into `config.yaml` instead of living only in code
-
-## Stable Action IDs
-
-Binding lookup should depend on stable string IDs, not on labels or view-specific help text.
-
-Recommended initial IDs:
-
-- `app.quit`
-- `focus.toggle_terminal`
-- `tree.move_up`
-- `tree.move_down`
-- `tree.collapse`
-- `tree.expand`
-- `project.create`
-- `environment_config.manage`
-- `project.create_node`
-- `project.update`
-- `project.delete`
-- `node.start`
-- `node.stop`
-- `node.delete`
-- `node.clone`
-- `dialog.cancel`
-- `dialog.submit`
-- `dialog.next_field`
-- `dialog.prev_field`
-- `dialog.activate_field`
-- `selector.cancel`
-- `selector.move_next`
-- `selector.move_prev`
-- `selector.confirm`
-- `selector.toggle`
-- `selector.clear`
-- `menu.cancel`
-
-Menu entries that currently use ad hoc single-letter keys should eventually be upgraded from `Key rune` to a stable action ID plus resolved bindings.
-
-## Binding Syntax
-
-Bindings in YAML should use a small canonical string syntax:
-
-- printable keys: `a`, `g`, `` ` ``
-- arrows: `up`, `down`, `left`, `right`
-- navigation keys: `tab`, `enter`, `esc`, `space`
-- function keys: `f6`
-- modifier combinations: `ctrl+c`, `ctrl+s`, `ctrl+[`, `alt+``
-
-Normalization rules:
-
-- case-insensitive on load
-- stored and rendered in canonical lowercase form
-- reject unknown key names early
-
-This should be parsed into a small internal binding type rather than matched from raw strings repeatedly.
-
-## Data Model Changes
-
-Add key binding fields to `Config`.
-
-Recommended shape:
-
-```go
-type Config struct {
-    ...
-    KeyBindings KeyBindingConfig `json:"key_bindings" yaml:"key_bindings"`
-}
-
-type KeyBindingConfig struct {
-    TUI map[string][]string `json:"tui" yaml:"tui"`
-}
-```
-
-Then add a normalized runtime form used by the TUI:
-
-```go
-type KeyMap struct {
-    TUI map[string][]KeyBinding
-}
-```
-
-Where `KeyBinding` is a parsed binding descriptor suitable for matching against `vaxis.Key`.
-
-## Default Loading Behavior
-
-The default bindings should be generated in code as a default config value, but they should be materialized into `_config/config.yaml` the same way default Lima commands are materialized today.
-
-That means:
-
-- `DefaultConfig()` includes default key bindings
-- `defaultConfigYAML()` writes them into the file
-- `LoadConfig()` applies missing defaults when older config files omit the section
-- `EnsureLayout()` backfills the section into existing `config.yaml` files
-
-The important rule is:
-
-- code defines the defaults
-- config persists the effective defaults
-- runtime behavior reads from config
-
-## Resolution Rules
-
-Binding resolution should be context-aware.
-
-Examples:
-
-- `node.start` and `node.stop` may both use `s` because they are never available at the same time for the same node
-- `project.create` and `project.delete` must not share the same binding because both are active on a selected project
-- `dialog.submit` using `enter` is valid because it is resolved only while a dialog is active
-
-Recommended validation model:
-
-- define binding scopes
-- reject collisions only within overlapping scopes
-
-Suggested scopes:
-
-- `tree.global`
-- `tree.project`
-- `tree.node`
-- `terminal.global`
-- `dialog`
-- `selector.single`
-- `selector.multi`
-- `menu`
-
-## UI Rendering Rules
-
-The footer and help text must stop assuming one binding per action.
-
-Recommended display rules:
-
-- if an action has one binding, render it normally: `[a] add project`
-- if an action has two short bindings, render both compactly: `Alt-\`/F6 shell focus`
-- if an action has more than two bindings, render the primary plus a compact suffix, for example `q/+2 quit`
-
-The first configured binding is the primary binding for display order.
-
-This keeps the UI readable while still honoring multiple bindings.
-
-## Refactor Required
-
-This is not just a config-file change.
-
-Required code changes:
-
-- replace `Hotkey rune` in `tuiActionSpec` with binding-aware metadata
-- replace direct `key.MatchString(...)` checks in the main TUI event loop with binding lookup by action ID
-- replace direct key checks in dialogs and selectors with binding-aware helpers
-- replace `tuiMenuEntry.Key rune` with action IDs or binding lists
-- move footer/help generation onto the resolved keymap so displayed help matches actual configured behavior
-
-## Suggested Implementation Shape
-
-### 1. Introduce a TUI Keymap Layer
-
-Add a small binding service responsible for:
-
-- parsing config strings into normalized binding structs
-- matching `vaxis.Key` against configured bindings
-- formatting bindings for footer/help text
-
-### 2. Separate Action Metadata From Binding Metadata
-
-Keep action metadata such as:
-
-- action ID
-- label
-- availability by context
-
-separate from the configured bindings for that action.
-
-### 3. Drive Help Text From the Keymap
-
-Footer, selector help, dialog help, and menu help must use the keymap rather than hardcoded text.
-
-Otherwise configuration and help text will drift immediately.
-
-## Migration Strategy
-
-### Phase 1
-
-- add `key_bindings` to config
-- define and serialize the current default bindings
-- load and validate them
-- use configured bindings for:
-  - quit
-  - terminal/tree focus toggle
-  - tree navigation
-  - top-level project/node actions
-
-### Phase 2
-
-- move dialog, selector, and overlay bindings onto the same keymap
-- replace hardcoded help strings with rendered configured bindings
-
-### Phase 3
-
-- refactor menu entries to use stable action IDs instead of a single letter
-- allow multiple bindings for menu actions as well
-
-### Phase 4
-
-- decide whether tmux sidebar reuses the exact same TUI binding namespace or gets its own namespace such as `key_bindings.tmux_sidebar`
-
-## Validation Rules
-
-Invalid configuration should fail clearly and early.
-
-Examples of invalid config:
-
-- unknown action ID
-- unknown key token
-- duplicate binding within the same action list
-- conflicting bindings in the same active scope
-- empty binding list for a required action
-
-Load errors should point to the action ID and offending binding string.
-
-## Test Plan
-
-Automated coverage should include:
-
-- `defaultConfigYAML()` includes `key_bindings`
-- `LoadConfig()` applies default bindings when the section is missing
-- `EnsureLayout()` backfills missing key bindings into legacy `config.yaml`
-- custom config bindings override defaults
-- multiple configured bindings trigger the same action
-- conflicting bindings fail validation
-- footer/help rendering reflects configured primary bindings
-- node start/stop shared `s` binding still works because the actions are context-disjoint
-
-## Recommendation
-
-Implement key bindings as a first-class config-backed keymap, not as scattered inline conditionals. The current default bindings should move into `_config/config.yaml` as structured defaults, and all TUI input handling should resolve through stable action IDs so multiple bindings per action remain maintainable.
+Keys are case-sensitive logical characters. Modifier and named-key words are
+case-insensitive and normalized to a stable spelling. `T` and `shift+t` identify
+the same key; `t` is different. Supported named keys include arrows, Tab, Enter,
+Escape, Space, Backspace, Delete, Insert, Home, End, PageUp/PageDown and F1–F63.
+Single printable noncombining Unicode characters are allowed. `plus` names `+`
+inside a modified binding. Unknown names/modifiers, control characters, multiple
+characters and empty tokens fail validation rather than matching a first rune.
+CapsLock/NumLock are event state, not binding modifiers.
+
+Normalize common legacy aliases (`ctrl+i`/Tab, `ctrl+m`/Enter,
+`ctrl+[`/Escape, `ctrl+h`/Backspace) to one collision identity. Shifted printable
+symbols must not produce duplicate aliases. Event matching prefers actual text
+for unmodified printable input, then shifted/key codes, with a base-layout
+fallback when needed. Printable case must remain distinct with both text-only
+legacy events and Kitty events. Paste never resolves to an action.
+
+Each action accepts at most eight bindings and each spelling at most 64 bytes.
+Unknown action IDs, equivalent duplicate bindings, and collisions between
+*different* actions active in the same context are invalid. Reusing a key in
+mutually exclusive contexts is valid. Errors identify the setting/action,
+spelling and conflicting context/action. Ordering is deterministic.
+
+Actions available during text entry require nonprinting or modified bindings;
+unmodified printable global/view commands are absent from input contexts.
+Native text-widget editing keys and pasted text retain their existing behavior.
+
+## 5. Configuration lifecycle and recovery
+
+1. Load `_config/settings.yaml` and compile a complete binding snapshot before
+   applying it. Compilation must not mutate the raw config, catalog or prior map.
+2. At initial TUI startup, invalid binding overrides produce a visible diagnostic
+   and the safe default map. Lifecycle/daemon commands must remain usable because
+   a frontend preference is invalid.
+3. On an explicit preferences refresh or successful settings write, apply a valid
+   replacement atomically. On invalid authored overrides, retain the last good
+   map and show a deduplicated diagnostic; help reports the effective map, never
+   the rejected values as though they were active.
+4. Preserve held physical-shortcut claims through a map change. Repeats/releases
+   of a transition key cannot enter a newly exposed text field or shell.
+5. `settings set keys.<action> '<YAML list>'` validates the prospective complete
+   map under the settings lock before writing. The dotted action ID is one map
+   key. Preserve comments, unknown settings and unrelated overrides.
+6. `settings keys` exposes action/context/default/effective bindings and any
+   binding-validation error. `settings reset keys [action]` removes authored
+   overrides for recovery without requiring the invalid map to compile first.
+   Malformed YAML is still refused, never silently replaced by these commands.
+
+Persist only settings data. The keymap belongs to each frontend; no daemon or
+renderer protocol change is needed. Older builds already preserve unknown
+settings fields. No keyboard configuration may contain or execute shell code.
+
+## 6. Dispatch and rendering invariants
+
+* An event resolves in its actual focused context before its action runs.
+* Actions use one shared registry. Context-disjoint meanings of the same default
+  key stay distinct; shared meanings use one action ID across surfaces.
+* Existing press-only actions remain press-only. Navigation/text editing may
+  repeat. Paste/release cannot confirm, delete, attach or switch views.
+* Physical lifecycle tracking continues to use the real triggering key.
+* Every displayed configurable key comes from the effective registry. Compact
+  hints may show a primary binding plus an alias count; help shows all bindings.
+  Disabled actions display an unbound indication and remain available by mouse
+  or palette where those paths already exist.
+* Help/search are read-only; selecting or searching a binding never invokes it.
+* Raw-shell payload, literal text entry and operating-system terminal shortcuts
+  are not globally remapped by manager settings.
+
+## 7. Validation matrix
+
+Automated checks must cover strict parsing and normalization, Unicode/case and
+legacy aliases, overlapping/disjoint contexts, required/disabled actions, limits,
+copy isolation, and deterministic diagnostics. Verify real dispatch with a
+nondefault destructive key opening its captured review, old keys deactivated,
+aliases, context-specific reuse, and matching effective help/footer/palette text.
+
+Exercise press/repeat/release/paste across remapped view/form/terminal transitions,
+including modifiers released before the triggering letter. Verify that text
+entry receives ordinary characters and that embedded input keeps Option word
+navigation. Check invalid startup/reload recovery, settings round trips, CLI
+reset and comments/unknown-key preservation. Add no test that only repeats the
+registry's data; assert observable behavior at dispatch/rendering boundaries.
+
+Live QA must use an isolated home with custom mappings, show their help/hints at
+80×24 ANSI and 150×38 truecolor, exercise view/detail/form/menu/review actions,
+prove old keys no longer act, and test real embedded-shell input/focus. Restart
+and refresh must retain valid bindings and recover from an invalid authored map.
+Cancel destructive reviews. Remove every owned verification artifact; put Unix
+sockets on a project-rooted native/tmpfs directory, not the virtiofs share.
+
+## 8. Implementation checklist
+
+- [x] Strict parser, immutable compiler and context/collision model.
+- [x] Complete action/context inventory for all required surfaces.
+- [x] Settings storage, inspection, validated update and recovery commands.
+- [x] Manager/detail/global dispatch and physical lifecycle integration.
+- [x] All overlays, menus, forms and embedded focus/inspection dispatch.
+- [x] Effective help, palette, footer and button hints.
+- [x] Invalid-map recovery and atomic refresh with retained gesture ownership.
+- [x] Automated gates, live QA, documentation/ADR and verification cleanup.
+
+The remapping promise is not delivered by completing only the parser or manager
+scope. Keep the Help artboard/roadmap partial until every listed surface is wired
+and validated.

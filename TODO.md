@@ -115,6 +115,23 @@ after a released failure, persistent count errors and truthful host-session impa
 
 ### 57. Implement the retrieved major-version TUI design
 
+Configurable keys (ADR 200) are implemented and verified: final full
+format/build/verify/race/CLI integration checks passed, together with isolated
+80×24 ANSI and 150×38 truecolor interaction and visual checks. Valid/invalid
+refresh, startup fallback, reset, captured reviews, editors/pickers, Help/palette,
+mouse cancellation and raw/embedded host input were exercised. All checkpoint
+processes, stores, mounts, captures, scratch and new inactive inputrc files were
+removed. Exact evidence is in the design ledger. Native terminal/keyboard and
+whole-design qualification remain open: repeat the shared keyboard/payload flows
+on supported native hosts. Advantage: verifies transport-specific behavior;
+disadvantage: requires those interactive environments.
+
+Count follow-up observed during keybinding QA: the captured delete review still
+renders `1 host sessions` in its guest/host impact line. Use the shared count
+helpers for both independently counted session kinds and add a one-host/one-guest
+render regression. Advantage: finishes truthful singular wording; disadvantage:
+a small additional presentation/verification pass. No count semantics should change.
+
 The no-frontend deletion audit reproduced an orphan host terminal with a live
 PID and retained shell state. Daemon-owned deletion cleanup is implemented
 (ADR 199): committed deletion closes node-owned sessions before releasing the
@@ -192,14 +209,12 @@ Help checkpoint (ADR 192): dedicated contextual columns, compact group/scroll
 navigation, all-context search and read-only keyboard/mouse behavior are now
 implemented. Qualification results are tracked in the design ledger.
 
-Remaining help requirement: the source advertises `settings.yaml › keys`, but
-dispatch remains fixed. Follow the key-bindings plan with a context-aware binding
-registry, collision validation, persisted overrides and help generated from the
-effective map. Advantage: help and behavior stay consistent and the artboard's
-remapping promise becomes real. Disadvantage: shortcut precedence, nested forms,
-terminal focus, migration and recovery from conflicting bindings require a
-separate cross-view regression pass. The current help explicitly describes only
-implemented keys; roadmap #9 remains open.
+Configurable-key implementation checkpoint (ADR 200): the shared immutable
+registry, strict context validation, authored overrides, frontend dispatch,
+recovery commands and effective Help/hints are implemented. The superseded
+fixed-key limitation is resolved. Completed verification and cleanup for this
+checkpoint are recorded above; native keyboard transport remains part of the
+whole-design qualification.
 
 Palette checkpoint (ADR 193): grouped results, counts, matching spans, frontend
 session recents, context hints, captured per-node commands and revalidated
@@ -246,14 +261,10 @@ marking that reference complete. Advantage: matches the design's visual metric
 hierarchy. Disadvantage: gauge call sites currently return flattened text, so
 style separation requires coordinated rendering changes and regression checks.
 
-Key-binding plan prerequisite: `plans/KEY_BINDINGS_PLAN.md` predates the manager
-and still specifies `_config/config.yaml`, project actions and case-insensitive
-keys. Reconcile it with the retrieved `settings.yaml › keys` contract, current
-action/context IDs and distinct `t`/`T`, `x`/`X`, `n`/`N` shortcuts before coding.
-Advantage: one effective map can drive matching, help and hints. Disadvantage:
-text input, embedded/raw terminal ownership and overlapping action scopes require
-explicit precedence and collision rules; blindly implementing the old draft
-would regress existing keyboard behavior.
+Key-binding plan reconciliation is complete. The specification now describes
+`_config/settings.yaml`, manager action/context IDs, case-sensitive printable
+keys and explicit text/embedded/raw ownership. ADR 200 records the implementation
+contract and recovery behavior.
 
 2026-10-25 investigation: `attachDaemonTerminalFile` restores a VT checkpoint
 and relays output/input without framing; clears, absolute cursor addressing,

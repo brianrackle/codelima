@@ -10,6 +10,7 @@ import (
 // A review owns its node and optional attachment identity until it closes.
 // Refreshes update evidence, never the target of a pending destructive action.
 type tuiNodeConfirmation struct {
+	tuiOverlayKeys
 	app                       *vaxisTUIApp
 	node                      Node
 	action                    tuiActionID
@@ -210,40 +211,40 @@ func (d *tuiNodeConfirmation) Update(event vaxis.Event) (bool, error) {
 		return false, nil
 	}
 	switch {
-	case key.Matches(vaxis.KeyPgUp):
+	case overlayKeyAction(d, key) == "overlay.page_up":
 		d.scroll = max(0, d.scroll-max(1, d.height-1))
-	case key.Matches(vaxis.KeyPgDown):
+	case overlayKeyAction(d, key) == "overlay.page_down":
 		d.scroll += max(1, d.height-1)
-	case key.Matches(vaxis.KeyHome) && d.action == tuiActionNodeStop:
+	case overlayKeyAction(d, key) == "overlay.first" && d.action == tuiActionNodeStop:
 		d.scroll = 0
-	case key.Matches(vaxis.KeyEnd) && d.action == tuiActionNodeStop:
+	case overlayKeyAction(d, key) == "overlay.last" && d.action == tuiActionNodeStop:
 		d.scroll = d.totalRows
-	case isOverlayCancelKey(key):
+	case overlayKeyAction(d, key) == "dialog.cancel":
 		if tuiKeyActivates(key, true) {
 			return d.activate("cancel")
 		}
-	case d.clone != nil && (key.Matches(vaxis.KeyTab) || key.Matches(vaxis.KeyTab, vaxis.ModShift)):
+	case d.clone != nil && (overlayKeyAction(d, key) == "review.next" || overlayKeyAction(d, key) == "dialog.previous"):
 		d.clone.checkFocus = !d.clone.checkFocus
-	case d.clone != nil && key.Matches(vaxis.KeyEnter):
+	case d.clone != nil && overlayKeyAction(d, key) == "dialog.accept":
 		if tuiKeyActivates(key, true) {
 			if d.clone.checkFocus {
 				return d.activate("start-clone")
 			}
 			d.clone.checkFocus = true
 		}
-	case d.clone != nil && d.clone.checkFocus && key.Matches(' '):
+	case d.clone != nil && d.clone.checkFocus && overlayKeyAction(d, key) == "dialog.toggle":
 		if tuiKeyActivates(key, true) {
 			return d.activate("start-clone")
 		}
-	case key.Matches(vaxis.KeyEnter), key.Matches('s', vaxis.ModCtrl), d.action == tuiActionNodeStop && key.Matches('s'):
+	case overlayKeyAction(d, key) == "dialog.accept", overlayKeyAction(d, key) == "dialog.submit", d.action == tuiActionNodeStop && overlayKeyAction(d, key) == "review.run":
 		if tuiKeyActivates(key, true) {
 			return d.activate("submit")
 		}
-	case d.action == tuiActionNodeStop && key.Matches(' '):
+	case d.action == tuiActionNodeStop && overlayKeyAction(d, key) == "review.skip_idle":
 		if tuiKeyActivates(key, true) {
 			return d.activate("skip-idle")
 		}
-	case d.action == tuiActionNodeStop && key.Matches('x'):
+	case d.action == tuiActionNodeStop && overlayKeyAction(d, key) == "review.attach":
 		if tuiKeyActivates(key, true) {
 			return d.activate("attach")
 		}
@@ -275,10 +276,10 @@ func (d *tuiNodeConfirmation) PreferredSize() (int, int) {
 
 func (d *tuiNodeConfirmation) FooterHint() string {
 	if d.clone != nil {
-		return "Ctrl+s clone · Tab name/start · Space toggle · PgUp/PgDn review · Esc cancel"
+		return d.bindingHints("{dialog.submit} clone · {review.next} name/start · {dialog.toggle} toggle · {overlay.page_up overlay.page_down} review · {dialog.cancel} cancel")
 	}
 	if d.action == tuiActionNodeDelete {
-		return "Enter delete after exact name · PgUp/PgDn review · Esc cancel"
+		return d.bindingHints("{dialog.accept} delete after exact name · {overlay.page_up overlay.page_down} review · {dialog.cancel} cancel")
 	}
-	return "s stop · x inspect guest · Space toggle · PgUp/PgDn review · Esc cancel"
+	return d.bindingHints("{review.run} stop · {review.attach} inspect guest · {review.skip_idle} toggle · {overlay.page_up overlay.page_down} review · {dialog.cancel} cancel")
 }

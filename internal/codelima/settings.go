@@ -23,6 +23,7 @@ type ShellSettings struct {
 // at creation, while each frontend owns its presentation preferences.
 func (s *Service) SettingsRead() (Config, error) {
 	cfg := s.cfg
+	cfg.Keys, cfg.keyBindingDecodeError = nil, ""
 	if err := readYAMLFile(s.store.configPath(), &cfg); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Config{}, metadataCorruption("failed to load settings.yaml", err, nil)
 	}
@@ -38,13 +39,19 @@ func (s *Service) SettingsUpdate(ctx context.Context, key, value string) (Config
 	if err != nil {
 		return Config{}, err
 	}
+	return s.editSettings(ctx, strings.HasPrefix(key, "keys."), func(root *yaml.Node) error {
+		return patchSetting(root, managerSettingPath(key), parsed)
+	})
+}
+
+func (s *Service) editSettings(ctx context.Context, validateKeys bool, edit func(*yaml.Node) error) (Config, error) {
 	// Preferences do not need template seeding. In particular, a seed repair
 	// must not replace a malformed authored file before we can reject it.
 	if err := s.ensureDirectories(); err != nil {
 		return Config{}, err
 	}
 	var result Config
-	err = s.withLocks(ctx, []lockKey{lockSettings}, nil, func() error {
+	err := s.withLocks(ctx, []lockKey{lockSettings}, nil, func() error {
 		path := s.store.configPath()
 		data, err := os.ReadFile(path)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -61,14 +68,20 @@ func (s *Service) SettingsUpdate(ctx context.Context, key, value string) (Config
 			}
 			root = document.Content[0]
 		}
-		if err := patchSetting(root, strings.Split(key, "."), parsed); err != nil {
+		if err := edit(root); err != nil {
 			return err
 		}
 		result = s.cfg
+		result.Keys = cloneKeyBindingConfig(s.cfg.Keys)
 		if err := root.Decode(&result); err != nil {
 			return metadataCorruption("invalid settings.yaml", err, nil)
 		}
 		result.MetadataRoot = s.cfg.MetadataRoot
+		if validateKeys {
+			if _, err := compileConfiguredKeyBindings(result); err != nil {
+				return err
+			}
+		}
 		encoded, err := yamlBytes(root)
 		if err != nil {
 			return err
@@ -79,6 +92,9 @@ func (s *Service) SettingsUpdate(ctx context.Context, key, value string) (Config
 }
 
 func parseManagerSetting(key, value string) (any, error) {
+	if strings.HasPrefix(key, "keys.") {
+		return parseKeyBindingSetting(key, value)
+	}
 	var allowed []string
 	switch key {
 	case "shell.mode":

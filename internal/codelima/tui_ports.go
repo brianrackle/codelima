@@ -32,8 +32,8 @@ type tuiPortMouseRow struct {
 	rect tuiRect
 }
 type tuiPortControl struct {
-	key  vaxis.Key
-	rect tuiRect
+	action string
+	rect   tuiRect
 }
 type tuiPortsEvent struct {
 	generation uint64
@@ -165,6 +165,10 @@ func (a *vaxisTUIApp) updatePortsInput(event vaxis.Event) {
 }
 
 func (a *vaxisTUIApp) handlePortsSearchKey(key vaxis.Key) bool {
+	return a.handlePortsSearchAction(a.keyAction(key), key)
+}
+
+func (a *vaxisTUIApp) handlePortsSearchAction(action string, key vaxis.Key) bool {
 	s := &a.ports
 	if a.view != tuiViewPorts || s.input == nil {
 		return false
@@ -172,11 +176,11 @@ func (a *vaxisTUIApp) handlePortsSearchKey(key vaxis.Key) bool {
 	switch {
 	case key.EventType == vaxis.EventPaste:
 		a.updatePortsInput(key)
-	case key.Matches(vaxis.KeyEsc) && tuiKeyActivates(key, true):
+	case action == "input.cancel" && tuiKeyActivates(key, true):
 		s.query, s.input = s.beforeQuery, nil
 		s.selected = s.beforeSelected
 		a.reconcilePortSelection()
-	case key.Matches(vaxis.KeyEnter) && tuiKeyActivates(key, true):
+	case action == "input.accept" && tuiKeyActivates(key, true):
 		s.input = nil
 	default:
 		a.updatePortsInput(key)
@@ -184,28 +188,28 @@ func (a *vaxisTUIApp) handlePortsSearchKey(key vaxis.Key) bool {
 	return true
 }
 
-func (a *vaxisTUIApp) handlePortsKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handlePortsAction(action string) bool {
 	if a.view != tuiViewPorts {
 		return false
 	}
 	s := &a.ports
 	row, selected := a.portSelection()
 	switch {
-	case key.MatchString("/"):
+	case action == "ports.filter":
 		s.beforeQuery, s.input = s.query, textinput.New()
 		s.beforeSelected = s.selected
 		s.input.SetContent(s.query)
-	case key.MatchString("C"):
+	case action == "ports.refresh":
 		a.startPortsLoad(true)
-	case key.Matches(vaxis.KeyPgDown):
+	case action == "navigation.page_down":
 		s.detailScroll += max(1, s.detailHeight-1)
-	case key.Matches(vaxis.KeyPgUp):
+	case action == "navigation.page_up":
 		s.detailScroll = max(0, s.detailScroll-max(1, s.detailHeight-1))
-	case key.MatchString("p"):
+	case action == "ports.pin":
 		a.pinSelectedPort()
-	case key.Matches(vaxis.KeyEnter):
+	case action == "ports.open_node":
 		a.openPortNode()
-	case key.MatchString("y"):
+	case action == "route.copy":
 		if selected {
 			if err := a.copyToHostClipboard(row.Address); err != nil {
 				a.setStatus(slog.LevelError, err.Error())
@@ -213,7 +217,7 @@ func (a *vaxisTUIApp) handlePortsKey(key vaxis.Key) bool {
 				a.setStatus(slog.LevelInfo, "Copied "+row.Address)
 			}
 		}
-	case key.MatchString("o"):
+	case action == "route.open":
 		if selected && row.Kind == "http" && row.Status != "conflicted" {
 			if err := a.openHyperlink(row.Address); err != nil {
 				a.setStatus(slog.LevelError, err.Error())
@@ -320,7 +324,7 @@ func (a *vaxisTUIApp) handlePortsMouse(mouse vaxis.Mouse) bool {
 	case vaxis.MouseLeftButton:
 		for _, control := range a.ports.controls {
 			if control.rect.contains(mouse.Col, mouse.Row) {
-				a.handleKey(control.key)
+				a.dispatchManagerAction(control.action, vaxis.Key{})
 				return true
 			}
 		}

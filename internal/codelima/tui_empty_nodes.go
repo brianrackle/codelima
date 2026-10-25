@@ -43,7 +43,7 @@ func (a *vaxisTUIApp) emptyNodeBlockReason() string {
 		return "Host checks unavailable: " + plainLogText(a.doctor.err.Error())
 	}
 	if a.doctor.checkedAt.IsZero() {
-		return "Host checks pending · R re-check"
+		return a.keyHints("Host checks pending · {fleet.recheck} re-check")
 	}
 	for _, check := range a.doctor.report.Checks {
 		if check.Status == "fail" {
@@ -67,13 +67,13 @@ func (a *vaxisTUIApp) emptyNodeLines(theme tuiTheme) ([]tuiEmptyNodeLine, []tuiE
 		{text: "A node is a Linux VM bound to a directory.", style: theme.muted},
 		{text: "Choose its resources, workspace mode and agent setup.", style: theme.muted},
 		{},
-		{text: "n  Create a node for " + directory, key: "n", style: createStyle},
+		{text: a.keyMap().PrimaryHint("node.create") + "  Create a node for " + directory, key: "node.create", style: createStyle},
 	}
 	defaults := "   Loading default template…"
 	if a.managerData.err != nil {
-		defaults = "   Template defaults unavailable · R re-check"
+		defaults = a.keyHints("   Template defaults unavailable · {fleet.recheck} re-check")
 	} else if a.managerData.configurationsLoaded || len(a.managerData.configurations) != 0 {
-		defaults = "   Default template small unavailable · 2 Templates"
+		defaults = a.keyHints("   Default template small unavailable · {view.recipes} Templates")
 		for _, c := range a.managerData.configurations {
 			if c.Slug == DefaultConfigurationSlug {
 				defaults = fmt.Sprintf("   %s · %d vCPU · %s memory · %s disk · %s", c.Slug, c.VCPUs, formatTUIResourceSize(c.MemoryMiB), formatTUIResourceSize(c.DiskMiB), DefaultWorkspaceMode)
@@ -85,13 +85,13 @@ func (a *vaxisTUIApp) emptyNodeLines(theme tuiTheme) ([]tuiEmptyNodeLine, []tuiE
 		}
 	}
 	left = append(left,
-		tuiEmptyNodeLine{text: defaults, key: "n", style: theme.dim},
+		tuiEmptyNodeLine{text: defaults, key: "node.create", style: theme.dim},
 		tuiEmptyNodeLine{},
-		tuiEmptyNodeLine{text: "2  Browse templates · built-ins or your own", key: "2", style: theme.text},
-		tuiEmptyNodeLine{text: "5  System · doctor, daemon, settings", key: "5", style: theme.text},
+		tuiEmptyNodeLine{text: a.keyMap().PrimaryHint("view.recipes") + "  Browse templates · built-ins or your own", key: "view.recipes", style: theme.text},
+		tuiEmptyNodeLine{text: a.keyMap().PrimaryHint("view.system") + "  System · doctor, daemon, settings", key: "view.system", style: theme.text},
 	)
 	if a.treeWorkspaceRoot != "" {
-		left = append(left, tuiEmptyNodeLine{text: "0  Show all nodes · leave this directory scope", key: "0", style: theme.text})
+		left = append(left, tuiEmptyNodeLine{text: a.keyMap().PrimaryHint("scope.toggle") + "  Show all nodes · leave this directory scope", key: "scope.toggle", style: theme.text})
 	}
 	left = append(left, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: "HOST CHECK", style: theme.muted})
 	if a.doctor.checkedAt.IsZero() && a.doctor.err == nil {
@@ -125,10 +125,10 @@ func (a *vaxisTUIApp) emptyNodeLines(theme tuiTheme) ([]tuiEmptyNodeLine, []tuiE
 		right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: "◐ Re-checking · showing the last result", style: theme.amber})
 	}
 	if count := len(a.doctor.report.Warnings); count != 0 {
-		right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: fmt.Sprintf("%d additional findings · 5 Doctor", count), key: "5", style: theme.amber})
+		right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: a.keyHintsFormat("%d additional findings · {view.system} Doctor", count), key: "view.system", style: theme.amber})
 	}
-	right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: "R  Re-check host and template defaults", key: "R", style: theme.mint},
-		tuiEmptyNodeLine{text: "5  Open full Doctor findings", key: "5", style: theme.mint})
+	right = append(right, tuiEmptyNodeLine{}, tuiEmptyNodeLine{text: a.keyMap().PrimaryHint("fleet.recheck") + "  Re-check host and template defaults", key: "fleet.recheck", style: theme.mint},
+		tuiEmptyNodeLine{text: a.keyMap().PrimaryHint("view.system") + "  Open full Doctor findings", key: "view.system", style: theme.mint})
 	return left, right
 }
 
@@ -173,15 +173,15 @@ func (a *vaxisTUIApp) drawEmptyNodes(win vaxis.Window, theme tuiTheme) {
 		tuiLine(outer.New(2, 0, bw-4, 1), 0, " "+label+" ", style)
 		// A long failure is always available in the scrollable main panel.
 		if overflowRight {
-			tuiLine(outer.New(2, height-1, bw-4, 1), 0, " PgUp/PgDn for full details ", theme.dim)
+			tuiLine(outer.New(2, height-1, bw-4, 1), 0, a.keyHints(" {navigation.page_up navigation.page_down} for full details "), theme.dim)
 		}
 		a.drawEmptyNodeLines(body, right, false, 1)
 	}
 	reason := a.emptyNodeBlockReason()
 	if reason == "" {
-		reason = "PgUp/PgDn scroll · R re-check host and template defaults"
+		reason = a.keyHints("{navigation.page_up navigation.page_down} scroll · {fleet.recheck} re-check host and template defaults")
 	} else {
-		reason = "n unavailable · PgUp/PgDn scroll · " + reason
+		reason = a.keyHints("{node.create} unavailable · {navigation.page_up navigation.page_down} scroll · ") + reason
 	}
 	tuiLine(win.New(2, h-3, w-4, 1), 0, reason, theme.dim)
 }
@@ -221,20 +221,20 @@ func (a *vaxisTUIApp) drawEmptyNodeLines(win vaxis.Window, lines []tuiEmptyNodeL
 	}
 }
 
-func (a *vaxisTUIApp) handleEmptyNodesKey(key vaxis.Key) bool {
+func (a *vaxisTUIApp) handleEmptyNodesAction(action string, key vaxis.Key) bool {
 	if !a.emptyNodesVisible() {
 		return false
 	}
 	switch {
-	case key.Matches(vaxis.KeyPgDown):
+	case action == "navigation.page_down":
 		a.emptyNodes.scroll += max(1, a.emptyNodes.height-1)
-	case key.Matches(vaxis.KeyPgUp):
+	case action == "navigation.page_up":
 		a.emptyNodes.scroll = max(0, a.emptyNodes.scroll-max(1, a.emptyNodes.height-1))
-	case key.Matches(vaxis.KeyDown), key.MatchString("j"):
+	case action == "navigation.down":
 		a.emptyNodes.scroll++
-	case key.Matches(vaxis.KeyUp), key.MatchString("k"):
+	case action == "navigation.up":
 		a.emptyNodes.scroll = max(0, a.emptyNodes.scroll-1)
-	case key.MatchString("R"):
+	case action == "fleet.recheck":
 		if tuiKeyActivates(key, true) {
 			a.claimShortcutKey(key)
 			a.startDoctorCheck(false, true)
@@ -261,7 +261,7 @@ func (a *vaxisTUIApp) handleEmptyNodesMouse(mouse vaxis.Mouse) bool {
 	case vaxis.MouseLeftButton:
 		for _, control := range a.emptyNodes.controls {
 			if control.rect.contains(mouse.Col, mouse.Row) {
-				a.handleKey(vaxis.Key{Keycode: []rune(control.key)[0], Text: control.key})
+				a.dispatchManagerAction(control.key, vaxis.Key{})
 				break
 			}
 		}
