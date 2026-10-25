@@ -337,13 +337,13 @@ compact guide was run again. All `tmp/eq` fixtures, processes and mounts were
 removed; the attempted outside-scope disposable node failed at disk allocation
 and was rolled back without starting a VM.
 
-Remaining first-run problem: this VM's real Doctor reports inaccessible
-`/dev/kvm`, so a live healthy-host transition and native terminal rendering are
-unqualified. Suggested solution: run the QA.md guide flow on a supported host,
-correct a real prerequisite, re-check and open/cancel scoped creation at both
-sizes. Advantages: qualifies actual host recovery and native presentation.
-Disadvantages: requires a separate host and cannot be replaced by the passing
-healthy/recovery unit fixture. Final automated checks passed: core unit 76.086s,
+First-run healthy recovery is now qualified locally: the existing KVM-group
+helper allowed real healthy checks, invalid disposable settings blocked
+creation, and restoration plus Re-check enabled scoped creation at both sizes.
+The forms were canceled and all disposable state cleaned. Native terminal
+rendering remains unqualified. Suggested solution: repeat the QA.md guide flow
+on a supported native host. Advantage: verifies native presentation;
+disadvantage: requires that host. Earlier automated checks passed: core unit 76.086s,
 core race 104.842s, CLI integration 17.651s, formatting/lint, Vaxis and builds.
 Gopls reported only existing style suggestions outside the changes. Verification
 logs and Go scratch were cleaned; the overall artboard/cross-view QA scope remains

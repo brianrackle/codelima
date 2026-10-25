@@ -13,7 +13,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Navigation map](reference/NavMap.dc.html) | Launch, global views, detail/back, editors/pickers, confirmations and shell routes | Implemented through the shared action/context registry and existing navigation (ADRs 150–200); attached-header presentation remains separately tracked below |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Palette, states, gauges and motion | Partial: shared fill/track gauges and 10-fps foreground progress cells (ADRs 201–202); final qualification remains |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
-| [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
+| [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls, defaults and live healthy recovery/create-form handoff verified; final native/artboard qualification remains |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); recorded auth imports (ADR 203), observed guest architecture/KVM access and real clone-check provenance (ADR 204); final artboard/native qualification remains |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
@@ -37,6 +37,19 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+First-run recovery qualification, 2026-10-25: the existing process-local KVM
+group helper allowed real healthy Doctor checks in this Linux VM. At 150×38
+truecolor and 80×24 ANSI, invalidating only the disposable settings file made
+Re-check block creation. Restoring the file and re-checking in the same frontend
+removed the failure and enabled the scoped New node form. Both forms were
+canceled; settings were restored and node metadata remained empty. Healthy
+guide and form captures were visually inspected, including completed directory
+validation. The daemon, frontends, tmux, 64 MiB tmpfs, store, workspace, captures
+and scratch were removed. No VM or credential import was created, no production
+code changed, and no full test gate was repeated. This closes the previously
+unqualified live recovery flow; it does not establish nested-KVM boot or native
+macOS/terminal qualification.
 
 Startup-header checkpoint (ADR 205), 2026-10-25: a real tmux capture reproduced
 RGB logo cells during ANSI startup. Animation ticks bypassed the saved color

@@ -878,10 +878,12 @@ check, keyboard/mouse/palette actions, Doctor return after Settings, scoped and
 all-node create-form defaults via Templates, filter clearing, paging/wheel and
 resource reload without metadata changes. ANSI screenshots were inspected and
 the final rebuilt compact guide was rerun. Fixture metadata, captures, processes
-and mounts were cleaned. This VM has no accessible `/dev/kvm`; a live transition
-to healthy host checks and native terminal presentation still need the flow
-above on a supported host. Automated fixtures cover healthy recovery and long
-diagnostics; they do not replace those manual qualifications.
+and mounts were cleaned. A later live run used the existing process-local KVM
+group helper and passed healthy/failed/recovered checks at 150×38 truecolor and
+80×24 ANSI: invalid disposable settings blocked creation; restoring them and
+re-checking enabled the scoped form. Both forms were canceled, zero nodes were
+created, and all verification state was cleaned. This proves guide recovery,
+not nested-KVM boot. Native terminal presentation still needs qualification.
 
 - At 150×38, verify the fleet spans the window and the selected preview sits
   below it. At 120 columns the large preview disappears; at 80×24 the table
