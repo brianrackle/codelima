@@ -33,9 +33,9 @@ func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {
 	tableHeight := min(max(6, len(rows)*rowHeight+3), max(6, h/2-3))
 	outer := win.New(1, 2, w-2, tableHeight)
 	box := border.All(outer, theme.mint)
-	title := fmt.Sprintf(" Ports · %d routes · %d nodes · port ▲ ", len(s.snapshot.Rows), len(s.snapshot.Nodes))
+	title := fmt.Sprintf(" Ports · %s · %s · port ▲ ", countLabel(len(s.snapshot.Rows), "route", "routes"), countLabel(len(s.snapshot.Nodes), "node", "nodes"))
 	if w >= 120 {
-		title = fmt.Sprintf(" Ports · %d routes on %d nodes · discovery %ds · port ▲ ", len(s.snapshot.Rows), len(s.snapshot.Nodes), s.snapshot.IntervalSeconds)
+		title = fmt.Sprintf(" Ports · %s on %s · discovery %ds · port ▲ ", countLabel(len(s.snapshot.Rows), "route", "routes"), countLabel(len(s.snapshot.Nodes), "node", "nodes"), s.snapshot.IntervalSeconds)
 	}
 	tuiLine(outer.New(2, 0, w-6, 1), 0, title, theme.mint)
 	bodyWidth, _ := box.Size()

@@ -448,5 +448,5 @@ func (a *vaxisTUIApp) fleetNodeAction(action tuiActionID) error {
 	}
 	verb := strings.TrimPrefix(string(action), "node.")
 	verb = strings.ToUpper(verb[:1]) + verb[1:]
-	return a.openBatchReview(fmt.Sprintf("%s %d nodes?", verb, len(targets)), plan, true)
+	return a.openBatchReview(fmt.Sprintf("%s %s?", verb, countLabel(len(targets), "node", "nodes")), plan, true)
 }

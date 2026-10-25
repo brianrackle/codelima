@@ -686,6 +686,9 @@ Parallel batch review and execution (ADR 198):
    restart and delete at 150×38 truecolor and 80×24 ANSI. Every captured target
    remains reachable by scrolling. Check guest/host impact and observed resource
    release. Selection/filter changes cannot enlarge the review.
+   With one node, the fleet/group count and marked deletion review use `1 node`,
+   `this node` and singular VM/disk wording. With two nodes, those counts and
+   prompts use plural wording. Check both sizes and cancel each wording review.
 2. For deletion, incorrect or space-padded counts must fail. Paste the exact
    count without submitting, then cancel. Repeat/release/pasted shortcuts and
    60×14/40×10 screens must not admit work. Restore size and use mouse/keyboard.

@@ -103,7 +103,7 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 		}
 	}
 	if unknown > 0 {
-		add(fmt.Sprintf("%d sessions have unknown kind; inspect before proceeding.", unknown), t.amber)
+		add(countLabel(unknown, "session has unknown kind; inspect before proceeding.", "sessions have unknown kind; inspect before proceeding."), t.amber)
 	}
 	return lines
 }

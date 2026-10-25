@@ -327,7 +327,7 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 	for _, record := range a.fleet.records {
 		counts[record.Status]++
 	}
-	countText := fmt.Sprintf("%d nodes", len(a.fleet.records))
+	countText := countLabel(len(a.fleet.records), "node", "nodes")
 	for _, status := range []string{"running", "starting", "stopped", "created", "failed"} {
 		if count := counts[status]; count > 0 {
 			glyph, _ := theme.status(status)
@@ -376,7 +376,7 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 	}
 	for row, item := range a.fleetMouseRows {
 		if item.NodeID == "" {
-			tuiLine(content, row, fmt.Sprintf("▾ %s · %d nodes", item.Directory, item.Count), theme.muted)
+			tuiLine(content, row, fmt.Sprintf("▾ %s · %s", item.Directory, countLabel(item.Count, "node", "nodes")), theme.muted)
 			continue
 		}
 		a.drawFleetRecord(content.New(0, row, innerWidth, 1), byID[item.NodeID], columns, layout.Compact, theme)

@@ -80,7 +80,7 @@ func (a *vaxisTUIApp) fleetPhase(nodeID string) string {
 		progress := operation.Progress
 		text := plainLogText(progress.Phase)
 		if progress.Total > 0 {
-			text += fmt.Sprintf(" %d/%d phases", progress.Completed, progress.Total)
+			text += fmt.Sprintf(" %d/%s", progress.Completed, countLabel(progress.Total, "phase", "phases"))
 		}
 		if progress.Detail != "" {
 			text += " · " + plainLogText(progress.Detail)
@@ -215,7 +215,7 @@ func (a *vaxisTUIApp) markedImpact() tuiMarkedImpact {
 }
 
 func (impact tuiMarkedImpact) summary() string {
-	text := fmt.Sprintf("%d marked · %d hidden · %d sessions", len(impact.targets), impact.hidden, impact.sessions)
+	text := fmt.Sprintf("%d marked · %d hidden · %s", len(impact.targets), impact.hidden, countLabel(impact.sessions, "session", "sessions"))
 	if impact.working > 0 {
 		text += fmt.Sprintf(" · %d working", impact.working)
 	}
@@ -242,7 +242,7 @@ func (a *vaxisTUIApp) drawMarkedPreview(win vaxis.Window, theme tuiTheme) {
 		if i >= limit {
 			break
 		}
-		text := fmt.Sprintf("%-20s %-12s %2d vCPU  %6s memory  %d sessions", record.Node.Slug, record.Node.ConfigurationSlug, record.Node.VCPUs, formatTUIResourceSize(record.Node.MemoryMiB), record.Sessions)
+		text := fmt.Sprintf("%-20s %-12s %2d vCPU  %6s memory  %s", record.Node.Slug, record.Node.ConfigurationSlug, record.Node.VCPUs, formatTUIResourceSize(record.Node.MemoryMiB), countLabel(record.Sessions, "session", "sessions"))
 		if !slices.ContainsFunc(a.fleet.visible, func(r tuiFleetRecord) bool { return r.Node.ID == record.Node.ID }) {
 			text += " · hidden by filter"
 		}

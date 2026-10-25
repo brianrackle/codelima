@@ -138,7 +138,7 @@ func (a *vaxisTUIApp) daemonOverviewRows() []string {
 	}
 	rows = append(rows, "forwarding  "+forwarding)
 	if f.DegradedPorts > 0 || f.LapsedRoutes > 0 {
-		rows = append(rows, fmt.Sprintf("            %d ports degraded · %d routes lapsed", f.DegradedPorts, f.LapsedRoutes))
+		rows = append(rows, fmt.Sprintf("            %s degraded · %s lapsed", countLabel(f.DegradedPorts, "port", "ports"), countLabel(f.LapsedRoutes, "route", "routes")))
 	}
 	if f.InventoryError != "" {
 		rows = append(rows, "            node inventory unavailable · Enter details")
@@ -156,7 +156,7 @@ func (a *vaxisTUIApp) daemonOverviewRows() []string {
 	}
 	rows = append(rows, "virtiofs    "+reclaim)
 	if !r.LastRunAt.IsZero() {
-		rows = append(rows, fmt.Sprintf("            last %s · %d nodes", r.LastRunAt.Local().Format("15:04:05"), r.LastReclaimedNodes))
+		rows = append(rows, fmt.Sprintf("            last %s · %s", r.LastRunAt.Local().Format("15:04:05"), countLabel(r.LastReclaimedNodes, "node", "nodes")))
 	}
 	if r.LastError != "" {
 		rows = append(rows, "            reclaim failed · Enter details")

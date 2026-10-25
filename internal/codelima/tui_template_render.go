@@ -248,7 +248,7 @@ func (e *tuiTemplateEditor) impactSummary() string {
 	if !e.loaded {
 		return "loading usage…"
 	}
-	return fmt.Sprintf("%d existing nodes keep frozen values", len(e.usedNodes()))
+	return countLabel(len(e.usedNodes()), "existing node keeps frozen values", "existing nodes keep frozen values")
 }
 func (e *tuiTemplateEditor) changeLines() []string {
 	var out []string

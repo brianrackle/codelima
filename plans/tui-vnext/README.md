@@ -38,6 +38,40 @@ All example identities, metrics and timestamps in those files are reference data
 
 ## Cross-cutting requirements
 
+Count wording checkpoint, 2026-10-25: shared explicit singular/plural forms
+now cover fleet/group counts, captured batch titles and deletion prompts,
+retained batch display labels, Activity node/phase progress, palette targets and
+sessions, Ports, Doctor/System and template/environment usage. A one-node review
+also describes this node's sessions, VM and disk in the singular. This is a
+presentation change with no architecture or schema change.
+
+Existing manager and batch gates passed (17.497s and 4.445s); after the final
+singular impact wording, format/build and batch checks passed again (4.693s).
+Final manager and confirmation checks passed (19.409s and 4.426s). The existing
+System render test now expects the corrected `1 port degraded` wording.
+Targeted gopls found no errors. Final `make build verify test-race
+test-integration` passed with exit 0: core unit 93.928s, core race 126.776s and
+CLI integration 17.651s, plus format, lint, Vaxis and normal VCS-stamped builds.
+
+Live checks used disposable metadata targets without creating or booting a VM.
+One/two-node fleet and directory counts, marked deletion titles and exact-count
+prompts passed at 80×24 ANSI and 150×38. Final singular impact text passed at
+80×24/150×38 truecolor. Screens were captured from the running TUI and rendered
+for visual inspection. Both reviews were canceled; no lifecycle receipt was
+admitted and neither fixture was deleted by a review.
+
+Cleanup removed both metadata fixtures, stores, workspace, browser scratch,
+captures, scripts, logs and completed Go/integration scratch. The isolated
+16-MiB socket tmpfs was unmounted; a privileged audit found no owned process
+survivors. Removed 48 new inactive exact-content inputrc files, preserving 1,015
+older files and the active user's INPUTRC. Removed only the owned test-launch
+line from guest shell history. The baseline VM disk hash is unchanged from the
+ADR 199 checkpoint. One cleanup item remains explicit in TODO #57:
+`tmp/countq/tmux`, created by the failed first tmux launch on virtiofs, returns
+EOPNOTSUPP for guest stat/unlink/rename and requires host-side removal. The user
+has been asked to remove that one entry. This count checkpoint is not complete
+until it is gone; all other owned verification artifacts have been removed.
+
 ADR 199 checkpoint, 2026-10-25: a real no-frontend audit reproduced the orphaned
 host terminal: its node was deleted but the terminal ID, PID and exported state
 survived. Deletion now removes the complete node-owned session set in the daemon

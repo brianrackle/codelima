@@ -70,7 +70,7 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 		tuiLine(progress, 1, "Waiting for observed phase data…", theme.dim)
 	}
 	if wide && !operation.CreatedAt.IsZero() {
-		tuiLine(progress, progressHeight-4, fmt.Sprintf("%d/%d phases complete · %s elapsed", completed, len(operation.Phases), time.Since(operation.CreatedAt).Truncate(time.Second)), theme.amber)
+		tuiLine(progress, progressHeight-4, fmt.Sprintf("%d/%s complete · %s elapsed", completed, countLabel(len(operation.Phases), "phase", "phases"), time.Since(operation.CreatedAt).Truncate(time.Second)), theme.amber)
 		tuiLine(progress, progressHeight-3, "Durations reflect observed work.", theme.dim)
 	}
 	if wide {

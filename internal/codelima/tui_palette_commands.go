@@ -34,7 +34,7 @@ func (a *vaxisTUIApp) paletteCommands() []tuiPaletteCommand {
 	daemonHint := "Status not sampled yet"
 	if !a.systemDaemon.checkedAt.IsZero() {
 		s := a.systemDaemon.overview.Status
-		daemonHint = fmt.Sprintf("pid %d · %d sessions · cached", s.PID, s.TerminalCount)
+		daemonHint = fmt.Sprintf("pid %d · %s · cached", s.PID, countLabel(s.TerminalCount, "session", "sessions"))
 		if a.systemDaemon.err != nil || a.daemonDisconnected {
 			daemonHint = "Retained status · connection unavailable"
 		}
@@ -172,7 +172,7 @@ func (a *vaxisTUIApp) paletteNodeHint(node Node, action tuiActionID) (string, bo
 		if a.daemonDisconnected {
 			hint += " · session impact unavailable"
 		} else {
-			hint += fmt.Sprintf(" · %d known guest sessions end", guest)
+			hint += fmt.Sprintf(" · %s", countLabel(guest, "known guest session ends", "known guest sessions end"))
 			if unknown > 0 {
 				hint += fmt.Sprintf(" · %d unclassified", unknown)
 			}

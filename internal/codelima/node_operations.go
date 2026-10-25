@@ -295,7 +295,7 @@ func (m *nodeOperations) Submit(ctx context.Context, request NodeOperationReques
 		if err != nil {
 			return NodeOperation{}, err
 		}
-		node.Slug = fmt.Sprintf("%d nodes", batch.Total)
+		node.Slug = countLabel(batch.Total, "node", "nodes")
 	}
 	if request.Kind == "test-environment" {
 		environmentTest, err = m.service.prepareEnvironmentTest(ctx, request.Environment)

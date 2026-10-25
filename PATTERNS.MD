@@ -943,6 +943,14 @@ Reuse captured-node reviews for clone inputs. Load all names off the UI loop,
 apply only to the same live review, preserve edits and let the service arbitrate
 final uniqueness. The checkbox belongs to this request, not global settings.
 
+## Use explicit singular and plural forms for visible counts
+
+Use `countLabel` for a number with its noun and `pluralForm` for a phrase whose
+verb or pronoun also changes. Supply both forms explicitly, including irregular
+words. Exactly one selects the singular; zero selects the plural. Fleet, review,
+Activity and resource summaries share these helpers so a one-member batch reads
+as one node throughout its review and retained display label.
+
 ## Finish deleted-target session cleanup before releasing operation ownership (ADR 199)
 
 Use the committed node tombstone as the authority for terminal teardown, even

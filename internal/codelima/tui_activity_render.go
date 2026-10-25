@@ -224,9 +224,9 @@ func drawActivityRunningRow(win vaxis.Window, row tuiActivityRow, theme tuiTheme
 	if p := row.progress; p != nil && p.Total > 0 {
 		phase, detail = p.Phase, p.Detail
 		completed := max(0, min(p.Completed, p.Total))
-		count = fmt.Sprintf("%d/%d phases", completed, p.Total)
+		count = fmt.Sprintf("%d/%s", completed, countLabel(p.Total, "phase", "phases"))
 		if row.kind == "batch" {
-			count = fmt.Sprintf("%d/%d nodes", completed, p.Total)
+			count = fmt.Sprintf("%d/%s", completed, countLabel(p.Total, "node", "nodes"))
 		}
 		filled := 12 * completed / p.Total
 		bar = strings.Repeat("█", filled) + strings.Repeat("░", 12-filled)

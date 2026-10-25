@@ -127,10 +127,24 @@ no longer depends on a frontend. Disadvantages: physical PTY teardown remains
 bounded and asynchronous, and persistence errors can report a partial outcome
 after deletion has committed.
 
-Presentation follow-up: one marked target currently says `Delete 1 nodes?`, and
-the fleet similarly says `1 nodes`. Use shared singular/plural count formatting
-and cover one/multiple targets in final artboard checks. Advantage: consistent
-user-facing wording; disadvantage: several existing count labels need review.
+Count wording is corrected through shared explicit singular/plural forms in the
+fleet, captured reviews, Activity and related node/session/route summaries.
+One-node deletion also uses singular impact text. Focused manager/batch/review
+checks and final format, lint, build, unit, race and CLI integration gates passed.
+Live count/title/prompt and corrected-impact checks passed at compact/wide sizes.
+All removable verification state is cleaned; the one shared socket below remains.
+This presentation change does not complete the remaining artboard qualification.
+
+Count-check cleanup remains open: the first tmux launch placed its socket at
+`tmp/countq/tmux` on the macOS virtiofs share. The VM now returns EOPNOTSUPP for
+stat, unlink and rename, including as root. The later isolated socket tmpfs was
+unmounted and all manual TUI/daemon/tmux/browser processes stopped. Suggested
+solution: remove only `/Users/brianrackle/personal/codelima/tmp/countq/tmux` from
+the Mac, then remove the now-empty local verification directory.
+The user has been asked for that host cleanup; this VM has no authenticated SSH
+login to the Mac. Advantage: removes the owned artifact without disrupting the
+shared workspace or restarting the VM. Disadvantage: requires one host-side
+step. Do not count verification cleanup as complete while that entry remains.
 
 Confirmation work (ADR 196): single-node delete/stop review, exact-name gating,
 captured attachment, guest/host impact and host-tab preservation are implemented;
@@ -220,6 +234,26 @@ then qualify full-screen applications, resets, mouse/query replies and resize.
 Advantage: preserves the source's no-embedded-emulator contract. Disadvantage:
 a persistent portable header cannot simply be painted over raw terminal output;
 its fidelity and fallback require an explicit decision before completion.
+
+Kit reference audit, 2026-10-25: the palette, status glyphs, ANSI/reverse-video
+fallback, 70/90 percent thresholds and fractional gauge strings already map to
+`tui_theme.go` and `TestTUIManagerThemeAndGauges`. The reference's `#2b3a49` track
+token is absent, and gauge strings currently paint filled and empty cells with
+one style. Add a shared segmented gauge renderer with a track style and use it
+in fleet/detail/resource summaries; verify fractional and unavailable values at
+both color depths. Also qualify the Kit's 10-fps spinner requirement before
+marking that reference complete. Advantage: matches the design's visual metric
+hierarchy. Disadvantage: gauge call sites currently return flattened text, so
+style separation requires coordinated rendering changes and regression checks.
+
+Key-binding plan prerequisite: `plans/KEY_BINDINGS_PLAN.md` predates the manager
+and still specifies `_config/config.yaml`, project actions and case-insensitive
+keys. Reconcile it with the retrieved `settings.yaml › keys` contract, current
+action/context IDs and distinct `t`/`T`, `x`/`X`, `n`/`N` shortcuts before coding.
+Advantage: one effective map can drive matching, help and hints. Disadvantage:
+text input, embedded/raw terminal ownership and overlapping action scopes require
+explicit precedence and collision rules; blindly implementing the old draft
+would regress existing keyboard behavior.
 
 2026-10-25 investigation: `attachDaemonTerminalFile` restores a VT checkpoint
 and relays output/input without framing; clears, absolute cursor addressing,

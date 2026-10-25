@@ -119,7 +119,7 @@ func TestTUISystemDaemonObservedStatusAndDetailsAtBothSizes(t *testing.T) {
 		}})
 		a.draw()
 		screen := renderedScreenText(t, a.vx, size[0], size[1])
-		for _, want := range []string{"pid 123", "0.4.0", "2 subscribers", "this TUI holds seat", "4 listeners", "1 ports degraded", "2 routes lapsed", "unsupported on host", "Enter details"} {
+		for _, want := range []string{"pid 123", "0.4.0", "2 subscribers", "this TUI holds seat", "4 listeners", "1 port degraded", "2 routes lapsed", "unsupported on host", "Enter details"} {
 			if !strings.Contains(screen, want) {
 				t.Fatalf("missing %q at %v:\n%s", want, size, screen)
 			}

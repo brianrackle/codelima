@@ -42,7 +42,7 @@ func (a *vaxisTUIApp) paletteBatchCommands() []tuiPaletteCommand {
 			names = append(names, name)
 		}
 		title := "start all in " + dir
-		commands = append(commands, tuiPaletteCommand{id: "start-directory:" + dir, group: "ACTIONS", label: title, hint: fmt.Sprintf("%d nodes · %s", len(plan), strings.Join(names, ", ")), run: func() error { return a.reviewPaletteBatch(title, plan) }})
+		commands = append(commands, tuiPaletteCommand{id: "start-directory:" + dir, group: "ACTIONS", label: title, hint: fmt.Sprintf("%s · %s", countLabel(len(plan), "node", "nodes"), strings.Join(names, ", ")), run: func() error { return a.reviewPaletteBatch(title, plan) }})
 	}
 	if a.view == tuiViewNodes {
 		targets := a.fleet.targets()
@@ -61,7 +61,7 @@ func (a *vaxisTUIApp) paletteBatchCommands() []tuiPaletteCommand {
 		}
 		if len(plan) > 0 {
 			slices.Sort(ids)
-			label := "Restart selected/marked nodes"
+			label := "Restart selected/marked " + pluralForm(len(plan), "node", "nodes")
 			shortcut := "r"
 			if a.nodeDetail {
 				label = "Restart this node"
@@ -69,7 +69,7 @@ func (a *vaxisTUIApp) paletteBatchCommands() []tuiPaletteCommand {
 			if a.state.selectedEntry().node.Status == NodeStatusFailed && (a.nodeDetail || len(a.fleet.marks) == 0) {
 				shortcut = "" // In this context r resumes bootstrap instead.
 			}
-			commands = append(commands, tuiPaletteCommand{id: "restart-selection:" + strings.Join(ids, ","), group: "ACTIONS", label: label, hint: fmt.Sprintf("Review %d targets · ends guest sessions", len(plan)), shortcut: shortcut, run: func() error { return a.reviewPaletteBatch(label, plan) }})
+			commands = append(commands, tuiPaletteCommand{id: "restart-selection:" + strings.Join(ids, ","), group: "ACTIONS", label: label, hint: fmt.Sprintf("Review %s · ends guest sessions", countLabel(len(plan), "target", "targets")), shortcut: shortcut, run: func() error { return a.reviewPaletteBatch(label, plan) }})
 		}
 	}
 	return commands

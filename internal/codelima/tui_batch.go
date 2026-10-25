@@ -63,12 +63,16 @@ func (a *vaxisTUIApp) openBatchReview(title string, plan []tuiPaletteNodePlan, c
 	}
 	var fields []tuiDialogField
 	if slices.ContainsFunc(d.targets, func(t NodeBatchTarget) bool { return t.Kind == "delete" }) {
-		fields = []tuiDialogField{newTUIInputField("confirm", "Type "+strconv.Itoa(len(d.targets))+" to delete these nodes", "", true)}
+		fields = []tuiDialogField{newTUIInputField("confirm", d.deletePrompt(), "", true)}
 	}
 	d.dialog = newTUIDialog(title, "Run", nil, fields, d.submit)
 	d.run = d.execute
 	a.overlay = d
 	return nil
+}
+
+func (d *tuiBatchReview) deletePrompt() string {
+	return fmt.Sprintf("Type %d exactly to delete %s", len(d.targets), pluralForm(len(d.targets), "this node", "these nodes"))
 }
 
 func (d *tuiBatchReview) validate() error {
@@ -164,7 +168,7 @@ func (d *tuiBatchReview) lines(t tuiTheme) []tuiConfirmationLine {
 		add("Guest sessions end on stop or restart. Host sessions keep running.", t.amber)
 	}
 	if slices.ContainsFunc(d.targets, func(target NodeBatchTarget) bool { return target.Kind == "delete" }) {
-		add("Guest and host sessions end for deleted nodes.", t.coral)
+		add(pluralForm(len(d.targets), "Guest and host sessions end for this node.", "Guest and host sessions end for deleted nodes."), t.coral)
 	}
 	if slices.ContainsFunc(d.targets, func(target NodeBatchTarget) bool { return target.Kind == "restart" }) {
 		add("Restart keeps completed bootstrap; failed setup reruns from the beginning.", t.muted)
@@ -185,9 +189,9 @@ func (d *tuiBatchReview) lines(t tuiTheme) []tuiConfirmationLine {
 		}
 	}
 	if len(d.dialog.Fields) > 0 {
-		add("Deletes these VMs and their disks. Host workspace files remain.", t.coral)
+		add(pluralForm(len(d.targets), "Deletes this VM and its disk. Host workspace files remain.", "Deletes these VMs and their disks. Host workspace files remain."), t.coral)
 	}
-	add("Runs up to 4 nodes in parallel; progress appears in each row and Activity.", t.muted)
+	add(pluralForm(len(d.targets), "Progress appears in this node's row and Activity.", "Runs up to 4 nodes in parallel; progress appears in each row and Activity."), t.muted)
 	add("Accepted work continues after this TUI closes. Failures do not stop other targets.", t.dim)
 	if err := d.validate(); err != nil {
 		add(err.Error(), t.coral)
@@ -293,7 +297,7 @@ func (d *tuiBatchReview) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 		tuiLine(content, h-6, fmt.Sprintf("PgUp/PgDn · %d–%d/%d", d.scroll+1, min(len(rows), d.scroll+d.height), len(rows)), t.dim)
 	}
 	if len(d.dialog.Fields) > 0 {
-		tuiLine(content, h-5, fmt.Sprintf("Type %d exactly to delete these nodes", len(d.targets)), t.muted)
+		tuiLine(content, h-5, d.deletePrompt(), t.muted)
 		input := d.dialog.Fields[0].Input
 		input.Content = t.text
 		input.Draw(content.New(0, h-4, min(36, cw), 1))

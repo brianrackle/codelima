@@ -315,7 +315,7 @@ func (a *vaxisTUIApp) recipeDetailRows(t tuiTheme) (string, []tuiRecipeDetailRow
 	if a.managerData.err != nil {
 		add("NODE USAGE UNAVAILABLE", t.coral)
 	} else {
-		add(fmt.Sprintf("USED BY %d NODES", len(nodes)), t.muted)
+		add("USED BY "+countLabel(len(nodes), "NODE", "NODES"), t.muted)
 	}
 	for _, n := range nodes {
 		spec, ok := a.managerData.recipes.specs[n.ID]

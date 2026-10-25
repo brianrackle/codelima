@@ -95,7 +95,7 @@ func (a *vaxisTUIApp) drawSystemHost(win vaxis.Window, theme tuiTheme) {
 	_, height := win.Size()
 	lines := make([]string, 0, len(host.Nodes)+1)
 	if host.UnknownNodes > 0 {
-		lines = append(lines, fmt.Sprintf("%d nodes have no runtime observation", host.UnknownNodes))
+		lines = append(lines, countLabel(host.UnknownNodes, "node has no runtime observation", "nodes have no runtime observation"))
 	}
 	for _, node := range host.Nodes {
 		status := string(node.Status)

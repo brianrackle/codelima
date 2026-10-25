@@ -162,7 +162,7 @@ func (a *vaxisTUIApp) doctorRows() []tuiDoctorRow {
 		rows = append(rows, tuiDoctorRow{"host:memory", "Memory overcommitted", fmt.Sprintf("%s / %s · stop a node, or accept", tuiHostBytes(&h.AllocatedMemoryBytes), tuiHostBytes(h.Capacity.MemoryBytes)), "warn"})
 	}
 	if h.UnknownNodes > 0 {
-		rows = append(rows, tuiDoctorRow{"host:unknown", "VM allocation incomplete", fmt.Sprintf("%d nodes have no runtime observation", h.UnknownNodes), "warn"})
+		rows = append(rows, tuiDoctorRow{"host:unknown", "VM allocation incomplete", countLabel(h.UnknownNodes, "node has no runtime observation", "nodes have no runtime observation"), "warn"})
 	}
 	return rows
 }
