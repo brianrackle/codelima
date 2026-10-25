@@ -139,6 +139,7 @@ func newDaemonHost(service *Service) *daemonHost {
 	host.activityEvents = newDaemonActivityEvents(host)
 	if host.forwarder != nil {
 		host.forwarder.activityObserver = host.activityEvents.observeForwarding
+		host.forwarder.persistPolicy = host.persistForwardingPolicy
 	}
 	if observer, ok := service.sandbox.(LimaObservationRuntime); ok {
 		host.observer = observer
@@ -257,6 +258,8 @@ func (e *daemonTerminalEntry) markSnapshotStale() {
 
 func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, method string, raw json.RawMessage) (any, error) {
 	switch method {
+	case "ports.list", "ports.pin":
+		return h.handlePorts(method, raw)
 	case "activity.append", "activity.list":
 		return h.handleActivity(method, raw)
 	case "operation.submit", "operation.get", "operation.list", "operation.latest", "operation.cancel":
@@ -1663,6 +1666,16 @@ func (h *daemonHost) update(binaryPath string) (map[string]any, error) {
 		)
 	}
 
+	if h.forwarder != nil {
+		if err := h.forwarder.prepareRoutingHandoff(); err != nil {
+			return nil, toDaemonError(err)
+		}
+		defer func() {
+			if !h.replaced.Load() {
+				h.forwarder.resumeRoutingAfterHandoff()
+			}
+		}()
+	}
 	h.broadcast(daemon.EventDaemonUpdateStarting, nil)
 	h.mu.RLock()
 	entries := make([]*daemonTerminalEntry, 0, len(h.terminals))

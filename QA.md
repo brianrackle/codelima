@@ -443,6 +443,37 @@ application forwarding rules change, `daemon_port_forwarding` persists as true,
 the frozen HOST:GUEST mapping remains, and routing now follows readiness.
 Remove the disposable node, processes, logs and metadata after verification.
 
+### Interactive Ports and durable ownership (ADR 183)
+
+With the two running HTTP guests above, open Ports at 150×38 and 80×24. Verify
+both named addresses, observed/unknown process labels, statuses, owner reason
+and configured stopped TCP rows. Select through all rows, scroll full details
+and inspect the By node summary. Filter with typed and pasted text containing
+digits and shortcut letters; it must not navigate or pin. Esc restores the old
+filter and selection. Exercise equivalent mouse and palette controls.
+
+Copy/open the selected HTTP address and enter its exact node without opening a
+shell. Pin the second claimant, then request all generic IPv4/IPv6 aliases and
+both named hosts: only generic ownership changes. Restart and live-update the
+daemon, confirming owner and original discovery order persist. Lose the pinned
+guest tunnel: the owner stays pinned and returns 502. Recover, then stop that
+listener successfully and verify the pin expires and the normal owner returns.
+Repeat on 1455: a restart preserves newest-listener order, but stopping and
+starting a listener gives it a new discovery time.
+
+Suspend the disposable daemon, refresh Ports and navigate away. The TUI must
+remain responsive and retain clearly stale rows. Resume and refresh. During a
+delayed pin reply, repeated activation must submit once; navigation stays where
+the user moved, and an uncertain reply asks for refresh rather than retrying.
+Inspect Activity for TCP add/degrade/recover/remove and ownership transitions,
+including overlap with an HTTP row on the same physical endpoint.
+
+In the disposable home only, back up routing preferences, stop the daemon and
+replace them with malformed JSON. Restart: Ports reports the complete error,
+the malformed bytes remain, and pin/update cannot silently overwrite them.
+Stop, restore the backup and restart to recover. Remove all disposable homes,
+guests, services, captures and files after completing these checks.
+
 ## Flow 7: path-scoped fleet manager
 
 Raw shell attachment checks (ADR 151):

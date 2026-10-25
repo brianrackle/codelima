@@ -31,6 +31,7 @@ type tuiManagerDataEvent struct {
 // the response to the navigation that requested it, so late replies cannot
 // replace another node's logs or clear a newer loading/error state.
 func (a *vaxisTUIApp) loadManagerData(repair bool) {
+	a.startPortsLoad(true)
 	a.startDaemonOverview(true)
 	a.cancelHiddenMetricsLoad()
 	a.cancelHiddenLogsLoad()
@@ -220,22 +221,5 @@ func (a *vaxisTUIApp) drawNodeDetail(win vaxis.Window, theme tuiTheme) {
 			a.sessions.SetPreferredTerminalSize(cols, rows)
 		}
 		a.drawTerminalSurface(surface, tuiTreeEntry{node: record.Node}, theme.mint, theme.muted, theme.coral)
-	}
-}
-
-func (a *vaxisTUIApp) drawPublishedPorts(win vaxis.Window, theme tuiTheme) {
-	width, height := win.Size()
-	tuiLine(win.New(2, 2, width-4, 1), 0, "Ports · published TCP routes", theme.mint)
-	inner := border.All(win.New(1, 4, width-2, height-7), theme.border)
-	tuiLine(inner, 0, "NODE                     HOST:GUEST               STATE", theme.dim)
-	row := 2
-	for _, record := range a.fleet.records {
-		for _, mapping := range record.Node.Ports {
-			tuiLine(inner, row, fmt.Sprintf("%-24s %-24s %s", record.Node.Slug, mapping, record.Status), theme.text)
-			row++
-		}
-	}
-	if row == 2 {
-		tuiLine(inner, 2, "No published ports configured.", theme.dim)
 	}
 }

@@ -20,14 +20,14 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
 | [Detail · starting (provisioning)](reference/NodeStarting.dc.html) | Visual reference and associated canvas notes | Partial: real Lima phases/output, cancellation and queued attachment verified at both sizes; final artboard qualification remains |
-| [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions and VM inspection verified at both sizes; readiness-gated ports and final artboard qualification remain |
+| [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions, VM inspection and readiness-gated ports verified; final artboard qualification remains |
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
 | [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
-| [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Partial: readiness and published TCP backend in progress (ADR 182); interactive projection/pins and guest QA pending |
+| [Ports · forwarding](reference/Ports.dc.html) | Visual reference and associated canvas notes | Partial: readiness/TCP, durable pins and interactive Ports pass two-guest Linux qualification (ADRs 182–183); final artboard/native qualification remains |
 | [Activity · operations & messages](reference/Activity.dc.html) | Visual reference and associated canvas notes | Partial: shared operations/messages, native events, pending-event handoff, aligned responsive presentation, mouse controls and typed/exact-session navigation; final cross-view/native qualification remains |
 | [System · doctor, daemon, host, settings](reference/System.dc.html) | ADRs 153/179–181 responsive capacity, retained Doctor findings, cached daemon status and explicit actions | Partial; Doctor, overview and action flows verified; macOS sampling and full artboard/native qualification remain |
 | [Command palette](reference/Palette.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -653,3 +653,29 @@ The final run used Linux signal tracing and a saved exit result (0); its trace
 contained no SIGTERM sender outside the traced processes. The untraced launcher
 interruption did not recur there and its cause remains unproven. The 937210-byte
 trace, log, exit receipt and identified interrupted-run Go scratch were removed.
+
+
+ADR 183 / ordinary protocol 22 provides cached live Ports rows, optional guest
+process names, durable generic-host pins and discovery order, raw TCP Activity,
+legacy/held/stopped labels and responsive keyboard/mouse/palette controls.
+Two real Ubuntu guests verified named/generic HTTP ownership, pin persistence,
+first/newest discovery order, restart while a pinned guest was unavailable,
+expiry/recovery and live daemon updates. TCP passed dual-stack binary half-close,
+readiness gating during boot and failed bootstrap, TUI retry, overlap and IPv6
+bind-conflict rollback/recovery. Running legacy start preserved PID/config;
+stopped migration changed only Lima forwarding and retained frozen node settings.
+The old Lima relay stalled on the EOF-response probe; the migrated relay passed.
+Malformed policy bytes were retained, valid pin/update rejected, full errors
+readable, and restoring the backup recovered service. Compact/wide controls,
+clipboard/browser dispatch, filtering, navigation and complete overflow details
+were exercised. Handoff now freezes the durable claim cut and resumes discovery
+on rollback; regressions cover both direct identity changes and a real failed
+handoff. Confirmed stops ended existing TCP connections, removed both host
+listeners and recorded exact-node Activity removal; the entry opened Ports.
+Both guests, daemons, TUI/tmux, overlays, scripts/captures and tmpfs mounts were
+removed with tmp/pq. The old stepqa cleanup debt remains separate. Final automated
+checks pass after the shutdown guard: core unit 77.674s, core race 106.253s and
+CLI integration 20.417s, plus fmt/lint, Vaxis, builds and clean gopls checks.
+The rebuilt CLI runs locally. The traced suite exited 0 with no external SIGTERM
+sender recorded; verification logs/traces were removed. TODO #57 retains native
+terminal/browser and final artboard/cross-view qualification.

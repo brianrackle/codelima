@@ -154,6 +154,14 @@ func (a *vaxisTUIApp) openCommandPalette() {
 			return nil
 		}})
 	}
+	if a.view == tuiViewPorts {
+		for _, action := range [][2]string{{"o", "Open selected port in browser"}, {"y", "Copy selected port address"}, {"p", "Pin selected port's bare localhost owner"}, {"/", "Filter ports"}, {"C", "Refresh ports"}} {
+			commands = append(commands, tuiPaletteCommand{label: action[1], hint: "Ports · " + action[0], run: func() error {
+				a.handlePortsKey(vaxis.Key{Keycode: []rune(action[0])[0], Text: action[0]})
+				return nil
+			}})
+		}
+	}
 	a.overlay = newTUIPalette("Command palette", commands)
 }
 
@@ -184,6 +192,9 @@ func (a *vaxisTUIApp) openKeyHelp() {
 		{label: "S", hint: "System: restart daemon; ends live shell processes"},
 		{label: "L", hint: "System: open daemon log"},
 		{label: "D", hint: "System: diagnose freeze; save local evidence"},
+		{label: "o / y / p", hint: "Ports: open HTTP / copy address / pin bare localhost"},
+		{label: "Enter / / / C", hint: "Ports: go to node / filter / refresh"},
+		{label: "PgUp / PgDn", hint: "Ports: scroll selected route details and compact By node list"},
 		{label: "Tab / C / R", hint: "System: panel / check / Doctor repair"},
 		{label: "q", hint: "Quit from a global view; return from node detail"},
 	}

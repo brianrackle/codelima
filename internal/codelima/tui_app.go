@@ -63,6 +63,7 @@ type vaxisTUIApp struct {
 	logs                tuiLogsState
 	spec                tuiSpecState
 	activity            tuiActivityState
+	ports               tuiPortsState
 	messageDelivery     tuiActivityDelivery
 	lifecycle           tuiLifecycleState
 	createIntent        *tuiCreateIntent
@@ -325,6 +326,7 @@ func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.cancelActivityAttachment()
 	defer a.cancelDoctorCheck()
 	defer a.cancelDaemonOverview()
+	defer a.cancelPortsWork()
 	defer a.cancelDaemonWork()
 	defer a.cancelLogsLoad()
 	defer a.cancelSpecLoad()
@@ -537,6 +539,14 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyDaemonOverview(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiPortsEvent:
+		a.applyPortsData(event)
+		a.requestRedraw()
+		return false, nil
+	case tuiPortPinEvent:
+		a.finishPortPin(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiDaemonLifecycleEvent:
 		a.applyDaemonLifecycle(event)
 		a.requestRedraw()
@@ -550,6 +560,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:
+		a.startPortsLoad(false)
 		a.startDaemonOverview(false)
 		a.startDoctorCheck(false, false)
 		a.pollCreateIntent()
@@ -667,6 +678,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case tuiDaemonDisconnectedEvent:
+		a.cancelPortsLoad()
 		a.cancelDaemonOverview()
 		a.resetGraphicsEpoch()
 		wasDisconnected := a.daemonDisconnected
@@ -697,6 +709,8 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.propagateHostColors()
 		wasDisconnected := a.daemonDisconnected
 		a.daemonDisconnected = false
+		a.cancelPortsLoad()
+		a.startPortsLoad(true)
 		a.cancelDaemonOverview()
 		a.startDaemonOverview(true)
 		if wasDisconnected {
@@ -758,6 +772,9 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		return false, nil
 	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
 		switch {
+		case a.view == tuiViewPorts && a.ports.input != nil:
+			a.updatePortsInput(event)
+			a.draw()
 		case a.view == tuiViewActivity && a.activity.input != nil:
 			a.updateActivityInput(event)
 			a.draw()
@@ -1009,6 +1026,7 @@ func (a *vaxisTUIApp) finishDataRefresh(event tuiRefreshCompleteEvent) {
 		a.setStatus(slog.LevelError, err.Error())
 	}
 	a.finishActivityNodeJump()
+	a.finishPortsNodeJump()
 	a.finishCreateNodeJump()
 }
 

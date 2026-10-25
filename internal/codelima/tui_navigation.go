@@ -17,6 +17,7 @@ import (
 func (a *vaxisTUIApp) switchView(view tuiView) {
 	a.cancelActivityAttachment()
 	a.activity.input, a.activity.pendingNode = nil, ""
+	a.ports.input, a.ports.pendingNode = nil, ""
 	a.view, a.nodeDetail, a.detailScroll = view, false, 0
 	a.state.focusTree()
 	a.state.treePaneMode = tuiTreePaneModeInfo
@@ -49,7 +50,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	defer a.cancelHiddenSpecLoad()
 	defer a.cancelHiddenLifecycleLoad()
 	a.refreshFleet()
-	if a.handleLogsSearchKey(key) || a.handleActivitySearchKey(key) {
+	if a.handleLogsSearchKey(key) || a.handleActivitySearchKey(key) || a.handlePortsSearchKey(key) {
 		return false
 	}
 	if a.filterInput != nil {
@@ -110,7 +111,7 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	if a.handleLifecycleKey(key) {
 		return false
 	}
-	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) || a.handleActivityKey(key) {
+	if a.handleMetricsKey(key) || a.handleLogsKey(key) || a.handleSpecKey(key) || a.handleActivityKey(key) || a.handlePortsKey(key) {
 		return false
 	}
 	var err error
@@ -277,6 +278,10 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 
 func (a *vaxisTUIApp) moveManagerSelection(delta int) {
 	a.createIntent = nil
+	if a.view == tuiViewPorts {
+		a.movePortSelection(delta)
+		return
+	}
 	if a.view == tuiViewActivity {
 		a.moveActivitySelection(delta)
 		return

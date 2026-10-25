@@ -54,7 +54,7 @@ func ClassifyMethod(method string) DeliveryClass {
 		return ClassReplaceable
 	case "input.takeover":
 		return ClassOwnership
-	case "terminal.open", "terminal.close", "terminal.move", "terminal.restart_renderer", "terminal.attach", "terminal.attach_read", "terminal.detach", "operation.submit", "operation.cancel", "activity.append", "daemon.stop":
+	case "terminal.open", "terminal.close", "terminal.move", "terminal.restart_renderer", "terminal.attach", "terminal.attach_read", "terminal.detach", "operation.submit", "operation.cancel", "activity.append", "daemon.stop", "ports.pin":
 		return ClassControl
 	case "node.start", "node.stop", "daemon.update":
 		return ClassLifecycle

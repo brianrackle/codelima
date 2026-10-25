@@ -11,9 +11,16 @@ the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
 `make test-ports` covers readiness without suppressing guest probes, published
 TCP remapping and half-close, cancellation, bind conflicts and recovery,
-confirmed-stop cleanup, legacy ownership and pre-boot migration (ADR 182).
+confirmed-stop cleanup, legacy ownership and pre-boot migration (ADR 182),
+durable pins/discovery order, cached typed projections, process-label loss,
+TCP Activity transitions, stable claims during handoff/rollback, compact/wide
+Ports rendering and real-socket refresh
+cancellation/lost pin replies (ADR 183, ordinary protocol 22).
 Use `make test-ports PORTS_TEST_FLAGS=-race` for the focused race run.
-Full Ports presentation and real-guest qualification remain in TODO #57.
+Use `make gopls GOPLS_ARGS='check internal/codelima/forwarding_policy.go
+internal/codelima/forwarding_ports.go internal/codelima/tui_ports.go'` while
+developing. Run the Ports terminal and real-guest flows in QA.md; final
+qualification remains tracked in TODO #57.
 
 `make test-host-capacity` checks native capacity parsing, read-only volume
 sampling, global allocation across directory scopes, stale-response rejection,
@@ -799,7 +806,7 @@ QA.md; offline tests do not establish outer-terminal permission behavior.
 `make test-terminal-attach` runs the native ANSI export, VT boundary, lease,
 input parser and real-PTY/socket regressions. `make verify` additionally checks
 the production binaries, all Go packages, lint and formatting. Ship current
-daemon protocol 21 and renderer protocol 5 together; attachment was introduced
+daemon protocol 22 and renderer protocol 5 together; attachment was introduced
 in protocols 8/4. Checkpoint envelope 2 adds the
 VT boundary state, and older envelopes use journal recovery. Native Ghostty
 remains pinned to the existing revision. Rebuild both binaries with `make build`

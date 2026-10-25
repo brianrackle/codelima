@@ -145,7 +145,11 @@ func (a *vaxisTUIApp) drawLifecycleFailure(win vaxis.Window, record tuiFleetReco
 	state := border.All(lower.New(stateCol, 0, stateWidth, stateHeight), theme.border)
 	tuiLine(state, 0, "What's still running", theme.muted)
 	tuiLine(state, 1, lifecycleVMState(record.Node), theme.text)
-	tuiLine(state, 2, "node "+string(record.Node.Status)+" · see recorded execution above", theme.coral)
+	portState := "ports held until ready"
+	if !record.Node.DaemonPortForwarding && len(record.Node.Ports) != 0 {
+		portState = "legacy ports · stop/start to migrate"
+	}
+	tuiLine(state, 2, "node "+string(record.Node.Status)+" · "+portState, theme.coral)
 	if nodeGuestShellReady(record.Node) {
 		tuiLine(state, 3, "x guest shell allowed for inspection", theme.text)
 	} else {

@@ -279,18 +279,61 @@ passed, and the rebuilt CLI ran locally. Gopls reported only existing
 modernization suggestions in service/types; the new routing files are clean.
 Lima 2.1 manually accepted and validated the migration expression on an isolated
 template, preserving resources/image/mounts; its scratch directory was removed.
-Real-guest qualification is still pending. Required follow-up: typed cached Ports RPC/UI, observed process
-labels, persistent bare-host pins/claim order, raw-TCP Activity/handoff identity,
-legacy/restart-required labels, compact controls, and real two-guest routing QA.
-This supplies enforceable readiness for managed nodes, at the cost of daemon
-dependency and connection interruption during daemon replacement. Do not mark
-the Ports screen or its lifecycle readiness copy complete until those remaining
-contracts and visual/manual checks are finished.
+ADR 183 adds typed cached Ports RPC/UI, optional process labels, persistent
+bare-host pins/claim order, physical-endpoint TCP Activity identity, legacy
+labels and compact controls. Restart with an unreachable pinned guest restores
+unavailable endpoints until discovery succeeds, preserving 502 without redirection.
+Complete errors and overflowing By node summaries remain readable in scrollable
+details. The Failed view explains managed ports held until ready versus legacy
+stop/start migration. A handoff now freezes claim identity at the durable save;
+in-flight scans cannot change that cut, and rollback resumes discovery. Regression
+tests reproduced the previous update race and cover the real handoff failure path.
 
-The Failed view still omits the universal “not forwarded until ready” claim:
-running legacy static mappings remain an exception. The remaining UI work must
-read the persisted forwarding marker and explain stop/start migration rather
-than making that claim for every node.
+Live Linux/arm64 qualification used two isolated Ubuntu guests in tmp/pq at
+150×38 and 80×24. Checks passed for paste/filter isolation, exact clipboard URL
+in isolated tmux, browser dispatch, exact-node navigation without a shell,
+palette refresh/help, mouse rejection of raw-TCP Open/Pin and full compact
+errors/details. Real HTTP checks established ordinary first ownership and newest
+1455 ownership, named-host isolation, pinning, restart/live-update persistence,
+pinned tunnel loss with 502, recovery and successful-listener-removal expiry.
+Restart while the pinned guest was unreachable retained the target. Genuine
+1455 rediscovery changed priority; a subsequent update preserved that new order.
+A delayed committed pin reply kept navigation responsive and asked for refresh;
+the real-socket regression separately proves no duplicate submission.
+
+Published TCP passed remapping, IPv4/IPv6 binary transfers with write half-close,
+readiness gating while guest services already listened, degraded reservation and
+recovery, HTTP overlap conflict, IPv6 bind-conflict rollback/recovery, and ordinary
+daemon-restart connection closure. Corrupt preferences remained byte-for-byte
+intact, with a full visible error and rejected valid pin/live update; restoring
+the backup recovered service. A running legacy node's start preserved its PID
+and Lima file. Explicit stop/start changed only portForwards, retained the frozen
+mapping/resources/image/mounts and persisted daemon ownership. Its pre-migration
+Lima relay stalled on an EOF-response probe; ordinary request/response succeeded,
+and the migrated daemon relay passed that binary half-close test on both families.
+A real failed bootstrap held the mapping closed, showed the Failed readiness copy,
+and the TUI retry restored both bootstrap steps, validation and binary forwarding.
+Both confirmed stops closed existing TCP connections, removed IPv4/IPv6 listeners,
+retained configured stopped rows and recorded exact-node removal in Activity.
+The removal entry opened Ports. The Alpha CLI launcher was interrupted, while its
+daemon-owned stop continued and succeeded; the interruption cause is unproven.
+Both node deletions, daemon/TUI/tmux shutdown, disk overlays, metadata, captures,
+scripts and both tmpfs mounts were cleaned; tmp/pq is removed. The older stepqa
+cleanup debt remains separate. Final automated checks pass after cleanup and the
+late-handoff shutdown guard: core unit 77.674s, core race 106.253s, CLI integration
+20.417s, formatting, lint, Vaxis checks, builds and clean gopls diagnostics.
+The rebuilt CLI runs locally. The traced run exited 0 and recorded no SIGTERM
+sender outside its traced process set. Verification logs/traces are removed.
+
+Required follow-up: final reference-artboard/native fidelity and remaining
+cross-view/platform QA flows. Use the exact retained artboards and QA.md on
+supported native terminals; ANSI-to-HTML captures and browser-command stubs do
+not qualify native rendering, desktop focus or actual browser launch.
+Advantages: the two-guest run exercises actual VM/SSH and terminal behavior.
+Disadvantages: nested emulation is slow and cannot qualify native macOS.
+Readiness depends on the owning daemon, and daemon replacement interrupts active
+forwarded connections. The overall Ports/design ledger remains partial until
+that final qualification and the complete redesign QA are finished.
 
 Protocol 14 now provides the bounded shared Activity journal and merged
 request/completion/message history (ADR 165). Two-client socket tests cover

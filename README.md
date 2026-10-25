@@ -779,6 +779,29 @@ An explicit `codelima node stop NODE` followed by `codelima node start NODE`
 migrates them to daemon forwarding while preserving `HOST:GUEST` values. Until
 that migration, their static mappings do not wait for bootstrap readiness.
 
+Press `3` in the manager for Ports. It lists discovered HTTP/WebSocket routes and
+published TCP mappings, including stopped, held, retrying and conflicting routes.
+Process names come from the guest when available; `—` means unknown. Use `/` to
+filter by port, node, process or address, arrows to select, `o` to open an HTTP
+route, `y` to copy its address and Enter to open that exact node. `C` refreshes;
+PgUp/PgDn scroll complete ownership and diagnostic details. Compact terminals
+show addresses on a second line. Mouse controls and the command palette expose
+the same actions.
+
+For shared HTTP ports, `p` pins bare `localhost:PORT` and loopback addresses to
+the selected node. Named `{node}.localhost` routes keep their own target. Pins
+and discovery order survive daemon restart/update. A pin lasts until its listener
+disappears, the node loses readiness, stops or is deleted; a temporary tunnel
+failure retains the pin and returns a retryable 502. Without a pin, ordinary
+ports prefer the first active claimant and port 1455 prefers the newest listener.
+If a pin reply is lost, refresh Ports to inspect the owner before acting again.
+Published TCP mappings reserve their whole host port and cannot be pinned.
+
+Routing preferences live in the private `_daemon/forwarding.json` file under the
+CodeLima home. An unreadable file is preserved and reported in Ports; restore a
+known-good copy while the daemon is stopped before attempting another pin or
+live update.
+
 Run `codelima --help` for the complete command surface and
 `codelima <group> <command> --help` for command flags. Put global flags before
 the command or path:

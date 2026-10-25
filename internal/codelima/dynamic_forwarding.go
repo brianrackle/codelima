@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,7 +74,8 @@ const (
 awk '/^MemTotal:/ { total=$2 } /^MemAvailable:/ { available=$2 } END { if (total != "" && available != "") printf "codelima-memory %s %s\n", total, available }' /proc/meminfo
 awk '/^MemAvailable:/ { a=$2 } /^Cached:/ { c=$2 } /^SwapTotal:/ { t=$2 } /^SwapFree:/ { f=$2 } END { if (a != "" && c != "" && t != "" && f != "") printf "codelima-memory-detail %s %s %s %s\n", a, c, t, f }' /proc/meminfo
 awk '{ printf "codelima-uptime %s\n", $1 }' /proc/uptime
-df -Pk / | awk 'NR == 2 { printf "codelima-disk %s %s\n", $2, $3 }'`
+df -Pk / | awk 'NR == 2 { printf "codelima-disk %s %s\n", $2, $3 }'
+ss -H -ltnp 2>/dev/null | sed 's/^/codelima-listener /'`
 )
 
 type guestCPUCounters struct {
@@ -87,12 +89,13 @@ type guestResourceUsage struct {
 }
 
 type forwardingGuestObservation struct {
-	Ports    []int
-	CPU      guestCPUCounters
-	Memory   guestResourceUsage
-	Disk     guestResourceUsage
-	CPUCores map[int]guestCPUCounters
-	Details  daemon.NodeUsageDetails
+	PortProcesses map[int]string
+	Ports         []int
+	CPU           guestCPUCounters
+	Memory        guestResourceUsage
+	Disk          guestResourceUsage
+	CPUCores      map[int]guestCPUCounters
+	Details       daemon.NodeUsageDetails
 }
 
 type nodeCPUUsageSample struct {
@@ -354,6 +357,7 @@ func (r retiredPeer) empty() bool { return r.peer == nil && r.monitor == nil }
 
 func parseForwardingGuestObservation(data []byte) forwardingGuestObservation {
 	observation := forwardingGuestObservation{Ports: parseProcNetTCP(data)}
+	observation.PortProcesses = parseListenerProcesses(data)
 	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
@@ -509,6 +513,7 @@ type dynamicRouteKey struct {
 // node that briefly disappears reclaims the generic host on its return instead
 // of being permanently outranked by a later claimant.
 type routeDiscoveryMemory struct {
+	nodeID       string
 	discoveredAt time.Time
 	removedAt    time.Time
 }
@@ -632,10 +637,11 @@ type dynamicPortServer struct {
 //	            bound but answer 502 while the peer is rebuilt.
 //	retired   - a confirmed stop or delete; only here are routes removed.
 type forwardingNodeState struct {
-	node      Node
-	peer      forwardingPeer
-	monitor   *peerHealthMonitor
-	processes *processProbe
+	node          Node
+	peer          forwardingPeer
+	monitor       *peerHealthMonitor
+	processes     *processProbe
+	portProcesses map[int]string
 
 	lastHealthyAt   time.Time
 	failures        int
@@ -687,6 +693,19 @@ func (s *forwardingNodeState) health() string {
 }
 
 type dynamicForwarder struct {
+	// policyMu serializes route identity/pin changes with durable policy writes.
+	// Disk work never holds mu, so HTTP requests and cached reads stay available.
+	policyMu         sync.Mutex
+	policyClosed     bool
+	policyHandoff    bool
+	policyPath       string
+	policyErr        error
+	policyWriteErr   string
+	policySaved      string
+	pins             map[int]string
+	restored         map[dynamicRouteKey]routeDiscoveryMemory
+	persistPolicy    func()
+	inventory        map[string]Node
 	activityObserver func(forwardingActivitySnapshot)
 	service          *Service
 	factory          forwardingPeerFactory
@@ -740,6 +759,7 @@ type dynamicForwarder struct {
 
 func newDynamicForwarder(service *Service, runtime LimaSSHRuntime) *dynamicForwarder {
 	return &dynamicForwarder{
+		policyPath:   filepath.Join(daemon.HomePaths(service.cfg.MetadataRoot).Dir, "forwarding.json"),
 		metricsEpoch: newID(),
 		logger:       service.log(),
 
@@ -780,6 +800,7 @@ func (f *dynamicForwarder) nowUTC() time.Time {
 }
 
 func (f *dynamicForwarder) Start(parent context.Context) error {
+	f.loadRoutingPolicy()
 	ctx, cancel := context.WithCancel(parent)
 	f.mu.Lock()
 	f.cancel = cancel
@@ -827,6 +848,9 @@ func (f *dynamicForwarder) reconcile(ctx context.Context) {
 	f.lastPoll = f.nowUTC()
 	f.mu.Unlock()
 	f.publishActivity()
+	if f.persistPolicy != nil {
+		f.persistPolicy()
+	}
 }
 
 func (f *dynamicForwarder) ensurePrepared(ctx context.Context) bool {
@@ -894,7 +918,45 @@ func (f *dynamicForwarder) syncMembership(nodes []Node, now time.Time) []Node {
 	stopGrace := durationOrDefault(f.stopGrace, forwardingStopGrace)
 	var retired []retiredPeer
 	targets := make([]Node, 0, len(present))
+	f.policyMu.Lock()
+	if f.policyHandoff {
+		f.policyMu.Unlock()
+		return nil
+	}
 	f.mu.Lock()
+	f.inventory = present
+	// Saved claims get the same stop grace as already-connected nodes. An
+	// initial stale runtime listing is not evidence that a pinned guest stopped.
+	for key, claim := range f.restored {
+		node, exists := present[claim.nodeID]
+		if !exists || key.node != strings.ToLower(node.SandboxName) {
+			delete(f.restored, key)
+			if f.pins[key.port] == claim.nodeID {
+				delete(f.pins, key.port)
+			}
+			continue
+		}
+		if f.nodes[claim.nodeID] == nil {
+			if f.nodes == nil {
+				f.nodes = map[string]*forwardingNodeState{}
+			}
+			f.nodes[claim.nodeID] = &forwardingNodeState{node: node}
+		}
+		if applicationRoutesReady(node) {
+			// Keep a saved endpoint unavailable until a successful scan confirms
+			// it. In particular, an unreachable pinned guest must never redirect
+			// generic requests to another node during daemon startup.
+			if f.routes == nil {
+				f.routes = map[dynamicRouteKey]*dynamicForwardingRoute{}
+			}
+			if f.routes[key] == nil {
+				route := newDynamicForwardingRoute(node, key.port, nil, claim.discoveredAt, f.logger)
+				route.lapsed, route.lapsedAt, route.seenAt = true, now, time.Time{}
+				f.routes[key] = route
+			}
+			delete(f.restored, key)
+		}
+	}
 	f.inventoryErr = ""
 	f.inventoryErrSince = time.Time{}
 	f.inventoryWarnAt = time.Time{}
@@ -941,6 +1003,7 @@ func (f *dynamicForwarder) syncMembership(nodes []Node, now time.Time) []Node {
 	f.pruneDiscoveryMemoryLocked(now)
 	f.pruneMetricsHistoryLocked(now)
 	f.mu.Unlock()
+	f.policyMu.Unlock()
 
 	for _, peer := range retired {
 		if peer.empty() {
@@ -1116,6 +1179,7 @@ func (f *dynamicForwarder) recordNodeFailure(node Node, err error) {
 	f.lastErr = err.Error()
 	f.lastErrAt = now
 	// Telemetry is dropped immediately; stale CPU numbers are worse than none.
+	state.portProcesses = nil
 	delete(f.cpu, node.ID)
 	delete(f.resources, node.ID)
 	delete(f.counters, node.ID)
@@ -1161,6 +1225,9 @@ func nextForwardingBackoff(current time.Duration) time.Duration {
 
 func (f *dynamicForwarder) recordNodeUsage(nodeID string, observation forwardingGuestObservation, sampledAt time.Time) {
 	f.mu.Lock()
+	if state := f.nodes[nodeID]; state != nil {
+		state.portProcesses = observation.PortProcesses
+	}
 	if f.metricsEpoch == "" {
 		f.metricsEpoch = newID()
 	}
@@ -1213,6 +1280,9 @@ func (f *dynamicForwarder) recordNodeUsage(nodeID string, observation forwarding
 // that says so.
 func (f *dynamicForwarder) clearNodeUsage(nodeID string) {
 	f.mu.Lock()
+	if state := f.nodes[nodeID]; state != nil {
+		state.portProcesses = nil
+	}
 	delete(f.cpu, nodeID)
 	delete(f.resources, nodeID)
 	delete(f.counters, nodeID)
@@ -1328,6 +1398,11 @@ func (f *dynamicForwarder) addNodeUsage(nodes []Node) {
 func (f *dynamicForwarder) applyScanResult(node Node, peer forwardingPeer, ports []int, now time.Time) {
 	wanted := map[dynamicRouteKey]bool{}
 	var added, removed, restored []string
+	f.policyMu.Lock()
+	if f.policyHandoff {
+		f.policyMu.Unlock()
+		return
+	}
 	f.mu.Lock()
 	if state := f.nodes[node.ID]; state != nil {
 		state.noteHealthy(now)
@@ -1349,7 +1424,7 @@ func (f *dynamicForwarder) applyScanResult(node Node, peer forwardingPeer, ports
 			}
 			continue
 		}
-		route := newDynamicForwardingRoute(node, port, peer, f.discoveryTimeLocked(key, now), f.logger)
+		route := newDynamicForwardingRoute(node, port, peer, f.discoveryTimeLocked(node.ID, key, now), f.logger)
 		route.seenAt = now
 		route.dialTimeout = durationOrDefault(f.dialTimeout, forwardingDialTimeout)
 		f.routes[key] = route
@@ -1361,7 +1436,16 @@ func (f *dynamicForwarder) applyScanResult(node Node, peer forwardingPeer, ports
 			removed = append(removed, route.url())
 		}
 	}
+	for key, claim := range f.restored {
+		if claim.nodeID == node.ID && !wanted[key] {
+			delete(f.restored, key)
+			if f.pins[key.port] == node.ID {
+				delete(f.pins, key.port)
+			}
+		}
+	}
 	f.mu.Unlock()
+	f.policyMu.Unlock()
 
 	for _, url := range added {
 		f.log().Info("dynamic forwarding route added", "url", url)
@@ -1378,12 +1462,18 @@ func (f *dynamicForwarder) applyScanResult(node Node, peer forwardingPeer, ports
 // A route that was removed recently keeps its original timestamp so the generic
 // claim returns to its previous owner rather than migrating permanently. The
 // Codex callback port is excluded: ADR 119 makes it follow the newest listener.
-func (f *dynamicForwarder) discoveryTimeLocked(key dynamicRouteKey, now time.Time) time.Time {
+func (f *dynamicForwarder) discoveryTimeLocked(nodeID string, key dynamicRouteKey, now time.Time) time.Time {
+	if saved, ok := f.restored[key]; ok {
+		delete(f.restored, key)
+		if saved.nodeID == nodeID {
+			return saved.discoveredAt
+		}
+	}
 	if key.port == codexLoginCallbackPort {
 		return now
 	}
 	memory, ok := f.discovered[key]
-	if !ok || memory.removedAt.IsZero() || now.Sub(memory.removedAt) > durationOrDefault(f.claimMemory, forwardingClaimMemory) {
+	if !ok || memory.nodeID != nodeID || memory.removedAt.IsZero() || now.Sub(memory.removedAt) > durationOrDefault(f.claimMemory, forwardingClaimMemory) {
 		return now
 	}
 	return memory.discoveredAt
@@ -1394,7 +1484,10 @@ func (f *dynamicForwarder) removeRouteLocked(key dynamicRouteKey, route *dynamic
 	if f.discovered == nil {
 		f.discovered = map[dynamicRouteKey]routeDiscoveryMemory{}
 	}
-	f.discovered[key] = routeDiscoveryMemory{discoveredAt: route.discoveredAt, removedAt: now}
+	f.discovered[key] = routeDiscoveryMemory{nodeID: route.nodeID, discoveredAt: route.discoveredAt, removedAt: now}
+	if f.pins[key.port] == route.nodeID {
+		delete(f.pins, key.port)
+	}
 	delete(f.routes, key)
 }
 
@@ -1445,6 +1538,16 @@ func (f *dynamicForwarder) retireNodeLocked(nodeID, reason string, now time.Time
 }
 
 func (f *dynamicForwarder) removeNodeRoutesLocked(nodeID string, now time.Time) {
+	for port, id := range f.pins {
+		if id == nodeID {
+			delete(f.pins, port)
+		}
+	}
+	for key, claim := range f.restored {
+		if claim.nodeID == nodeID {
+			delete(f.restored, key)
+		}
+	}
 	for key, route := range f.routes {
 		if route.nodeID == nodeID {
 			f.removeRouteLocked(key, route, now)
@@ -1539,6 +1642,13 @@ func (f *dynamicForwarder) serveListener(server *http.Server, listener net.Liste
 }
 
 func (f *dynamicForwarder) preferredClaimantLocked(port int) string {
+	if id := f.pins[port]; id != "" {
+		for key, route := range f.routes {
+			if key.port == port && route.nodeID == id {
+				return key.node
+			}
+		}
+	}
 	newest := port == codexLoginCallbackPort
 	if node := f.selectClaimantLocked(port, newest, false); node != "" {
 		return node
@@ -1764,6 +1874,14 @@ func (f *dynamicForwarder) Close() error {
 	}
 	f.mu.Unlock()
 	f.wg.Wait()
+	if f.persistPolicy != nil {
+		f.persistPolicy()
+	}
+	// Drain admitted policy writers before shutdown can release daemon ownership.
+	// Later requests from an already-closed client must not write shared state.
+	f.policyMu.Lock()
+	f.policyClosed = true
+	f.policyMu.Unlock()
 	f.mu.Lock()
 	servers := f.servers
 	tcpServers := f.tcpServers

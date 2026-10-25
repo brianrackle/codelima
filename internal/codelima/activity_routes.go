@@ -6,6 +6,8 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 type activityRoute struct {
@@ -39,6 +41,32 @@ func (f *dynamicForwarder) publishActivity() {
 		view.Routes[key] = value
 		if value.Serving && server.defaultNode == key.node {
 			view.Owners[key.port] = value
+		}
+	}
+	// Activity identifies a node's physical host endpoint. When a raw mapping
+	// reserves the same node/host port as discovery, its actual serving state
+	// supersedes the conflicted HTTP projection at that endpoint. The Ports
+	// table retains both protocol-specific rows for inspection.
+	for _, state := range f.nodes {
+		if !state.node.DaemonPortForwarding || !applicationRoutesReady(state.node) {
+			continue
+		}
+		ports, err := validatePorts(state.node.Ports)
+		if err != nil {
+			continue
+		}
+		for _, mapping := range ports {
+			port, _ := strconv.Atoi(strings.SplitN(mapping, ":", 2)[0])
+			server := f.tcpServers[port]
+			if server == nil {
+				continue
+			}
+			status := f.publishedTCPStatusLocked(server)
+			value := activityRoute{NodeID: state.node.ID, NodeSlug: state.node.Slug, Port: port, Lapsed: status == "retrying", Serving: status == "serving" || status == "retrying"}
+			view.Routes[dynamicRouteKey{node: strings.ToLower(state.node.SandboxName), port: port}] = value
+			if value.Serving && server.mapping.nodeID == state.node.ID {
+				view.Owners[port] = value
+			}
 		}
 	}
 	f.mu.RUnlock()

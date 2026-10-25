@@ -569,7 +569,10 @@ func (a *vaxisTUIApp) managerFooter() string {
 	case tuiViewTemplates:
 		return a.recipeFooter()
 	case tuiViewPorts:
-		return "Esc nodes · : commands · ? help · q quit"
+		if a.ports.input != nil {
+			return "Enter keep filter · Esc restore filter"
+		}
+		return "↑↓ move · o open · y copy · p pin · Enter node · / filter · ? help"
 	case tuiViewActivity:
 		if a.activity.input != nil {
 			return "Enter keep filter · Esc cancel · [] pages search older history"
