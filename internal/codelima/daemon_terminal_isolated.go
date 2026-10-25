@@ -109,6 +109,7 @@ type isolatedDaemonTerminal struct {
 	// readFetches counts on-demand variant round-trips to the renderer. It is
 	// test observability for the "nothing is rendered until a read asks" rule.
 	readFetches atomic.Uint64
+	lastInput   atomic.Int64
 	responseMu  sync.Mutex
 	responses   map[rendererResponseKey]struct{}
 	order       []rendererResponseKey
@@ -135,7 +136,7 @@ func newIsolatedDaemonTerminalWithOptions(
 		responses: make(map[rendererResponseKey]struct{}),
 	}
 	terminal.journal.AppendResize(terminal.cols, terminal.rows)
-	terminal.rawAttachment.write = terminal.SendInput
+	terminal.rawAttachment.write = terminal.sendProtocolResponse
 	return terminal
 }
 
@@ -565,15 +566,38 @@ func (t *isolatedDaemonTerminal) Scroll(delta int) {
 }
 
 func (t *isolatedDaemonTerminal) SendInput(data []byte) {
+	if t.enqueuePTYBytes(data) {
+		t.recordInputActivity()
+	}
+}
+
+func (t *isolatedDaemonTerminal) sendProtocolResponse(data []byte) {
+	_ = t.enqueuePTYBytes(data)
+}
+
+func (t *isolatedDaemonTerminal) enqueuePTYBytes(data []byte) bool {
 	if len(data) == 0 {
-		return
+		return false
 	}
 	t.mu.Lock()
 	writer := t.ptyWriter
 	running := t.state == runtimeStateRunning
 	t.mu.Unlock()
-	if running && writer != nil && !writer.Enqueue(slices.Clone(data)) {
+	if running && writer != nil {
+		if writer.Enqueue(slices.Clone(data)) {
+			return true
+		}
 		t.postTerminalError(errors.New("terminal PTY writer is closed"))
+	}
+	return false
+}
+
+func (t *isolatedDaemonTerminal) LastInputUnixMilli() int64 { return t.lastInput.Load() }
+
+func (t *isolatedDaemonTerminal) recordInputActivity() {
+	t.lastInput.Store(time.Now().UTC().UnixMilli())
+	if t.postEvent != nil {
+		t.postEvent(vaxis.Redraw{})
 	}
 }
 
@@ -719,7 +743,11 @@ func (t *isolatedDaemonTerminal) applyRendererPTYWrite(
 		delete(t.responses, oldest)
 	}
 	t.responseMu.Unlock()
-	t.rawAttachment.response(eventID, data)
+	if eventID&rendererInputEventBit != 0 {
+		t.rawAttachment.effect(eventID, data, t.SendInput)
+	} else {
+		t.rawAttachment.response(eventID, data)
+	}
 }
 
 func (t *isolatedDaemonTerminal) handleRendererEvent(_ uint64, frame rendererWorkerFrame) {

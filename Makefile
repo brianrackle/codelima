@@ -312,6 +312,12 @@ test-fleet-evidence: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(FLEET_EVIDENCE_TEST_FLAGS) ./internal/codelima -run '^Test(FleetEvidence|FleetPreview|TUIFleet)' -count=1 -timeout=120s
 
+.PHONY: test-prompt-idle
+PROMPT_IDLE_TEST_FLAGS ?=
+test-prompt-idle: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test $(PROMPT_IDLE_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima ./internal/codelima/daemon -run '^Test(TerminalPromptIdle|TUIFleet|ActivityNative|DaemonImport|IsolatedTerminalPromptIdle|Handoff)' -count=1 -timeout=180s
+
 .PHONY: test-empty-nodes
 EMPTY_NODES_TEST_FLAGS ?=
 test-empty-nodes: init

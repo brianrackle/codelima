@@ -439,7 +439,12 @@ of Activity pagination. Unavailable or stale evidence is labeled explicitly.
 
 Session activity uses terminal integration: progress reports working, error or
 paused, and prompt markers report at prompt. Otherwise activity is unknown;
-a title alone does not prove work or idle time. Marked impact distinguishes guest
+a title alone does not prove work or idle time. Integrated sessions show `idle`
+with the time since the prompt or most recent accepted input. This shared clock
+survives reopening the TUI, renderer recovery and live daemon updates. Stale or
+disconnected activity stays unknown. A marked target shows an idle duration only
+when all its sessions are observed idle, using the most recently active session.
+Marked impact distinguishes guest
 sessions that stopping ends from host sessions and includes hidden targets.
 
 Open a node with Enter and Tab to Metrics. `+`/`-` select 1m, 5m, 15m or 1h;

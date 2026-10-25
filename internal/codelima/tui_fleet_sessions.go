@@ -2,6 +2,7 @@ package codelima
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 	"go.rockorager.dev/vaxis"
@@ -11,11 +12,15 @@ type tuiFleetSession struct {
 	label, activity string
 	kind            terminal.TerminalKind
 	kindKnown       bool
+	idleSince       int64
 }
 
 // Progress and prompt integration provide positive evidence. Absence of a
 // prompt marker is not evidence of work: unsupported shells stay unknown.
 func fleetSessionActivity(metadata TerminalMetadata) string {
+	if metadata.ActivityStale {
+		return "unknown"
+	}
 	switch metadata.ProgressState {
 	case 1, 3:
 		return "working"
@@ -39,6 +44,12 @@ func (a *vaxisTUIApp) fleetSessions(node Node) []tuiFleetSession {
 				metadata := a.terminalMetadata(key)
 				record.label = terminalTabLabel(session, metadata)
 				record.activity = fleetSessionActivity(metadata)
+				if a.daemonDisconnected || (a.fleetEvidence.loaded || a.fleetEvidence.err != nil) && a.fleetEvidenceStale() {
+					record.activity = "unknown"
+				}
+				if record.activity == "at prompt" && metadata.PromptIdleSinceUnixMilli > 0 && metadata.PromptIdleSinceUnixMilli <= time.Now().UnixMilli() {
+					record.idleSince = metadata.PromptIdleSinceUnixMilli
+				}
 				record.kind, record.kindKnown = session.shellKind, true
 			}
 		}
@@ -58,13 +69,17 @@ func (a *vaxisTUIApp) drawFleetSessions(win vaxis.Window, node Node, theme tuiTh
 		if i >= 3 {
 			break
 		}
-		statusWidth := renderedTextWidth(a.vx, record.activity)
+		activity := record.activity
+		if record.idleSince > 0 {
+			activity = fleetIdleLabel(record.idleSince, time.Now())
+		}
+		statusWidth := renderedTextWidth(a.vx, activity)
 		tuiLine(win.New(0, i+1, max(0, width-statusWidth-3), 1), 0, record.label, theme.text)
 		style := theme.dim
 		if record.activity == "working" {
 			style = theme.amber
 		}
-		tuiLine(win.New(max(0, width-statusWidth), i+1, statusWidth, 1), 0, record.activity, style)
+		tuiLine(win.New(max(0, width-statusWidth), i+1, statusWidth, 1), 0, activity, style)
 	}
 }
 
@@ -81,8 +96,10 @@ func (impact tuiMarkedImpact) sessionWarning() string {
 
 func (a *vaxisTUIApp) fleetSessionSummary(node Node) string {
 	working, prompt, unknown := 0, 0, 0
+	idle, newestIdle := 0, int64(0)
 	first := ""
-	for _, session := range a.fleetSessions(node) {
+	sessions := a.fleetSessions(node)
+	for _, session := range sessions {
 		switch session.activity {
 		case "working":
 			working++
@@ -91,6 +108,10 @@ func (a *vaxisTUIApp) fleetSessionSummary(node Node) string {
 			}
 		case "at prompt":
 			prompt++
+			if session.idleSince > 0 {
+				idle++
+				newestIdle = max(newestIdle, session.idleSince)
+			}
 		case "unknown":
 			unknown++
 		}
@@ -102,7 +123,21 @@ func (a *vaxisTUIApp) fleetSessionSummary(node Node) string {
 		return fmt.Sprintf(" · %d activity unknown", unknown)
 	}
 	if prompt > 0 {
+		if idle == len(sessions) {
+			return " · " + fleetIdleLabel(newestIdle, time.Now())
+		}
 		return fmt.Sprintf(" · %d at prompt", prompt)
 	}
 	return ""
+}
+
+func fleetIdleLabel(since int64, now time.Time) string {
+	elapsed := max(time.Duration(0), now.Sub(time.UnixMilli(since)))
+	if elapsed < time.Minute {
+		return fmt.Sprintf("idle %ds", int(elapsed.Seconds()))
+	}
+	if elapsed < time.Hour {
+		return fmt.Sprintf("idle %dm", int(elapsed.Minutes()))
+	}
+	return fmt.Sprintf("idle %dh%dm", int(elapsed.Hours()), int(elapsed.Minutes())%60)
 }

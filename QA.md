@@ -646,6 +646,17 @@ diagnostics; they do not replace those manual qualifications.
   and verify its task label appears on the corresponding marked row, including
   when that target is hidden. A title alone must not count as working. Cancel
   bulk actions during this inspection and remove all owned sessions afterwards.
+- Prompt idle time (ADR 189): use a disposable integrated terminal emitting
+  OSC 133 prompt markers, with no progress state. Wait, then open a second TUI;
+  both previews must retain the same increasing idle interval. Mark its node
+  and verify the all-idle row; add a working/paused/unknown session and confirm
+  the target no longer claims all-idle. Send raw text, encoded keys and paste;
+  accepted input must reset the interval. Leaving the prompt or starting a
+  progress state must remove idle. Restore the prompt, restart its renderer,
+  and perform a live daemon update: the original interval and terminal identity
+  must survive. A stale renderer or disconnected daemon must not claim current
+  idle. Resize to 80×24 and back, detach/reopen, then clean up every test session,
+  process, temporary home and capture.
 - Select several running nodes, press Enter/Esc and refresh. `terminal list`
   must show no newly created shell. Directory headings cannot be selected by
   keyboard or mouse. `G` toggles groups; `<`/`>` chooses sort and `=` reverses.
@@ -742,6 +753,26 @@ stale labels. Full verify/race/CLI integration and final focused race checks
 passed. All owned terminals, daemon/TUI/tmux processes, guest overlay, stores,
 captures and tmpfs were removed; the existing backing image's checksum matched.
 Multi-node conflicts and final native/artboard qualification remain open.
+
+ADR 189 checkpoint (2026-10-25): the rebuilt Linux TUI was visually inspected
+and operated at 150×38 and 80×24 using an isolated metadata-only node and real
+host Bash terminals with OSC 133 prompt integration. A second frontend and a
+reopened frontend retained the original idle interval, including minute labels.
+Accepted raw text, encoded keys, semantic paste and input through raw attachment
+reset it. Working/paused signals removed idle; an unsupported shell with a
+busy-looking title remained unknown and prevented an all-idle marked target.
+Renderer restart and live daemon updates preserved the exact idle timestamp;
+the update also preserved the shell PID. Suspending a renderer through a real
+command deadline published stale activity with no idle claim, then recovered
+the interval. Suspending the daemon exposed a fleet-response freshness gap;
+the regression and fix were verified in both rebuilt frontends. Both displayed
+unknown during suspension and the retained idle interval after recovery.
+Raw attach/detach preserved the session; resize preserved selection and restored
+the preview. All test shells exited, both TUIs and daemon stopped, and the owned
+store, captures, helper binaries and tmpfs were removed. This is Linux prompt
+activity qualification; final native/artboard qualification remains open.
+Final verify/race/CLI integration, focused prompt/fleet race checks and gopls
+passed after the live freshness fix.
 
 - In the create form, type a replacement slug and verify the muted default
   disappears. Esc asks whether to discard; `n` preserves edits and `y`

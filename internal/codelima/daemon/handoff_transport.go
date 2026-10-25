@@ -194,7 +194,7 @@ func ValidateHandoffRecoverySizes(manifest HandoffManifest) error {
 }
 
 func ValidateHandoffActivitySize(manifest HandoffManifest) error {
-	if manifest.Version < HandoffVersion {
+	if manifest.Version < PreviousActivityHandoffVersion {
 		if manifest.ActivitySize != 0 {
 			return errors.New("legacy handoff contains Activity payload")
 		}

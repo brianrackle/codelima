@@ -336,7 +336,7 @@ func (h *updateHandoffHarness) receiveHandoff(t *testing.T, peer *daemon.Handoff
 		}
 		runtimeState.Recovery = recovery
 	}
-	if manifest.Version == daemon.HandoffVersion {
+	if manifest.Version >= daemon.PreviousActivityHandoffVersion {
 		data, err := peer.ReadActivity(manifest.ActivitySize)
 		if err != nil {
 			t.Fatal(err)
@@ -718,6 +718,10 @@ func TestDaemonImportAcceptsPreviousChunkedHandoffVersion(t *testing.T) {
 	testDaemonImportPersistsSession(t, daemon.PreviousChunkedHandoffVersion)
 }
 
+func TestDaemonImportAcceptsPreviousActivityHandoffVersion(t *testing.T) {
+	testDaemonImportPersistsSession(t, daemon.PreviousActivityHandoffVersion)
+}
+
 func TestDaemonImportAcceptsPreviousRecoveryHandoffVersion(t *testing.T) {
 	testDaemonImportPersistsSession(t, daemon.PreviousRecoveryHandoffVersion)
 }
@@ -741,7 +745,7 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 	token := "import-token"
 	manifest := handoffManifestFor(ids, token)
 	manifest.Version = version
-	if version < daemon.HandoffVersion {
+	if version < daemon.PreviousActivityHandoffVersion {
 		manifest.Activity, manifest.ActivitySize = nil, 0
 	}
 	manifest.BinaryVersion = "0.3.4"
@@ -793,7 +797,7 @@ func testDaemonImportPersistsSession(t *testing.T, version int) {
 			}
 		}
 	}
-	if version == daemon.HandoffVersion {
+	if version >= daemon.PreviousActivityHandoffVersion {
 		if err := peer.WriteActivity(manifest.Activity); err != nil {
 			t.Fatal(err)
 		}

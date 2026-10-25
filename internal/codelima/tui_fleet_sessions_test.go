@@ -1,8 +1,10 @@
 package codelima
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
@@ -20,6 +22,53 @@ func TestTUIFleetSessionActivityUsesPositiveIntegrationEvidence(t *testing.T) {
 		if got := fleetSessionActivity(tt.metadata); got != tt.want {
 			t.Fatalf("%+v: got %q want %q", tt.metadata, got, tt.want)
 		}
+	}
+}
+
+func TestTUIFleetPromptIdleUsesRetainedTimeAndRequiresAllMarkedSessionsIdle(t *testing.T) {
+	a, _ := newTestManager(t, 150, 38)
+	node := a.state.nodes[0]
+	since := time.Now().Add(-4 * time.Minute).UnixMilli()
+	term := &metadataTestTerminal{fakeTUITerminal: newFakeTUITerminal(), metadata: TerminalMetadata{CursorAtPrompt: true, PromptIdleSinceUnixMilli: since}}
+	putTestSession(a.sessions, nodeTargetKey(node.ID), &tuiSession{shellKind: terminal.NodeShell}, term)
+	a.refreshFleet()
+	a.fleet.selectID(node.ID)
+	a.selectFleetNode()
+	a.draw()
+	if screen := renderedScreenText(t, a.vx, 150, 38); !strings.Contains(screen, "idle 4m") {
+		t.Fatalf("retained idle missing:\n%s", screen)
+	}
+	if got := a.fleetSessionSummary(node); got != " · idle 4m" {
+		t.Fatal(got)
+	}
+	for _, bad := range []string{"future", "busy", "stale", "disconnected", "expired response", "failed request"} {
+		term.metadata = TerminalMetadata{CursorAtPrompt: true, PromptIdleSinceUnixMilli: since}
+		a.daemonDisconnected = false
+		a.fleetEvidence = tuiFleetEvidenceState{}
+		switch bad {
+		case "future":
+			term.metadata.PromptIdleSinceUnixMilli = time.Now().Add(time.Hour).UnixMilli()
+		case "busy":
+			term.metadata.ProgressState = 3
+		case "stale":
+			term.metadata.ActivityStale = true
+		case "disconnected":
+			a.daemonDisconnected = true
+		case "expired response":
+			a.fleetEvidence = tuiFleetEvidenceState{loaded: true, receivedAt: time.Now().Add(-6 * time.Second)}
+		case "failed request":
+			a.fleetEvidence.err = errors.New("request timed out")
+		}
+		if got := a.fleetSessionSummary(node); strings.Contains(got, "idle") {
+			t.Fatalf("%s claimed idle: %s", bad, got)
+		}
+	}
+	a.daemonDisconnected = false
+	a.fleetEvidence = tuiFleetEvidenceState{}
+	term.metadata = TerminalMetadata{CursorAtPrompt: true, PromptIdleSinceUnixMilli: since}
+	putTestSession(a.sessions, nodeTargetKey(node.ID), &tuiSession{shellKind: terminal.NodeShell}, &metadataTestTerminal{fakeTUITerminal: newFakeTUITerminal(), metadata: TerminalMetadata{ProgressState: 4}})
+	if got := a.fleetSessionSummary(node); strings.Contains(got, "idle") {
+		t.Fatal("mixed target claimed wholly idle", got)
 	}
 }
 

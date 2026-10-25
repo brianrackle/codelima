@@ -47,7 +47,8 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   rows are implemented (ADR 186). Bounded failure/recent evidence and explicit
   guest/host session activity/impact are implemented (ADR 187). Selected runtime
   configuration, CPU/memory preview trends and per-target tasks are implemented
-  (ADR 188). Idle timing, complete agent validation and final artboard/native
+  (ADR 188). Prompt idle timing is retained across frontends, renderer recovery
+  and live daemon updates (ADR 189). Complete agent validation and final artboard/native
   qualification remain in TODO #57.
 
 - Ports delivery [partially complete, in progress]: readiness-gated application

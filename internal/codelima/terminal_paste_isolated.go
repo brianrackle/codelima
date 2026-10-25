@@ -16,8 +16,11 @@ func (t *isolatedDaemonTerminal) Paste(text string) error {
 	if err != nil {
 		return err
 	}
-	if len(data) > 0 && !writer.Enqueue(data) {
-		return errTerminalInputQueueFull
+	if len(data) > 0 {
+		if !writer.Enqueue(data) {
+			return errTerminalInputQueueFull
+		}
+		t.recordInputActivity()
 	}
 	return nil
 }

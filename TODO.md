@@ -26,10 +26,11 @@ evidence, recovered interruption/liveness checks and explicit guest/host session
 impact with progress/prompt activity. Qualification evidence is in the design
 ledger. ADR 188 adds selected runtime/mount/nesting configuration, CPU
 average/peak and memory history, creation/auth/Lima identity, workspace access
-and per-target working task labels. Remaining fleet work: durable idle timing,
-complete multi-agent validation and final wide/compact native artboard
-qualification. Add terminal activity timestamps and explicit validation evidence
-to their owning caches, then project them without guest I/O in renderers. Advantages: faithful,
+and per-target working task labels. ADR 189 adds daemon-owned prompt idle timing
+with accepted-input resets, renderer recovery and live-update continuity.
+Remaining fleet work: complete multi-agent validation and final wide/compact
+native artboard qualification. Add explicit validation evidence to its owning
+cache, then project it without guest I/O in renderers. Advantages: faithful,
 truthful cross-view presentation. Disadvantages: additional observation
 contracts, retention/staleness rules and responsive/native QA. These remain
 in the full #57 scope; unknown activity must not be inferred from titles.
@@ -51,9 +52,19 @@ age. Owned guests, overlays, processes, stores, captures and tmpfs were removed;
 the older backing image remained unchanged. Multi-node route conflicts,
 native desktop browser launch and final native/artboard qualification remain.
 
+ADR 189 live checks passed with two rebuilt Linux frontends, integrated Bash,
+raw attach/detach, wide/compact resize, renderer restart and live daemon updates.
+The same idle interval and shell PID survived update. Raw/encoded/paste input
+reset the interval; working/paused/unsupported sessions prevented idle claims.
+Renderer timeout and daemon suspension/recovery were exercised. Live inspection
+found a freshness gap before the connection heartbeat expired; the added
+regression and rebuilt-frontends check verify that expired/failed fleet responses
+now suppress current idle claims. All owned manual QA state was removed.
+Final full verify/race/CLI integration and focused race/gopls checks pass.
+
 Verification cleanup follow-up: forced shell termination in existing tests can
-leave `.codelima-inputrc.*` files in the user home. This checkpoint removed its
-25 inactive, exact-content test files; older accumulated files were preserved.
+leave `.codelima-inputrc.*` files in the user home. ADR 189's checkpoint removed
+46 inactive, exact-content test files; older accumulated files were preserved.
 Suggested solution: use an explicit project-rooted temporary inputrc directory
 for test launches, add cleanup on shell termination and have test owners remove
 their files even after forced termination. Audit older files against active

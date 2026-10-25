@@ -193,6 +193,7 @@ func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
 	// These identity fields never change. Do not copy the whole state here:
 	// resize mutates its geometry under the host lock while publishers run.
 	identity := daemon.TerminalState{TerminalID: entry.state.TerminalID, Target: entry.state.Target, Label: entry.state.Label}
+	idle := terminalPromptIdle{since: entry.activity.metadata.PromptIdleSinceUnixMilli}
 	for {
 		select {
 		case <-entry.snapshotStop:
@@ -217,6 +218,11 @@ func (h *daemonHost) runTerminalSnapshotPublisher(entry *daemonTerminalEntry) {
 		published := daemonSnapshot(result.Snapshot)
 		published.SnapshotSequence = entry.snapshotSequence.Add(1)
 		published.ProducedAt = time.Now().UTC()
+		published.Metadata.PromptIdleSinceUnixMilli = 0
+		published.Metadata.ActivityStale = published.Stale
+		if input, ok := entry.term.(interface{ LastInputUnixMilli() int64 }); ok {
+			published.Metadata.PromptIdleSinceUnixMilli = idle.observe(published.Metadata, published.Stale, input.LastInputUnixMilli(), published.ProducedAt.UnixMilli())
+		}
 		cache := &daemonTerminalCache{
 			snapshot: published,
 			visibleText: ReadResult{
@@ -1907,7 +1913,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 	}
 	validHandoffVersion := manifest.Version == daemon.HandoffVersion
 	if peer.Framing == daemon.HandoffFramingLengthPrefixed {
-		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion || manifest.Version == daemon.PreviousChunkedHandoffVersion || manifest.Version == daemon.PreviousRecoveryHandoffVersion
+		validHandoffVersion = validHandoffVersion || manifest.Version == daemon.PreviousActivityHandoffVersion || manifest.Version == daemon.PreviousStreamHandoffVersion || manifest.Version == daemon.PreviousChunkedHandoffVersion || manifest.Version == daemon.PreviousRecoveryHandoffVersion
 	} else {
 		validHandoffVersion = manifest.Version == daemon.LegacyHandoffVersion
 	}
@@ -1976,7 +1982,7 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			runtimeState.Recovery = recovery
 		}
 	}
-	if manifest.Version == daemon.HandoffVersion {
+	if manifest.Version >= daemon.PreviousActivityHandoffVersion {
 		manifest.Activity, err = peer.ReadActivity(manifest.ActivitySize)
 		if err != nil {
 			return err

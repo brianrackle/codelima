@@ -56,7 +56,8 @@ func (e *daemonActivityEvents) prepareHandoff(entries []*daemonTerminalEntry) ([
 
 func activityBaselineMetadata(metadata TerminalMetadata) TerminalMetadata {
 	return TerminalMetadata{
-		BellCount: metadata.BellCount, NotificationCount: metadata.NotificationCount,
+		PromptIdleSinceUnixMilli: metadata.PromptIdleSinceUnixMilli,
+		BellCount:                metadata.BellCount, NotificationCount: metadata.NotificationCount,
 		NotificationTitle: terminalMetadataText(metadata.NotificationTitle, 120),
 		NotificationBody:  terminalMetadataText(metadata.NotificationBody, 512),
 	}
@@ -72,7 +73,7 @@ func (e *daemonActivityEvents) resumeAfterHandoff() {
 // Validate the whole payload before changing state. Restored admission remains
 // memory-only until the successor owns the daemon lock and commits its reply.
 func (e *daemonActivityEvents) restoreHandoff(manifest daemon.HandoffManifest) error {
-	if manifest.Version < daemon.HandoffVersion {
+	if manifest.Version < daemon.PreviousActivityHandoffVersion {
 		return nil
 	}
 	var state activityHandoffState
@@ -95,7 +96,7 @@ func (e *daemonActivityEvents) restoreHandoff(manifest daemon.HandoffManifest) e
 	}
 	for _, terminal := range manifest.Session.Terminals {
 		metadata, ok := state.Terminals[terminal.TerminalID]
-		if !ok || metadata != activityBaselineMetadata(metadata) {
+		if !ok || metadata.PromptIdleSinceUnixMilli < 0 || metadata != activityBaselineMetadata(metadata) {
 			return errors.New("invalid native Activity terminal baseline")
 		}
 	}

@@ -2,6 +2,6 @@ package codelima
 
 import "github.com/brianrackle/codelima/internal/codelima/daemon"
 
-// TerminalMetadata is copied from native effects. It is presentation state,
-// never authority to open a path, execute a command, or notify the host.
+// TerminalMetadata includes native effects and daemon activity observations.
+// It never authorizes paths, commands or host notifications.
 type TerminalMetadata = daemon.TerminalMetadata

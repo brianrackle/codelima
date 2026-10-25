@@ -675,6 +675,13 @@ deferred redraw policy (ADRs 134, 138 and 139).
 
 The production TUI loads the daemon's flat node inventory on lifecycle pushes with a slow safety refresh, then scopes it by canonical directory containment. Apply one-second telemetry pushes in place without triggering inventory reads. Project fleet selection, marks, filtering and sorting by node identity; use the same projected rows for rendering and mouse hit testing. Configuration and environment views are global.
 
+Retain prompt idle intervals in the daemon terminal publisher, using native
+prompt evidence and the PTY owner's accepted-input timestamp. Never use a title,
+quiet output or frontend arrival time as an idle signal. Preserve the interval
+in the bounded Activity handoff baseline; suppress current claims when stale.
+Keep renderer query replies separate from user input and preserve response
+deduplication before accounting. See ADR 189 and `make test-prompt-idle`.
+
 Project fleet evidence independently of paged Activity and full Spec/receipts.
 Bound node IDs, text and recent counts; preserve step kind, execution node and
 attempt time. Read only visible nodes plus selection, cancel on navigation,

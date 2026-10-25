@@ -12,11 +12,12 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 25 adds selected
-	// fleet resource history and effective runtime configuration evidence.
-	ProtocolVersion                = 25
+	// whenever a wire shape this protocol carries changes; 26 adds daemon-owned
+	// prompt idle timing and explicit stale terminal activity.
+	ProtocolVersion                = 26
 	SessionVersion                 = 2
-	HandoffVersion                 = 6
+	HandoffVersion                 = 7
+	PreviousActivityHandoffVersion = 6
 	PreviousRecoveryHandoffVersion = 5
 	PreviousChunkedHandoffVersion  = 4
 
@@ -277,18 +278,21 @@ type SnapshotCell struct {
 	Overline       bool   `json:"ov,omitempty"`
 }
 
-// TerminalMetadata is terminal-supplied presentation state, not authority to
-// execute commands, open paths, change the host title, or post notifications.
+// TerminalMetadata combines terminal presentation state with daemon activity
+// observations. It never authorizes commands, paths or host notifications.
 type TerminalMetadata struct {
-	Title             string `json:"title,omitempty"`
-	WorkingDirectory  string `json:"working_directory,omitempty"`
-	BellCount         uint64 `json:"bell_count,omitempty"`
-	NotificationCount uint64 `json:"notification_count,omitempty"`
-	NotificationTitle string `json:"notification_title,omitempty"`
-	NotificationBody  string `json:"notification_body,omitempty"`
-	ProgressState     int    `json:"progress_state,omitempty"`
-	Progress          int    `json:"progress,omitempty"`
-	CursorAtPrompt    bool   `json:"cursor_at_prompt,omitempty"`
+	// These two fields are stamped by the daemon publisher, not the terminal.
+	PromptIdleSinceUnixMilli int64  `json:"prompt_idle_since_unix_milli,omitempty"`
+	ActivityStale            bool   `json:"activity_stale,omitempty"`
+	Title                    string `json:"title,omitempty"`
+	WorkingDirectory         string `json:"working_directory,omitempty"`
+	BellCount                uint64 `json:"bell_count,omitempty"`
+	NotificationCount        uint64 `json:"notification_count,omitempty"`
+	NotificationTitle        string `json:"notification_title,omitempty"`
+	NotificationBody         string `json:"notification_body,omitempty"`
+	ProgressState            int    `json:"progress_state,omitempty"`
+	Progress                 int    `json:"progress,omitempty"`
+	CursorAtPrompt           bool   `json:"cursor_at_prompt,omitempty"`
 }
 
 type Snapshot struct {
