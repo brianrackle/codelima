@@ -106,6 +106,31 @@ additional compatibility/QA work. Preserve this in the full redesign scope.
 
 ### 57. Implement the retrieved major-version TUI design
 
+Confirmation work (ADR 196): single-node delete/stop review, exact-name gating,
+captured attachment, guest/host impact and host-tab preservation are implemented;
+automated and live Linux/TCG qualification passed, with cleanup recorded in the
+design ledger. The Dialogs artboard remains
+partial. Implement the clone review with an available default name, actual
+source-cycle impact and a daemon-owned optional child start, then the durable
+parallel batch owner described above and its per-node review/outcomes. Advantages:
+clone/start and every batch member survive frontend exit, with truthful progress.
+Disadvantages: admission, cancellation, source restoration, partial failure and
+recovery require lifecycle tests beyond modal presentation. Historical last-up
+time is not stored; use the matching confirmed-stop evidence now and preserve
+explicit unavailable states when it is absent. Final whole-design/native QA is
+still required. These stages do not reduce the accepted 26-artboard scope.
+
+Clone/start implementation note: `nodeOperations.bindCreatedNode` already adds
+the child reservation and persists its receipt identity. Reuse that transition
+after the clone has returned and restored the source, before optional child
+startup. Do not simply add clone to `startsNode()`: cancellation cleanup currently
+uses the receipt's original node ID, which is the source during cloning, and
+could stop the source again after its guaranteed restoration. Track the child
+cleanup target separately; test cancellation before and after child admission,
+source-restoration failure, startup failure and observer disconnect. Keep the
+direct Service and daemon entrypoints consistent, and qualify compatibility for
+the new optional start field so an older daemon cannot silently ignore it.
+
 Manual setup follow-up: launching two frontends concurrently against the new
 ADR 193 disposable home produced one `daemon exited before becoming ready`
 error while the other connected; reopening the failed frontend then worked.
@@ -161,6 +186,17 @@ then qualify full-screen applications, resets, mouse/query replies and resize.
 Advantage: preserves the source's no-embedded-emulator contract. Disadvantage:
 a persistent portable header cannot simply be painted over raw terminal output;
 its fidelity and fallback require an explicit decision before completion.
+
+2026-10-25 investigation: `attachDaemonTerminalFile` restores a VT checkpoint
+and relays output/input without framing; clears, absolute cursor addressing,
+terminal queries and full physical resize therefore belong to the host terminal.
+The [xterm control reference](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)
+documents DECSSDT/DECSASD status displays and title controls, but these do not
+establish a universal top-header facility across supported terminals. A user
+preference question is pending: preserve direct access with native title/banner
+context, or add framing to guarantee the fixed row. Continue the independent
+confirmation artboard meanwhile. Do not mark Attached complete based on a title
+alone or silently replace the direct attach path with embedded rendering.
 
 Source access resolved on 2026-10-24. The user's interactive Claude Code
 session could read the artifact with its `Artifact` tool; the headless

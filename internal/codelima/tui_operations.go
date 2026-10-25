@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 )
 
 func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
@@ -67,6 +69,13 @@ func (a *vaxisTUIApp) startOperation(request tuiOperationRequest) error {
 func (a *vaxisTUIApp) applyOperationResult(selectedKey string, result tuiOperationResult) error {
 	if result.CloseNodeID != "" {
 		a.sessions.CloseNode(result.CloseNodeID)
+	}
+	if result.CloseGuestNodeID != "" {
+		for _, key := range a.sessions.TargetSessionKeys(terminal.NodeTarget(result.CloseGuestNodeID).String()) {
+			if session, ok := a.sessions.Session(key); ok && session.shellKind == terminal.NodeShell {
+				a.sessions.CloseSession(key)
+			}
+		}
 	}
 	if result.ReloadData {
 		// The reload is a daemon RPC or a store read; it runs off the event

@@ -914,3 +914,17 @@ not change dimensions or create another terminal owner. Keep the active session
 visible by identity, with metadata and bell acknowledgement shared across tab
 presentations. Capture node/session/terminal IDs in mouse targets and revalidate
 them on click; an ended target must never select its replacement (ADR 195).
+
+## Destructive review identity and evidence
+
+Keep a confirmation's canonical node ID and original displayed name through
+submission. Validate action availability before mutation and again after an
+asynchronous prerequisite such as a settings save. Exact-name confirmation uses
+the original input string, without trimming. Discarding this disposable input
+needs no second confirmation. Bind optional inspection to a specific terminal
+ID; an ended target must not create or select a replacement. Use known terminal
+kind and fresh activity evidence for impact, and preserve unaffected host tabs
+when a guest operation completes. Share the generic input and submission model
+inside a dedicated domain review instead of adding lifecycle behavior to every
+dialog. Revalidate the current root terminal size before activation: the global
+minimum-size screen may skip the overlay's Draw method entirely (ADR 196).

@@ -705,9 +705,20 @@ codelima settings set color ansi
 
 The window command is a quoted argument list; `{cmd}` must be a standalone
 argument and expands to the managed session's attach command. Use an executable
-wrapper for shell expressions. Stop confirmation defaults to sessions that
-are busy or do not report an idle prompt; `confirm_stop` accepts `busy`,
-`always` and `never`. The detach key is fixed at Ctrl+].
+wrapper for shell expressions. Stop confirmation defaults to guest sessions
+that are working, paused or lack a fresh idle prompt; host shells keep running.
+`confirm_stop` accepts `busy`, `always` and `never`. The stop review lists guest
+sessions and observed resource release. Press `x` to inspect its named guest
+first; Ctrl+] returns to the review without ending that session. Space toggles
+whether idle guests skip future reviews; the preference saves only on submit.
+Use `s` or Enter to stop and Esc to cancel. PgUp/PgDn or the mouse wheel scrolls
+long reviews. The detach key is fixed at Ctrl+].
+
+Single-node deletion shows virtual disk capacity, configured ports and the
+copy/mounted workspace consequence. Type the exact node slug, including case
+and without surrounding spaces, then Enter. Esc cancels immediately. Guest-only
+changes are lost; the host directory is retained. Changing selection does not
+change the reviewed target, and removed or renamed nodes require a new review.
 
 Set `shell.mode` to `embedded` in Settings to enable `X` then `e`, which opens
 a fresh embedded Shell tab. It reserves **F6 only** while the shell has focus. All

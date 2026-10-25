@@ -1385,10 +1385,10 @@ func TestTUIStopOverlaySuppressesGuestTabReopen(t *testing.T) {
 	target := nodeTargetKey(node.ID)
 	selectTUIEntry(t, app, target)
 	release := startBlockedNodeOperation(t, app, node, "stopping", tuiOperationResult{
-		Status:       "stopped node " + node.Slug,
-		PreferredKey: target,
-		CloseNodeID:  node.ID,
-		ReloadData:   true,
+		Status:           "stopped node " + node.Slug,
+		PreferredKey:     target,
+		CloseGuestNodeID: node.ID,
+		ReloadData:       true,
 	}, nil)
 
 	// A reload still carrying the pre-stop record lands mid-stop.
@@ -3752,10 +3752,11 @@ func TestTUINodeActionsStartStopCloneAndDelete(t *testing.T) {
 	if err := app.performAction(tuiActionSpec{ID: tuiActionNodeDelete}); err != nil {
 		t.Fatalf("performAction(delete node) error = %v", err)
 	}
-	if app.activeDialog() == nil || app.activeDialog().Title != "Delete Node" {
+	if app.activeDialog() == nil || app.activeDialog().Title != "Delete "+childNode.Slug+"?" {
 		t.Fatalf("expected delete node dialog, got %#v", app.activeDialog())
 	}
-	submitTUIDialog(t, app, map[string]string{})
+	app.activeDialog().SetFieldValue("confirm", childNode.Slug)
+	submitTUIDialog(t, app, map[string]string{"confirm": childNode.Slug})
 
 	deletedChild, err := service.NodeShow(ctx, childNode.ID)
 	if err != nil {

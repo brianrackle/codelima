@@ -127,7 +127,8 @@ func (a *vaxisTUIApp) drawManager(window vaxis.Window) {
 	_, keyHelp := a.overlay.(*tuiKeyHelp)
 	_, palette := a.overlay.(*tuiPalette)
 	_, shellChooser := a.overlay.(*tuiShellChooser)
-	if a.visibleCreateForm() != nil || keyHelp || palette || shellChooser {
+	_, nodeConfirmation := a.overlay.(*tuiNodeConfirmation)
+	if a.visibleCreateForm() != nil || keyHelp || palette || shellChooser || nodeConfirmation {
 		theme = theme.dimmed()
 	}
 	a.fleetMouseRows = nil

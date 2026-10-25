@@ -23,7 +23,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Detail · failed](reference/NodeFailed.dc.html) | Visual reference and associated canvas notes | Partial: real failure/source actions, VM inspection and readiness-gated ports verified; final artboard qualification remains |
 | [Create node · validation](reference/CreateNode.dc.html) | ADR 174 form, async validation and launch intent | Partial; form/launch flows verified, final artboard/native qualification open |
 | [Create node · template picker](reference/TemplatePicker.dc.html) | ADRs 174–175 filter/details/shared new-template editor and return | Partial; live return verified, final fidelity/native qualification pending |
-| [Confirmations](reference/Dialogs.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Confirmations](reference/Dialogs.dc.html) | Exact-name delete, busy stop, clone/start and captured parallel batch review | Partial: single-node delete/stop review and automated/Linux TUI qualification complete (ADR 196); clone/start, durable batches and final native/artboard qualification remain |
 | [Templates · configurations](reference/Templates.dc.html) | ADR 176 global usage, frozen drift, stable selection and responsive list/details | Partial; final artboard/native qualification pending |
 | [Templates · edit](reference/TemplateEdit.dc.html) | ADR 175 shared draft, resources, ordered environments, command blocks, preview and frozen-node impact | Partial; live wide/compact flows verified, final modal/native qualification pending |
 | [Templates · environments](reference/Environments.dc.html) | ADRs 176–178 ordered drafts, external editing, execution evidence, disposable tests and dependency hints | Partial; disposable runs and reviewable dependency fixes verified, final artboard/native qualification pending |
@@ -37,6 +37,83 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+ADR 196 checkpoint, 2026-10-25: single-node delete
+and stop now use a content-sized themed review with a fixed input/action area,
+wrapped scrollable evidence and dimmed manager context. Delete requires the
+untrimmed exact slug; both reviews retain canonical identity and revalidate
+availability before mutation. Esc discards confirmation input immediately.
+Stop distinguishes guest/host impact, exposes an exact captured attachment and
+persists an edited idle preference only on submission. Its asynchronous save
+revalidates the target before stopping. Completion retains unaffected host tabs.
+No daemon/storage/worker protocol change is needed; versions remain 27/2/6/7.
+
+Focused regressions cover exact text, canonical identity, renamed/removed/
+in-flight/disconnected targets, retained errors, paste/release/repeat gating,
+host versus guest activity, unclassified kinds, ended attachment targets,
+preference persistence/cancellation and asynchronous revalidation, compact
+scrolling, mouse controls, small-view refusal and host-tab retention. `go doc`
+checked Vaxis text input and `gopls` found no new-file diagnostics. The existing
+lifecycle test now supplies actual typed confirmation input instead of directly
+calling its callback with only a value map.
+
+The rebuilt TUI was inspected at 150×38 truecolor and 80×24 ANSI. Real copied
+and mounted fixtures showed their disk/workspace consequences and port data.
+Partial and space-padded names were refused; pasted exact text enabled deletion
+without submitting. Esc canceled immediately. An exact-name review at 60×14
+refused Enter until restored. Mouse deletion removed the copy fixture's Lima
+directory/disk and retained a host marker file.
+
+The real mounted guest booted in about five minutes under TCG. Twelve guest
+sessions and one host exercised the list; title/progress metadata became visible
+once their SSH shells were ready. Attachment retained guest PID 2437 and its
+exported state; Ctrl+] returned to the same review. Cancellation kept all thirteen
+sessions. Closing the captured guest then pressing x refused replacement and
+left the remaining twelve sessions intact. The wide full list and compact
+scrolling exposed working titles, age, actual 1-vCPU/1-GiB allocation release,
+retained disk/workspace and host survival. Canceling a toggled checkbox left
+`always` unchanged. Suspending only the fixture daemon refused submission;
+after recovery, mouse toggling and submission saved `busy`. Stop ended all eleven
+remaining guests while host terminal identity, PID 2252867 and exported state
+survived. A second real start (273.71s) followed by host-only working activity
+skipped the busy review and stopped the guest directly. Both stops took about
+30.5s. The latest rebuilt frontend reattached that same surviving host process
+and showed matching confirmed-stop evidence in the stopped-node delete review.
+
+The focused race run passed (5.268s), including the added unclassified-kind
+regression; both binaries built and `gopls` checks were clear. The first full
+format/lint/unit/Vaxis/build/race/integration pass succeeded (core unit 86.572s,
+core race 118.636s, CLI integration 17.821s). Cleanup deleted both fixture
+nodes/VMs, closed all shells, stopped
+the owned daemon and both frontends, and removed their tmux server. Command and
+environment process audits found no owned survivors. The read-only baseline's
+SHA256 remained `a717dba3fd2c2dfe699262623aa2c6b5147955ea4bca46c8da4dfae8ba42913c`.
+Unmounting/removing `tmp/dq` removed the overlays, metadata, scripts, captures,
+host marker and socket state. Existing baseline resources were preserved.
+
+Review then found an additional minimum-size edge: the manager does not draw
+overlays below 60×14, so the modal's previous size flag alone could authorize a
+hidden action. A failing regression reproduced this for both delete and stop.
+Activation now checks the current root size and shared manager minimums, as well
+as the modal's own required height. Focused race coverage passed again (5.248s).
+The rebuilt app was exercised with a separate metadata-only fixture at 60×14,
+40×10, 59×24 and 80×13. Enter created no operation receipts; returning to 80×24
+retained the exact input and Esc canceled. Screenshots were inspected, the owned
+frontend/daemon stopped, process absence verified and `tmp/ds` unmounted/removed.
+Final gopls reported only existing modernization hints in `tui_render.go`.
+The final `make fmt verify test-race test-integration` run passed after this
+correction: core unit 87.648s, core race 118.575s and CLI integration 17.650s,
+with formatting, lint, Vaxis tests and both builds successful. Cleanup removed
+47 newly created inactive exact-content INPUTRC files, preserving 1,015 older,
+active or other files; active-process references were checked with read-only
+privileged inspection where the baseline PAM/sshd processes hid their
+environments. There were no new Lima cache files. Test work directories and
+owned verification logs were removed. All 26 retained artboards and the canvas
+were rechecked against the manifest hashes.
+
+Clone/start review, durable parallel batch review/ownership and the full native
+and whole-design QA matrix remain in TODO #57. This checkpoint does not complete
+the Dialogs artboard or the accepted redesign.
 
 ADR 195 checkpoint, 2026-10-25: Shell detail is now explicitly gated by embedded
 mode, including its empty state. The themed session strip keeps the active tab

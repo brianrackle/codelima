@@ -43,6 +43,7 @@ type tuiOperationResult struct {
 	Status           string
 	PreferredKey     string
 	CloseNodeID      string
+	CloseGuestNodeID string
 	ReloadData       bool
 	ShowTerminalPane bool
 	// Apply runs on the TUI event loop once the rest of the result has been

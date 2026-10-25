@@ -10,6 +10,12 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-node-confirmations NODE_CONFIRMATION_TEST_FLAGS=-race` covers exact
+deletion text, captured node/session targets, stale actions, asynchronous
+preference revalidation, guest/host impact, retained host tabs, compact scrolling,
+mouse controls and keyboard event lifecycle (ADR 196). Run the single-node
+confirmation subsection of QA.md Flow 7 with disposable nodes and real shells.
+
 `make test-embedded-shell EMBEDDED_SHELL_TEST_FLAGS=-race` covers opt-in detail
 visibility, shared frame/resize geometry, overflowing active tabs, host accents,
 mouse target identity, disconnected launch refusal and forwarding freshness

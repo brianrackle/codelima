@@ -604,34 +604,20 @@ func (a *vaxisTUIApp) openDeleteEnvironmentConfigDialog(config EnvironmentConfig
 }
 
 func (a *vaxisTUIApp) openDeleteNodeDialog(node Node) {
-	a.overlay = newTUIDialog(
-		"Delete Node",
-		"Delete",
-		[]string{
-			"Delete node " + node.Slug + ".",
-			"The associated Lima instance will be terminated.",
-		},
-		nil,
-		func(_ map[string]string) error {
-			return a.startOperation(tuiOperationRequest{
-				Title:         "Deleting node " + node.Slug,
-				DisplayStatus: "deleting",
-				ResourceKeys:  []string{terminal.NodeTarget(node.ID).String()},
-				EntryKeys:     []string{terminal.NodeTarget(node.ID).String()},
-				Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
-					deleted, err := service.NodeDelete(ctx, node.ID)
-					if err != nil {
-						return tuiOperationResult{}, err
-					}
-					return tuiOperationResult{
-						Status:      "deleted node " + deleted.Slug,
-						CloseNodeID: deleted.ID,
-						ReloadData:  true,
-					}, nil
-				},
-			})
-		},
-	)
+	a.overlay = a.newNodeConfirmation(node, tuiActionNodeDelete, func(current Node) error {
+		return a.startOperation(tuiOperationRequest{
+			Title: "Deleting node " + current.Slug, DisplayStatus: "deleting",
+			ResourceKeys: []string{terminal.NodeTarget(current.ID).String()},
+			EntryKeys:    []string{terminal.NodeTarget(current.ID).String()},
+			Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
+				deleted, err := service.NodeDelete(ctx, current.ID)
+				if err != nil {
+					return tuiOperationResult{}, err
+				}
+				return tuiOperationResult{Status: "deleted node " + deleted.Slug, CloseNodeID: deleted.ID, ReloadData: true}, nil
+			},
+		})
+	})
 }
 
 func (a *vaxisTUIApp) openCloneNodeDialog(node Node) {

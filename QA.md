@@ -650,6 +650,36 @@ System daemon controls (ADR 181), in an isolated metadata home:
 7. Close fixture terminals/TUIs, stop the daemon and remove all diagnostic
    bundles, metadata, tmux state, screenshots, mounts and verification scripts.
 
+Single-node confirmations (ADR 196):
+
+1. With disposable mounted and copied nodes, open `d` at 150×38 truecolor and
+   80×24 ANSI. Inspect the coral border, actual virtual disk capacity, configured
+   ports, workspace consequences, session counts and confirmed-stop/unavailable
+   evidence. The background dims and the dialog fits its content.
+2. Enter a partial or space-padded slug and submit: the node remains. Paste the
+   exact slug; the delete action becomes available but does not run until a real
+   Enter press or mouse click. Esc cancels immediately after typing. Resize to
+   60×14, then 40×10 and back; neither an unreadable review nor the global
+   minimum-size screen can submit. Delete the copy fixture
+   and verify its VM/disk disappear while the host directory remains.
+3. Open a real guest and host shell on the mounted node. Mark guest work through
+   supported progress/prompt integration and set `confirm_stop=always`. Open
+   `s`: guest sessions are listed with known activity/age; host sessions are
+   described as surviving. Resource release matches the observed allocation.
+4. Press `x`, verify the named guest's existing process/state, then Ctrl+]. The
+   same stop review returns. Cancel and verify both shells survive. End that
+   captured guest from another frontend while its review stays open; `x` must
+   refuse attachment rather than select or create another shell.
+5. With enough guest sessions to overflow, inspect first/last rows with
+   PgUp/PgDn and wheel scrolling at both widths. Toggle the idle checkbox with
+   Space and mouse, cancel, and verify settings were not saved. Submit a changed
+   preference and confirm it persists. Stopping ends guest sessions while the
+   existing host process, terminal ID and local tab remain usable.
+6. With the default `busy` preference, host-only work must stop without a busy
+   review; working/unknown guests still ask. Verify stale/disconnected actions
+   refuse submission. Clean all disposable guests, shells, nodes, metadata,
+   screenshots, processes, mounts and temporary test inputs after verification.
+
 Embedded shell (ADR 195):
 
 1. With `shell.mode=attach`, existing raw sessions must not expose Shell detail;

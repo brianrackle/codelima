@@ -17,6 +17,11 @@ import (
 // tuiMessageLogDefaultCap bounds the message ring; older entries are evicted.
 const tuiMessageLogDefaultCap = 200
 
+const (
+	tuiMinWidth  = 60
+	tuiMinHeight = 14
+)
+
 // tuiMessage is one entry in the message surface: when it happened, its severity
 // (borrowed from slog so the view can colour it), and the human text.
 type tuiMessage struct {
@@ -540,8 +545,8 @@ func (a *vaxisTUIApp) draw() {
 	a.nodeBackRect = tuiRect{}
 	a.embedded.clearTargets()
 	a.linkRegions = nil
-	if width < 60 || height < 14 {
-		window.Println(0, vaxis.Segment{Text: "CodeLima TUI requires at least 60x14 terminal cells."})
+	if width < tuiMinWidth || height < tuiMinHeight {
+		window.Println(0, vaxis.Segment{Text: fmt.Sprintf("CodeLima TUI requires at least %dx%d terminal cells.", tuiMinWidth, tuiMinHeight)})
 		window.Println(1, vaxis.Segment{Text: fmt.Sprintf("Current size: %dx%d", width, height)})
 		a.vx.Render()
 		return

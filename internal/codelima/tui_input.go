@@ -210,7 +210,7 @@ func (a *vaxisTUIApp) performEntryAction(action tuiActionSpec, entry tuiTreeEntr
 		return a.restartNode(entry.node)
 	case tuiActionNodeStop:
 		if a.confirmNodeStop(entry.node) {
-			a.overlay = newTUIDialog("Stop "+entry.node.Slug, "Stop", []string{"Sessions may have running commands. Stopping ends their guest processes."}, nil, func(map[string]string) error { return a.stopNode(entry.node) })
+			a.openStopNodeDialog(entry.node)
 			return nil
 		}
 		return a.stopNode(entry.node)
@@ -229,7 +229,7 @@ func (a *vaxisTUIApp) stopNode(node Node) error {
 		ResourceKeys: []string{terminal.NodeTarget(node.ID).String()}, EntryKeys: []string{terminal.NodeTarget(node.ID).String()},
 		Run: func(ctx context.Context, service *Service) (tuiOperationResult, error) {
 			stopped, err := service.NodeStop(ctx, node.ID)
-			return tuiOperationResult{Status: "stopped node " + stopped.Slug, PreferredKey: terminal.NodeTarget(stopped.ID).String(), CloseNodeID: stopped.ID, ReloadData: true}, err
+			return tuiOperationResult{Status: "stopped node " + stopped.Slug, PreferredKey: terminal.NodeTarget(stopped.ID).String(), CloseGuestNodeID: stopped.ID, ReloadData: true}, err
 		},
 	})
 }
@@ -256,10 +256,13 @@ func (a *vaxisTUIApp) confirmNodeStop(node Node) bool {
 	if a.sessions == nil {
 		return false
 	}
-	for _, key := range a.sessions.TargetSessionKeys(terminal.NodeTarget(node.ID).String()) {
-		// Prompt state comes from shell integration. If a shell does not report
-		// it, treat its activity as unknown and ask before ending its process.
-		if !a.terminalMetadata(key).CursorAtPrompt {
+	for _, session := range a.fleetSessions(node) {
+		if session.kindKnown && session.kind == terminal.NodeHostShell {
+			continue
+		}
+		// Only a fresh positive prompt observation permits skipping review.
+		// Host shells survive a guest stop; unclassified sessions stay cautious.
+		if !session.kindKnown || session.kind != terminal.NodeShell || session.activity != "at prompt" {
 			return true
 		}
 	}
