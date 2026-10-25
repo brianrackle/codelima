@@ -265,7 +265,7 @@ func (p *tuiTemplatePicker) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 			name += " •"
 		}
 		fit := createHostFit(p.form.app.host, c)[1]
-		fitText := strings.TrimPrefix(fit.text, "memory  ")
+		fitText := strings.TrimPrefix(fit.String(), "memory  ")
 		if strings.Contains(fitText, "unavailable") {
 			fitText = "— unavailable"
 		}

@@ -1947,3 +1947,13 @@ rm -rf "$QA_ROOT"
 ```
 
 Verify `limactl list --json` under the QA `LIMA_HOME` contains no QA instance and `git status --short` contains no QA artifacts.
+
+## Resource-gauge colors (ADR 201)
+
+At 150×38 truecolor and 80×24 ANSI, inspect resource gauges in Nodes (wide),
+Overview, Metrics, System → Host and the create form. Filled cells must follow
+70/90 percent warning thresholds; empty cells must use the dark track (ANSI
+gray). Move fleet selection and open/close the create form: row selection and
+modal backgrounds must cover the whole gauge. Missing samples must show an
+unavailable marker, never a measured zero. Resize and confirm clipping stays
+inside the panel. Gauge rendering does not change measured values or commands.

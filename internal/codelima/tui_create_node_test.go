@@ -44,7 +44,7 @@ func TestTUICreateFormFitWarningsDoNotBlockValidInput(t *testing.T) {
 		t.Fatal("capacity shortfalls were hidden or blocked a valid form", fit, f.validationError())
 	}
 	a.host.UnknownNodes = 1
-	if fit := createHostFit(a.host, c); !strings.Contains(fit[0].text, "unavailable") || !strings.Contains(fit[1].text, "unavailable") {
+	if fit := createHostFit(a.host, c); !strings.Contains(fit[0].String(), "unavailable") || !strings.Contains(fit[1].String(), "unavailable") {
 		t.Fatal("unknown allocation was reported as free capacity", fit)
 	}
 }

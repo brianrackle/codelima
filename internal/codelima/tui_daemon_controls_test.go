@@ -130,8 +130,20 @@ func TestTUIDaemonControlCaptureContinuesWhenClosedAndDoesNotReplaceLogView(t *t
 		t.Fatal("log unavailable during capture")
 	}
 	close(release)
-	handleDaemonControlTestEvent(t, a, events)
-	handleDaemonControlTestEvent(t, a, events)
+	// Applying either completion can enqueue a redraw before the other worker
+	// finishes. Wait for both workers, not an assumed count of queued events.
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for a.systemDaemon.capture.loading || log.loading {
+		select {
+		case event := <-events:
+			if _, err := a.handleEvent(event); err != nil {
+				t.Fatal(err)
+			}
+		case <-deadline.C:
+			t.Fatal("capture and log completions were not delivered")
+		}
+	}
 	if calls.Load() != 1 || a.overlay != log {
 		t.Fatal("capture duplicated or replaced a foreground view")
 	}

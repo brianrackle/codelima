@@ -21,14 +21,14 @@ func (a *vaxisTUIApp) managerTheme() tuiTheme {
 }
 
 func (t tuiTheme) modal() tuiTheme {
-	for _, style := range []*vaxis.Style{&t.text, &t.muted, &t.dim, &t.border, &t.mint, &t.amber, &t.coral, &t.blue, &t.violet} {
+	for _, style := range []*vaxis.Style{&t.text, &t.muted, &t.dim, &t.border, &t.track, &t.mint, &t.amber, &t.coral, &t.blue, &t.violet} {
 		style.Background = t.raised.Background
 	}
 	return t
 }
 
 func (t tuiTheme) dimmed() tuiTheme {
-	for _, style := range []*vaxis.Style{&t.text, &t.muted, &t.dim, &t.mint, &t.amber, &t.coral, &t.blue, &t.violet, &t.selected} {
+	for _, style := range []*vaxis.Style{&t.text, &t.muted, &t.dim, &t.track, &t.mint, &t.amber, &t.coral, &t.blue, &t.violet, &t.selected} {
 		style.Foreground = t.border.Foreground
 		style.Attribute &^= vaxis.AttrBold | vaxis.AttrReverse
 	}
@@ -112,7 +112,7 @@ func (f *tuiCreateNodeForm) Draw(win vaxis.Window, _, _, _ vaxis.Style) {
 			if line.shortfall {
 				style = t.coral
 			}
-			tuiLine(body.New(2, row+1+index, w-4, 1), 0, line.text, style)
+			line.draw(body.New(2, row+1+index, w-4, 1), 0, style, t)
 		}
 	}
 	tuiLine(body.New(2, h-3, w-4, 1), 0, "cli · "+f.cliPreview(), t.dim)
@@ -192,47 +192,47 @@ func (f *tuiCreateNodeForm) fieldHint(key string) string {
 }
 
 type tuiCreateFitLine struct {
-	text               string
+	tuiGaugeLine
 	warning, shortfall bool
 }
 
 func createMiB(value uint32) string { return fmt.Sprintf("%g GiB", float64(value)/1024) }
 
 func createHostFit(host tuiHostSummary, c Configuration) []tuiCreateFitLine {
-	lines := []tuiCreateFitLine{{text: "vCPU    allocation unavailable"}, {text: "memory  allocation unavailable"}, {text: "disk    " + createMiB(c.DiskMiB) + " thin · free space unavailable"}}
+	lines := []tuiCreateFitLine{{tuiGaugeLine: tuiGaugeLine{prefix: "vCPU    allocation unavailable"}}, {tuiGaugeLine: tuiGaugeLine{prefix: "memory  allocation unavailable"}}, {tuiGaugeLine: tuiGaugeLine{prefix: "disk    " + createMiB(c.DiskMiB) + " thin · free space unavailable"}}}
 	if host.AllocationsKnown && host.UnknownNodes == 0 {
 		if host.Capacity.CPUs > 0 {
 			allocated := host.AllocatedCPUs + uint64(c.VCPUs)
-			lines[0].text = fmt.Sprintf("vCPU    %s %d → %d/%d", tuiGauge(float64(allocated)/float64(host.Capacity.CPUs)*100, 10), host.AllocatedCPUs, allocated, host.Capacity.CPUs)
+			lines[0].tuiGaugeLine = tuiGaugeLine{prefix: "vCPU    ", percent: float64(allocated) / float64(host.Capacity.CPUs) * 100, cells: 10, suffix: fmt.Sprintf(" %d → %d/%d", host.AllocatedCPUs, allocated, host.Capacity.CPUs)}
 			if allocated > uint64(host.Capacity.CPUs) {
-				lines[0].text += " · ⚠ overcommit; contended under load"
+				lines[0].suffix += " · ⚠ overcommit; contended under load"
 				lines[0].warning = true
 			} else {
-				lines[0].text += " · ✓ fits"
+				lines[0].suffix += " · ✓ fits"
 			}
 		}
 		if host.Capacity.MemoryBytes != nil {
 			total, used := float64(*host.Capacity.MemoryBytes)/(1<<30), float64(host.AllocatedMemoryBytes)/(1<<30)
 			after := used + float64(c.MemoryMiB)/1024
-			lines[1].text = fmt.Sprintf("memory  %s %.1f → %.1f/%.1f GiB", tuiGauge(after/total*100, 10), used, after, total)
+			lines[1].tuiGaugeLine = tuiGaugeLine{prefix: "memory  ", percent: after / total * 100, cells: 10, suffix: fmt.Sprintf(" %.1f → %.1f/%.1f GiB", used, after, total)}
 			left := total - after
 			switch {
 			case left < 0:
-				lines[1].text += fmt.Sprintf(" · ✕ %.1f GiB short", -left)
+				lines[1].suffix += fmt.Sprintf(" · ✕ %.1f GiB short", -left)
 				lines[1].shortfall = true
 			case left == 0:
-				lines[1].text += " · ⚠ no memory left for host"
+				lines[1].suffix += " · ⚠ no memory left for host"
 				lines[1].warning = true
 			default:
-				lines[1].text += fmt.Sprintf(" · ✓ %.1f GiB left for host", left)
+				lines[1].suffix += fmt.Sprintf(" · ✓ %.1f GiB left for host", left)
 			}
 		}
 	}
 	if host.Capacity.DiskAvailableBytes != nil {
 		free := float64(*host.Capacity.DiskAvailableBytes) / (1 << 30)
-		lines[2].text = fmt.Sprintf("disk    %s thin · %.1f GiB free on LIMA_HOME volume", createMiB(c.DiskMiB), free)
+		lines[2].prefix = fmt.Sprintf("disk    %s thin · %.1f GiB free on LIMA_HOME volume", createMiB(c.DiskMiB), free)
 		if uint64(c.DiskMiB)<<20 > *host.Capacity.DiskAvailableBytes {
-			lines[2].text += " · ⚠ growth may exhaust space"
+			lines[2].prefix += " · ⚠ growth may exhaust space"
 			lines[2].warning = true
 		}
 	}

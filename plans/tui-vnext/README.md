@@ -11,7 +11,7 @@ All example identities, metrics and timestamps in those files are reference data
 |---|---|---|
 | [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail (ADR 188); prompt idle timing (ADR 189); per-agent recorded validation (ADR 190); final qualification remains |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
-| [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
+| [TUI kit · tokens & states](reference/Kit.dc.html) | Palette, states, gauges and motion | Partial: shared fill/track gauges (ADR 201); 10-fps spinner and final qualification remain |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
@@ -37,6 +37,23 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+Gauge checkpoint (ADR 201), 2026-10-25: resource lines retain explicit gauge
+values and widths until drawing. Empty cells use `#2b3a49` / ANSI gray, filled
+cells use the 70/90 percent thresholds, and selected/modal backgrounds survive.
+Automated coverage checks all six resource renderers, missing/nonfinite values,
+fractional cells, literal block text and clipping in both color modes.
+`make verify` and targeted gopls checks passed. An existing asynchronous
+Daemon-control test now waits for capture and log completion instead of assuming
+two queued events; redraw events could otherwise race the second completion.
+Live checks used the rebuilt binary with isolated metadata: 150×38 truecolor
+and 80×24 ANSI System/Host and create views, navigation, cancellation and resize.
+The create fit showed 1/2 CPUs and fractional 1.0/3.8 GiB memory with distinct
+fill/track cells; the default 4 GiB request showed the expected full coral gauge.
+Captures were visually inspected; no VM was created. The owned frontend, daemon,
+tmux server, temporary store, mount and captures were removed. Spinner timing and the
+previous whole-design/native qualification items remain open.
+
 
 Configurable-key checkpoint (ADR 200), 2026-10-25: a strict immutable registry
 now drives manager/detail commands, every overlay, embedded focus, Help,

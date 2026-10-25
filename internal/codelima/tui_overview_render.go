@@ -111,7 +111,8 @@ func (a *vaxisTUIApp) drawOverviewPanel(win vaxis.Window, panel int, record tuiF
 func (a *vaxisTUIApp) drawOverviewIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
 	n := record.Node
 	w, h := win.Size()
-	status, style := a.fleetCell(record, tuiFleetSortStatus, false, w, theme)
+	statusCell, style := a.fleetCell(record, tuiFleetSortStatus, false, w, theme)
+	status := statusCell.String()
 	if !record.StartedAt.IsZero() {
 		status += " · since " + record.StartedAt.Local().Format("Jan 2 15:04")
 	}
@@ -193,13 +194,13 @@ func (a *vaxisTUIApp) drawOverviewResources(win vaxis.Window, record tuiFleetRec
 	if a.daemonDisconnected || a.fleetEvidenceStale() || o == nil || o.Status != ObservationRunning || o.ResourceUsageSampledAt == nil || now.Sub(*o.ResourceUsageSampledAt) > 5*time.Second {
 		label = "Last observed usage / unavailable"
 	}
-	lines := []string{label, fmt.Sprintf("CPU    %d vCPU · %s", record.Node.VCPUs, cpu), tuiCPUSparkline(points, now, time.Minute, 10) + " · " + stats + " · 1m"}
+	lines := []tuiGaugeLine{{prefix: label}, {prefix: fmt.Sprintf("CPU    %d vCPU · %s", record.Node.VCPUs, cpu)}, {prefix: tuiCPUSparkline(points, now, time.Minute, 10) + " · " + stats + " · 1m"}}
 	for _, resource := range []struct {
 		name       string
 		configured uint32
 		field      tuiFleetSort
 	}{{"memory", record.Node.MemoryMiB, tuiFleetSortMemory}, {"disk", record.Node.DiskMiB, tuiFleetSortDisk}} {
-		usage, gauge := "—", ""
+		line := tuiGaugeLine{suffix: "—"}
 		var used, total *uint64
 		if o != nil {
 			used, total = o.MemoryUsedBytes, o.MemoryTotalBytes
@@ -207,20 +208,19 @@ func (a *vaxisTUIApp) drawOverviewResources(win vaxis.Window, record tuiFleetRec
 				used, total = o.DiskUsedBytes, o.DiskTotalBytes
 			}
 			if percent, ok := tuiFleetUsagePercent(used, total); ok && *used <= *total {
-				usage = tuiGiB(*used) + " / " + tuiGiB(*total) + " GiB"
-				gauge = tuiGauge(percent, 10) + " "
+				line = tuiGaugeLine{percent: percent, cells: 10, suffix: " " + tuiGiB(*used) + " / " + tuiGiB(*total) + " GiB"}
 			}
 		}
-		lines = append(lines, fmt.Sprintf("%-6s %s configured", resource.name, formatTUIResourceSize(resource.configured)), gauge+usage)
+		lines = append(lines, tuiGaugeLine{prefix: fmt.Sprintf("%-6s %s configured", resource.name, formatTUIResourceSize(resource.configured))}, line)
 		if resource.field == tuiFleetSortMemory && used != nil && total != nil && *used <= *total && *total > 0 {
-			lines[len(lines)-1] += " · " + tuiGiB(*total-*used) + " available"
+			lines[len(lines)-1].suffix += " · " + tuiGiB(*total-*used) + " available"
 		}
 		if resource.field == tuiFleetSortDisk {
-			lines[len(lines)-1] += " root fs"
+			lines[len(lines)-1].suffix += " root fs"
 		}
 	}
 	if nodeWorkspaceMode(record.Node) == "mounted" {
-		lines = append(lines, "Workspace on host; excluded from root fs")
+		lines = append(lines, tuiGaugeLine{prefix: "Workspace on host; excluded from root fs"})
 	}
 	offset := max(0, min(a.overview.scroll[tuiOverviewResources], len(lines)-h))
 	a.overview.scroll[tuiOverviewResources] = offset
@@ -234,7 +234,7 @@ func (a *vaxisTUIApp) drawOverviewResources(win vaxis.Window, record tuiFleetRec
 		case 4:
 			style = theme.blue
 		}
-		tuiLine(win.New(0, i, w, 1), 0, line, style)
+		line.draw(win.New(0, i, w, 1), 0, style, theme)
 	}
 }
 

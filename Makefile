@@ -217,6 +217,10 @@ lint: init
 test: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) ./...
 
+.PHONY: test-tui-gauges
+test-tui-gauges: init
+	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^TestTUI(Gauge|ManagerThemeAndGauges)' -count=1
+
 .PHONY: test-tui-input
 test-tui-input: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '$(TUI_INPUT_TEST_FILTER)' -count=1

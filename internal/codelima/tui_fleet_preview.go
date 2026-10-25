@@ -66,10 +66,11 @@ func (a *vaxisTUIApp) fleetWorkspaceLabel(node Node) string {
 
 func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {
 	node := record.Node
-	status, statusStyle := a.fleetCell(record, tuiFleetSortStatus, false, 30, theme)
+	statusCell, statusStyle := a.fleetCell(record, tuiFleetSortStatus, false, 30, theme)
+	status := statusCell.String()
 	if !record.StartedAt.IsZero() {
 		uptime, _ := a.fleetCell(record, tuiFleetSortUptime, false, 12, theme)
-		status += " · up " + uptime
+		status += " · up " + uptime.String()
 	}
 	created, auth := "—", "auth not imported"
 	if !node.CreatedAt.IsZero() {

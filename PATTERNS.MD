@@ -1,5 +1,12 @@
 # Patterns
 
+## Structured resource gauges
+
+Keep generated gauges as `tuiGaugeLine` values until drawing. Preserve the base
+background and attributes when choosing fill/track foregrounds; sanitize and
+clip all segments together. Do not infer metric styling from arbitrary text
+that contains block glyphs (ADR 201).
+
 ## Contextual keyboard actions
 
 Declare stable actions, defaults and finite focused contexts in the shared key

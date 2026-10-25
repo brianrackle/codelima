@@ -250,16 +250,13 @@ Advantage: preserves the source's no-embedded-emulator contract. Disadvantage:
 a persistent portable header cannot simply be painted over raw terminal output;
 its fidelity and fallback require an explicit decision before completion.
 
-Kit reference audit, 2026-10-25: the palette, status glyphs, ANSI/reverse-video
-fallback, 70/90 percent thresholds and fractional gauge strings already map to
-`tui_theme.go` and `TestTUIManagerThemeAndGauges`. The reference's `#2b3a49` track
-token is absent, and gauge strings currently paint filled and empty cells with
-one style. Add a shared segmented gauge renderer with a track style and use it
-in fleet/detail/resource summaries; verify fractional and unavailable values at
-both color depths. Also qualify the Kit's 10-fps spinner requirement before
-marking that reference complete. Advantage: matches the design's visual metric
-hierarchy. Disadvantage: gauge call sites currently return flattened text, so
-style separation requires coordinated rendering changes and regression checks.
+Kit gauge rendering is implemented (ADR 201): explicit fill/track segments now
+cover fleet, Overview, Metrics, host capacity and create fit, preserving selected
+and modal styles. The Kit's 10-fps spinner requirement remains open. Implement
+a bounded presentation timer for visible in-flight work without increasing
+telemetry polls or changing the separate startup-logo animation. Advantage:
+matches the remaining motion contract; disadvantage: requires redraw/lifetime
+checks. Final whole-design/native visual qualification remains open.
 
 Key-binding plan reconciliation is complete. The specification now describes
 `_config/settings.yaml`, manager action/context IDs, case-sensitive printable

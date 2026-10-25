@@ -466,6 +466,8 @@ agent health; stale results are labeled and stopped nodes retain their history.
 Open Spec to inspect the frozen commands and execution records.
 Missing samples remain blank; wide memory and disk cells
 show observed used/total GiB with gauges, and compact cells show percentages.
+Gauges use a dark empty track; filled cells turn amber at 70% and coral at 90%.
+Unavailable measurements stay unavailable rather than appearing as zero.
 At 80 columns inactive views use their number, leaving space for connectivity
 and global CPU/memory allocation. Flat tables include each node's directory.
 

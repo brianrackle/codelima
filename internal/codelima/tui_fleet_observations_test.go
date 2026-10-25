@@ -42,12 +42,12 @@ func TestTUIFleetWideResourcesUseObservedBytes(t *testing.T) {
 	r := tuiFleetRecord{Node: Node{LastRuntimeObservation: &RuntimeObservation{MemoryUsedBytes: &used, MemoryTotalBytes: &total}}}
 	wide, _ := a.fleetCell(r, tuiFleetSortMemory, false, 21, newTUITheme(true))
 	compact, _ := a.fleetCell(r, tuiFleetSortMemory, true, 6, newTUITheme(true))
-	if !strings.Contains(wide, "1.5/4G") || compact != "38%" {
+	if !strings.Contains(wide.String(), "1.5/4G") || compact.String() != "38%" {
 		t.Fatalf("wrong observed values: wide=%q compact=%q", wide, compact)
 	}
 	r.Node.LastRuntimeObservation.MemoryTotalBytes = nil
 	missing, _ := a.fleetCell(r, tuiFleetSortMemory, false, 21, newTUITheme(true))
-	if missing != "—" {
+	if missing.String() != "—" {
 		t.Fatalf("invented total: %q", missing)
 	}
 }
@@ -200,7 +200,7 @@ func TestTUIFleetMissingObservationsStayUnknown(t *testing.T) {
 		t.Fatal("unavailable port inventory became measured zero")
 	}
 	text, _ := a.fleetCell(record, tuiFleetSortPorts, false, 12, newTUITheme(true))
-	if text != "?" {
+	if text.String() != "?" {
 		t.Fatalf("missing unavailable marker: %q", text)
 	}
 }

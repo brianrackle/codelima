@@ -168,11 +168,11 @@ func (a *vaxisTUIApp) drawMetricCPU(win vaxis.Window, points []daemon.NodeMetric
 		if core.UsagePercent != nil {
 			value = *core.UsagePercent
 		}
-		text := fmt.Sprintf("cpu%d %s %s", core.Index, tuiGauge(value, 8), metricPercent(core.UsagePercent))
+		line := tuiGaugeLine{prefix: fmt.Sprintf("cpu%d ", core.Index), percent: value, cells: 8, suffix: " " + metricPercent(core.UsagePercent)}
 		if i == coreRows*2-1 && len(cores) > coreRows*2 {
-			text += fmt.Sprintf(" · +%d cores", len(cores)-coreRows*2)
+			line.suffix += fmt.Sprintf(" · +%d cores", len(cores)-coreRows*2)
 		}
-		tuiLine(inner.New(i%2*(width/2), height-coreRows+i/2, width/2, 1), 0, text, theme.usage(value))
+		line.draw(inner.New(i%2*(width/2), height-coreRows+i/2, width/2, 1), 0, theme.usage(value), theme)
 	}
 }
 
@@ -192,7 +192,7 @@ func drawMetricDisk(win vaxis.Window, points []daemon.NodeMetricPoint, latest no
 	if !ok {
 		percent = math.NaN()
 	}
-	tuiLine(inner, 0, "Disk / "+tuiGauge(percent, 8)+" "+metricResource(latest.DiskUsedBytes, latest.DiskTotalBytes), theme.text)
+	(tuiGaugeLine{prefix: "Disk / ", percent: percent, cells: 8, suffix: " " + metricResource(latest.DiskUsedBytes, latest.DiskTotalBytes)}).draw(inner, 0, theme.text, theme)
 	tuiLine(inner, 1, metricDiskGrowth(points)+" · guest root; host mounts excluded", theme.dim)
 }
 

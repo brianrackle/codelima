@@ -14,6 +14,7 @@ type tuiTheme struct {
 	mint, amber, coral       vaxis.Style
 	blue, violet, selected   vaxis.Style
 	chrome, raised           vaxis.Style
+	track                    vaxis.Style
 }
 
 func newTUITheme(rgb bool) tuiTheme {
@@ -33,6 +34,7 @@ func newTUITheme(rgb bool) tuiTheme {
 		mint: style(0x91e6c0, vaxis.ColorGreen), amber: style(0xf0c674, vaxis.ColorYellow),
 		coral: style(0xf4877c, vaxis.ColorRed), blue: style(0x82b8ff, vaxis.ColorBlue),
 		violet: style(0xc4a7ff, vaxis.ColorFuschia),
+		track:  style(0x2b3a49, vaxis.ColorGray),
 	}
 	theme.selected = theme.text
 	theme.chrome = theme.text
@@ -101,8 +103,44 @@ func tuiFill(win vaxis.Window, style vaxis.Style) {
 }
 
 func tuiLine(win vaxis.Window, row int, text string, style vaxis.Style) {
+	tuiSegmentLine(win, row, vaxis.Segment{Text: text, Style: style})
+}
+
+func tuiSegmentLine(win vaxis.Window, row int, segments ...vaxis.Segment) {
 	// Records can contain newlines (paths and command output). A table cell is
 	// always exactly one row; rendering must not displace its neighbors.
-	text = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(text)
-	win.PrintTruncate(row, vaxis.Segment{Text: text, Style: style})
+	clean := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ")
+	for i := range segments {
+		segments[i].Text = clean.Replace(segments[i].Text)
+	}
+	win.PrintTruncate(row, segments...)
+}
+
+// tuiGaugeLine keeps the optional gauge separate from surrounding text so
+// literal block characters in labels never acquire metric colors.
+type tuiGaugeLine struct {
+	prefix, suffix string
+	percent        float64
+	cells          int
+}
+
+func (l tuiGaugeLine) String() string {
+	return l.prefix + tuiGauge(l.percent, l.cells) + l.suffix
+}
+
+func (l tuiGaugeLine) draw(win vaxis.Window, row int, base vaxis.Style, theme tuiTheme) {
+	filled := base
+	filled.Foreground = theme.usage(l.percent).Foreground
+	if math.IsNaN(l.percent) || math.IsInf(l.percent, 0) || l.percent < 0 {
+		filled.Foreground = theme.dim.Foreground
+	}
+	track := base
+	track.Foreground = theme.track.Foreground
+	gauge := tuiGauge(l.percent, l.cells)
+	fill := strings.TrimRight(gauge, "░")
+	tuiSegmentLine(win, row,
+		vaxis.Segment{Text: l.prefix, Style: base},
+		vaxis.Segment{Text: fill, Style: filled},
+		vaxis.Segment{Text: gauge[len(fill):], Style: track},
+		vaxis.Segment{Text: l.suffix, Style: base})
 }

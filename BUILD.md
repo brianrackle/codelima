@@ -2,6 +2,10 @@
 
 ## Fleet-manager frontend checks
 
+Resource-gauge rendering checks: `make test-tui-gauges` covers both color modes,
+selection/modal styles, unavailable readings, clipping and all resource surfaces
+(ADR 201). The normal `make verify` gate includes these tests.
+
 `make test-tui-manager` runs the identity/filter/sort/mark projection, responsive
 layout, observed byte values, compact capacity, hidden-mark/global allocation
 projections, global/detail navigation, palette, key lifecycle, shell payload and

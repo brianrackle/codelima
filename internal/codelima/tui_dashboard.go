@@ -515,23 +515,23 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 		text, foreground := a.fleetCell(record, column.field, compact, column.width, theme)
 		cellStyle := style
 		cellStyle.Foreground = foreground.Foreground
-		tuiLine(win.New(column.col, 0, column.width-1, 1), 0, text, cellStyle)
+		text.draw(win.New(column.col, 0, column.width-1, 1), 0, cellStyle, theme)
 	}
 }
 
-func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compact bool, width int, theme tuiTheme) (string, vaxis.Style) {
+func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compact bool, width int, theme tuiTheme) (tuiGaugeLine, vaxis.Style) {
 	switch field {
 	case tuiFleetSortName:
-		return record.Node.Slug, theme.text
+		return tuiGaugeLine{prefix: record.Node.Slug}, theme.text
 	case tuiFleetSortStatus:
 		glyph, style := theme.status(record.Status)
-		return glyph + " " + record.Status, style
+		return tuiGaugeLine{prefix: glyph + " " + record.Status}, style
 	case tuiFleetSortTemplate:
-		return record.Node.ConfigurationSlug, theme.violet
+		return tuiGaugeLine{prefix: record.Node.ConfigurationSlug}, theme.violet
 	case tuiFleetSortDirectory:
-		return record.Node.DirectoryPath, theme.muted
+		return tuiGaugeLine{prefix: record.Node.DirectoryPath}, theme.muted
 	case tuiFleetSortSessions:
-		return strconv.Itoa(record.Sessions), theme.text
+		return tuiGaugeLine{prefix: strconv.Itoa(record.Sessions)}, theme.text
 	case tuiFleetSortPorts:
 		ports := make([]string, len(record.Ports))
 		for i, port := range record.Ports {
@@ -541,35 +541,35 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 			ports = append(ports, "?")
 		}
 		if len(ports) == 0 {
-			return "—", theme.dim
+			return tuiGaugeLine{prefix: "—"}, theme.dim
 		}
-		return strings.Join(ports, " "), theme.muted
+		return tuiGaugeLine{prefix: strings.Join(ports, " ")}, theme.muted
 	case tuiFleetSortUptime:
 		if !record.StartedAt.IsZero() {
-			return max(time.Duration(0), time.Since(record.StartedAt)).Truncate(time.Second).String(), theme.muted
+			return tuiGaugeLine{prefix: max(time.Duration(0), time.Since(record.StartedAt)).Truncate(time.Second).String()}, theme.muted
 		}
-		return "—", theme.dim
+		return tuiGaugeLine{prefix: "—"}, theme.dim
 	default:
 		value, ok := tuiFleetMetric(record, field)
 		if !ok {
-			return "—", theme.dim
+			return tuiGaugeLine{prefix: "—"}, theme.dim
 		}
 		text := fmt.Sprintf("%.0f%%", value)
 		if !compact && (field == tuiFleetSortMemory || field == tuiFleetSortDisk) {
 			text = tuiFleetBytes(record, field)
 			if cells := min(10, width-len(text)-2); cells >= 3 {
-				text = tuiGauge(value, cells) + " " + text
+				return tuiGaugeLine{percent: value, cells: cells, suffix: " " + text}, theme.usage(value)
 			}
-			return text, theme.usage(value)
+			return tuiGaugeLine{prefix: text}, theme.usage(value)
 		}
 		if !compact && width >= 14 {
 			if field == tuiFleetSortCPU && record.Node.LastRuntimeObservation != nil {
 				text = tuiCPUSparkline(record.Node.LastRuntimeObservation.CPUHistory, time.Now(), 8*time.Second, 8) + " " + text
 			} else {
-				text = tuiGauge(value, min(10, width-7)) + " " + text
+				return tuiGaugeLine{percent: value, cells: min(10, width-7), suffix: " " + text}, theme.usage(value)
 			}
 		}
-		return text, theme.usage(value)
+		return tuiGaugeLine{prefix: text}, theme.usage(value)
 	}
 }
 

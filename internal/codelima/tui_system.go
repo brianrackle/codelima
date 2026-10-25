@@ -73,24 +73,26 @@ func (a *vaxisTUIApp) drawSystemHost(win vaxis.Window, theme tuiTheme) {
 		return
 	}
 	tuiLine(win, 2, "ALLOCATED TO VMs THAT ARE UP · all directories", theme.muted)
-	cpuText, cpuStyle := fmt.Sprintf("vCPU    %d / %d", host.AllocatedCPUs, host.Capacity.CPUs), theme.text
+	cpuLine, cpuStyle := tuiGaugeLine{prefix: "vCPU    ", suffix: fmt.Sprintf("%d / %d", host.AllocatedCPUs, host.Capacity.CPUs)}, theme.text
 	if host.Capacity.CPUs > 0 {
-		cpuText = fmt.Sprintf("vCPU    %s  %d / %d", tuiGauge(100*float64(host.AllocatedCPUs)/float64(host.Capacity.CPUs), 8), host.AllocatedCPUs, host.Capacity.CPUs)
+		cpuLine.percent, cpuLine.cells = 100*float64(host.AllocatedCPUs)/float64(host.Capacity.CPUs), 8
+		cpuLine.suffix = "  " + cpuLine.suffix
 	}
 	if host.Capacity.CPUs > 0 && host.AllocatedCPUs > uint64(host.Capacity.CPUs) {
-		cpuText += fmt.Sprintf(" · overcommitted by %d", host.AllocatedCPUs-uint64(host.Capacity.CPUs))
+		cpuLine.suffix += fmt.Sprintf(" · overcommitted by %d", host.AllocatedCPUs-uint64(host.Capacity.CPUs))
 		cpuStyle = theme.coral
 	}
-	tuiLine(win, 3, cpuText, cpuStyle)
-	memoryText, memoryStyle := fmt.Sprintf("memory  %s / %s", tuiHostBytes(&host.AllocatedMemoryBytes), tuiHostBytes(host.Capacity.MemoryBytes)), theme.text
+	cpuLine.draw(win, 3, cpuStyle, theme)
+	memoryLine, memoryStyle := tuiGaugeLine{prefix: "memory  ", suffix: fmt.Sprintf("%s / %s", tuiHostBytes(&host.AllocatedMemoryBytes), tuiHostBytes(host.Capacity.MemoryBytes))}, theme.text
 	if host.Capacity.MemoryBytes != nil && *host.Capacity.MemoryBytes > 0 {
-		memoryText = fmt.Sprintf("memory  %s  %s / %s", tuiGauge(100*float64(host.AllocatedMemoryBytes)/float64(*host.Capacity.MemoryBytes), 8), tuiHostBytes(&host.AllocatedMemoryBytes), tuiHostBytes(host.Capacity.MemoryBytes))
+		memoryLine.percent, memoryLine.cells = 100*float64(host.AllocatedMemoryBytes)/float64(*host.Capacity.MemoryBytes), 8
+		memoryLine.suffix = "  " + memoryLine.suffix
 	}
 	if host.Capacity.MemoryBytes != nil && host.AllocatedMemoryBytes > *host.Capacity.MemoryBytes {
-		memoryText += " · overcommitted"
+		memoryLine.suffix += " · overcommitted"
 		memoryStyle = theme.coral
 	}
-	tuiLine(win, 4, memoryText, memoryStyle)
+	memoryLine.draw(win, 4, memoryStyle, theme)
 	tuiLine(win, 5, "disk    "+tuiHostBytes(host.Capacity.DiskAvailableBytes)+" free on LIMA_HOME volume", theme.text)
 	_, height := win.Size()
 	lines := make([]string, 0, len(host.Nodes)+1)
