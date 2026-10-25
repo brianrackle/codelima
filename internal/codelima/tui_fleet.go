@@ -352,7 +352,7 @@ func layoutTUIFleet(width, height, rows int) tuiFleetLayout {
 	available := max(0, height-5)
 	tableHeight := min(available, max(4, rows+3))
 	if width >= 140 && available >= 18 {
-		tableHeight = min(tableHeight, available-12)
+		tableHeight = min(tableHeight, available-min(16, available-4))
 		layout.Preview = tuiRect{col: 1, row: 3 + tableHeight, width: max(0, width-2), height: available - tableHeight - 1}
 	} else {
 		// Leave the selected/marked summary above the filter and status rows,

@@ -665,6 +665,25 @@ diagnostics; they do not replace those manual qualifications.
   and Esc backs out. `?` filters key help. Numbers typed in a form or filter
   must remain text.
 
+- Fleet evidence/session checks (ADR 187): select a disposable failed node at
+  150×38 and 80×24. Compare step kind/index, source, exit and recorded duration
+  with its bootstrap metadata. A later stop must not replace the retained start
+  receipt, while a newer start must not inherit its failed step. Restart after
+  interrupting a disposable daemon-owned start; recovered in-flight metadata
+  must show failure without a fabricated finish time. A live direct lifecycle
+  claim must still appear in progress. Do not interrupt a shared daemon.
+- At 150×38 compare the selected node's three Recent events with Activity.
+  Page Activity into older history, return and rapidly change selection. Recent
+  must stay node-scoped and current. Suspend/recover the disposable daemon and
+  verify stale labeling and recovery. Corrupt only disposable bootstrap/journal
+  fixtures: unrelated evidence must survive with unavailable/incomplete labels.
+- Open disposable host and guest sessions. Emit OSC progress and prompt markers
+  and compare working/error/paused/at-prompt status with a title-only session,
+  which must remain unknown. Mark nodes, hide one with a filter and inspect the
+  aggregate session count, guest end-on-stop warning and separate host count.
+  Cancel the action, clear marks and resize through wide/compact layouts.
+  Close every test session and remove all owned fixture state afterwards.
+
 ADR 186 checkpoint (2026-10-25): the rebuilt TUI was visually inspected and
 interacted with at 150×38, 120×30, 100×30 and 80×24 using 20 isolated metadata-only
 nodes. Hidden/all-hidden marks, confirmation/cancel, marked-list overflow,
@@ -674,6 +693,21 @@ and zero newly created shells passed. ANSI captures were inspected and all
 fixture state/processes/mounts removed. This does not qualify live guest byte
 values, positive discovered-route browser opening, resource release or native
 presentation; those checks above remain open with TODO #57.
+
+ADR 187 checkpoint (2026-10-25): the rebuilt Linux TUI was inspected and
+interacted with at 150×38 and 80×24 using three disposable metadata-only nodes
+and one real host terminal. Failed step 2/3, exit 23 and 6s duration rendered;
+recovery of a persisted running receipt showed interrupted failure with no
+finish time, while an actual lifecycle flock temporarily restored starting.
+Independent Recent survived older Activity pagination and rapid selection.
+Malformed journal/bootstrap fixtures produced incomplete/unavailable evidence
+without hiding unrelated records, then recovered after repair. Native OSC
+progress verified working/error/paused, prompt markers verified at prompt, and
+a busy-looking title without integration stayed unknown. Hidden marks retained
+the host count. Daemon suspension labeled cached evidence stale; recovery
+restored fresh rows. Terminals, processes, fixture files, captures and the tmpfs
+were removed. Real guest session termination, confirmed stop-age rendering,
+resource/route comparisons and final native/artboard qualification remain open.
 
 - In the create form, type a replacement slug and verify the muted default
   disappears. Esc asks whether to discard; `n` preserves edits and `y`

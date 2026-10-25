@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 23 adds a durable
-	// node restart with one lifecycle claim across stop and start.
-	ProtocolVersion                = 23
+	// whenever a wire shape this protocol carries changes; 24 adds bounded
+	// fleet lifecycle/step evidence and independent selected-node recent history.
+	ProtocolVersion                = 24
 	SessionVersion                 = 2
 	HandoffVersion                 = 6
 	PreviousRecoveryHandoffVersion = 5

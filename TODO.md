@@ -21,12 +21,35 @@ Full verify/race/integration and focused race checks pass. Isolated metadata-onl
 TUI checks covered four widths, keyboard/mouse, hidden marks, scrolling and
 disconnect/recovery; all fixture state was removed. The new positive live-route
 browser action and guest resource-release comparisons still need live QA.
-Remaining fleet work: complete busy/end-session impact, bounded recent events
-and retained failed-step/duration evidence, plus final wide/compact native
-artboard qualification. Use independent bounded evidence rather than whichever
-Activity history page happens to be open. Advantages: consistent, truthful
-cross-view presentation. Disadvantages: additional metadata projection,
-staleness handling and responsive QA. These remain in the full #57 scope.
+ADR 187 adds independent bounded recent events and retained failure/step/duration
+evidence, recovered interruption/liveness checks and explicit guest/host session
+impact with progress/prompt activity. Qualification evidence is in the design
+ledger. Remaining fleet work: actual runtime/mount/nesting identity, CPU
+average/peak and memory history, durable idle timing, per-target working task
+labels, plus final wide/compact native artboard qualification. Add observed
+runtime capabilities and terminal activity timestamps to their owning caches,
+then project them without guest I/O in renderers. Advantages: faithful,
+truthful cross-view presentation. Disadvantages: additional observation
+contracts, retention/staleness rules and responsive/native QA. These remain
+in the full #57 scope; unknown activity must not be inferred from titles.
+
+ADR 187 verification passed full unit/race/CLI integration, final verification,
+focused race and gopls checks. Isolated wide/compact TUI checks exercised retained
+failure, interrupted recovery/live claims, independent Recent, malformed source
+recovery, real host-terminal progress/prompt signals, hidden host impact and
+daemon suspension/recovery. All owned fixture state was removed. Real guest
+session termination and confirmed stop-age presentation still require manual
+qualification, alongside the remaining live route/resource and native checks.
+
+Verification cleanup follow-up: forced shell termination in existing tests can
+leave `.codelima-inputrc.*` files in the user home. This checkpoint removed its
+25 inactive, exact-content test files; older accumulated files were preserved.
+Suggested solution: use an explicit project-rooted temporary inputrc directory
+for test launches, add cleanup on shell termination and have test owners remove
+their files even after forced termination. Audit older files against active
+INPUTRC references before cleanup. Advantages: reproducible isolation and no
+home pollution; disadvantages: shell signal/exec portability and additional
+termination-path tests. Do not repurpose HOME or delete active/user-owned files.
 
 Bulk queue lifetime remains a separate problem: the current frontend submits
 marked nodes sequentially, so closing it prevents later submissions and the first

@@ -289,6 +289,8 @@ func (h *daemonHost) Handle(ctx context.Context, client daemon.ClientContext, me
 			h.forwarder.addNodeUsage(nodes)
 		}
 		return nodes, nil
+	case "node.fleet_evidence":
+		return h.handleFleetEvidence(ctx, raw)
 	case "node.metrics":
 		var params daemon.NodeMetricsParams
 		if err := json.Unmarshal(raw, &params); err != nil || strings.TrimSpace(params.Node) == "" {

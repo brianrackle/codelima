@@ -675,6 +675,16 @@ deferred redraw policy (ADRs 134, 138 and 139).
 
 The production TUI loads the daemon's flat node inventory on lifecycle pushes with a slow safety refresh, then scopes it by canonical directory containment. Apply one-second telemetry pushes in place without triggering inventory reads. Project fleet selection, marks, filtering and sorting by node identity; use the same projected rows for rendering and mouse hit testing. Configuration and environment views are global.
 
+Project fleet evidence independently of paged Activity and full Spec/receipts.
+Bound node IDs, text and recent counts; preserve step kind, execution node and
+attempt time. Read only visible nodes plus selection, cancel on navigation,
+and fence responses by request identity. A recovered interrupted receipt has
+no finish timestamp: stale in-flight classification requires an unclaimed
+lifecycle token and the same observed metadata revision; a newer running ID
+takes precedence. Positive terminal progress/prompt signals may describe work,
+but titles and absent signals never prove busy/idle state. Keep guest stop impact
+separate from host and unclassified sessions, including hidden marks (ADR 187).
+
 Retain aggregate metric history once in a bounded daemon-owned ring. Use an epoch and timestamp cursor for incremental frontend reads, deep-copy observations across ownership boundaries, and preserve missing intervals. Optional detail probes share the existing guest transport, use bounded output and deadlines, coalesce concurrent requests, and never affect route health. Fence frontend responses by request serial and navigation generation; stop requesting detail when its view is hidden or paused (ADR 155).
 
 Bounded presentation animations stay inside the UI event loop. Derive their frame from monotonic elapsed time so delayed events cannot rewind visible state, keep changing text cell-width stable, and stop their ticker as soon as the terminal state is reached. When only a small fixed region changes, update that region and use the normal Vaxis diff render instead of clearing and rebuilding terminal, tree, and overlay surfaces. Keep pure elapsed-time-to-frame behavior separate from the event producer so progression tests do not sleep.

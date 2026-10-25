@@ -9,10 +9,10 @@ All example identities, metrics and timestamps in those files are reference data
 
 | Surface | Required behavior | Status |
 |---|---|---|
-| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: observed bytes, cached routes/first-port action, runtime preview and live phase rows added (ADR 186); recent-event/failure/session fidelity and final qualification remain |
+| [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime identity, preview trends/idle timing and final qualification remain |
 | [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Visual reference and associated canvas notes | Pending |
-| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: marks include hidden-target/global-allocation summary and flat-directory context (ADR 186); complete session impact, durable batch queue and final qualification remain |
+| [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail, durable batch queue and final qualification remain |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
 | [Detail · Overview](reference/NodeOverview.dc.html) | Visual reference and associated canvas notes | Pending |
@@ -38,6 +38,26 @@ All example identities, metrics and timestamps in those files are reference data
 
 ## Cross-cutting requirements
 
+ADR 187 checkpoint, 2026-10-25: `make verify test-race test-integration`
+passed (core unit 81.167s, race 113.556s, CLI integration 17.780s). After adding
+read-only claim/revision fencing for nil-finish interrupted receipts, focused
+race checks passed (4.554s), final `make verify` passed (core 80.977s), and gopls
+reported no diagnostics. Go API inspection, formatter, lint, Vaxis checks and
+both binary builds passed.
+
+The rebuilt Linux TUI was visually inspected and interacted with at 150×38 and
+80×24 using three isolated metadata-only nodes and a real host terminal.
+Failure step/source/exit/duration, interrupted recovery without a finish time,
+live flock precedence, independent recent history after older Activity paging,
+rapid selection, incomplete source recovery, hidden host-session impact and
+stale/recovered daemon observations passed. Real OSC progress and prompt
+signals showed working/error/paused/at prompt; a title alone remained unknown.
+All owned processes, terminals, files, captures and the tmpfs were removed,
+including 25 inactive inputrc files left by this checkpoint's test runs.
+This does not qualify real guest session termination, confirmed stop-age
+presentation, live route/resource comparisons or final native/artboard fidelity.
+The complete redesign remains partial.
+
 Fleet re-audit against the three home artboards:
 
 | Requirement | Current evidence and remaining work |
@@ -45,12 +65,12 @@ Fleet re-audit against the three home artboards:
 | `r` restart, with failed-step retry retained | ADR 185 service/daemon/CLI/TUI restart passes two-guest Linux/TCG checks; full native/artboard qualification remains |
 | `o` opens the first forwarded route | ADR 186 opens the selected ready node's first current live HTTP route; unavailable/stale/non-live/TCP guards tested |
 | Port filters/counts include discovered forwarding | ADR 186 joins frozen guest ports with discovered routes by node ID; unavailable/stale counts remain explicit |
-| Marked-node panel replaces single-node preview | ADR 186 includes hidden targets, associated session counts and global resource release/remaining allocation; complete busy/end-session detail still remains |
+| Marked-node panel replaces single-node preview | ADRs 186–187 include hidden targets, global release/remaining allocation, guest/host counts and observed working/unknown activity; per-target task labels and idle timing remain |
 | Flat filter view includes directory | ADR 186 shows Directory when grouping is absent |
 | Wide memory/disk values show used/total | ADR 186 uses observed byte totals and explicit unavailable values; compact stays percentages |
 | Compact navigation retains connection and capacity | ADR 186 abbreviates inactive views and preserves connection/global allocation with unknowns |
-| Preview includes resolved routes, runtime and recent events | ADR 186 adds runtime and observed routes; recent events and complete session details still require bounded independent evidence |
-| Lifecycle rows explain current work and failure | ADR 186 prefers recorded running phases at both sizes; retained failed-step evidence/duration still remains |
+| Preview includes resolved routes, runtime and recent events | ADRs 186–187 add provider/runtime, observed routes, independent recent events and explicit session activity; actual VM/mount/nesting identity and complete trend/idle fidelity remain |
+| Lifecycle rows explain current work and failure | ADRs 186–187 show recorded running phases, causally matched failed steps/duration, confirmed stop age and recovered interrupted state with live-claim precedence |
 | Whole-batch caller independence | Individual admitted mutations survive; the sequential frontend queue does not. Persist complete queue/result ownership |
 
 - Preserve daemon-owned sessions, node/configuration identities and existing storage compatibility.

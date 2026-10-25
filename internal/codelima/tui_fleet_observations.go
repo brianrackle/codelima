@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brianrackle/codelima/internal/codelima/daemon"
+	"github.com/brianrackle/codelima/internal/codelima/terminal"
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
 )
@@ -138,11 +139,13 @@ func (host tuiHostSummary) compactAllocation() string {
 }
 
 type tuiMarkedImpact struct {
-	targets          []tuiFleetRecord
-	hidden, sessions int
-	freed, remaining hostAllocations
-	known            bool
-	unknownTargets   bool
+	targets                                                                     []tuiFleetRecord
+	hidden, sessions                                                            int
+	freed, remaining                                                            hostAllocations
+	known                                                                       bool
+	unknownTargets                                                              bool
+	guestSessions, hostSessions, unclassifiedSessions, working, activityUnknown int
+	guestWorking, guestActivityUnknown                                          int
 }
 
 func (a *vaxisTUIApp) markedImpact() tuiMarkedImpact {
@@ -156,6 +159,28 @@ func (a *vaxisTUIApp) markedImpact() tuiMarkedImpact {
 			impact.hidden++
 		}
 		impact.sessions += record.Sessions
+		for _, session := range a.fleetSessions(record.Node) {
+			switch {
+			case !session.kindKnown:
+				impact.unclassifiedSessions++
+			case session.kind == terminal.NodeShell:
+				impact.guestSessions++
+				if session.activity == "working" {
+					impact.guestWorking++
+				} else if session.activity == "unknown" {
+					impact.guestActivityUnknown++
+				}
+			case session.kind == terminal.NodeHostShell:
+				impact.hostSessions++
+			default:
+				impact.unclassifiedSessions++
+			}
+			if session.activity == "working" {
+				impact.working++
+			} else if session.activity == "unknown" {
+				impact.activityUnknown++
+			}
+		}
 		if summarizeHostAllocations([]Node{record.Node}).UnknownNodes > 0 {
 			impact.unknownTargets = true
 		}
@@ -177,10 +202,16 @@ func (a *vaxisTUIApp) markedImpact() tuiMarkedImpact {
 
 func (impact tuiMarkedImpact) summary() string {
 	text := fmt.Sprintf("%d marked · %d hidden · %d sessions", len(impact.targets), impact.hidden, impact.sessions)
+	if impact.working > 0 {
+		text += fmt.Sprintf(" · %d working", impact.working)
+	}
 	if !impact.known {
 		return text + " · allocation unavailable"
 	}
 	release := "stop frees"
+	if impact.working > 0 {
+		release = "free"
+	}
 	if impact.unknownTargets {
 		release = "known release"
 	}
@@ -192,7 +223,7 @@ func (a *vaxisTUIApp) drawMarkedPreview(win vaxis.Window, theme tuiTheme) {
 	inner := border.All(win, theme.border)
 	width, height := inner.Size()
 	tuiLine(win.New(2, 0, width-2, 1), 0, fmt.Sprintf(" %d marked · %d hidden · actions apply to all ", len(impact.targets), impact.hidden), theme.mint)
-	limit := max(0, height-5)
+	limit := max(0, height-6)
 	for i, record := range impact.targets {
 		if i >= limit {
 			break
@@ -211,5 +242,6 @@ func (a *vaxisTUIApp) drawMarkedPreview(win vaxis.Window, theme tuiTheme) {
 	tuiLine(inner.New(1, row+1, width-2, 1), 0, impact.summary(), theme.text)
 	remaining := tuiHostSummary{Capacity: a.host.Capacity, AllocationsKnown: impact.known, AllocatedCPUs: impact.remaining.AllocatedCPUs, AllocatedMemoryBytes: impact.remaining.AllocatedMemoryBytes, UnknownNodes: impact.remaining.UnknownNodes}
 	tuiLine(inner.New(1, row+2, width-2, 1), 0, "After stop: "+strings.ReplaceAll(remaining.compactAllocation(), "G", " GiB"), theme.muted)
-	tuiLine(inner.New(1, row+3, width-2, 1), 0, "s start/stop · r restart · d delete · Space mark · * mark shown · Esc clear", theme.amber)
+	tuiLine(inner.New(1, row+3, width-2, 1), 0, impact.sessionWarning(), theme.amber)
+	tuiLine(inner.New(1, row+4, width-2, 1), 0, "s start/stop · r restart · d delete · Space mark · * mark shown · Esc clear", theme.muted)
 }

@@ -69,6 +69,9 @@ func (a *vaxisTUIApp) refreshFleet() {
 }
 
 func (a *vaxisTUIApp) fleetStatus(node Node) string {
+	if a.fleetReceiptFailed(node) {
+		return "failed"
+	}
 	if status := a.operationDisplayStatus(tuiTreeEntry{node: node}); status != "" {
 		return status
 	}
@@ -97,6 +100,7 @@ func (a *vaxisTUIApp) fleetSelected() (tuiFleetRecord, bool) {
 }
 
 func (a *vaxisTUIApp) selectFleetNode() {
+	defer a.startFleetEvidenceLoad(false)
 	if a.fleet.selectedID == "" {
 		a.state.selection = -1
 		return
@@ -472,6 +476,9 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 			if phase := a.fleetPhase(record.Node.ID); phase != "" {
 				text = phase
 			}
+			if evidence := a.fleetEvidenceLine(record); evidence != "" {
+				text = evidence
+			}
 			_, statusStyle := theme.status(record.Status)
 			style.Foreground = statusStyle.Foreground
 			tuiLine(win.New(column.col, 0, -1, 1), 0, text, style)
@@ -558,24 +565,9 @@ func (a *vaxisTUIApp) drawNodePreview(win vaxis.Window, record tuiFleetRecord, t
 		text, style := a.fleetCell(record, field, false, third-10, theme)
 		tuiLine(resources, graphHeight+2+i, fmt.Sprintf("%-7s %s", field, text), style)
 	}
-	tuiLine(sessions, 0, fmt.Sprintf("Sessions · %d", record.Sessions), theme.muted)
-	keys := a.state.sessions.TargetSessionKeys(tuiTreeEntry{node: record.Node}.key())
-	for i, key := range keys {
-		if i >= 3 {
-			break
-		}
-		label := key
-		if a.sessions != nil {
-			if session, ok := a.sessions.Session(key); ok {
-				label = terminalTabLabel(session, a.terminalMetadata(key))
-			}
-		}
-		tuiLine(sessions, i+1, label, theme.text)
-	}
-	if len(keys) == 0 {
-		tuiLine(sessions, 1, "No sessions", theme.dim)
-	}
-	a.drawFleetRoutes(sessions, record.Node.ID, 5, height, theme)
+	a.drawFleetSessions(sessions, record.Node, theme)
+	a.drawFleetRoutes(sessions, record.Node.ID, 5, min(8, height), theme)
+	a.drawFleetRecent(sessions, record.Node.ID, 9, height, theme)
 }
 
 func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, theme tuiTheme) {

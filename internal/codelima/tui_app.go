@@ -35,6 +35,7 @@ type vaxisTUIApp struct {
 	screenHyperlinkAt   func(int, int) (string, bool)
 	state               *tuiState
 	fleet               *tuiFleet
+	fleetEvidence       tuiFleetEvidenceState
 	view                tuiView
 	nodeDetail          bool
 	detailTab           tuiDetailTab
@@ -330,6 +331,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 // host-terminal restoration (vx.Close) and auto-refresh cancellation deferred
 // there, keyed to the resources it owns.
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
+	defer a.cancelFleetEvidenceLoad()
 	defer a.cancelActivityAttachment()
 	defer a.cancelDoctorCheck()
 	defer a.cancelDaemonOverview()
@@ -550,6 +552,10 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyPortsData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiFleetEvidenceEvent:
+		a.applyFleetEvidence(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiPortPinEvent:
 		a.finishPortPin(event)
 		a.requestRedraw()
@@ -567,6 +573,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.requestRedraw()
 		return false, nil
 	case tuiMetricsTickEvent:
+		a.startFleetEvidenceLoad(false)
 		a.startPortsLoad(false)
 		a.startDaemonOverview(false)
 		a.startDoctorCheck(false, false)
@@ -685,6 +692,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case tuiDaemonDisconnectedEvent:
+		a.cancelFleetEvidenceLoad()
 		a.cancelPortsLoad()
 		a.cancelDaemonOverview()
 		a.resetGraphicsEpoch()
@@ -716,6 +724,8 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.propagateHostColors()
 		wasDisconnected := a.daemonDisconnected
 		a.daemonDisconnected = false
+		a.cancelFleetEvidenceLoad()
+		a.startFleetEvidenceLoad(true)
 		a.cancelPortsLoad()
 		a.startPortsLoad(true)
 		a.cancelDaemonOverview()

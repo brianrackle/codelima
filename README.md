@@ -425,6 +425,18 @@ stopped, conflicted and TCP routes cannot open through this shortcut. `3` opens
 Ports for inspection. Running lifecycle rows show recorded phase progress at
 both widths; phase counts describe completed work, not estimated time.
 
+Fleet failure rows retain the applicable bootstrap/validation step, recorded
+exit code and duration. Recovered interrupted attempts have no invented finish
+time; a live lifecycle claim or newer metadata takes precedence. Stopped rows
+label the confirmed last stop, rather than claiming VM uptime. The wide
+preview's three recent events belong to the selected node and stay independent
+of Activity pagination. Unavailable or stale evidence is labeled explicitly.
+
+Session activity uses terminal integration: progress reports working, error or
+paused, and prompt markers report at prompt. Otherwise activity is unknown;
+a title alone does not prove work or idle time. Marked impact distinguishes guest
+sessions that stopping ends from host sessions and includes hidden targets.
+
 Open a node with Enter and Tab to Metrics. `+`/`-` select 1m, 5m, 15m or 1h;
 Space pauses/resumes. CPU and memory charts use observed samples, with gaps
 when unavailable. The daemon retains up to one hour, lost on restart. Disk is

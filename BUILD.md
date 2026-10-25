@@ -31,6 +31,14 @@ internal/codelima/forwarding_ports.go internal/codelima/tui_ports.go'` while
 developing. Run the Ports terminal and real-guest flows in QA.md; final
 qualification remains tracked in TODO #57.
 
+`make test-fleet-evidence` checks bounded, node/attempt-scoped evidence, recovered
+interruption and live claims, independent recent history, response fencing,
+cancellation, incomplete sources and explicit terminal activity (ADR 187).
+Use `FLEET_EVIDENCE_TEST_FLAGS=-race` for race checking. The current ordinary
+daemon protocol is **24**; update older daemons explicitly. Session protocol 2
+and handoff protocol 6 are unchanged. Run the fleet evidence/session flows in
+QA.md after the full verification gates.
+
 `make test-host-capacity` checks native capacity parsing, read-only volume
 sampling, global allocation across directory scopes, stale-response rejection,
 responsive System panels and settings navigation. It also cross-compiles the
@@ -39,7 +47,7 @@ sampler for macOS arm64 and amd64; native macOS readings require manual QA.
 `make test-metrics` covers bounded history, incremental reads, telemetry parsing,
 process CPU deltas/PID reuse, shared probe caching and cancellation, protocol
 frame size, navigation fencing, pause/sort/copy controls and responsive plots.
-The current daemon protocol is 18 (ADR 173); Metrics and inventory trends were
+Metrics and inventory trends were
 introduced in protocols 9 and 10 (ADRs 155–156).
 The focused suite also checks CPU trend retention/epoch reset, stale refreshes
 and both process rankings during pause. Live guest qualification
@@ -65,7 +73,7 @@ clone inheritance, JSON/YAML round trips, CLI/TUI retry and failed-VM stopping
 cancellation, preserved bootstrap, both output streams, durable phases and
 caller-disconnect behavior, plus TUI single/bulk confirmation and detail scope
 (ADR 185). Use `NODE_RESTART_TEST_FLAGS=-race` for the focused race run. The
-ordinary protocol is 23; update older daemons explicitly. Run the real-guest
+restart contract was introduced in ordinary protocol 23. Run the real-guest
 restart procedure in QA.md after the full verification gates.
 
 `make test-node-operations` checks independent execution lifetime, per-node

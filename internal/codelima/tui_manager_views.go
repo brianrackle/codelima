@@ -32,6 +32,7 @@ type tuiManagerDataEvent struct {
 // the response to the navigation that requested it, so late replies cannot
 // replace another node's logs or clear a newer loading/error state.
 func (a *vaxisTUIApp) loadManagerData(repair bool) {
+	a.startFleetEvidenceLoad(true)
 	a.startPortsLoad(true)
 	a.startDaemonOverview(true)
 	a.cancelHiddenMetricsLoad()
