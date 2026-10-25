@@ -600,7 +600,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 			}
 			return "s start/stop · x inspect · E template · l logs · Esc nodes"
 		}
-		return "Tab/Shift-Tab view · x shell · s start/stop · r restart · l logs · Esc nodes · ? help"
+		return "Esc nodes · Tab view · ctrl+↑↓ panels · t/T new shell · s start/stop · r restart · l logs"
 	}
 	switch a.view {
 	case tuiViewTemplates:

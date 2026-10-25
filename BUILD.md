@@ -10,6 +10,14 @@ resize regressions. `make test-tui-input` remains available for a selected
 redesign, and run every applicable flow in QA.md. Focused checks do not qualify
 the incomplete runtime contracts in TODO #57 or the full 26-artboard design.
 
+`make test-overview OVERVIEW_TEST_FLAGS=-race` covers Overview focus and
+responsive panels, stable session/route selection, captured end confirmation,
+daemon-derived session age, coalesced cross-client tab-order refresh, mouse
+links and stale/unknown observations
+(ADR 191). It includes the shared fleet/manager and bounded recent-evidence
+regressions. Ordinary/session/renderer/handoff protocols remain 27/2/6/7.
+Run the Overview subsection of QA.md Flow 7 after the complete gates.
+
 `make test-empty-nodes` covers the first-run guide, actual defaults, scoped
 creation, host blockers/recovery, read-only re-check, mouse actions and complete
 scrollable errors (ADR 184). Use `EMPTY_NODES_TEST_FLAGS=-race` for race checking.

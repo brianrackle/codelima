@@ -27,6 +27,7 @@ type tuiSession struct {
 	label      string
 	node       Node
 	terminalID terminal.TerminalID
+	createdAt  time.Time
 	// acknowledgedBells is local to this TUI and survives tab reorder/resync.
 	acknowledgedBells uint64
 }
@@ -383,7 +384,7 @@ func (s *tuiSessionStore) handleDaemonEvent(event daemon.Event) {
 			s.postCompletion(tuiDaemonTerminalCreatedEvent(state))
 		}
 	case daemon.EventTargetTabsChanged:
-		s.postEvent(vaxis.Redraw{})
+		s.postCompletion(tuiSessionOrderChangedEvent{})
 	case daemon.EventNodeStatusChanged, daemon.EventNodeOperationChanged:
 		// A redraw alone would render the same stale list: the node records
 		// live in the daemon, so the change is only visible after a reload.
@@ -759,6 +760,7 @@ func (s *tuiSessionStore) installDaemonTab(event tuiDaemonTerminalOpenedEvent) (
 		label:      event.Label,
 		node:       event.Node,
 		terminalID: runtime.ID,
+		createdAt:  event.State.CreatedAt,
 	})
 	return key, nil
 }
@@ -840,6 +842,7 @@ func (s *tuiSessionStore) replaceDaemonSessions(states []daemon.TerminalState) e
 			delete(s.sessions, session.key)
 		}
 		session.key, session.target, session.label = key, state.Target, state.Label
+		session.createdAt = state.CreatedAt
 		target, err := terminal.ParseTargetKey(state.Target)
 		if err == nil && target.Kind == terminal.TargetNode {
 			if state.Kind == terminal.NodeHostShell.String() {

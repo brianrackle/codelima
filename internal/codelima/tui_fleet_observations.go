@@ -48,16 +48,20 @@ func (a *vaxisTUIApp) openFleetPort() error {
 	if !a.fleetPortsCurrent() {
 		return fmt.Errorf("forwarding observation unavailable or stale; use 3 Ports to inspect")
 	}
-	snapshot := a.ports.snapshot
-	ready := slices.ContainsFunc(snapshot.Nodes, func(node daemon.PortNode) bool { return node.ID == record.Node.ID && node.Ready })
-	if snapshot.Enabled && snapshot.Authorized && ready && record.Status == "running" {
-		for _, route := range a.fleetRoutes(record.Node.ID) {
-			if route.Kind == "http" && route.Status == "live" && (strings.HasPrefix(route.Address, "http://") || strings.HasPrefix(route.Address, "https://")) {
-				return a.openHyperlink(route.Address)
-			}
+	for _, route := range a.fleetRoutes(record.Node.ID) {
+		if a.fleetRouteOpenable(record, route) {
+			return a.openHyperlink(route.Address)
 		}
 	}
 	return fmt.Errorf("no live HTTP route for %s; use 3 Ports to inspect", record.Node.Slug)
+}
+
+func (a *vaxisTUIApp) fleetRouteOpenable(record tuiFleetRecord, route daemon.PortRoute) bool {
+	snapshot := a.ports.snapshot
+	ready := slices.ContainsFunc(snapshot.Nodes, func(node daemon.PortNode) bool { return node.ID == record.Node.ID && node.Ready })
+	return a.fleetPortsCurrent() && snapshot.Enabled && snapshot.Authorized && ready && record.Status == "running" &&
+		route.NodeID == record.Node.ID && route.Kind == "http" && route.Status == "live" &&
+		(strings.HasPrefix(route.Address, "http://") || strings.HasPrefix(route.Address, "https://"))
 }
 
 func tuiGiB(value uint64) string {

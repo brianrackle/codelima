@@ -476,6 +476,32 @@ guests, services, captures and files after completing these checks.
 
 ## Flow 7: path-scoped fleet manager
 
+Overview panels (ADR 191), in the disposable home:
+
+1. At 150×38 open a ready node's Overview. Inspect Identity/Resources on the
+   left and Sessions/Ports/Recent events on the right. Compare configured and
+   observed resource values with Metrics, agent checks with Spec, and routes
+   with Ports. Missing observations must not become zeros or success claims.
+2. Open multiple guest and host sessions. Use Ctrl+Up/Down to change panels,
+   Up/Down to select rows, and Tab/Shift+Tab to change detail tabs. Select a
+   session, reorder tabs with `terminal.move` from another daemon client, and confirm Enter attaches
+   the same terminal (compare a shell variable/PID). Detach with Ctrl+].
+   t/T must create a new guest/host session even when one already exists.
+3. K opens an end-session confirmation. Esc leaves all sessions open; confirm
+   ends only its captured session. Remove a selected session from another
+   client and verify Enter cannot create or attach a replacement implicitly.
+4. Select a second route; o opens that route, and y copies its address. Stop
+   the node or interrupt the observation feed and verify stale/held routes
+   cannot open. Click rows and panel links, and wheel within each panel.
+5. Resize to 80×24. Cycle all five panels, inspect agent results and scroll
+   long identity/resources/recent content. Return wide; selection stays put.
+   Recent must contain only the selected node, at most six retained records,
+   with incomplete/stale data labeled. Navigate to Logs for full history.
+6. Reopen the frontend and update/reconnect the daemon: session ages must use
+   original creation times. Confirm Starting/Failed Overview still uses the
+   lifecycle controls below. Close test shells, stop disposable guests and
+   daemon, and remove only this flow's files, stores, sockets and mounts.
+
 Raw shell attachment checks (ADR 151):
 
 1. Select a ready node, press `x`, type a command and confirm the outer terminal

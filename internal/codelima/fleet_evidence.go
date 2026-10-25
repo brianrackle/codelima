@@ -141,7 +141,7 @@ func (h *daemonHost) handleFleetEvidence(ctx context.Context, raw json.RawMessag
 			messages, _ = journal.Snapshot()
 			messages = slices.DeleteFunc(messages, func(m ActivityMessage) bool { return m.NodeID != request.RecentNode })
 		}
-		page, err := buildActivityPage(selected, messages, "", 3)
+		page, err := buildActivityPage(selected, messages, "", 6)
 		if err != nil {
 			result.RecentError = fleetEvidenceError(err)
 		} else {

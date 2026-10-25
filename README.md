@@ -317,6 +317,18 @@ shell. Wide terminals show a selected-node preview below the table; widths
 below 100 columns use a compact table. `Enter` opens node detail, and `Esc`
 returns to the same selection.
 
+Overview shows Identity, Resources, Sessions, Ports and Recent events.
+`Ctrl+Up` / `Ctrl+Down` cycles panel focus; `Up` / `Down` selects or scrolls
+inside that panel. `Tab` / `Shift+Tab` cycles the node's detail tabs. Compact
+windows keep identity beside the focused Sessions, Ports or Recent panel;
+focusing Resources replaces identity until focus moves again.
+In Sessions, `Enter` attaches the selected session, `t` creates a fresh guest
+shell, `T` creates a fresh host shell, and `K` confirms ending that exact
+session. Ctrl+] returns from attachment. Session age comes from the daemon;
+an unknown age or activity stays unknown. In Ports, `o` opens the selected
+live HTTP route and `y` copies its URL. Mouse rows select, the wheel moves
+within a panel, and panel links open Spec, Metrics, Ports and Logs.
+
 An empty scope shows a first-run guide with the stored `small` template's
 resources and the latest host checks. `n` creates in the displayed directory
 scope; all-node mode uses the launch directory. Failed or unavailable host

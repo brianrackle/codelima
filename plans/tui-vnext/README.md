@@ -15,7 +15,7 @@ All example identities, metrics and timestamps in those files are reference data
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); batch queue and final qualification remain |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
 | [Nodes · compact 80×24](reference/NodesCompact.dc.html) | Condensed navigation/capacity, percentage table and selected-node summary | Partial: condensed navigation/capacity, phase rows and reserved selected/marked summary implemented (ADR 186); final artboard/native qualification remains |
-| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: selected identity/runtime and per-agent recorded checks refresh at both widths (ADR 190); full resource/session/route layout, actions and final qualification remain |
+| [Detail · Overview](reference/NodeOverview.dc.html) | Identity, resources, sessions, ports and recent events | Partial: five responsive panels, stable selected actions, daemon session age and shared bounded observations (ADR 191); final artboard/native qualification remains |
 | [Detail · Metrics](reference/NodeMetrics.dc.html) | Visual reference and associated canvas notes | Partial: bounded history, detail telemetry and processes; live guest checks pass; final qualification open |
 | [Detail · Logs & events](reference/NodeLogs.dc.html) | Visual reference and associated canvas notes | Partial: four bounded sources, controls and real failed-bootstrap capture verified; final qualification remains |
 | [Detail · Spec & template drift](reference/NodeSpec.dc.html) | Visual reference and associated canvas notes | Partial: frozen/current comparison, YAML, actions and real failure/retry step records verified; final qualification remains |
@@ -37,6 +37,49 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Visual reference and associated canvas notes | Pending |
 
 ## Cross-cutting requirements
+
+ADR 191 checkpoint, 2026-10-25: Overview now has five responsive panels,
+independent focus/scrolling, stable session and route selections, exact-session
+attach/end actions, fresh guest/host creation, daemon-derived ages and six
+bounded recent records. The dashboard keeps its three-record preview; Overview
+no longer loads a complete event log. Missing/stale observations remain explicit.
+Tab-change pushes now refresh daemon order asynchronously; generation fences
+and membership-preserving application keep later creations and closures safe.
+Ordinary/session/renderer/handoff protocols remain 27/2/6/7.
+
+Final `make verify test-race test-integration` passed after the visual and
+ordering fixes: core unit 84.625s, race 113.572s, CLI integration 17.734s,
+plus format, lint, Vaxis and both builds. Focused race checks passed (8.067s);
+Go API inspection and gopls passed. A final process audit found no owned
+verification processes. No new Lima cache files were created. The final audit
+removed 46 additional inactive inputrc files created since the preceding
+checkpoint; older files and every active INPUTRC were preserved.
+
+Live Linux QEMU/TCG verification used two rebuilt frontends at 150×38 and 80×24.
+It covered Starting, observed CPU/memory/disk, unknown agent checks, template
+change indication, six selected-node events, all panel navigation/links,
+mouse row selection/wheel movement, resize, actual host/guest creation and
+exact attachment (retained variable and PID). Cancel/confirm ended only the
+captured session. A second daemon client reordered tabs; the first live run
+exposed a redraw-only cache bug, now fixed and repeated successfully. An
+externally closed selection refused attachment without creating/reusing another
+session. Frontend reopen and live daemon update retained terminal IDs and
+creation times. Daemon suspension refused stale routing, and node stop refused
+retained routing. Two discovered guest HTTP services returned HTTP 200;
+selected-port opening was checked with a captured host launcher, and OSC 52
+copy delivered the same URL to tmux's clipboard buffer. This is Linux terminal
+qualification, not native macOS browser/desktop clipboard qualification.
+
+Visual inspection caught and fixed low-contrast inactive titles, missing
+resource colors, overlapping ended-session heading text and an inappropriate
+guest-shell hint on stopped nodes. The final stopped empty state was run and
+inspected after rebuilding. The original backing image hash stayed unchanged.
+All owned sessions, processes, guest overlay, metadata, temporary clients,
+captures, workspace and tmpfs mount were removed; two newly created inactive
+inputrc files with the exact expected contents were removed. Older cleanup debt
+in TODO.md remains untouched. Full design/native qualification and real clone
+provenance qualification remain open in TODO #57.
+
 
 ADR 190 checkpoint, 2026-10-25: the selected preview and Overview now project
 separate frozen agent checks, including failed/pending, inherited, missing and

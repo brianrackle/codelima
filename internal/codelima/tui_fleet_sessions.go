@@ -9,10 +9,12 @@ import (
 )
 
 type tuiFleetSession struct {
+	key             string
 	label, activity string
 	kind            terminal.TerminalKind
 	kindKnown       bool
 	idleSince       int64
+	createdAt       time.Time
 }
 
 // Progress and prompt integration provide positive evidence. Absence of a
@@ -38,7 +40,7 @@ func fleetSessionActivity(metadata TerminalMetadata) string {
 func (a *vaxisTUIApp) fleetSessions(node Node) []tuiFleetSession {
 	var records []tuiFleetSession
 	for _, key := range a.state.sessions.TargetSessionKeys(tuiTreeEntry{node: node}.key()) {
-		record := tuiFleetSession{label: key, activity: "unknown"}
+		record := tuiFleetSession{key: key, label: key, activity: "unknown"}
 		if a.sessions != nil {
 			if session, ok := a.sessions.Session(key); ok {
 				metadata := a.terminalMetadata(key)
@@ -51,6 +53,7 @@ func (a *vaxisTUIApp) fleetSessions(node Node) []tuiFleetSession {
 					record.idleSince = metadata.PromptIdleSinceUnixMilli
 				}
 				record.kind, record.kindKnown = session.shellKind, true
+				record.createdAt = session.createdAt
 			}
 		}
 		records = append(records, record)

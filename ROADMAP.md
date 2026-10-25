@@ -50,8 +50,9 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   (ADR 188). Prompt idle timing is retained across frontends, renderer recovery
   and live daemon updates (ADR 189). Separate recorded agent checks, clone
   provenance and explicit unknown/custom-profile results are implemented
-  (ADR 190); automated and Linux guest/TUI checkpoint checks pass. Complete Overview and
-  final artboard/native qualification remain in TODO #57.
+  (ADR 190). Overview panel layout, stable row actions, resource presentation,
+  daemon-derived session age and bounded recent events are implemented (ADR 191).
+  Final artboard/native qualification remains in TODO #57.
 
 - Ports delivery [partially complete, in progress]: readiness-gated application
   routes and daemon-owned published TCP with stopped-node migration (ADR 182).

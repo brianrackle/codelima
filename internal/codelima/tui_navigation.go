@@ -103,6 +103,9 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 	if a.handleEmptyNodesKey(key) {
 		return false
 	}
+	if a.handleOverviewKey(key) {
+		return false
+	}
 	if key.MatchString("Up") || key.MatchString("k") || key.MatchString("Down") || key.MatchString("j") {
 		delta := 1
 		if key.MatchString("Up") || key.MatchString("k") {

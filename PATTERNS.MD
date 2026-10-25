@@ -708,6 +708,22 @@ for login-user claims; arbitrary profile checks stay labeled as such. Keep the
 projection selected-node-only and read-only, with no commands/output on the
 fleet wire and no guest I/O in rendering (ADR 190).
 
+Selectable detail panels retain canonical row IDs, not positions in the latest
+snapshot. Reordering preserves selection; removal invalidates actions until
+explicit navigation selects a replacement. Capture identity in confirmations
+and validate it again on submit. Derive mouse regions from the exact rendered
+rows, keep panel focus separate from global/detail tab navigation, and share
+the existing inventory and route-readiness owners. Retain daemon creation time
+through frontend adoption instead of deriving session age from a TUI's lifetime
+(ADR 191).
+
+An inventory-change push must refresh the cached projection, not just redraw
+it. Coalesce reads, fence replies with a mutation generation, and separate an
+order-only update from membership adoption/removal. A delayed ordering response
+may rearrange known IDs but cannot resurrect closed records or discard records
+created since the read. Full synchronization invalidates outstanding order
+reads (ADR 191).
+
 Retain aggregate metric history once in a bounded daemon-owned ring. Use an epoch and timestamp cursor for incremental frontend reads, deep-copy observations across ownership boundaries, and preserve missing intervals. Optional detail probes share the existing guest transport, use bounded output and deadlines, coalesce concurrent requests, and never affect route health. Fence frontend responses by request serial and navigation generation; stop requesting detail when its view is hidden or paused (ADR 155).
 
 Bounded presentation animations stay inside the UI event loop. Derive their frame from monotonic elapsed time so delayed events cannot rewind visible state, keep changing text cell-width stable, and stop their ticker as soon as the terminal state is reached. When only a small fixed region changes, update that region and use the normal Vaxis diff render instead of clearing and rebuilding terminal, tree, and overlay surfaces. Keep pure elapsed-time-to-frame behavior separate from the event producer so progression tests do not sleep.

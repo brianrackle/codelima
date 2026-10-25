@@ -118,6 +118,15 @@ func (a *vaxisTUIApp) finishRawShell(event tuiRawShellReadyEvent) {
 		a.setStatus(slog.LevelError, err.Error())
 		return
 	}
+	if a.overviewVisible() && event.State.Target == terminal.NodeTarget(a.state.selectedEntry().node.ID).String() {
+		a.reconcileOverview(a.state.selectedEntry().node)
+		for _, key := range a.sessions.TargetSessionKeys(event.State.Target) {
+			if session, ok := a.sessions.Session(key); ok && string(session.terminalID) == event.State.TerminalID {
+				a.overview.session = key
+				break
+			}
+		}
+	}
 	if event.Mode == "window" || event.Mode == "tmux" {
 		a.setStatus(slog.LevelInfo, "Opened "+event.State.Label+" in "+event.Mode+" · session belongs to the daemon")
 		return

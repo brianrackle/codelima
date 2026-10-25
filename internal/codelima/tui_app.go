@@ -36,6 +36,8 @@ type vaxisTUIApp struct {
 	state               *tuiState
 	fleet               *tuiFleet
 	fleetEvidence       tuiFleetEvidenceState
+	overview            tuiOverviewState
+	sessionOrder        tuiSessionOrderState
 	view                tuiView
 	nodeDetail          bool
 	detailTab           tuiDetailTab
@@ -449,6 +451,13 @@ func loadTUINodes(ctx context.Context, service *Service) ([]Node, error) {
 //nolint:unparam // the error result is the event-loop abort channel; it is part of the
 func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 	switch event := event.(type) {
+	case tuiSessionOrderChangedEvent:
+		a.requestSessionOrder()
+		return false, nil
+	case tuiSessionOrderEvent:
+		a.applySessionOrder(event)
+		a.draw()
+		return false, nil
 	case tuiDaemonTerminalCreatedEvent:
 		if err := a.installCreatedDaemonTab(event); err != nil {
 			a.setStatus(slog.LevelError, err.Error())
@@ -704,6 +713,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case tuiDaemonSynchronizedEvent:
+		a.sessionOrder.serial++
 		a.resetGraphicsEpoch()
 		var syncErr error
 		if a.sessions != nil {

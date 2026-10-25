@@ -33,12 +33,24 @@ Overview, including pending, failed, inherited, custom-profile and unknown
 results. Final verify/race/CLI integration, focused race, Go API and gopls checks
 pass. Real guest version-check failure/retry and wide/compact UI checks pass;
 the design ledger records fixture-only cases and the cleanup audit.
-Remaining fleet work: final wide/compact native artboard qualification and the
-complete Overview interaction/layout. Reuse the shared evidence and add the
-design's session/route selection, actions and resource layout. Advantages:
-faithful cross-view presentation; disadvantages: additional focus, responsive
-layout and native QA work. These remain in the full #57 scope; unknown activity
-must not be inferred from titles.
+ADR 191 adds the five Overview panels, stable session/route selection, captured
+end-session confirmation, fresh guest/host shells, guarded selected-route
+opening, daemon-derived age and six bounded recent events. Its automated and
+live verification checkpoint is recorded in the design ledger.
+Remaining fleet work: final wide/compact native artboard qualification, including
+macOS VZ and the complete cross-view QA matrix. Compare every panel and action
+against the saved design on both supported hosts. Advantages: faithful
+cross-view presentation; disadvantages: additional native setup and QA time.
+These remain in the full #57 scope; unknown activity must not be inferred from titles.
+Remaining Overview evidence: the selected projection does not expose guest
+architecture/KVM availability or imported credential-item/timestamp receipts;
+session kinds currently identify shell/host, and clone identity is scoped to
+the loaded fleet. Extend the bounded owners with recorded evidence and explicit
+agent-launch identity, and use a bounded global child lookup if all clones must
+be shown. Advantage: can reproduce those artboard details without inferring
+facts from titles or inventing receipts. Disadvantages: additional provider,
+storage/protocol work and native qualification. Keep current unknown states
+until that evidence exists.
 Final clone qualification must create inherited records through the Clone action
 and revalidate the child; this checkpoint exercised their presentation with
 metadata fixtures. Reuse a disposable stopped guest and compare parent/child

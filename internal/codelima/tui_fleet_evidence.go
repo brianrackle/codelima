@@ -267,7 +267,7 @@ func (a *vaxisTUIApp) drawFleetRecent(win vaxis.Window, nodeID string, row, heig
 		}
 		tuiLine(win, row+1, text, theme.dim)
 	}
-	for i, event := range s.snapshot.Recent {
+	for i, event := range s.snapshot.Recent[:min(3, len(s.snapshot.Recent))] {
 		if row+1+i >= height {
 			break
 		}

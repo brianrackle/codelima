@@ -107,6 +107,11 @@ func TestFleetEvidenceKeepsFailureAndRecentNodeHistoryIndependent(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
+	for range 3 {
+		if _, err := journal.Append(activityMessageRequest{ID: newID(), NodeID: node.ID, Source: "ports", Text: "another selected event"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	page := requestFleetEvidence(t, host, fleetEvidenceRequest{Nodes: []string{node.ID}, RecentNode: node.ID})
 	evidence := page.Nodes[node.ID]
 	if evidence.Start == nil || evidence.Start.ID != start.ID || evidence.Step == nil || evidence.Step.Index != 2 || evidence.Step.Total != 2 || evidence.Step.DurationMillis == nil || *evidence.Step.DurationMillis != 6000 {
@@ -115,7 +120,7 @@ func TestFleetEvidenceKeepsFailureAndRecentNodeHistoryIndependent(t *testing.T) 
 	if evidence.StoppedAt == nil || !evidence.StoppedAt.Equal(now) {
 		t.Fatal("confirmed stop time missing")
 	}
-	if len(page.Recent) != 3 || page.RecentError != "" {
+	if len(page.Recent) != 6 || page.RecentError != "" {
 		t.Fatalf("bad recent projection: %+v", page)
 	}
 	for _, event := range page.Recent {

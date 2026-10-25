@@ -297,7 +297,7 @@ func (a *vaxisTUIApp) handleMouse(mouse vaxis.Mouse) {
 			}
 		}
 	}
-	if a.handleEmptyNodesMouse(mouse) || a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) || a.handleActivityMouse(mouse) || a.handlePortsMouse(mouse) || a.handleRecipeMouse(mouse) || a.handleDoctorMouse(mouse) || a.handleSystemDaemonMouse(mouse) {
+	if a.handleEmptyNodesMouse(mouse) || a.handleOverviewMouse(mouse) || a.handleLogsMouse(mouse) || a.handleSpecMouse(mouse) || a.handleActivityMouse(mouse) || a.handlePortsMouse(mouse) || a.handleRecipeMouse(mouse) || a.handleDoctorMouse(mouse) || a.handleSystemDaemonMouse(mouse) {
 		return
 	}
 	if a.view == tuiViewSystem && mouse.EventType == vaxis.EventPress {
