@@ -195,6 +195,8 @@ func (a *vaxisTUIApp) dispatchManagerKey(key vaxis.Key) bool {
 		err = a.editManagerSetting()
 	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemDoctor:
 		a.openDoctorDetails()
+	case a.view == tuiViewSystem && key.MatchString("Enter") && a.systemPanel == tuiSystemDaemon:
+		a.openDaemonDetails()
 	case a.view != tuiViewNodes:
 		return false
 	case key.MatchString("/") && !a.nodeDetail:

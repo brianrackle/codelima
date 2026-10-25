@@ -138,6 +138,13 @@ repair/re-check outcomes, current settings, header counts and details controls
 `make gopls GOPLS_ARGS='check internal/codelima/tui_doctor.go'` while developing.
 Run full verify/race/integration and the live System Doctor flow in `QA.md`.
 
+`make test-system-daemon` covers cached runtime summaries, unique subscribers,
+real-socket deadline/cancellation/recovery and responsive status/details
+(ADR 180). Protocol 20 adds `daemon.overview` and subscriber counts; session 2,
+handoff 6 and renderer 5 are unchanged. Use `make gopls GOPLS_ARGS='check
+internal/codelima/daemon_overview.go internal/codelima/tui_system_daemon.go'`,
+then full verify/race/integration and the live overview flow in `QA.md`.
+
 `make test-dependency-hints` covers bounded shell analysis and the environment
 warning's keyboard/mouse draft flow (ADR 178). Run full verify/race/integration
 and `make test-terminal-attach` when changing its parser dependency. The pinned
@@ -780,7 +787,7 @@ QA.md; offline tests do not establish outer-terminal permission behavior.
 `make test-terminal-attach` runs the native ANSI export, VT boundary, lease,
 input parser and real-PTY/socket regressions. `make verify` additionally checks
 the production binaries, all Go packages, lint and formatting. Ship current
-daemon protocol 19 and renderer protocol 5 together; attachment was introduced
+daemon protocol 20 and renderer protocol 5 together; attachment was introduced
 in protocols 8/4. Checkpoint envelope 2 adds the
 VT boundary state, and older envelopes use journal recovery. Native Ghostty
 remains pinned to the existing revision. Rebuild both binaries with `make build`

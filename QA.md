@@ -475,6 +475,25 @@ System Doctor and global findings (ADR 179), using an isolated metadata home:
    update; that check must leave the record in place. Remove isolated metadata, quarantine data,
    daemon/TUI, terminal sessions, sockets, mounts and captures afterward.
 
+System daemon overview (ADR 180), using an isolated metadata home:
+
+1. At 150×38 and 80×24 compare PID/version/session/subscriber counts with
+   `daemon status`; open a second TUI and close it to verify automatic counts.
+   Transfer the seat and verify both panels identify their ownership correctly.
+2. Inspect actual forwarding/telemetry and platform reclaim observations;
+   inactive and unsupported states must be explicit. Automated fixtures cover
+   degraded listeners/routes, inventory failures and reclaim outcomes.
+3. Open full details with Enter and mouse, scroll/resize, then close. Keep the
+   daemon briefly suspended in this isolated fixture: after the request deadline
+   old observations must remain visibly stale and navigation must respond.
+   Resume it and confirm automatic recovery; leave System and return.
+4. Run a live daemon update with the existing CLI; verify the TUI reconnects,
+   reports the new PID and observed in-place update time. After an ordinary
+   stop/start, the new incarnation must not claim that update time.
+5. Stop and remove the isolated TUI(s), daemon, sockets, metadata, mounts and
+   captures. Retain older qualification fixtures separately until their work
+   is complete.
+
 Settings and shell choices (ADR 152):
 
 1. Open System, cycle Tab to Settings, and change shell mode with Enter. Quit and

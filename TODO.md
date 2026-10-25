@@ -608,8 +608,33 @@ the record; explicit keyboard repair then preserved its bytes in quarantine.
 The isolated daemon/TUI/tmux, tmpfs, metadata/quarantine, fault wrapper,
 captures/logs, `tmp/sq` and focused-test scratch have been removed. No VM was
 created.
+ADR 180 adds the cached daemon overview, protocol-20 subscriber counts,
+forwarding/reclaim observations and bounded visible-view refresh with stale
+retention and full details. Focused and full verification, race and integration
+checks passed; gopls is clean. Live 150×38/80×24 checks confirmed current
+PID/protocol/session/subscriber counts, two-frontends and seat transfer, refresh
+after one frontend exits, keyboard/mouse details, resize and navigation. A six-second
+SIGSTOP of the isolated daemon left status explicitly stale without freezing
+panel navigation; SIGCONT recovered fresh observations. The existing CLI update
+preserved a host shell's PID and variable while the panel reconnected and showed
+the new daemon PID/update time. Ordinary stop/start reset that time. All host
+terminals, daemon/TUIs/tmux, metadata, captures, tmp/oq and its tmpfs mount were
+removed. No VM was created. Degraded forwarding and reclaim outcomes are covered
+by automated fixtures; their native-platform qualification remains open.
+A post-QA full-suite rerun was terminated by SIGTERM without a failed assertion;
+its orphaned stubborn-shell test group was identified by command/cwd and cleaned.
+An isolated full verify/race/integration rerun with Linux signal tracing passed;
+the trace and identified interrupted-run Go scratch were removed. If this recurs,
+record the signal sender around make/go-test with strace and separate process
+sessions before changing terminal shutdown code. This can distinguish tooling
+cleanup from a test defect, but tracing is Linux-specific and affects timing.
+
 Daemon update/restart/log/diagnostic controls and complete System fidelity remain
-open. The retained snapshot keeps navigation responsive but can be one minute
+open. Reuse the existing update handoff and shutdown ownership checks in bounded
+background actions; package diagnostic collection for installed binaries. This
+preserves established lifecycle semantics and gives operators evidence without
+blocking the TUI, at the cost of explicit interruption handling and maintaining
+a portable collector. The retained snapshot keeps navigation responsive but can be one minute
 old; explicit C re-check and stale/error labels expose that limit.
 
 Finish native terminal and exact artboard qualification, including generic

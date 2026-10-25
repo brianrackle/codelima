@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/brianrackle/codelima/internal/codelima/daemon"
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
 )
@@ -19,8 +18,6 @@ type tuiManagerData struct {
 	loading        bool
 	err            error
 	preferences    *Config
-	daemon         *daemon.Status
-	daemonErr      error
 }
 
 type tuiManagerDataEvent struct {
@@ -34,6 +31,7 @@ type tuiManagerDataEvent struct {
 // the response to the navigation that requested it, so late replies cannot
 // replace another node's logs or clear a newer loading/error state.
 func (a *vaxisTUIApp) loadManagerData(repair bool) {
+	a.startDaemonOverview(true)
 	a.cancelHiddenMetricsLoad()
 	a.cancelHiddenLogsLoad()
 	a.cancelHiddenSpecLoad()
@@ -80,13 +78,6 @@ func (a *vaxisTUIApp) loadManagerData(repair bool) {
 				data.recipes, data.err = a.service.readRecipeCatalog(ctx, data.environments)
 			}
 		case tuiViewSystem:
-			if a.service.daemonClient != nil {
-				var status daemon.Status
-				data.daemonErr = a.service.daemonClient.Call(ctx, "daemon.status", nil, &status)
-				if data.daemonErr == nil {
-					data.daemon = &status
-				}
-			}
 			var cfg Config
 			cfg, data.err = a.service.SettingsRead()
 			if data.err == nil {

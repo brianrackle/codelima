@@ -2,7 +2,6 @@ package codelima
 
 import (
 	"fmt"
-	"time"
 
 	"go.rockorager.dev/vaxis"
 	"go.rockorager.dev/vaxis/widgets/border"
@@ -21,6 +20,7 @@ func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
 	tuiLine(win.New(2, 2, width-4, 1), 0, "System · Tab/Shift-Tab panel · ↑↓ scroll · C check · R repair", theme.mint)
 	a.systemRects = [tuiSystemPanelCount]tuiRect{}
 	a.doctor.controls = nil
+	a.systemDaemon.controls = nil
 	full := tuiRect{col: 1, row: 4, width: width - 2, height: height - 7}
 	if width >= 120 && height >= 34 {
 		left, top := (full.width-1)/2, (full.height-1)/2
@@ -63,26 +63,6 @@ func (a *vaxisTUIApp) drawSystem(win vaxis.Window, theme tuiTheme) {
 			a.drawSystemHost(inner, theme)
 		}
 	}
-}
-
-func (a *vaxisTUIApp) drawSystemDaemon(win vaxis.Window, theme tuiTheme) {
-	tuiLine(win, 0, "Daemon · sessions, forwarding, telemetry", theme.muted)
-	status := a.managerData.daemon
-	if status == nil || a.daemonDisconnected {
-		message := "Daemon status unavailable · C re-check"
-		if a.managerData.daemonErr != nil {
-			message = a.managerData.daemonErr.Error()
-		}
-		tuiLine(win, 2, message, theme.amber)
-		return
-	}
-	tuiLine(win, 2, fmt.Sprintf("status     running · pid %d", status.PID), theme.mint)
-	tuiLine(win, 3, fmt.Sprintf("version    %s · protocol %d", status.Version, status.Protocol), theme.text)
-	if !status.StartedAt.IsZero() {
-		tuiLine(win, 4, "uptime     "+time.Since(status.StartedAt).Round(time.Second).String(), theme.text)
-	}
-	tuiLine(win, 5, fmt.Sprintf("sessions   %d", status.TerminalCount), theme.text)
-	tuiLine(win, 6, "telemetry  1s · CPU, memory, disk over SSH", theme.dim)
 }
 
 func (a *vaxisTUIApp) drawSystemHost(win vaxis.Window, theme tuiTheme) {

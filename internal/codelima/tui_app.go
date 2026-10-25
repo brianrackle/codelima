@@ -57,6 +57,7 @@ type vaxisTUIApp struct {
 	preferenceRevision  uint64
 	systemPanel         int
 	doctor              tuiDoctorState
+	systemDaemon        tuiSystemDaemonState
 	settingIndex        int
 	metrics             tuiMetricsState
 	logs                tuiLogsState
@@ -323,6 +324,7 @@ func (r *vaxisTUIRunner) Run(ctx context.Context, service *Service, workspaceRoo
 func (a *vaxisTUIApp) serve(events chan vaxis.Event) error {
 	defer a.cancelActivityAttachment()
 	defer a.cancelDoctorCheck()
+	defer a.cancelDaemonOverview()
 	defer a.cancelLogsLoad()
 	defer a.cancelSpecLoad()
 	defer a.cancelMetricsLoad()
@@ -530,7 +532,12 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.applyLifecycleData(event)
 		a.requestRedraw()
 		return false, nil
+	case tuiDaemonOverviewEvent:
+		a.applyDaemonOverview(event)
+		a.requestRedraw()
+		return false, nil
 	case tuiMetricsTickEvent:
+		a.startDaemonOverview(false)
 		a.startDoctorCheck(false, false)
 		a.pollCreateIntent()
 		if f := a.visibleCreateForm(); f != nil && time.Since(f.dataAt) >= 3*time.Second {
@@ -647,6 +654,7 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.draw()
 		return false, nil
 	case tuiDaemonDisconnectedEvent:
+		a.cancelDaemonOverview()
 		a.resetGraphicsEpoch()
 		wasDisconnected := a.daemonDisconnected
 		a.daemonDisconnected = true
@@ -676,6 +684,8 @@ func (a *vaxisTUIApp) handleEvent(event vaxis.Event) (bool, error) {
 		a.propagateHostColors()
 		wasDisconnected := a.daemonDisconnected
 		a.daemonDisconnected = false
+		a.cancelDaemonOverview()
+		a.startDaemonOverview(true)
 		if wasDisconnected {
 			a.setStatus(slog.LevelInfo, "reconnected to daemon")
 		}

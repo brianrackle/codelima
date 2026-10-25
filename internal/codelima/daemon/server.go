@@ -1060,6 +1060,13 @@ func (s *Server) handle(ctx context.Context, client *clientConn, request Request
 	switch request.Method {
 	case "daemon.ping", "daemon.status":
 		return s.status(), nil
+	case "daemon.overview":
+		overview := Overview{Status: s.status()}
+		if handler, ok := s.cfg.Handler.(OverviewHandler); ok {
+			runtime := handler.Overview()
+			overview.Runtime = &runtime
+		}
+		return overview, nil
 	case "daemon.stop":
 		s.Broadcast(EventDaemonShutdown, nil)
 		// Stop accepting BEFORE responding so a client that saw this response
@@ -1121,6 +1128,12 @@ func (s *Server) synchronizationSnapshot(ctx context.Context) (any, error) {
 func (s *Server) status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	subscribers := make(map[string]struct{})
+	for _, client := range s.clients {
+		if client.subscribed.Load() {
+			subscribers[client.clientInstanceID] = struct{}{}
+		}
+	}
 	return Status{
 		Running:       true,
 		PID:           s.identity.PID,
@@ -1129,6 +1142,7 @@ func (s *Server) status() Status {
 		Identity:      s.identity.Token,
 		StartedAt:     s.identity.StartedAt,
 		TerminalCount: s.cfg.Handler.TerminalCount(),
+		Subscribers:   len(subscribers),
 		InputOwner:    s.input.clientInstanceID,
 		DaemonEpoch:   s.identity.Token,
 		StateSequence: s.revision,

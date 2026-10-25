@@ -237,6 +237,11 @@ test-terminal-attach: init
 .PHONY: test-environment-runs
 .PHONY: test-dependency-hints
 .PHONY: test-system-doctor
+.PHONY: test-system-daemon
+test-system-daemon: init
+	mkdir -p '$(CURDIR)/tmp/.go-work'
+	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima ./internal/codelima/daemon -run '^Test(DaemonOverview|TUISystemDaemon)' -count=1 -timeout=90s
+
 test-system-doctor: init
 	mkdir -p '$(CURDIR)/tmp/.go-work'
 	TMPDIR='$(CURDIR)/tmp/.go-work' $(GO) test ./internal/codelima -run '^Test(TUIDoctor|TUIHost|TUIManagerSettings)' -count=1 -timeout=90s

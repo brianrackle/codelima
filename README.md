@@ -561,6 +561,13 @@ built-in/stale-claim repairs apply. Completed repair messages remain in Activity
 a fresh check determines which findings are still open. Doctor reads the latest
 settings file without rewriting malformed YAML during a normal check.
 
+The Daemon panel refreshes every three seconds while System is open. It shows
+observed PID/version, session and subscriber counts, seat ownership, forwarding
+listeners/degraded ports/lapsed routes, telemetry cadence and reclaim state.
+Subscribers include event observers as well as TUIs. Failed refreshes retain
+an explicitly stale snapshot. Focus Daemon and press Enter or click details
+for full errors and sample times; arrows/wheel reveal additional rows.
+
 By default, `x` attaches the node's daemon session directly to your terminal and suspends
 the manager. `Ctrl+]` detaches; `exit` ends the session. `codelima shell NODE`
 uses the same managed shell, and `codelima terminal attach TERMINAL_ID` resumes

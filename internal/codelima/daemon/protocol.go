@@ -12,9 +12,9 @@ import (
 const (
 	MaxMessageSize = 1 << 20
 	// ProtocolVersion is exact-match for ordinary clients (ADR 65). Bump it
-	// whenever a wire shape this protocol carries changes; 19 adds disposable
-	// environment tests with frozen recipes and durable cleanup ownership.
-	ProtocolVersion                = 19
+	// whenever a wire shape this protocol carries changes; 20 adds lightweight
+	// runtime overviews and the count of subscribed logical frontends.
+	ProtocolVersion                = 20
 	SessionVersion                 = 2
 	HandoffVersion                 = 6
 	PreviousRecoveryHandoffVersion = 5
@@ -151,6 +151,7 @@ type Status struct {
 	Identity      string    `json:"identity" yaml:"identity"`
 	StartedAt     time.Time `json:"started_at" yaml:"started_at"`
 	TerminalCount int       `json:"terminal_count" yaml:"terminal_count"`
+	Subscribers   int       `json:"subscribers" yaml:"subscribers"`
 	InputOwner    string    `json:"input_owner,omitempty" yaml:"input_owner,omitempty"`
 	DaemonEpoch   string    `json:"daemon_epoch,omitempty" yaml:"daemon_epoch,omitempty"`
 	StateSequence uint64    `json:"state_sequence,omitempty" yaml:"state_sequence,omitempty"`

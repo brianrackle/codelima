@@ -750,3 +750,14 @@ with its observation time when refresh fails. Unknown or stale diagnostics
 must not render as a clean zero. Separate completed repair messages from open
 findings by re-checking; retain repair evidence in Activity. Only explicit user
 actions may request repair. See ADR 179.
+
+
+## Cached daemon overviews
+
+Keep routine status RPCs separate from evidence collection. Return typed cached
+observations and explicit unavailable support; never render terminal grids or
+probe guests just to draw a global panel. Count logical subscriptions rather
+than transport connections, and label observed units precisely. Bound and
+coalesce visible-view polling, cancel it on navigation, fence reconnect
+completions and preserve prior evidence with an explicit stale timestamp.
+See ADR 180.

@@ -106,6 +106,7 @@ type daemonHost struct {
 	// point from which broadcasting is both meaningful and safe.
 	serving              atomic.Bool
 	mu                   sync.RWMutex
+	updatedAt            time.Time // latest successful import; protected by mu
 	persistMu            sync.Mutex
 	teardownMu           sync.Mutex
 	teardowns            []chan struct{}
@@ -2090,6 +2091,9 @@ func runDaemonImport(ctx context.Context, service *Service, handoffPath, token s
 			}
 			// Publish native transitions only after the committed response was
 			// sent, so a failed importer cannot announce successful recovery.
+			host.mu.Lock()
+			host.updatedAt = time.Now().UTC()
+			host.mu.Unlock()
 			host.markServing()
 			// Teardown recovery performs runtime mutations; wait until the
 			// importer is committed before allowing it to own those effects.
