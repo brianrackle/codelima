@@ -2,6 +2,17 @@
 
 ## Fleet-manager frontend checks
 
+For source-checkout runtime setup, `make install-lima` installs the pinned
+official Lima 2.1.0 archive under `LIMA_INSTALL_PREFIX` (default `~/.local`).
+`scripts/install_lima.sh` verifies per-platform SHA-256 digests before extraction
+and rejects replacing another existing limactl version. `LIMA_ARCHIVE` may name
+a previously downloaded archive; it receives the same checksum verification.
+This is an explicit runtime installation, separate from `make init`'s compiler
+and development dependencies. Keep its `bin` directory on the normal PATH and
+check `codelima doctor` and `node list` before interactive verification. A private
+QA PATH does not qualify ordinary source-checkout startup. See the upstream
+[Lima installation instructions](https://lima-vm.io/docs/installation/).
+
 `make test-tui-spinners TUI_SPINNER_TEST_FLAGS=-race` covers frame timing,
 partial paints, clipping, overlay ownership, completion/shutdown and the
 affected frontend views (ADR 202). Telemetry polling is unchanged.

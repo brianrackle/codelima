@@ -2,6 +2,16 @@
 
 ## Open Work
 
+Normal Linux VM runtime setup: the missing `limactl` startup dependency is
+installed and the ordinary TUI command now opens. This login still lacks KVM
+device access, and QEMU is currently only in the project tooling directory.
+Use `make init-qemu-guest`, add its bin directory to PATH, and run the relevant
+frontend/daemon process tree through the existing `make run-kvm` helper before
+qualifying real VM creation. Advantage: preserves device permissions and user
+membership; disadvantage: process-local groups do not update an already-running
+daemon. Preserve active sessions when arranging that restart. The prior nested
+KVM guest-boot limitation is separately recorded below.
+
 Restart is implemented (ADR 185, part of #57) with one daemon receipt and one
 lifecycle claim across stop/start. Two isolated Linux/TCG guests passed restart,
 caller exit, preserved bootstrap, repeated validation, session shutdown, failed
@@ -257,13 +267,11 @@ ledger. Final native-terminal and whole-design qualification remains; exercise
 these controls in each supported native terminal. Advantage: validates input,
 clipboard and rendering beyond this VM. Disadvantage: needs those environments.
 
-The Attached artboard still needs its dedicated presentation pass. Preserve the
-raw VT relay and real-terminal ownership while adding node/session/detach
-context. Investigate terminal-native status areas and an attach-banner fallback,
-then qualify full-screen applications, resets, mouse/query replies and resize.
-Advantage: preserves the source's no-embedded-emulator contract. Disadvantage:
-a persistent portable header cannot simply be painted over raw terminal output;
-its fidelity and fallback require an explicit decision before completion.
+Attached-shell presentation is resolved by the user's 2026-10-25 instruction:
+keep CodeLima's existing direct terminal behavior. The implemented raw VT relay
+and real-terminal ownership remain; the artboard's fixed header is not an open
+requirement. Existing attachment checks are recorded in the design ledger;
+native terminal qualification remains in the overall QA matrix.
 
 Kit resource gauges and progress motion are implemented (ADRs 201–202). Gauge
 fill/track styles preserve selection and modal backgrounds. One event-loop timer
@@ -284,11 +292,9 @@ and relays output/input without framing; clears, absolute cursor addressing,
 terminal queries and full physical resize therefore belong to the host terminal.
 The [xterm control reference](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)
 documents DECSSDT/DECSASD status displays and title controls, but these do not
-establish a universal top-header facility across supported terminals. A user
-preference question is pending: preserve direct access with native title/banner
-context, or add framing to guarantee the fixed row. Continue the independent
-confirmation artboard meanwhile. Do not mark Attached complete based on a title
-alone or silently replace the direct attach path with embedded rendering.
+establish a universal top-header facility across supported terminals. The later
+explicit user decision resolves this tradeoff in favor of the existing direct
+terminal behavior; no fixed header or title/banner replacement is required.
 
 Source access resolved on 2026-10-24. The user's interactive Claude Code
 session could read the artifact with its `Artifact` tool; the headless

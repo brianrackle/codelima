@@ -88,6 +88,12 @@ GO_TEST_PARALLEL ?= 4
 GO_RACE_TEST_PARALLEL ?= 1
 DIAG_ARGS ?=
 KVM_ARGS ?= id
+LIMA_INSTALL_PREFIX ?= $(HOME)/.local
+LIMA_ARCHIVE ?=
+
+.PHONY: install-lima
+install-lima:
+	bash scripts/install_lima.sh '$(LIMA_INSTALL_PREFIX)' '$(CURDIR)/tmp' '$(LIMA_ARCHIVE)'
 
 .PHONY: init-qemu-guest run-kvm test-qemu-guest
 init-qemu-guest:

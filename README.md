@@ -240,6 +240,20 @@ implementation (`pkgconf`), and the static Ghostty dependency under
 `.tooling/<os>-<arch>`. No Homebrew or system `pkg-config` installation is needed
 for source builds; the first bootstrap requires network access.
 
+The build toolchain does not install the Lima runtime. If `codelima doctor`
+reports that `limactl` is missing, run `make install-lima` to install pinned
+Lima 2.1.0 under `~/.local`, and ensure `~/.local/bin` is on your shell's PATH:
+
+```sh
+make install-lima
+export PATH="$HOME/.local/bin:$PATH"
+./bin/codelima doctor
+./bin/codelima
+```
+
+The installer verifies the official archive checksum and keeps an existing
+Lima installation intact. An existing package-managed Lima can be used directly.
+
 In a Debian/Ubuntu arm64 development VM, `make init-qemu-guest` installs QEMU
 and firmware under `.tooling/linux-aarch64/qemu` using the configured APT
 repositories, without changing system packages. Add its `bin` directory to

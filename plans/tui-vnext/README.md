@@ -10,7 +10,7 @@ All example identities, metrics and timestamps in those files are reference data
 | Surface | Required behavior | Status |
 |---|---|---|
 | [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail (ADR 188); prompt idle timing (ADR 189); per-agent recorded validation (ADR 190); final qualification remains |
-| [Navigation map](reference/NavMap.dc.html) | Launch, global views, detail/back, editors/pickers, confirmations and shell routes | Implemented through the shared action/context registry and existing navigation (ADRs 150–200); attached-header presentation remains separately tracked below |
+| [Navigation map](reference/NavMap.dc.html) | Launch, global views, detail/back, editors/pickers, confirmations and shell routes | Implemented through the shared action/context registry and existing navigation (ADRs 150–200) |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Palette, states, gauges and motion | Partial: shared fill/track gauges and 10-fps foreground progress cells (ADRs 201–202); final qualification remains |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls, defaults and live healthy recovery/create-form handoff verified; final native/artboard qualification remains |
@@ -33,10 +33,25 @@ All example identities, metrics and timestamps in those files are reference data
 | [Command palette](reference/Palette.dc.html) | Grouped fuzzy results, live context, recents and captured actions | Partial: result spans/counts, responsive modal, session recents, identity guards and directory Start/Retry (ADR 193); final whole-design/native qualification remains |
 | [Help · keymap](reference/Help.dc.html) | Contextual groups, search, compact access and one-press behavior | Partial: dedicated read-only help and responsive keyboard/mouse navigation (ADR 192); remapping, effective hints, full automated gates and wide/compact Linux checks passed (ADR 200); final native qualification remains |
 | [Shell · where to open](reference/ShellChooser.dc.html) | Grouped new/existing sessions, availability, captured attachment and saved defaults | Partial: dedicated responsive chooser and stable session shortcuts (ADR 194); live guest/host/window/tmux/embedded checks pass; final native/whole-design qualification remains |
-| [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Shell · attached (TUI suspended)](reference/ShellAttached.dc.html) | Existing direct terminal behavior, per explicit user clarification on 2026-10-25 | Implemented raw relay, suspension and detach/return (ADR 151); fixed-header requirement withdrawn by the user; native qualification remains |
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+User clarification, 2026-10-25: retain the existing direct terminal behavior.
+The fixed attached-header investigation is closed; no framing or substitute
+title/banner is required. The user also exposed a normal-startup failure hidden
+by prior QA PATH overrides: `limactl` was absent. `make install-lima` now provides
+a checksum-verified, user-local installation, separate from the build toolchain.
+Lima 2.1.0 was installed on this VM's normal PATH. `node list` and the Lima Doctor
+checks pass, and the exact `./bin/linux-aarch64/codelima` command opens Nodes and
+supports Templates navigation without fixture environment variables. KVM device
+permissions remain a separate Doctor finding; this check does not claim VM boot.
+Installer validation passed shell syntax, real checksum-verified installation,
+idempotent re-run, and rejection of an invalid archive before destination
+creation. The ordinary TUI was visually inspected and interacted with at
+120×30; its temporary frontend, tmux socket/mount and captures were removed,
+preserving the pre-existing user daemon and the installed runtime.
 
 First-run recovery qualification, 2026-10-25: the existing process-local KVM
 group helper allowed real healthy Doctor checks in this Linux VM. At 150×38
@@ -135,8 +150,8 @@ launch/Nodes, five global views, detail tabs/back, shared node actions, palette
 and Help. Template/directory picker tests cover return to the preserved form;
 chooser and raw-attachment tests cover exact-session routing and detach/return.
 These are already implemented; the previous “Pending” label was stale. The
-Attached artboard's fixed header remains an unresolved presentation difference
-from the source's explicit real-terminal ownership requirement.
+later user clarification retains direct attachment and removes the fixed-header
+presentation requirement.
 
 
 Spinner checkpoint (ADR 202), 2026-10-25: active progress cells use the Kit's
