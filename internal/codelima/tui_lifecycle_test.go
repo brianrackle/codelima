@@ -97,6 +97,10 @@ func TestTUILifecycleStartingShowsObservedPhasesAndOutputWithoutOpeningShell(t *
 	for _, size := range [][2]int{{80, 24}, {150, 38}} {
 		a, sessions := newTestManager(t, size[0], size[1])
 		a.nodeDetail = true
+		a.applyKeyBindings(KeyBindingConfig{"node.logs": {"alt+l"}})
+		if a.keyBindingError != "" {
+			t.Fatal(a.keyBindingError)
+		}
 		node := a.state.selectedEntry().node
 		started := time.Now().Add(-time.Minute)
 		record := NodeOperation{ID: "start-id", NodeID: node.ID, State: "running", Request: NodeOperationRequest{Kind: "start"}, CurrentPhase: "boot", CreatedAt: started, Phases: initialNodeOperationPhases("start"), Output: []string{"BOOT-LINE"}}
@@ -106,7 +110,7 @@ func TestTUILifecycleStartingShowsObservedPhasesAndOutputWithoutOpeningShell(t *
 		a.lifecycle = tuiLifecycleState{nodeID: node.ID, loaded: true, operation: record}
 		a.draw()
 		screen := renderedScreenText(t, a.vx, size[0], size[1])
-		for _, want := range []string{"Starting", "Boot", "Output", "BOOT-LINE", "cancel start"} {
+		for _, want := range []string{"Starting", "Boot", "Output", "BOOT-LINE", "cancel start", "Alt+l full logs"} {
 			if !strings.Contains(screen, want) {
 				t.Fatalf("missing %s at %v:\n%s", want, size, screen)
 			}

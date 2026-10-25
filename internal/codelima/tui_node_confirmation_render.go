@@ -59,7 +59,7 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 			}
 		}
 		add(last, t.dim)
-		add(fmt.Sprintf("%d guest sessions · %d host sessions", guests, hosts), t.dim)
+		add(countLabel(guests, "guest session", "guest sessions")+" · "+countLabel(hosts, "host session", "host sessions"), t.dim)
 	case tuiActionNodeClone:
 		add("Copies the disk. Keeps the directory, template link, frozen values, bootstrap state and workspace mode.", t.muted)
 		add("", t.text)
@@ -68,14 +68,14 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 		switch {
 		case !stale && observation != nil && observation.Exists && observation.Status == ObservationRunning:
 			add(node.Slug+" is running: it stops for the copy, then restarts.", t.amber)
-			add(fmt.Sprintf("Its %d guest sessions end. %d host sessions keep running.", guests, hosts), t.dim)
+			add("Its "+countLabel(guests, "guest session ends.", "guest sessions end.")+" "+countLabel(hosts, "host session keeps running.", "host sessions keep running."), t.dim)
 		case !stale && observation != nil && observation.Exists && observation.Status == ObservationStopped:
 			add("Source is stopped; it stays stopped.", t.dim)
 		default:
 			add("Source state unavailable. If running, it stops for the copy and restarts; guest sessions end.", t.amber)
 		}
 	default:
-		add(fmt.Sprintf("%d guest sessions will end:", guests), t.text)
+		add(countLabel(guests, "guest session", "guest sessions")+" will end:", t.text)
 		for _, session := range sessions {
 			if !session.kindKnown || session.kind != terminal.NodeShell {
 				continue
@@ -99,7 +99,7 @@ func (d *tuiNodeConfirmation) lines(t tuiTheme) []tuiConfirmationLine {
 		}
 		add(d.bindingHints("Disk, workspace and frozen values stay. {node.toggle} starts the node again."), t.muted)
 		if hosts > 0 {
-			add(fmt.Sprintf("%d host sessions keep running.", hosts), t.dim)
+			add(countLabel(hosts, "host session keeps running.", "host sessions keep running."), t.dim)
 		}
 	}
 	if unknown > 0 {

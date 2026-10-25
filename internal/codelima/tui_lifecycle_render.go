@@ -81,7 +81,7 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 	}
 	if wide {
 		output := win.New(progressWidth+2, 0, width-progressWidth-2, height-8)
-		drawLifecycleOutput(output, operation, theme)
+		a.drawLifecycleOutput(output, operation, theme)
 		actions := border.All(win.New(progressWidth+2, height-7, width-progressWidth-2, 7), theme.border)
 		tuiLine(actions, 0, "While it starts", theme.muted)
 		if operation.State == "canceling" {
@@ -91,18 +91,18 @@ func (a *vaxisTUIApp) drawNodeLifecycle(win vaxis.Window, record tuiFleetRecord,
 			tuiLine(actions, 1, a.keyHints("{node.shell} attach when ready · {navigation.back} cancels queue"), theme.text)
 			tuiLine(actions, 3, a.keyHints("{node.toggle} cancel start and stop the VM"), theme.amber)
 		}
-		tuiLine(actions, 2, a.keyHints("{session.host} host shell · l ful{node.logs} logs"), theme.text)
+		tuiLine(actions, 2, a.keyHints("{session.host} host shell · {node.logs} full logs"), theme.text)
 		tuiLine(actions, 4, a.keyHints("{navigation.back} back · operation continues"), theme.dim)
 	} else {
-		drawLifecycleOutput(win.New(0, progressHeight, width, max(1, height-progressHeight)), operation, theme)
+		a.drawLifecycleOutput(win.New(0, progressHeight, width, max(1, height-progressHeight)), operation, theme)
 	}
 	return true
 }
 
-func drawLifecycleOutput(win vaxis.Window, record NodeOperation, theme tuiTheme) {
+func (a *vaxisTUIApp) drawLifecycleOutput(win vaxis.Window, record NodeOperation, theme tuiTheme) {
 	_, height := win.Size()
 	box := border.All(win, theme.border)
-	tuiLine(box, 0, "Output · following · l full logs", theme.muted)
+	tuiLine(box, 0, a.keyHints("Output · following · {node.logs} full logs"), theme.muted)
 	lines := record.Output
 	if record.OutputPartial != "" {
 		lines = append(slices.Clone(lines), record.OutputPartial)

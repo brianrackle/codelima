@@ -183,7 +183,7 @@ func TestTUINodeConfirmationResponsiveImpactAndScrolling(t *testing.T) {
 			_, _ = d.Update(vaxis.Key{Keycode: vaxis.KeyEnd})
 			a.draw()
 			text = renderedScreenText(t, a.vx, width, 24)
-			for _, want := range []string{"4 vCPU", "8 GiB", "host", "keep running", "Esc"} {
+			for _, want := range []string{"4 vCPU", "8 GiB", "1 host session keeps running", "Esc"} {
 				if !strings.Contains(text, want) {
 					t.Fatalf("missing scrolled impact %q:\n%s", want, text)
 				}

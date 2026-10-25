@@ -10,7 +10,7 @@ All example identities, metrics and timestamps in those files are reference data
 | Surface | Required behavior | Status |
 |---|---|---|
 | [Nodes · dashboard (home)](reference/Main.dc.html) | Live fleet, preview, lifecycle actions and routes | Partial: shared observations/routes (ADR 186), bounded recent/failure evidence and explicit session activity (ADR 187); runtime configuration, CPU/memory trends and task detail (ADR 188); prompt idle timing (ADR 189); per-agent recorded validation (ADR 190); final qualification remains |
-| [Navigation map](reference/NavMap.dc.html) | Visual reference and associated canvas notes | Pending |
+| [Navigation map](reference/NavMap.dc.html) | Launch, global views, detail/back, editors/pickers, confirmations and shell routes | Implemented through the shared action/context registry and existing navigation (ADRs 150–200); attached-header presentation remains separately tracked below |
 | [TUI kit · tokens & states](reference/Kit.dc.html) | Palette, states, gauges and motion | Partial: shared fill/track gauges and 10-fps foreground progress cells (ADRs 201–202); final qualification remains |
 | [Nodes · filter, sort & bulk marks](reference/NodesFilter.dc.html) | Typed filters, identity marks, metric sorting, batch review/actions | Partial: hidden-target/global-allocation summary (ADR 186) and guest/host session impact (ADR 187); per-target task detail added (ADR 188); prompt idle timing added (ADR 189); captured durable batches and retained outcomes verified (ADR 198); final qualification remains |
 | [Nodes · first run (empty)](reference/NodesEmpty.dc.html) | ADR 184 scoped creation, cached host checks and actual template defaults | Partial: wide/compact blocked-host controls and defaults verified; live healthy-host transition and final native/artboard qualification remain |
@@ -37,6 +37,16 @@ All example identities, metrics and timestamps in those files are reference data
 | [Shell · embedded terminal (opt-in)](reference/ShellEmbedded.dc.html) | Opt-in detail, framed terminal, session strip, input ownership and live routes | Partial: shared viewport and active-tab overflow with mouse controls (ADR 195); host/guest, route and focus checks pass; final native/whole-design qualification remains |
 
 ## Cross-cutting requirements
+
+Navigation-map reconciliation, 2026-10-25: the map is a routing reference, not
+an additional screen. Current `tui_key_catalog.go` and `tui_navigation.go` cover
+launch/Nodes, five global views, detail tabs/back, shared node actions, palette
+and Help. Template/directory picker tests cover return to the preserved form;
+chooser and raw-attachment tests cover exact-session routing and detach/return.
+These are already implemented; the previous “Pending” label was stale. The
+Attached artboard's fixed header remains an unresolved presentation difference
+from the source's explicit real-terminal ownership requirement.
+
 
 Spinner checkpoint (ADR 202), 2026-10-25: active progress cells use the Kit's
 braille sequence on a 100 ms event-loop timer. Ticks touch registered cells only;

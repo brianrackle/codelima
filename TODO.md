@@ -126,11 +126,11 @@ whole-design qualification remain open: repeat the shared keyboard/payload flows
 on supported native hosts. Advantage: verifies transport-specific behavior;
 disadvantage: requires those interactive environments.
 
-Count follow-up observed during keybinding QA: the captured delete review still
-renders `1 host sessions` in its guest/host impact line. Use the shared count
-helpers for both independently counted session kinds and add a one-host/one-guest
-render regression. Advantage: finishes truthful singular wording; disadvantage:
-a small additional presentation/verification pass. No count semantics should change.
+Confirmation count wording now uses the shared singular/plural helpers for
+each independently counted guest/host group, including stop and running-clone
+impact. Lifecycle output and action hints now both use the effective log key;
+the malformed remapped hint is corrected. These close the remaining count and
+log-hint follow-ups without changing operation behavior.
 
 The no-frontend deletion audit reproduced an orphan host terminal with a live
 PID and retained shell state. Daemon-owned deletion cleanup is implemented
