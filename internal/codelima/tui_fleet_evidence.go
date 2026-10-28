@@ -165,7 +165,11 @@ func (a *vaxisTUIApp) fleetEvidenceStale() bool {
 }
 
 func (a *vaxisTUIApp) fleetReceiptFailed(node Node) bool {
-	if a.fleetEvidenceStale() || !nodeStatusInFlight(node.Status) {
+	return nodeStatusInFlight(node.Status) && a.fleetSetupReceiptFailed(node)
+}
+
+func (a *vaxisTUIApp) fleetSetupReceiptFailed(node Node) bool {
+	if a.fleetEvidenceStale() {
 		return false
 	}
 	e, ok := a.fleetEvidence.snapshot.Nodes[node.ID]
@@ -209,7 +213,7 @@ func (a *vaxisTUIApp) fleetEvidenceLine(record tuiFleetRecord) string {
 	}
 	text := ""
 	switch {
-	case e.Step != nil && (record.Status == "failed" || record.Status == "starting"):
+	case e.Step != nil && (record.Setup == "failed" || record.Setup == "provisioning" || record.Setup == "registering"):
 		step := e.Step
 		text = fmt.Sprintf("%s %d/%d", step.Kind, step.Index, step.Total)
 		if e.Start != nil && e.Start.State == "interrupted" {
@@ -224,7 +228,7 @@ func (a *vaxisTUIApp) fleetEvidenceLine(record tuiFleetRecord) string {
 		if step.DurationMillis != nil {
 			text += " · " + (time.Duration(*step.DurationMillis) * time.Millisecond).Round(time.Millisecond).String()
 		}
-	case e.Start != nil && record.Status == "failed" && (e.Start.State == "failed" || e.Start.State == "interrupted"):
+	case e.Start != nil && record.Setup == "failed" && (e.Start.State == "failed" || e.Start.State == "interrupted"):
 		start := e.Start
 		phase := start.Phase
 		if start.Progress != nil && start.Progress.Phase != "" {

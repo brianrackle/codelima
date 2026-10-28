@@ -80,6 +80,19 @@ func (t tuiTheme) status(status string) (string, vaxis.Style) {
 	}
 }
 
+func (t tuiTheme) setup(status string) vaxis.Style {
+	switch status {
+	case "ready":
+		return t.mint
+	case "failed":
+		return t.coral
+	case "provisioning", "registering":
+		return t.amber
+	default:
+		return t.dim
+	}
+}
+
 // tuiGauge renders fractional eighth-blocks in a fixed number of terminal cells.
 func tuiGauge(percent float64, cells int) string {
 	if cells <= 0 {

@@ -35,7 +35,7 @@ func managerHelpGroups(keys *compiledKeyMap) []tuiHelpGroup {
 			helpBinding("{node.copy_name}", "copy name"),
 			helpBinding("{fleet.mark}", "mark node"),
 			helpBinding("{fleet.mark_all}", "mark all shown"),
-			helpBinding("{fleet.filter}", "filter: status: template: dir: port:"),
+			helpBinding("{fleet.filter}", "filter: status: setup: template: dir: port:"),
 			helpBinding("{fleet.sort_previous fleet.sort_next}", "sort column"),
 			helpBinding("{fleet.reverse}", "reverse sort"),
 			helpBinding("{fleet.group}", "group by directory"),

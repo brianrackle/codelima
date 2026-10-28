@@ -105,24 +105,24 @@ func TestTUIFleetEvidenceInterruptedReceiptSupersedesItsStaleInflightStatus(t *t
 	a.fleetEvidence = tuiFleetEvidenceState{loaded: true, receivedAt: now, snapshot: fleetEvidenceSnapshot{Nodes: map[string]fleetNodeEvidence{
 		node.ID: {NodeUpdatedAt: node.UpdatedAt, ClaimState: "unclaimed", Start: &fleetLifecycleEvidence{ID: "interrupted", State: "interrupted", Phase: "bootstrap"}},
 	}}}
-	if got := a.fleetStatus(node); got != "failed" {
+	if got := a.fleetSetupStatus(node); got != "failed" {
 		t.Fatalf("interrupted start still shown as %s", got)
 	}
 	evidence := a.fleetEvidence.snapshot.Nodes[node.ID]
 	evidence.ClaimState = "active"
 	a.fleetEvidence.snapshot.Nodes[node.ID] = evidence
-	if got := a.fleetStatus(node); got != "starting" {
+	if got := a.fleetSetupStatus(node); got != "provisioning" {
 		t.Fatalf("retained receipt overrode a live direct lifecycle claim: %s", got)
 	}
 	evidence.ClaimState = "unclaimed"
 	a.fleetEvidence.snapshot.Nodes[node.ID] = evidence
 	node.UpdatedAt = now.Add(time.Second)
-	if got := a.fleetStatus(node); got != "starting" {
+	if got := a.fleetSetupStatus(node); got != "provisioning" {
 		t.Fatalf("older receipt overrode a new lifecycle attempt: %s", got)
 	}
 	node.UpdatedAt = now.Add(-time.Minute)
 	a.activity.page.Running = []NodeOperation{{ID: "new-start", NodeID: node.ID, State: "running", Request: NodeOperationRequest{Kind: "start"}}}
-	if got := a.fleetStatus(node); got != "starting" {
+	if got := a.fleetSetupStatus(node); got != "provisioning" {
 		t.Fatalf("older receipt overrode a new running ID: %s", got)
 	}
 }

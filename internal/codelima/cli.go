@@ -243,7 +243,7 @@ func parseSizeMiB(input string) (uint32, error) {
 
 func writeSuccess(stdout io.Writer, asJSON bool, value any) {
 	if asJSON {
-		payload, _ := json.MarshalIndent(map[string]any{"ok": true, "data": value}, "", "  ")
+		payload, _ := json.MarshalIndent(map[string]any{"ok": true, "data": presentNodeOutput(value)}, "", "  ")
 		_, _ = stdout.Write(append(payload, '\n'))
 		return
 	}
@@ -265,7 +265,7 @@ func writeSuccess(stdout io.Writer, asJSON bool, value any) {
 			_, _ = fmt.Fprintf(stdout, "warning: %s\n", warning)
 		}
 	default:
-		payload, _ := yaml.Marshal(value)
+		payload, _ := yaml.Marshal(presentNodeOutput(value))
 		_, _ = stdout.Write(payload)
 	}
 }
@@ -320,11 +320,12 @@ func renderNodeList(nodes []Node) string {
 			nodeWorkspaceMode(node),
 			node.Runtime,
 			nodeVMStatus(node),
+			nodeSetupStatus(node),
 			node.AgentProfileName,
 		})
 	}
 
-	return renderTable([]string{"slug", "uuid", "configuration", "directory", "workspace_mode", "runtime", "vm_status", "agent"}, rows)
+	return renderTable([]string{"slug", "uuid", "configuration", "directory", "workspace_mode", "runtime", "vm_status", "setup", "agent"}, rows)
 }
 
 func renderEnvironmentConfigList(configs []EnvironmentConfig) string {
@@ -363,26 +364,6 @@ func renderIncompleteNodeCleanupResult(result IncompleteNodeCleanupResult) strin
 	}
 
 	return renderTable([]string{"node_dir", "sandbox_name", "action"}, rows)
-}
-
-func nodeVMStatus(node Node) string {
-	// An in-flight lifecycle state outranks the runtime sighting. Lima reports a
-	// VM as running the moment it boots, so a node whose start is still
-	// bootstrapping would otherwise be displayed as plain "running" on every
-	// read surface — the exact reading that hid an unfinished node.
-	if nodeStatusInFlight(node.Status) {
-		return string(node.Status)
-	}
-	if node.LastRuntimeObservation != nil {
-		if node.LastRuntimeObservation.Status != "" {
-			return string(node.LastRuntimeObservation.Status)
-		}
-		if !node.LastRuntimeObservation.Exists {
-			return "missing"
-		}
-	}
-
-	return string(node.Status)
 }
 
 func renderTable(headers []string, rows [][]string) string {

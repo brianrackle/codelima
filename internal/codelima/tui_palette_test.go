@@ -25,7 +25,7 @@ func TestTUIManagerPaletteGroupsAndBracketedPaste(t *testing.T) {
 			t.Fatalf("missing %q:\n%s", text, screen)
 		}
 	}
-	for _, r := range "status: failed" {
+	for _, r := range "setup: failed" {
 		a.handleKey(vaxis.Key{Keycode: r, Text: string(r), EventType: vaxis.EventPaste})
 	}
 	_, _ = a.handleEvent(vaxis.PasteEndEvent{})
@@ -37,7 +37,7 @@ func TestTUIManagerPaletteGroupsAndBracketedPaste(t *testing.T) {
 		t.Fatal("release ran filter")
 	}
 	a.handleKey(vaxis.Key{Keycode: vaxis.KeyEnter})
-	if a.fleet.filter != "status:failed" || a.view != tuiViewNodes {
+	if a.fleet.filter != "setup:failed" || a.view != tuiViewNodes {
 		t.Fatal("filter command did not run")
 	}
 	a.openCommandPalette()

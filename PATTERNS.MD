@@ -1,5 +1,11 @@
 # Patterns
 
+VM status and setup are independent presentation values (ADR 208). Use
+`nodeVMStatus` for runtime and `nodeSetupStatus` for setup. Start/receipt evidence
+may refine Setup, never Status. Keep lifecycle state intact for retry, ownership
+and unfinished guest-shell gates. CLI projection copies the Node before setting
+its displayed VM status.
+
 ## Event-loop presentation timers
 
 Register visible animated cells during normal drawing; clear registrations when

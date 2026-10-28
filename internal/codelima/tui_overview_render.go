@@ -144,7 +144,7 @@ func (a *vaxisTUIApp) drawOverviewIdentity(win vaxis.Window, record tuiFleetReco
 		template += " · changed →"
 	}
 	fields := [][2]string{
-		{"status", status}, {"template", template},
+		{"status", status}, {"setup", record.Setup}, {"template", template},
 		{"image", n.Image}, {"directory", n.DirectoryPath}, {"workspace", a.fleetWorkspaceLabel(n)},
 		{"lima", n.SandboxName}, {"runtime", a.fleetRuntimeLabel(n)}, {"guest", a.fleetGuestPlatformLabel(n)}, {"agents", ""}, {"checks", note},
 		{"host auth", a.fleetAuthLabel(n)}, {"items", authItems}, {"clones", cloneLabel}, {"created", created}, {"id", n.ID},
@@ -155,16 +155,19 @@ func (a *vaxisTUIApp) drawOverviewIdentity(win vaxis.Window, record tuiFleetReco
 	a.overview.scroll[tuiOverviewIdentity] = offset
 	virtual := win.New(0, -offset, w, h+offset)
 	row := 0
-	for i, field := range fields {
+	for _, field := range fields {
 		tuiLine(virtual.New(0, row, 10, 1), 0, field[0], theme.dim)
 		if field[0] == "agents" {
 			row += a.drawFleetAgentChecks(virtual.New(10, row, max(0, w-10), max(1, 20-row)), agents)
 			continue
 		}
 		valueStyle := theme.text
-		if i == 0 {
+		switch field[0] {
+		case "status":
 			valueStyle = style
-		} else if i == 1 {
+		case "setup":
+			valueStyle = theme.setup(record.Setup)
+		case "template":
 			valueStyle = theme.violet
 		}
 		tuiLine(virtual.New(10, row, max(0, w-10), 1), 0, field[1], valueStyle)

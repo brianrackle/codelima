@@ -2,6 +2,21 @@
 
 ## Open Work
 
+Headless PTY frontend shutdown: two verification frontends stayed alive after
+Ctrl+C and SIGTERM and were forcibly removed during cleanup. Reproduce with an
+isolated daemon/home, capture goroutine evidence, and compare a native terminal
+before changing shutdown behavior. Advantage: finds a possible stuck cleanup
+path; disadvantage: may be specific to the verification PTY environment and
+needs separate terminal-lifecycle investigation.
+
+CPU/memory chart gaps (diagnosed, separate from ADR 208 status/setup work):
+`tuiMetricColumns` leaves holes when a one-minute plot has more columns than
+one-second observations. Redrawing with `time.Now()` moves those holes during
+mouse motion even without new samples. Anchor buckets between sample updates
+and render contiguous observations across adjacent columns, preserving real
+telemetry interruptions. Advantage: stable continuous charts; disadvantage:
+requires cadence-aware gap handling and compact/wide regression coverage.
+
 Release qualification after the installation/terminal repair remains partial.
 The runtime QA record covers real Linux KVM and macOS VZ guests, embedded
 host/guest terminals, handoff, renderer recovery, and a disposable Homebrew

@@ -307,7 +307,7 @@ func TestTUILifecycleRetainsBootFailureAfterStatusRollbackAndInterruption(t *tes
 	a.lifecycle = tuiLifecycleState{nodeID: node.ID, loaded: true, operation: NodeOperation{ID: "boot-failed", NodeID: node.ID, State: "failed", CurrentPhase: "boot", Error: "firmware unavailable"}}
 	a.draw()
 	screen := renderedScreenText(t, a.vx, 80, 24)
-	for _, want := range []string{"Boot failed", "firmware unavailable", "VM stopped", "node stopped"} {
+	for _, want := range []string{"Boot failed", "firmware unavailable", "VM stopped", "setup failed"} {
 		if !strings.Contains(screen, want) {
 			t.Fatal("boot failure disappeared after metadata rollback", want, screen)
 		}

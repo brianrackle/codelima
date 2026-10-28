@@ -631,9 +631,6 @@ func (a *vaxisTUIApp) operationDisplayStatus(entry tuiTreeEntry) string {
 }
 
 func (a *vaxisTUIApp) nodeStatusText(node Node) string {
-	if operationStatus := a.operationDisplayStatus(tuiTreeEntry{node: node}); operationStatus != "" {
-		return operationStatus
-	}
 	return nodeVMStatus(node)
 }
 

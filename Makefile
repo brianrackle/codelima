@@ -332,6 +332,12 @@ test-manager-settings: init
 test-tui-manager: init
 	$(GO) test -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '^Test(TUI(Fleet|Overview|Manager|Resize|Shortcut|Tab|FocusToggle)|PushedReload|TerminalTab)' -count=1
 
+.PHONY: test-node-status
+NODE_STATUS_TEST_FILTER ?= ^Test(NodeVMStatus|NodeSetupStatus|CLINodeOutput|TUIFleet.*Setup)
+NODE_STATUS_TEST_FLAGS ?=
+test-node-status: init
+	$(GO) test $(NODE_STATUS_TEST_FLAGS) -ldflags "$(RENDERER_LDFLAGS)" ./internal/codelima -run '$(NODE_STATUS_TEST_FILTER)' -count=1
+
 .PHONY: test-tui-help
 TUI_HELP_TEST_FLAGS ?=
 test-tui-help: init
@@ -426,7 +432,7 @@ test-race: init
 
 test-integration: build
 	mkdir -p $(INTEGRATION_TMP)
-	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -ldflags "$(RENDERER_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
+	CODELIMA_TEST_BIN=$(CODELIMA_BIN) CODELIMA_TEST_TMP=$(INTEGRATION_TMP) $(GO) test -ldflags "$(VERSION_LDFLAGS)" -p $(GO_TEST_PARALLEL) -parallel $(GO_TEST_PARALLEL) -tags=integration ./tests
 	rm -rf $(INTEGRATION_TMP)
 
 test-lima-native: init

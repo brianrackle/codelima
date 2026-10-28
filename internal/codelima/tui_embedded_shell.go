@@ -94,7 +94,7 @@ func (a *vaxisTUIApp) drawEmbeddedShell(win vaxis.Window, record tuiFleetRecord,
 		if err := a.sessions.SessionError(terminal.NodeTarget(record.Node.ID).String()); err != nil {
 			tuiLine(surface, 1, plainLogText(err.Error()), t.coral)
 		} else if !nodeGuestShellReady(record.Node) || record.Status != "running" {
-			tuiLine(surface, 1, "Guest unavailable while "+record.Status+a.keyHints(" · {session.host} opens a host shell"), t.dim)
+			tuiLine(surface, 1, "Guest unavailable · VM "+record.Status+" · setup "+record.Setup+a.keyHints(" · {session.host} opens a host shell"), t.dim)
 		}
 	}
 	focus := a.keyHints(" TUI focus · {terminal.focus} enters ")

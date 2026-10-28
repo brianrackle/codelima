@@ -476,6 +476,39 @@ guests, services, captures and files after completing these checks.
 
 ## Flow 7: path-scoped fleet manager
 
+VM status and setup (ADR 208):
+
+1. With a running VM whose bootstrap failed, inspect the fleet at 80×24,
+   100×30, 120×30 and 150×38. Status must say `running`, Setup must say
+   `failed`, and both columns must remain visible. The running count includes
+   the VM; the separate setup-failure count includes its failed setup.
+2. Filter `status:running setup:failed`, sort by Setup, clear the filter and
+   resize. Preserve selection and marks. Preview, Overview, failure details,
+   CLI node list and node show JSON/YAML must retain both independent facts.
+3. Stop/start a disposable VM externally: Status tracks runtime while Setup
+   remains failed until setup succeeds. Explicit VM absence says `missing`;
+   unavailable runtime information says `unknown`, never a setup failure.
+4. Retry setup: Status remains the observed VM state while Setup becomes
+   `provisioning`, then `ready` or `failed`. Preserve recorded retries and
+   block early guest-shell attachment during provisioning. Stop/restart/delete
+   phases must not replace VM Status.
+5. Run `make test-node-status` and normal verification gates. Clean up all
+   disposable nodes, frontends, daemon homes and captures.
+
+Local evidence (2026-10-28): rebuilt CLI and PTY frontends against the existing
+running `codelima` and `work` VMs showed running/failed and running/ready.
+`make verify PACKAGE_VERSION=1.0.1` and the CLI integration suite passed.
+Inspected 80×24, 100×30, 120×30 and 150×38 fleet columns; exercised combined
+Status/Setup filtering, Setup sorting, preview and failure detail. CLI reads
+left the failed node's metadata checksum unchanged. Automated tests cover
+external-state projections, retained failures, retry actions and bootstrap
+shell gating. A separate disposable native VZ VM then passed the sequence
+running/failed, externally stopped/failed, externally running/failed,
+running/ready after suffix retry, and stopped/ready. The successful first
+bootstrap step retained one attempt; the failed second step reached two.
+The disposable VM and daemon were removed. See
+plans/status_setup_release_qa.md for release evidence and existing limits.
+
 Command palette (ADR 193), in the disposable home:
 
 1. At 150×38 and 80×24 press `:`. Search `sta` with running, stopped, created
@@ -483,7 +516,7 @@ Command palette (ADR 193), in the disposable home:
    context, shortcuts, selection and dimmed background. Navigate past the
    viewport with arrows, page keys and the wheel. Resize while a result is
    selected; it must stay selected and visible when the terminal is usable.
-2. Paste `status: failed`, complete with Tab and run with Enter. Reopen with
+2. Paste `setup: failed`, complete with Tab and run with Enter. Reopen with
    an empty query to see the recent command. Try no-match text and Esc. Click
    result rows and footer controls; confirm compact context remains readable.
    Repeat in ANSI and truecolor modes. Close/reopen the frontend to verify

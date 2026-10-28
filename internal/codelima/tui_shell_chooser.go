@@ -143,7 +143,7 @@ func (h *tuiShellChooser) refresh() {
 		case a.rawShellPending:
 			c.unavailable = "A shell is already opening"
 		case c.unavailable == "" && !c.host && (!nodeGuestShellReady(node) || a.fleetStatus(node) != "running"):
-			c.unavailable = "Guest shell unavailable while " + a.fleetStatus(node)
+			c.unavailable = "Guest shell unavailable · VM " + a.fleetStatus(node) + " · setup " + a.fleetSetupStatus(node)
 		}
 		if c.unavailable != "" && (nodeErr != nil || a.daemonDisconnected || a.rawShellPending || strings.HasPrefix(c.unavailable, "Guest shell")) {
 			c.hint = c.unavailable

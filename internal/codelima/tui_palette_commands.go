@@ -20,9 +20,9 @@ func (a *vaxisTUIApp) paletteCommands() []tuiPaletteCommand {
 		tuiPaletteCommand{id: "settings", group: "ACTIONS", label: "Edit settings", hint: "System › Settings · shell, colors, confirmations", shortcut: a.keyHint("system.open"), run: func() error { a.switchView(tuiViewSystem); a.systemPanel = tuiSystemSettings; return nil }},
 		tuiPaletteCommand{id: "create", group: "ACTIONS", label: "Create node", hint: "Choose a name, directory and template", shortcut: a.keyHint("node.create"), run: a.openCreateNodeDialog},
 		tuiPaletteCommand{id: "help", group: "ACTIONS", label: "Show keybindings", hint: "Search keys for every view", shortcut: a.keyHint("help.open"), run: func() error { a.openKeyHelp(); return nil }},
-		tuiPaletteCommand{id: "filter:failed", group: "ACTIONS", label: "status: show only failed", hint: "applies filter status:failed", shortcut: a.keyHint("fleet.filter"), run: func() error {
+		tuiPaletteCommand{id: "filter:failed", group: "ACTIONS", label: "setup: show only failed", hint: "applies filter setup:failed", shortcut: a.keyHint("fleet.filter"), run: func() error {
 			a.switchView(tuiViewNodes)
-			a.fleet.setFilter("status:failed")
+			a.fleet.setFilter("setup:failed")
 			a.selectFleetNode()
 			return nil
 		}},

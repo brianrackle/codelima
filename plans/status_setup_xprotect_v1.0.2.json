@@ -1,0 +1,20 @@
+{
+  "version": "1.0.2",
+  "source_base": "v1.0.1",
+  "engine": "yara-python 4.5.4",
+  "xprotect_version": "5368",
+  "rules_sha256": "fce4574c0b429b3b70262f320ac630db483b6055606c399747daba496d180d5c",
+  "archive_sha256": "b816dd2b5de32be9a964b664a16fb6a30e1b5d33885977d15b3905f0d9c43687",
+  "results": [
+    {
+      "executable": "codelima",
+      "sha256": "d4df46b5eb152aee0c61a137cfebb2be0a04bfd27206c156a8fadfa555109fa8",
+      "matches": []
+    },
+    {
+      "executable": "codelima-renderer-worker",
+      "sha256": "9d680203fe84e0122eb59888e236ff2d0fae479e3ecd1c2fa56e4b2a6229c232",
+      "matches": []
+    }
+  ]
+}

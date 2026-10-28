@@ -522,7 +522,9 @@ func TestTUIBackgroundOperationSelfHealsAfterDroppedCompletion(t *testing.T) {
 	}
 
 	// Drop every event the operation posts, including its completion.
-	waitForCondition(t, 2*time.Second, func() bool {
+	// The fake runtime still fsyncs real lifecycle/bootstrap records. Allow
+	// filesystem contention in the full parallel suite before testing recovery.
+	waitForCondition(t, 5*time.Second, func() bool {
 		return app.operations[app.operationOrder[0]].completion.Load() != nil
 	}, "background operation to finish")
 	drainDroppedTUIEvents(events)

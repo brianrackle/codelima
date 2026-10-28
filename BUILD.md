@@ -2,6 +2,12 @@
 
 ## Fleet-manager frontend checks
 
+`make test-node-status` covers independent VM Status/Setup presentation, CLI
+JSON/YAML output, compact/wide columns, setup filtering/sorting and unfinished
+guest-shell readiness. Run it with the normal `make verify` release gates.
+Integration clients and their built CLI use the same `PACKAGE_VERSION`, so
+`make test-integration PACKAGE_VERSION=1.0.1` preserves exact daemon handshakes.
+
 For source-checkout runtime setup, `make install-lima` installs the pinned
 official Lima 2.1.0 archive under `LIMA_INSTALL_PREFIX` (default `~/.local`).
 `scripts/install_lima.sh` verifies per-platform SHA-256 digests before extraction

@@ -125,14 +125,14 @@ func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, 
 	}
 	agents, checkNote := a.fleetAgentCheckSegments(node, theme)
 	fields := [][2]string{
-		{"status", status}, {"template", fmt.Sprintf("%s · %d vCPU", node.ConfigurationSlug, node.VCPUs)},
+		{"status", status}, {"setup", record.Setup}, {"template", fmt.Sprintf("%s · %d vCPU", node.ConfigurationSlug, node.VCPUs)},
 		{"resources", fmt.Sprintf("%s mem · %s disk", formatTUIResourceSize(node.MemoryMiB), formatTUIResourceSize(node.DiskMiB))},
 		{"image", node.Image}, {"directory", node.DirectoryPath}, {"workspace", a.fleetWorkspaceLabel(node)},
 		{"runtime", a.fleetRuntimeLabel(node)}, {"agents", ""}, {"checks", checkNote}, {"created", created + " · " + auth}, {"lima", node.SandboxName},
 	}
 	width, height := win.Size()
 	row := 0
-	for i, field := range fields {
+	for _, field := range fields {
 		if row >= height {
 			break
 		}
@@ -142,9 +142,12 @@ func (a *vaxisTUIApp) drawNodeIdentity(win vaxis.Window, record tuiFleetRecord, 
 			continue
 		}
 		style := theme.text
-		if i == 0 {
+		switch field[0] {
+		case "status":
 			style = statusStyle
-		} else if i == 1 {
+		case "setup":
+			style = theme.setup(record.Setup)
+		case "template":
 			style = theme.violet
 		}
 		tuiLine(win.New(10, row, max(0, width-10), 1), 0, field[1], style)

@@ -97,7 +97,7 @@ to the current directory and its descendants. Press `0` to toggle that scope.
 | `0` | Toggle directory scope |
 | Arrow keys or `j` / `k` | Select a row |
 | `Enter` / `Esc` | Open node detail / return to the fleet |
-| `/` | Filter by text or `status:`, `template:`, `dir:`, `port:` |
+| `/` | Filter by text or `status:`, `setup:`, `template:`, `dir:`, `port:` |
 | `G`, `<` / `>` / `=` | Group, choose sort column, reverse sort |
 | `Space` / `*` | Mark one node / all visible nodes |
 | `n` | Create a node |
@@ -109,6 +109,14 @@ to the current directory and its descendants. Press `0` to toggle that scope.
 | `a` / `g` / `m` | Configurations / environments / activity |
 | `:` / `?` | Command palette / contextual key help |
 | `q` | Quit from a global view, or return from detail |
+
+**Status** shows the observed VM state, such as `running` or `stopped`.
+**Setup** separately shows `pending`, `provisioning`, `registering`, `ready`,
+or `failed`. A running VM can have failed setup and still offer `r` to retry
+the failed step. Filter with `status:running setup:failed` to find those VMs.
+Setup also appears in the selected-node preview, Overview, and CLI node list.
+CLI node show/list JSON exposes the VM state as `status` and setup as
+`setup_status`; unknown or missing VMs remain explicit.
 
 Filters do not clear marked nodes. Batch reviews list the affected nodes;
 submitted operations continue after the TUI closes. Delete requires the exact

@@ -100,10 +100,7 @@ func (a *vaxisTUIApp) drawSystemHost(win vaxis.Window, theme tuiTheme) {
 		lines = append(lines, countLabel(host.UnknownNodes, "node has no runtime observation", "nodes have no runtime observation"))
 	}
 	for _, node := range host.Nodes {
-		status := string(node.Status)
-		if node.Status == NodeStatusFailed {
-			status += " · VM still up"
-		}
+		status := nodeVMStatus(node) + " · setup " + nodeSetupStatus(node)
 		memory := uint64(node.MemoryMiB) << 20
 		lines = append(lines, fmt.Sprintf("%-18s %2d CPU  %s  %s", node.Slug, node.VCPUs, tuiHostBytes(&memory), status))
 	}

@@ -204,7 +204,7 @@ func TestTUIBatchDeleteRecoveryRequiresCurrentUnclaimedTarget(t *testing.T) {
 				t.Fatal("incorrect deletion recovery availability", err)
 			}
 			if condition == "released" {
-				if a.fleetStatus(*node) != "delete incomplete" {
+				if !a.fleetDeleteRetryable(*node) || !strings.Contains(a.fleetPhase(node.ID), "Delete incomplete") {
 					t.Fatal("completed deletion failure still appears active")
 				}
 				for _, action := range []tuiActionID{tuiActionNodeStart, tuiActionNodeRetry, tuiActionNodeRestart} {

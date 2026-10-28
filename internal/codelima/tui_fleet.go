@@ -15,6 +15,7 @@ import (
 type tuiFleetRecord struct {
 	Node             Node
 	Status           string
+	Setup            string
 	Sessions         int
 	Ports            []int
 	PortsUnavailable bool
@@ -26,6 +27,7 @@ type tuiFleetSort int
 const (
 	tuiFleetSortName tuiFleetSort = iota
 	tuiFleetSortStatus
+	tuiFleetSortSetup
 	tuiFleetSortTemplate
 	tuiFleetSortCPU
 	tuiFleetSortMemory
@@ -40,7 +42,7 @@ const (
 const tuiFleetSortDirectory = tuiFleetSortCount
 
 func (s tuiFleetSort) String() string {
-	names := [...]string{"name", "status", "template", "cpu", "memory", "disk", "sessions", "ports", "uptime"}
+	names := [...]string{"name", "status", "setup", "template", "cpu", "memory", "disk", "sessions", "ports", "uptime"}
 	if s < 0 || s >= tuiFleetSortCount {
 		return "name"
 	}
@@ -141,6 +143,8 @@ func (f *tuiFleet) compare(a, b tuiFleetRecord) int {
 		order = strings.Compare(strings.ToLower(a.Node.Slug), strings.ToLower(b.Node.Slug))
 	case tuiFleetSortStatus:
 		order = strings.Compare(a.Status, b.Status)
+	case tuiFleetSortSetup:
+		order = strings.Compare(a.Setup, b.Setup)
 	case tuiFleetSortTemplate:
 		order = strings.Compare(a.Node.ConfigurationSlug, b.Node.ConfigurationSlug)
 	default:
@@ -249,6 +253,8 @@ func tuiFleetMatches(record tuiFleetRecord, terms []string) bool {
 			switch field {
 			case "status":
 				text = record.Status
+			case "setup":
+				text = record.Setup
 			case "template":
 				text = record.Node.ConfigurationSlug
 			case "dir":

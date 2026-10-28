@@ -495,8 +495,8 @@ func TestTUIDrawBackgroundOperationKeepsSelectedNodeInPrimaryPane(t *testing.T) 
 	if !strings.Contains(rendered, "created-node") {
 		t.Fatalf("expected tree to render the background operation status, got:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "starting") {
-		t.Fatalf("expected manager to render the background operation status, got:\n%s", rendered)
+	if !strings.Contains(rendered, "provisioning") {
+		t.Fatalf("expected manager to render setup progress, got:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, "Starting created-node") {
 		t.Fatalf("expected manager to summarize the background task, got:\n%s", rendered)
@@ -1253,7 +1253,7 @@ func newOverlayGateTestApp(t *testing.T, ctx context.Context, service *Service) 
 
 // startBlockedNodeOperation registers the lifecycle operation a node action
 // would, and hands back the release the operation's runner waits on. It is the
-// window state that renders "starting"/"stopping" over the node's row.
+// window state that displays startup progress and holds lifecycle admission.
 func startBlockedNodeOperation(t *testing.T, app *vaxisTUIApp, node Node, displayStatus string, result tuiOperationResult, runErr error) chan struct{} {
 	t.Helper()
 
@@ -1271,8 +1271,11 @@ func startBlockedNodeOperation(t *testing.T, app *vaxisTUIApp, node Node, displa
 	}); err != nil {
 		t.Fatalf("startOperation(%s) error = %v", displayStatus, err)
 	}
-	if app.nodeStatusText(node) != displayStatus {
-		t.Fatalf("node row status = %q, want the %q overlay", app.nodeStatusText(node), displayStatus)
+	if got := app.operationDisplayStatus(tuiTreeEntry{node: node}); got != displayStatus {
+		t.Fatalf("operation phase = %q, want %q", got, displayStatus)
+	}
+	if got := app.nodeStatusText(node); got != nodeVMStatus(node) {
+		t.Fatalf("operation replaced observed VM status with %q", got)
 	}
 	return release
 }
@@ -1333,8 +1336,11 @@ func TestTUIStartOverlayWithholdsTheGuestTabUntilTheOperationCompletes(t *testin
 	if app.state.treePaneMode != tuiTreePaneModeInfo {
 		t.Fatalf("pane mode under the starting overlay = %q, want info", app.state.treePaneMode)
 	}
-	if got := app.nodeStatusText(app.state.selectedEntry().node); got != "starting" {
-		t.Fatalf("node row status after the push = %q, want the starting overlay to still show", got)
+	if got := app.nodeStatusText(app.state.selectedEntry().node); got != "running" {
+		t.Fatalf("node row status after the push = %q, want observed running VM", got)
+	}
+	if got := app.fleetSetupStatus(app.state.selectedEntry().node); got != "provisioning" {
+		t.Fatalf("setup progress after the push = %q, want provisioning", got)
 	}
 
 	close(release)

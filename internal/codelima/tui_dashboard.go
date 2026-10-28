@@ -40,7 +40,7 @@ func (a *vaxisTUIApp) refreshFleet() {
 	}
 	records := make([]tuiFleetRecord, 0, len(a.state.nodes))
 	for _, node := range a.state.nodes {
-		record := tuiFleetRecord{Node: node, Status: a.fleetStatus(node), PortsUnavailable: !a.fleetPortsCurrent()}
+		record := tuiFleetRecord{Node: node, Status: a.fleetStatus(node), Setup: a.fleetSetupStatus(node), PortsUnavailable: !a.fleetPortsCurrent()}
 		if observation := node.LastRuntimeObservation; observation != nil && observation.UsageDetails != nil && observation.UsageDetails.UptimeSeconds != nil && observation.ResourceUsageSampledAt != nil {
 			record.StartedAt = observation.ResourceUsageSampledAt.Add(-time.Duration(*observation.UsageDetails.UptimeSeconds * float64(time.Second)))
 		}
@@ -68,28 +68,23 @@ func (a *vaxisTUIApp) refreshFleet() {
 }
 
 func (a *vaxisTUIApp) fleetStatus(node Node) string {
-	if a.fleetDeleteRetryable(node) {
-		return "delete incomplete"
+	return nodeVMStatus(node)
+}
+
+func (a *vaxisTUIApp) fleetSetupStatus(node Node) string {
+	if a.operationDisplayStatus(tuiTreeEntry{node: node}) == "starting" {
+		return "provisioning"
 	}
-	if a.fleetReceiptFailed(node) {
+	if a.fleetSetupReceiptFailed(node) {
 		return "failed"
 	}
-	if status := a.operationDisplayStatus(tuiTreeEntry{node: node}); status != "" {
-		return status
-	}
-	// A booted VM can still have a failed bootstrap. Preserve the failure in
-	// the manager while keeping its actual VM observation available in detail.
-	if node.Status == NodeStatusFailed {
+	setup := nodeSetupStatus(node)
+	// A boot failure may restore the pre-start metadata. The selected-node
+	// receipt still explains the failed setup until fresher state is loaded.
+	if setup == "pending" && a.lifecycle.nodeID == node.ID && a.lifecycleReceiptFailed() {
 		return "failed"
 	}
-	switch nodeVMStatus(node) {
-	case "provisioning", "registering", "installing":
-		return "starting"
-	case "terminating":
-		return "deleting"
-	default:
-		return nodeVMStatus(node)
-	}
+	return setup
 }
 
 func (a *vaxisTUIApp) fleetSelected() (tuiFleetRecord, bool) {
@@ -337,11 +332,20 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 		counts[record.Status]++
 	}
 	countText := countLabel(len(a.fleet.records), "node", "nodes")
-	for _, status := range []string{"running", "starting", "stopped", "created", "failed"} {
+	for _, status := range []string{"running", "stopped", "installing", "uninitialized", "broken", "missing", "unknown"} {
 		if count := counts[status]; count > 0 {
 			glyph, _ := theme.status(status)
 			countText += fmt.Sprintf("   %s %d %s", glyph, count, status)
 		}
+	}
+	failedSetup := 0
+	for _, record := range a.fleet.records {
+		if record.Setup == "failed" {
+			failedSetup++
+		}
+	}
+	if failedSetup > 0 {
+		countText += fmt.Sprintf("   %d setup failed", failedSetup)
 	}
 	tuiLine(win.New(2, 1, width-4, 1), 0, countText, theme.muted)
 	if width >= 140 && !a.host.Capacity.ObservedAt.IsZero() {
@@ -436,6 +440,7 @@ func tuiFleetColumns(width int, compact, flat bool) []tuiFleetColumn {
 	columns := []tuiFleetColumn{
 		{field: tuiFleetSortName, title: "NAME", width: 20},
 		{field: tuiFleetSortStatus, title: "STATUS", width: 12},
+		{field: tuiFleetSortSetup, title: "SETUP", width: 13},
 		{field: tuiFleetSortTemplate, title: "TEMPLATE", width: 11},
 		{field: tuiFleetSortCPU, title: "CPU", width: 6},
 		{field: tuiFleetSortMemory, title: "MEMORY", width: 15},
@@ -445,15 +450,46 @@ func tuiFleetColumns(width int, compact, flat bool) []tuiFleetColumn {
 		{field: tuiFleetSortUptime, title: "UPTIME", width: 8},
 	}
 	if compact {
-		columns = columns[:7]
-		columns[1].width, columns[2].width = 11, 10
-		columns[4].title, columns[5].title = "MEM%", "DISK%"
-		columns[4].width, columns[5].width, columns[6].width = 6, 6, 4
-	} else if width >= 134 {
-		columns[3].width, columns[4].width, columns[5].width = 14, 21, 20
+		columns = columns[:8]
 	}
-	if !compact && flat {
-		columns[7].field, columns[7].title, columns[7].width = tuiFleetSortDirectory, "DIRECTORY", 20
+	for i := range columns {
+		column := &columns[i]
+		switch column.field {
+		case tuiFleetSortStatus:
+			if compact || width < 120 {
+				column.width = 11
+			}
+		case tuiFleetSortTemplate:
+			if compact || width < 120 {
+				column.width = 10
+			}
+		case tuiFleetSortCPU:
+			if !compact && width >= 134 {
+				column.width = 14
+			}
+		case tuiFleetSortMemory, tuiFleetSortDisk:
+			switch {
+			case compact:
+				column.title, column.width = "MEM%", 6
+				if column.field == tuiFleetSortDisk {
+					column.title = "DISK%"
+				}
+			case width < 120:
+				column.width = 9
+			case width >= 134:
+				column.width = 20
+			}
+		case tuiFleetSortSessions:
+			if compact || width < 120 {
+				column.width = 4
+			}
+		case tuiFleetSortPorts:
+			if flat {
+				column.field, column.title, column.width = tuiFleetSortDirectory, "DIRECTORY", 20
+			} else if width < 120 {
+				column.width = 8
+			}
+		}
 	}
 	used := 3
 	for _, column := range columns[1:] {
@@ -463,7 +499,7 @@ func tuiFleetColumns(width int, compact, flat bool) []tuiFleetColumn {
 		// At the medium breakpoint directory context yields space to the
 		// minimum name width, keeping the final uptime column on screen.
 		overflow := used + 8 - width
-		columns[7].width -= overflow
+		columns[len(columns)-2].width -= overflow
 		used -= overflow
 	}
 	columns[0].width = max(8, width-used)
@@ -487,8 +523,10 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 	}
 	tuiFill(win, style)
 	tuiLine(win.New(0, 0, 2, 1), 0, marker, style)
+	phase := a.fleetPhase(record.Node.ID)
+	showEvidence := record.Status != "running" || record.Setup == "failed" || record.Setup == "provisioning" || record.Setup == "registering" || phase != ""
 	for _, column := range columns {
-		if record.Status != "running" && (column.field == tuiFleetSortCPU || (compact && column.field == tuiFleetSortTemplate)) {
+		if showEvidence && (column.field == tuiFleetSortCPU || (compact && column.field == tuiFleetSortTemplate)) {
 			text := ""
 			switch record.Status {
 			case "created":
@@ -500,18 +538,24 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 			default:
 				text = record.Status
 			}
+			if record.Setup == "failed" {
+				text = a.keyHints("setup failed · {node.open} details · {node.logs} logs")
+			}
 			for _, operation := range a.entryOperations(tuiTreeEntry{node: record.Node}) {
 				if len(operation.Lines) > 0 {
 					text = operation.Lines[len(operation.Lines)-1]
 				}
 			}
-			if phase := a.fleetPhase(record.Node.ID); phase != "" {
+			if phase != "" {
 				text = phase
 			}
 			if evidence := a.fleetEvidenceLine(record); evidence != "" {
 				text = evidence
 			}
 			_, statusStyle := theme.status(record.Status)
+			if record.Setup == "failed" || record.Setup == "provisioning" || record.Setup == "registering" {
+				statusStyle = theme.setup(record.Setup)
+			}
 			style.Foreground = statusStyle.Foreground
 			tuiLine(win.New(column.col, 0, -1, 1), 0, text, style)
 			break
@@ -530,6 +574,8 @@ func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compa
 	case tuiFleetSortStatus:
 		glyph, style := theme.status(record.Status)
 		return tuiGaugeLine{prefix: glyph + " " + record.Status}, style
+	case tuiFleetSortSetup:
+		return tuiGaugeLine{prefix: record.Setup}, theme.setup(record.Setup)
 	case tuiFleetSortTemplate:
 		return tuiGaugeLine{prefix: record.Node.ConfigurationSlug}, theme.violet
 	case tuiFleetSortDirectory:
@@ -600,7 +646,7 @@ func (a *vaxisTUIApp) managerFooter() string {
 		return a.keyHints("{terminal.focus} back to TUI · all other keys, including Alt+←/→, reach the shell")
 	}
 	if a.filterInput != nil {
-		return a.keyHints("status: template: dir: port: · {input.accept} apply · {input.cancel} cancel")
+		return a.keyHints("status: setup: template: dir: port: · {input.accept} apply · {input.cancel} cancel")
 	}
 	if a.nodeDetail && a.detailTab == tuiDetailShell {
 		return a.keyHints("{terminal.focus} focus shell · {terminal.previous_tab terminal.next_tab} tabs · {session.guest} new guest · {session.host} new host · {terminal.close_tab} close · {terminal.search} search · {navigation.back} overview")
