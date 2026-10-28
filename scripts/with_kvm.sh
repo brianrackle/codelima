@@ -14,5 +14,8 @@ if [[ ! -c /dev/kvm ]]; then
 fi
 kvm_gid=$(stat -c %g /dev/kvm)
 kvm_groups=$( { id -G | tr ' ' '\n'; printf '%s\n' "$kvm_gid"; } | sort -nu | paste -sd, -)
-exec sudo -n setpriv --reuid "$(id -u)" --regid "$(id -g)" --groups "$kvm_groups" \
-  --no-new-privs env HOME="$HOME" PATH="$PATH" "$@"
+kvm_env_names=$(compgen -e | paste -sd, -)
+kvm_user_env=("HOME=$HOME" "PATH=$PATH")
+if [[ -v TMPDIR ]]; then kvm_user_env+=("TMPDIR=$TMPDIR"); fi
+exec sudo -n "--preserve-env=$kvm_env_names" setpriv --reuid "$(id -u)" --regid "$(id -g)" --groups "$kvm_groups" \
+  --no-new-privs env "${kvm_user_env[@]}" "$@"

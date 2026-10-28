@@ -1,0 +1,9 @@
+bash scripts/install_qemu_guest.sh '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64' '/Users/brianrackle/personal/codelima/tmp'
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+{"QMP": {"version": {"qemu": {"micro": 1, "minor": 2, "major": 10}, "package": "Debian 1:10.2.1+ds-1ubuntu3.3"}, "capabilities": ["oob"]}}
+{"return": {}}
+{"return": {"enabled": true, "present": true}}
+{"timestamp": {"seconds": 1793162029, "microseconds": 597497}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+{"return": {}}
+CODELIMA_KVM_TEST=1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go test ./internal/release -run '^TestKVMHelper' -count=1
+ok  	github.com/brianrackle/codelima/internal/release	0.043s

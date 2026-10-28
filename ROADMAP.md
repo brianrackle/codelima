@@ -76,6 +76,10 @@ The active engineering effort. Plan: [plans/IMPROVEMENT_PLAN.md](plans/IMPROVEME
   viewport geometry, active-tab overflow, exact mouse targets and current route
   context are implemented (ADR 195). Live host/guest and input qualification is
   recorded in the design ledger; final native and whole-design checks remain.
+  Manager-focus tab reordering is restored through configurable
+  `terminal.move_tab_left` and `terminal.move_tab_right` actions. Behavioral
+  tests cover repeat/release, remapping, stable identity, boundaries, and
+  unchanged input while the terminal has focus.
 - Shell chooser [partially complete]: grouped fresh/existing sessions, launcher
   availability, stable numbered/mouse identities, saved defaults and explicit
   embedded opt-in are implemented (ADR 194). Final native/artboard qualification

@@ -202,6 +202,24 @@ Supported modes are `attach`, `window`, `tmux`, and `embedded`. In embedded
 mode, `F6` switches focus between the manager and terminal. Closing the TUI
 leaves sessions running; stopping a node ends guest processes.
 
+To use CodeLima as a terminal emulator, enable the embedded shell:
+
+```sh
+codelima settings set shell.mode embedded
+codelima .
+```
+
+Select a running node and press `x` to open its Shell tab. Press `F6` to return
+to manager focus before using `t` for a new guest tab, `T` for a host tab,
+`[` and `]` to switch tabs, `w` to close a tab, or `F7` to search history.
+`Alt+Shift+Left` and `Alt+Shift+Right` move the active tab without wrapping.
+On macOS, Alt is Option. These commands also appear in `?` help and support
+custom bindings through `settings keys`. While the terminal has focus, every
+key except the configured focus shortcut reaches the shell.
+
+Host shells also work for stopped nodes. Open node detail, select Shell with
+`Tab`, and press `T`, then `F6` to type into the host shell.
+
 ### Ports and services
 
 HTTP and WebSocket listeners are discovered automatically. Reach a service
@@ -314,6 +332,10 @@ make build
 Ghostty dependency under `.tooling/<os>-<arch>`. The first setup needs network
 access. `make build` produces platform-specific binaries under `bin/` and a
 `bin/codelima` compatibility link.
+
+The optional native ABI check, `make test-ghostty-vt-schema`, also needs host
+Python 3 with `venv` support. Make installs its pinned jsonschema dependency
+in a project-local virtual environment.
 
 Install the Lima runtime separately if `limactl` is missing:
 

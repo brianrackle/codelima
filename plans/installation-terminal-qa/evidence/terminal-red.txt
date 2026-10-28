@@ -1,0 +1,17 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_zig.sh 0.16.0 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_pkgconf.sh 2.5.1 '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64' '/Users/brianrackle/personal/codelima/tmp' '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/zig/0.16.0/zig'
+./scripts/install_gopls.sh v0.18.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_golangci_lint.sh 1.64.8 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go mod download
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=2e205255ce6d39bbfdf6f314824a31f12c8de3bbf32fac535a3d01e13289626c" ./internal/codelima -run 'TestTUIKeyBindingsEmbeddedTabReordering|TestTUIOverviewPortRowsPreserveText' -count=1
+--- FAIL: TestTUIKeyBindingsEmbeddedTabReordering (0.10s)
+    --- FAIL: TestTUIKeyBindingsEmbeddedTabReordering/defaults (0.05s)
+        tui_key_bindings_test.go:110: left shortcut did not reorder active tab: [node:node-root#1 node:node-root#2 node:node-root#3]
+    --- FAIL: TestTUIKeyBindingsEmbeddedTabReordering/remapped (0.05s)
+        tui_key_bindings_test.go:99: keys.terminal.move_tab_left: unknown action
+FAIL
+FAIL	github.com/brianrackle/codelima/internal/codelima	0.249s
+FAIL
+make: *** [Makefile:237: test-tui-input] Error 1

@@ -26,6 +26,8 @@ GHOSTTY_VT_CPU ?= baseline
 GHOSTTY_VT_BUILD_JOBS ?= 4
 GHOSTTY_VT_TEST_JOBS ?= 1
 GHOSTTY_VT_UNIT_FILTER ?=
+JSONSCHEMA_VERSION ?= 4.25.1
+GHOSTTY_VERIFIER_DIR := $(TOOLS_DIR)/ghostty-verifier/$(JSONSCHEMA_VERSION)
 GHOSTTY_TEST_FILTER ?= Ghostty
 GHOSTTY_VT_CURRENT := $(TOOLS_DIR)/ghostty-vt/current
 GO := $(TOOLS_DIR)/go/$(GO_VERSION)/bin/go
@@ -102,8 +104,9 @@ init-qemu-guest:
 run-kvm:
 	bash scripts/with_kvm.sh $(KVM_ARGS)
 
-test-qemu-guest: init-qemu-guest
+test-qemu-guest: init-qemu-guest go-toolchain
 	@printf '%s\n' '{"execute":"qmp_capabilities"}' '{"execute":"query-kvm"}' '{"execute":"quit"}' | bash scripts/with_kvm.sh '$(TOOLS_DIR)/qemu/bin/qemu-system-aarch64' -machine virt -accel kvm -cpu host -m 256 -nodefaults -display none -S -qmp stdio
+	CODELIMA_KVM_TEST=1 $(GO) test ./internal/release -run '^TestKVMHelper' -count=1
 
 .PHONY: go-toolchain release-metadata test-release
 go-toolchain:
@@ -129,6 +132,13 @@ test-pkgconf: pkg-config
 # archive. Its dependency hashes remain intact, and caches stay project-local.
 # Unit execution and compile-only tests require Debug's tracked-pin safety
 # instrumentation. Schema/bridge checks use the selected production profile.
+.PHONY: init-ghostty-verifier
+init-ghostty-verifier: go-toolchain
+	$(GO) run scripts/tooling_lock.go '$(TOOLS_DIR)/.ghostty-verifier.lock' sh -c 'set -eu; test -x "$$1/bin/python3" || python3 -m venv "$$1"; "$$1/bin/python3" -m pip install --disable-pip-version-check --cache-dir "$$2" "jsonschema==$$3"' sh '$(GHOSTTY_VERIFIER_DIR)' '$(TOOLS_DIR)/cache/pip' '$(JSONSCHEMA_VERSION)'
+
+test-ghostty-vt-schema: init-ghostty-verifier
+test-ghostty-vt-schema: export PATH := $(GHOSTTY_VERIFIER_DIR)/bin:$(PATH)
+
 test-ghostty-vt test-ghostty-vt-build test-ghostty-vt-schema: ghostty-vt
 	cd $(GHOSTTY_VT_CURRENT)/source && ZIG_GLOBAL_CACHE_DIR=$(TOOLS_DIR)/cache/zig-global ZIG_LOCAL_CACHE_DIR=$(TOOLS_DIR)/cache/ghostty-native-tests $(ZIG) build $(patsubst test-ghostty-vt%,test-lib-vt%,$@) -j$(GHOSTTY_VT_TEST_JOBS) -Demit-lib-vt=true -Demit-xcframework=false -Dversion-string=1.3.2-dev+$(GHOSTTY_VT_GHOSTTY_COMMIT) -Dlib-version-string=0.1.0-dev+$(GHOSTTY_VT_GHOSTTY_COMMIT) -Doptimize=$(if $(filter test-ghostty-vt test-ghostty-vt-build,$@),Debug,$(GHOSTTY_VT_OPTIMIZE)) -Dtarget=$(GHOSTTY_VT_TARGET) -Dcpu=$(GHOSTTY_VT_CPU) -Dvt-features=$(GHOSTTY_VT_FEATURES) $(if $(GHOSTTY_VT_UNIT_FILTER),-Dtest-filter='$(GHOSTTY_VT_UNIT_FILTER)')
 

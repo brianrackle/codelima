@@ -1,0 +1,25 @@
+{
+  "engine": "4.5.4",
+  "rules_sha256": "fce4574c0b429b3b70262f320ac630db483b6055606c399747daba496d180d5c",
+  "results": [
+    {
+      "name": "v1.0.0 positive control",
+      "sha256": "8e41b755186b2ab04a30d61fab7b3f3568ec406be37fc5d82cb0d440dc0ae16d",
+      "matches": [
+        "XProtect_MACOS_FRIENDLYFERRET_SECD"
+      ]
+    },
+    {
+      "name": "tmp/codelima-repair/mac-package/bin/codelima",
+      "sha256": "1e080b95e504eb5f874910be86523f4ed6b675d2cc69d02658b2a4b925544607",
+      "known_collision_count": 0,
+      "matches": []
+    },
+    {
+      "name": "tmp/codelima-repair/mac-package/bin/codelima-renderer-worker",
+      "sha256": "e849d9396dec864ff7ce2cdc8f9551275af6507ae72156f34b7a1beceb5f564b",
+      "known_collision_count": 0,
+      "matches": []
+    }
+  ]
+}

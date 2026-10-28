@@ -80,12 +80,19 @@ func (a *vaxisTUIApp) dispatchManagerAction(action string, key vaxis.Key) bool {
 	if !tuiKeyActivates(key, false) {
 		return false
 	}
-	if a.nodeDetail && a.detailTab == tuiDetailShell && (action == "terminal.previous_tab" || action == "terminal.next_tab") {
-		delta := 1
-		if action == "terminal.previous_tab" {
-			delta = -1
+	if a.nodeDetail && a.detailTab == tuiDetailShell && (action == "terminal.previous_tab" || action == "terminal.next_tab" || action == "terminal.move_tab_left" || action == "terminal.move_tab_right") {
+		var err error
+		switch action {
+		case "terminal.previous_tab":
+			err = a.switchTerminalTab(-1)
+		case "terminal.next_tab":
+			err = a.switchTerminalTab(1)
+		case "terminal.move_tab_left":
+			err = a.moveTerminalTab(-1)
+		case "terminal.move_tab_right":
+			err = a.moveTerminalTab(1)
 		}
-		if err := a.switchTerminalTab(delta); err != nil {
+		if err != nil {
 			a.setStatus(slog.LevelError, err.Error())
 		}
 		a.syncSessionFocus()
@@ -279,10 +286,6 @@ func (a *vaxisTUIApp) dispatchManagerAction(action string, key vaxis.Key) bool {
 			err = a.openTerminalTab()
 		case action == "session.host":
 			err = a.openHostTerminalTab()
-		case action == "terminal.previous_tab":
-			err = a.switchTerminalTab(-1)
-		case action == "terminal.next_tab":
-			err = a.switchTerminalTab(1)
 		case action == "terminal.close_tab":
 			err = a.closeTerminalTab()
 		case action == "terminal.search":

@@ -71,6 +71,7 @@ func tuiKeyActionDefinitions() []keyActionDefinition {
 	add("route.copy", "Copy selected route address", []string{"y"}, []string{"overview.ports", "ports"})
 	for _, action := range []struct{ id, description, key string }{
 		{"previous_tab", "Previous embedded shell tab", "["}, {"next_tab", "Next embedded shell tab", "]"},
+		{"move_tab_left", "Move embedded shell tab left", "alt+shift+left"}, {"move_tab_right", "Move embedded shell tab right", "alt+shift+right"},
 		{"close_tab", "Close embedded shell tab", "w"}, {"search", "Search embedded history", "f7"},
 	} {
 		add("terminal."+action.id, action.description, []string{action.key}, []string{"detail.shell"})

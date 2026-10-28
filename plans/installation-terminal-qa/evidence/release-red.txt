@@ -1,0 +1,12 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go test ./internal/release ./cmd/codelima-release
+--- FAIL: TestBuildArchiveRejectsKnownDarwinXProtectCollisionBeforeWriting (0.00s)
+    --- FAIL: TestBuildArchiveRejectsKnownDarwinXProtectCollisionBeforeWriting/codelima (0.00s)
+        release_test.go:106: known collision was not identified for codelima: <nil>
+    --- FAIL: TestBuildArchiveRejectsKnownDarwinXProtectCollisionBeforeWriting/codelima-renderer-worker (0.00s)
+        release_test.go:106: known collision was not identified for codelima-renderer-worker: <nil>
+FAIL
+FAIL	github.com/brianrackle/codelima/internal/release	7.107s
+?   	github.com/brianrackle/codelima/cmd/codelima-release	[no test files]
+FAIL
+make: *** [Makefile:458: test-release] Error 1

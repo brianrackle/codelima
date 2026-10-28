@@ -1,0 +1,17 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_zig.sh 0.16.0 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_pkgconf.sh 2.5.1 '/Users/brianrackle/personal/codelima/.tooling/darwin-arm64' '/Users/brianrackle/personal/codelima/tmp' '/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig'
+./scripts/install_gopls.sh v0.18.1 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_golangci_lint.sh 1.64.8 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go mod download
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" ./internal/codelima -run 'TestTUIBackground(NodeOperation|Operations)' -count=1
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+--- FAIL: TestTUIBackgroundOperationsAllowNonConflictingActionsAndRejectConflicts (3.05s)
+    tui_test.go:3942: timed out waiting for background start operations to finish
+    testing.go:1267: TempDir RemoveAll cleanup: unlinkat /var/folders/9b/4879vz457xjcp_rwld35tpg80000gn/T/TestTUIBackgroundOperationsAllowNonConflictingActionsAndRejectConflicts2900037160/001/.codelima/nodes: directory not empty
+FAIL
+FAIL	github.com/brianrackle/codelima/internal/codelima	5.036s
+FAIL
+make: *** [test-tui-input] Error 1
