@@ -2,12 +2,28 @@
 
 ## Open Work
 
+Release qualification after the installation/terminal repair remains partial.
+The runtime QA record covers real Linux KVM and macOS VZ guests, embedded
+host/guest terminals, handoff, renderer recovery, and a disposable Homebrew
+candidate. Still run QA 5b's two-window seats, the full manager workflows in
+Flow 7, multi-node forwarding/ownership/published TCP in Flow 6, physical
+mouse/clipboard/theme/Kitty checks in Flow 10, and Flow 11's clean-host trust,
+public install, previous-version regular upgrade, and retired-beta migration.
+Full-resource VM presets, built-in coding-agent installs, and gauge/spinner
+presentation also need qualification. Use isolated homes and compare package
+dependency baselines before and after cleanup. Advantage: completes the
+user-observable release matrix. Disadvantage: needs fresh hosts and physical
+terminal interaction. Existing #41 and #57 retain the broader design scope.
+
 Normal Linux VM runtime setup: the missing `limactl` startup dependency is
-installed and the ordinary TUI command now opens. This login still lacks KVM
-device access, and QEMU is currently only in the project tooling directory.
-Use `make init-qemu-guest`, add its bin directory to PATH, and run the relevant
-frontend/daemon process tree through the existing `make run-kvm` helper before
-qualifying real VM creation. Advantage: preserves device permissions and user
+installed and the ordinary TUI command now opens. The login's groups still lack
+KVM access; `make test-qemu-guest` now verifies process-local access, original
+UID, and preserved isolated paths, including with sudo-rs (ADR 207).
+QEMU is currently only in the project tooling directory.
+Use `make init-qemu-guest`, add its bin directory to PATH, set the nested-host
+machine override below, and start the frontend/daemon process tree through
+`make run-kvm`. Real VM creation and guest/host terminal checks passed with
+that setup. Advantage: preserves device permissions and user
 membership; disadvantage: process-local groups do not update an already-running
 daemon. Preserve active sessions when arranging that restart. The prior nested
 KVM guest-boot limitation is separately recorded below.
@@ -65,13 +81,15 @@ clone produced by the supported operation is therefore already in its parent's
 loaded scope; search and marks do not filter the underlying node list.
 Observed guest architecture and KVM device access now use current telemetry
 (ADR 204), with unknown/stale presentation independent of nested-virt settings.
-Native KVM qualification remains open: the disposable Ubuntu guest stopped
-advancing at kernel time 2.5s under nested KVM in this VM, while QEMU consumed
-one CPU continuously. Its boot was canceled and its owned QEMU stopped before
-switching to the existing TCG fixture. Suggested follow-up: reproduce with a
-native host or supported kernel/firmware combination, then compare device access
-with actual nested-VM boot. Advantage: separates access from working virtualization;
-disadvantage: needs platform diagnosis outside the TUI implementation.
+The nested KVM boot issue now has a verified local configuration. With
+`QEMU_SYSTEM_AARCH64` supplying the full `-machine virt,accel=kvm,its=off`
+argument, real mounted/copy CodeLima nodes booted, bootstrapped, validated,
+and supported guest shells and forwarding without TCG. The default machine
+stalled in `cpu_do_idle` before SSH; disabling ACPI did not help. Remaining
+work is to identify and report the underlying virtual-ITS interrupt fault in
+the kernel, QEMU, or outer hypervisor, then remove the debugging override.
+Advantage: restores ordinary nested defaults. Disadvantage: requires platform
+diagnosis beyond this local configuration. BUILD.md records the working setup.
 Overview now projects the selected node's recorded auth-import date, count and
 categories (ADR 203), with explicit empty, missing and inherited states. Its
 bounded reader uses the existing 2 MiB event tail; older receipts outside that
@@ -1721,6 +1739,21 @@ bounded static/text path remains useful independently of those extensions.
 
 ### 41. Finish full libghostty adoption qualification on a native, adequately sized host
 
+2026-10-27 native macOS checkpoint: the 64 GiB M4 host completed ABI validation
+for 159 types and the full Debug test compilation. The unfiltered shipping
+feature-profile run executed 6402 tests: 6353 passed, 47 skipped, and two
+instances of `terminal.stream_terminal.test.full reset` failed. Both assert
+that a glyph-protocol registration populates the glossary, although the
+reviewed `-all,...` profile disables glyph_protocol and the handler correctly
+ignores those requests. Suggested fix: make that fixture's pre-reset
+expectation equal `build_options.glyph_protocol`, retain its unconditional
+reset assertions, update the reviewed patch digest, and rerun the full native
+suite and cross-build handoff checks. Advantage: qualifies the shipping
+feature profile without enabling an unsupported protocol. Disadvantage:
+changing a reviewed patch also changes renderer build identity and requires
+fresh package/handoff qualification. This test-only upstream fixture remains
+outside the installation/terminal repair; the renderer profile is unchanged.
+
 Implementation is underway on `feat/libghostty-vt-adoption`; see
 [the completion ledger](plans/libghostty_vt_adoption_progress.md).
 Per-flow actual execution, the fixed handoff regression and complete disposable
@@ -1984,31 +2017,78 @@ Disadvantages:
 - Requires care to avoid noisy warnings once a node is already healthy.
 - A doctor check would add another piece of guest-state probing to maintain.
 
-### 4. Sign and notarize release artifacts
+### 4. Resolve the macOS malware rule collision and sign release artifacts
+
+Partial implementation in ADR 206 removes the implicated port-row format
+without changing displayed text. `BuildArchive` now rejects the known
+`cs%s%d` collision in either Darwin executable before creating output.
+Behavioral archive/rendering tests pass. The native 1.0.1 candidate CLI and
+renderer were scanned on macOS 26.6.2 against the complete active XProtect
+5368 rules using yara-python 4.5.4. Neither executable matches any rule;
+the unchanged v1.0.0 CLI still matches FRIENDLYFERRET_SECD as a positive
+control. Both candidate signatures verify and the CLI launches. No valid
+Developer ID identity exists on the host. Signing/notarization, public
+release installation/upgrade, and Apple's response remain open below.
 
 Problem:
 
 - The new packaging and release workflow publishes binary archives and updates the Homebrew tap automatically.
 - Those artifacts are not yet signed, and macOS releases are not notarized.
 - That leaves users without a machine-verifiable trust signal beyond GitHub release provenance and repository control.
+- On 2026-10-26, macOS 26.6.2 with XProtect 5368 was confirmed to block the
+  Homebrew v1.0.0 CLI after an XProtect scan. The launch logs from 2026-10-25
+  22:09:05 PDT record `Successfully moved malware to trash`. This is an actual
+  malware verdict, which missing notarization alone does not explain.
+- Offline scanning with yara-python 4.5.4 and the active Apple rules identifies
+  `XProtect_MACOS_FRIENDLYFERRET_SECD`, UUID
+  `360707AA-95CE-4EA2-9719-CA1BB4B62B8A`. The installed CLI and a fresh source
+  build both match. The installed renderer worker does not match any rule.
+  The active `XProtect.yara` SHA-256 is
+  `fce4574c0b429b3b70262f320ac630db483b6055606c399747daba496d180d5c`.
+- The rule matches ordinary strings: Go's RFC3339 layout and Security framework
+  path, `hw.model` from host capacity discovery, `kern.hostname` from Go's
+  hostname support, and `runCommand` within the Lima `runCommands` symbols.
+  Its `$c0` string, `cs%s%d`, occurs at file offset 6072102 across adjacent
+  strings in `focus: metrics%s%d %s`. The `%s%d %s` format is used by
+  `internal/codelima/tui_overview_render.go` to render port rows. These source
+  and binary checks strongly support a false positive caused by the rule.
+- The cached archive matches both the Homebrew formula and GitHub's release
+  asset digest, SHA-256
+  `0c20a8b3d5ea559e79ea883206f7a7d972742d7da60ea10a6e93a7e9071e426c`.
+  Both installed binaries are byte-for-byte identical to that archive. The CLI
+  SHA-256 is `8e41b755186b2ab04a30d61fab7b3f3568ec406be37fc5d82cb0d440dc0ae16d`.
+  Its embedded source revision is `e8a58d33c11fc7dbbe4b3e152ee96d369cacb4e6`
+  with `vcs.modified=false`. Both signatures verify but are ad hoc, with no
+  Developer ID. Remediation and a release accepted by macOS remain open.
 
 Suggested solution:
 
 - Add signing to the release workflow for the generated archives and manifests.
-- Add macOS code signing and notarization for the packaged `codelima-real` binary and the bundled Ghostty library before the archive is created.
+- Report the reproducible rule collision to Apple with the rule UUID, hashes,
+  matched offsets, and source origins. Track Apple's response before declaring
+  the malware verdict resolved.
+- Add macOS Developer ID code signing and notarization for both packaged
+  executables, `codelima` and `codelima-renderer-worker`, before publication.
 - Publish signatures or checksums in the GitHub release and teach the Homebrew tap flow to reference the signed assets where appropriate.
+- Add a macOS release check against the active XProtect rules and qualify the
+  actual downloaded Homebrew installation with Gatekeeper enabled. Signing and
+  notarization do not by themselves prove that this malware-rule collision is
+  resolved.
 
 Advantages:
 
 - Improves end-user trust in downloaded binaries.
 - Reduces friction from macOS Gatekeeper on distributed artifacts.
 - Makes the release pipeline stronger before wider external distribution.
+- Detects this specific release-blocking rule collision before publication.
 
 Disadvantages:
 
 - Adds credential and secret management to the release workflow.
 - Notarization will increase release latency and platform-specific maintenance.
 - Signed builds are more expensive to debug when packaging changes break late in the pipeline.
+- XProtect rules change independently of CodeLima, and resolving a false
+  positive can require Apple's review.
 
 ### 5. Audit the remaining metadata-only service mutations for unnecessary runtime validation
 

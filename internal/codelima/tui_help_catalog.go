@@ -97,6 +97,7 @@ func managerHelpGroups(keys *compiledKeyMap) []tuiHelpGroup {
 				helpBinding("exit", "end session")}},
 			{"EMBEDDED SHELL", []tuiHelpBinding{helpBinding("{terminal.focus}", "TUI / terminal focus; other keys reach focused shell"),
 				helpBinding("{terminal.previous_tab terminal.next_tab}", "previous / next tab (TUI focus)"),
+				helpBinding("{terminal.move_tab_left terminal.move_tab_right}", "move tab left / right (TUI focus)"),
 				helpBinding("{session.guest session.host}", "new guest / host (TUI focus)"),
 				helpBinding("{terminal.close_tab}", "close tab (TUI focus)"),
 				helpBinding("{terminal.search}", "search history (TUI focus)")}},

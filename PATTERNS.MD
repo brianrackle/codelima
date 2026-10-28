@@ -1033,3 +1033,14 @@ Guest platform facts (ADR 204) belong to the existing current telemetry sample.
 Keep unknown distinct from false, copy pointer fields at ownership boundaries,
 and clear them with the sample. Device accessibility and configured nested
 virtualization describe different facts; never infer one from the other.
+
+Known distribution incompatibilities belong at the archive boundary, where
+the exact executable payloads are available before output is created. Check
+every packaged executable and reject a candidate without replacing an existing
+artifact. Keep narrow regression checks distinct from native acceptance
+qualification and record their limits in the release instructions (ADR 206).
+
+When a development helper briefly needs privilege to assign groups, drop that
+privilege before restoring user-specific paths or launching the command. Test
+the actual command's UID, device access, and isolated environment together.
+Device initialization alone does not prove a guest boots (ADR 207).

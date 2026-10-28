@@ -31,6 +31,20 @@ func overviewFixture(t *testing.T, width, height int) *vaxisTUIApp {
 	return a
 }
 
+func TestTUIOverviewPortRowsPreserveText(t *testing.T) {
+	for _, width := range []int{40, 80} {
+		a := overviewFixture(t, 150, 38)
+		a.overview.route = "second"
+		a.drawOverviewPorts(a.vx.Window().New(0, 0, width, 5), a.fleet.selectedID, newTUITheme(true))
+		text := renderedScreenText(t, a.vx, 150, 38)
+		for _, want := range []string{" 3000 http://first.localhost:3000", "▸4000 http://second.localhost:4000"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("port text changed at width %d, want %q:\n%s", width, want, text)
+			}
+		}
+	}
+}
+
 func TestTUIOverviewMouseSelectsRowsAndOpensPanelLinks(t *testing.T) {
 	a := overviewFixture(t, 150, 38)
 	var selected tuiOverviewRow

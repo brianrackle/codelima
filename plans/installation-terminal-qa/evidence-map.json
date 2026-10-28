@@ -1,0 +1,17 @@
+{
+  "tmp/codelima-repair/verify-baseline.log": "plans/installation-terminal-qa/evidence/verify-baseline.txt",
+  "tmp/codelima-repair/release-red.log": "plans/installation-terminal-qa/evidence/release-red.txt",
+  "tmp/codelima-repair/terminal-red.log": "plans/installation-terminal-qa/evidence/terminal-red.txt",
+  "tmp/codelima-repair/kvm-red.log": "plans/installation-terminal-qa/evidence/kvm-red.txt",
+  "tmp/codelima-repair/kvm-green.log": "plans/installation-terminal-qa/evidence/kvm-green.txt",
+  "tmp/codelima-repair/linux-final.log": "plans/installation-terminal-qa/evidence/linux-final.txt",
+  "tmp/codelima-repair/macos-background-recheck.log": "plans/installation-terminal-qa/evidence/macos-background-recheck.txt",
+  "tmp/codelima-repair/macos-background-green.log": "plans/installation-terminal-qa/evidence/macos-background-green.txt",
+  "tmp/codelima-repair/macos-final-verification.log": "plans/installation-terminal-qa/evidence/macos-final-verification.txt",
+  "tmp/codelima-repair/linux-schema.log": "plans/installation-terminal-qa/evidence/linux-schema.txt",
+  "tmp/codelima-repair/macos-native-final.log": "plans/installation-terminal-qa/evidence/macos-native-final.txt",
+  "tmp/codelima-repair/final-diagnostics.log": "plans/installation-terminal-qa/evidence/final-diagnostics.txt",
+  "tmp/codelima-repair/macos-native-checks.log": "plans/installation-terminal-qa/evidence/macos-native-checks.txt",
+  "tmp/codelima-repair/macos-bridge-final.log": "plans/installation-terminal-qa/evidence/macos-bridge-final.txt",
+  "tmp/codelima-repair/final-cleanup.log": "plans/installation-terminal-qa/evidence/final-cleanup.txt"
+}

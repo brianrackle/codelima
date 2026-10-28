@@ -1,0 +1,43 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_zig.sh 0.16.0 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_pkgconf.sh 2.5.1 '/Users/brianrackle/personal/codelima/.tooling/darwin-arm64' '/Users/brianrackle/personal/codelima/tmp' '/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig'
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+Dirty-row accounting: clean=0 decoded/4 reused; partial=2 decoded/2 reused
+Checkpoint allocation accounting: encoded=1016817 live=9036016 peak=9040360 limit=134217728 bytes
+Ghostty native bridge contract tests passed
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" ./internal/ghostty ./internal/codelima ./internal/terminalstate -run 'Ghostty' -count=1
+# github.com/brianrackle/codelima/internal/ghostty.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/ghostty	7.474s
+ok  	github.com/brianrackle/codelima/internal/codelima	0.853s
+ok  	github.com/brianrackle/codelima/internal/terminalstate	0.228s [no tests to run]
+./scripts/install_gopls.sh v0.18.1 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_golangci_lint.sh 1.64.8 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go mod download
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" ./internal/codelima ./internal/ghostty ./internal/terminalstate -run 'Test(Raw|GhosttyAttach|VTBoundary)' -count=1 -timeout=60s
+# github.com/brianrackle/codelima/internal/ghostty.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	1.124s
+ok  	github.com/brianrackle/codelima/internal/ghostty	0.154s
+ok  	github.com/brianrackle/codelima/internal/terminalstate	0.267s
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" ./internal/codelima -run '^Test(TUI(Resize|HandleResize)|Daemon.*Resize|IsolatedTerminalResize)' -count=1
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	1.953s
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" ./internal/ghostty ./internal/codelima ./internal/codelima/daemon -run Clipboard -count=1
+# github.com/brianrackle/codelima/internal/ghostty.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/ghostty	0.161s
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	2.393s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemon	0.402s
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test ./internal/release ./cmd/codelima-release
+ok  	github.com/brianrackle/codelima/internal/release	7.804s
+?   	github.com/brianrackle/codelima/cmd/codelima-release	[no test files]

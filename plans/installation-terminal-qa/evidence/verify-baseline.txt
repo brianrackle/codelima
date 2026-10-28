@@ -1,0 +1,60 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_zig.sh 0.16.0 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_pkgconf.sh 2.5.1 '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64' '/Users/brianrackle/personal/codelima/tmp' '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/zig/0.16.0/zig'
+./scripts/install_gopls.sh v0.18.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_golangci_lint.sh 1.64.8 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go mod download
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/bin/golangci-lint run ./...
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=2e205255ce6d39bbfdf6f314824a31f12c8de3bbf32fac535a3d01e13289626c" -p 4 -parallel 4 ./...
+?   	github.com/brianrackle/codelima/cmd/codelima	[no test files]
+?   	github.com/brianrackle/codelima/cmd/codelima-release	[no test files]
+?   	github.com/brianrackle/codelima/cmd/codelima-renderer-worker	[no test files]
+?   	github.com/brianrackle/codelima/internal/atomicfile	[no test files]
+ok  	github.com/brianrackle/codelima/internal/codelima	78.186s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemon	1.145s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemonclient	0.388s
+ok  	github.com/brianrackle/codelima/internal/codelima/terminal	(cached)
+ok  	github.com/brianrackle/codelima/internal/diagnosticskill	0.020s
+ok  	github.com/brianrackle/codelima/internal/ghostty	10.812s
+ok  	github.com/brianrackle/codelima/internal/hostinfo	(cached)
+ok  	github.com/brianrackle/codelima/internal/release	6.933s
+ok  	github.com/brianrackle/codelima/internal/rendererbuild	(cached)
+?   	github.com/brianrackle/codelima/internal/terminalgraphics	[no test files]
+ok  	github.com/brianrackle/codelima/internal/terminalio	(cached)
+ok  	github.com/brianrackle/codelima/internal/terminalstate	(cached)
+ok  	github.com/brianrackle/codelima/internal/testutil	0.056s
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go test go.rockorager.dev/vaxis/...
+ok  	go.rockorager.dev/vaxis	0.400s
+ok  	go.rockorager.dev/vaxis/ansi	(cached)
+?   	go.rockorager.dev/vaxis/cmd/vtwidth	[no test files]
+?   	go.rockorager.dev/vaxis/log	[no test files]
+?   	go.rockorager.dev/vaxis/octreequant	[no test files]
+ok  	go.rockorager.dev/vaxis/sixel	(cached)
+ok  	go.rockorager.dev/vaxis/ui	(cached)
+?   	go.rockorager.dev/vaxis/ui/uitest	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw	(cached)
+?   	go.rockorager.dev/vaxis/vxfw/button	[no test files]
+?   	go.rockorager.dev/vaxis/vxfw/center	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw/image	(cached)
+?   	go.rockorager.dev/vaxis/vxfw/list	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw/richtext	(cached)
+ok  	go.rockorager.dev/vaxis/vxfw/text	(cached)
+?   	go.rockorager.dev/vaxis/vxfw/textfield	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw/vxlayout	(cached)
+?   	go.rockorager.dev/vaxis/widgets/align	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/border	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/list	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/pager	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/progress	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/scrollbar	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/spinner	[no test files]
+ok  	go.rockorager.dev/vaxis/widgets/term	(cached)
+?   	go.rockorager.dev/vaxis/widgets/term/pty	[no test files]
+ok  	go.rockorager.dev/vaxis/widgets/textinput	(cached)
+mkdir -p /Users/brianrackle/personal/codelima/bin/linux-aarch64
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=0.0.0-dev -X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=2e205255ce6d39bbfdf6f314824a31f12c8de3bbf32fac535a3d01e13289626c" -o /Users/brianrackle/personal/codelima/bin/linux-aarch64/codelima ./cmd/codelima
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=0.0.0-dev -X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=2e205255ce6d39bbfdf6f314824a31f12c8de3bbf32fac535a3d01e13289626c" -o /Users/brianrackle/personal/codelima/bin/linux-aarch64/codelima-renderer-worker ./cmd/codelima-renderer-worker
+cp scripts/codelima_dispatch.sh /Users/brianrackle/personal/codelima/bin/.codelima-dispatch.tmp
+chmod 0755 /Users/brianrackle/personal/codelima/bin/.codelima-dispatch.tmp
+mv -f /Users/brianrackle/personal/codelima/bin/.codelima-dispatch.tmp /Users/brianrackle/personal/codelima/bin/codelima

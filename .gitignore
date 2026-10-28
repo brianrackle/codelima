@@ -9,6 +9,7 @@
 /.codex/
 /.codelima/
 /.codeboarding/
+/.env
 
 # Toolchain, caches, and build artifacts.
 /.tooling/

@@ -3,6 +3,7 @@ package codelima
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -348,7 +349,7 @@ func (a *vaxisTUIApp) drawOverviewPorts(win vaxis.Window, nodeID string, theme t
 			cursor, style = "▸", theme.selected
 			tuiFill(row, style)
 		}
-		text := fmt.Sprintf("%s%d %s", cursor, r.Port, r.Address)
+		text := cursor + strconv.Itoa(r.Port) + " " + r.Address
 		if rowHeight == 1 {
 			tuiLine(row.New(0, 0, max(0, w-18), 1), 0, text, style)
 			tuiLine(row.New(max(0, w-17), 0, 17, 1), 0, r.Process+" · "+r.Status, style)

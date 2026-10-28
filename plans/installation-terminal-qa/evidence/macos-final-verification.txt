@@ -1,0 +1,104 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_zig.sh 0.16.0 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_pkgconf.sh 2.5.1 '/Users/brianrackle/personal/codelima/.tooling/darwin-arm64' '/Users/brianrackle/personal/codelima/tmp' '/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig'
+./scripts/install_gopls.sh v0.18.1 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_golangci_lint.sh 1.64.8 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/darwin-arm64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go mod download
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/bin/golangci-lint run ./...
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" -p 1 -parallel 1 ./...
+?   	github.com/brianrackle/codelima/cmd/codelima	[no test files]
+?   	github.com/brianrackle/codelima/cmd/codelima-release	[no test files]
+?   	github.com/brianrackle/codelima/cmd/codelima-renderer-worker	[no test files]
+?   	github.com/brianrackle/codelima/internal/atomicfile	[no test files]
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	317.295s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemon	1.442s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemonclient	0.847s
+ok  	github.com/brianrackle/codelima/internal/codelima/terminal	0.224s
+ok  	github.com/brianrackle/codelima/internal/diagnosticskill	0.433s
+# github.com/brianrackle/codelima/internal/ghostty.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/ghostty	10.709s
+ok  	github.com/brianrackle/codelima/internal/hostinfo	0.231s
+ok  	github.com/brianrackle/codelima/internal/release	13.172s
+ok  	github.com/brianrackle/codelima/internal/rendererbuild	0.261s
+?   	github.com/brianrackle/codelima/internal/terminalgraphics	[no test files]
+ok  	github.com/brianrackle/codelima/internal/terminalio	0.237s
+ok  	github.com/brianrackle/codelima/internal/terminalstate	0.239s
+ok  	github.com/brianrackle/codelima/internal/testutil	0.286s
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test go.rockorager.dev/vaxis/...
+ok  	go.rockorager.dev/vaxis	1.022s
+ok  	go.rockorager.dev/vaxis/ansi	0.259s
+?   	go.rockorager.dev/vaxis/cmd/vtwidth	[no test files]
+?   	go.rockorager.dev/vaxis/log	[no test files]
+?   	go.rockorager.dev/vaxis/octreequant	[no test files]
+ok  	go.rockorager.dev/vaxis/sixel	0.395s
+ok  	go.rockorager.dev/vaxis/ui	0.709s
+?   	go.rockorager.dev/vaxis/ui/uitest	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw	1.421s
+?   	go.rockorager.dev/vaxis/vxfw/button	[no test files]
+?   	go.rockorager.dev/vaxis/vxfw/center	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw/image	0.879s
+?   	go.rockorager.dev/vaxis/vxfw/list	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw/richtext	1.235s
+ok  	go.rockorager.dev/vaxis/vxfw/text	1.056s
+?   	go.rockorager.dev/vaxis/vxfw/textfield	[no test files]
+ok  	go.rockorager.dev/vaxis/vxfw/vxlayout	1.563s
+?   	go.rockorager.dev/vaxis/widgets/align	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/border	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/list	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/pager	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/progress	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/scrollbar	[no test files]
+?   	go.rockorager.dev/vaxis/widgets/spinner	[no test files]
+ok  	go.rockorager.dev/vaxis/widgets/term	2.633s
+?   	go.rockorager.dev/vaxis/widgets/term/pty	[no test files]
+ok  	go.rockorager.dev/vaxis/widgets/textinput	1.329s
+mkdir -p /Users/brianrackle/personal/codelima/bin/darwin-arm64
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=0.0.0-dev -X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" -o /Users/brianrackle/personal/codelima/bin/darwin-arm64/codelima ./cmd/codelima
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go build -ldflags "-X github.com/brianrackle/codelima/internal/codelima.Version=0.0.0-dev -X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" -o /Users/brianrackle/personal/codelima/bin/darwin-arm64/codelima-renderer-worker ./cmd/codelima-renderer-worker
+# github.com/brianrackle/codelima/cmd/codelima-renderer-worker
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+cp scripts/codelima_dispatch.sh /Users/brianrackle/personal/codelima/bin/.codelima-dispatch.tmp
+chmod 0755 /Users/brianrackle/personal/codelima/bin/.codelima-dispatch.tmp
+mv -f /Users/brianrackle/personal/codelima/bin/.codelima-dispatch.tmp /Users/brianrackle/personal/codelima/bin/codelima
+/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" -race -p 1 -parallel 1 ./...
+?   	github.com/brianrackle/codelima/cmd/codelima	[no test files]
+?   	github.com/brianrackle/codelima/cmd/codelima-release	[no test files]
+?   	github.com/brianrackle/codelima/cmd/codelima-renderer-worker	[no test files]
+?   	github.com/brianrackle/codelima/internal/atomicfile	[no test files]
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: '/private/var/folders/9b/4879vz457xjcp_rwld35tpg80000gn/T/go-link-1114813461/000021.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	353.052s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemon	5.611s
+ok  	github.com/brianrackle/codelima/internal/codelima/daemonclient	1.856s
+ok  	github.com/brianrackle/codelima/internal/codelima/terminal	1.248s
+ok  	github.com/brianrackle/codelima/internal/diagnosticskill	1.530s
+# github.com/brianrackle/codelima/internal/ghostty.test
+ld: warning: '/private/var/folders/9b/4879vz457xjcp_rwld35tpg80000gn/T/go-link-2814694147/000018.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/ghostty	11.896s
+ok  	github.com/brianrackle/codelima/internal/hostinfo	1.227s
+ok  	github.com/brianrackle/codelima/internal/release	14.231s
+ok  	github.com/brianrackle/codelima/internal/rendererbuild	1.245s
+?   	github.com/brianrackle/codelima/internal/terminalgraphics	[no test files]
+ok  	github.com/brianrackle/codelima/internal/terminalio	1.254s
+ok  	github.com/brianrackle/codelima/internal/terminalstate	1.243s
+ok  	github.com/brianrackle/codelima/internal/testutil	1.298s
+mkdir -p /Users/brianrackle/personal/codelima/tmp/i
+CODELIMA_TEST_BIN=/Users/brianrackle/personal/codelima/bin/darwin-arm64/codelima CODELIMA_TEST_TMP=/Users/brianrackle/personal/codelima/tmp/i /Users/brianrackle/personal/codelima/.tooling/darwin-arm64/go/1.24.1/bin/go test -ldflags "-X github.com/brianrackle/codelima/internal/rendererbuild.identityOverride=71bf404f8734c63cf06c42a9d0589e21bf74e9bfff2f518327e6771eaf1b77c2" -p 1 -parallel 1 -tags=integration ./tests
+ok  	github.com/brianrackle/codelima/tests	21.702s
+rm -rf /Users/brianrackle/personal/codelima/tmp/i
+# github.com/brianrackle/codelima/cmd/codelima-renderer-worker
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+/Users/brianrackle/personal/codelima/tmp/package-test.h2lNoa/dist/codelima_0.0.0-package-test_darwin_arm64.tar.gz
+/Users/brianrackle/personal/codelima/tmp/package-test.h2lNoa/dist/codelima_0.0.0-package-test_darwin_arm64.tar.gz.json
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	1.105s
+# github.com/brianrackle/codelima/internal/codelima.test
+ld: warning: object file (/Users/brianrackle/personal/codelima/.tooling/darwin-arm64/ghostty-vt/82232ecde55405559dec29c5466cb9e39938cb41-a66b68196ac45314732b2eeb4dbae7867a8352beae8ab1aa0bd2902690803126/lib/libghostty-vt.a[14](codelima_build.o)) was built for newer 'macOS' version (26.6.2) than being linked (26.0)
+ok  	github.com/brianrackle/codelima/internal/codelima	0.412s

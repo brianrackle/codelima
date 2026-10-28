@@ -77,6 +77,85 @@ func TestTUIKeyBindingsEmbeddedPayloadAndFocus(t *testing.T) {
 	}
 }
 
+func TestTUIKeyBindingsEmbeddedTabReordering(t *testing.T) {
+	for _, remapped := range []bool{false, true} {
+		t.Run(map[bool]string{false: "defaults", true: "remapped"}[remapped], func(t *testing.T) {
+			a, _ := newTestManager(t, 100, 30)
+			enableTestEmbeddedShell(a)
+			target := nodeTargetKey(a.state.selectedEntry().node.ID)
+			var term *fakeTUITerminal
+			var keys []string
+			for i := range 3 {
+				candidate := newFakeTUITerminal()
+				if i == 1 {
+					term = candidate
+				}
+				keys = append(keys, putTestSession(a.sessions, target, &tuiSession{}, candidate))
+			}
+			active := keys[1]
+			a.state.setActiveTab(target, active)
+			a.openNodeDetail(tuiDetailShell)
+			left := vaxis.Key{Keycode: vaxis.KeyLeft, Modifiers: vaxis.ModAlt | vaxis.ModShift}
+			right := vaxis.Key{Keycode: vaxis.KeyRight, Modifiers: vaxis.ModAlt | vaxis.ModShift}
+			if remapped {
+				a.applyKeyBindings(KeyBindingConfig{"terminal.move_tab_left": {"alt+h"}, "terminal.move_tab_right": {"alt+l"}})
+				if a.keyBindingError != "" {
+					t.Fatal(a.keyBindingError)
+				}
+				a.handleKey(left)
+				if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, keys) {
+					t.Fatalf("disabled default reordered tabs: %v", got)
+				}
+				left = vaxis.Key{Keycode: 'h', Modifiers: vaxis.ModAlt}
+				right = vaxis.Key{Keycode: 'l', Modifiers: vaxis.ModAlt}
+			}
+			a.handleKey(left)
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, []string{keys[1], keys[0], keys[2]}) {
+				t.Fatalf("left shortcut did not reorder active tab: %v", got)
+			}
+			a.handleKey(left)
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, []string{keys[1], keys[0], keys[2]}) {
+				t.Fatalf("boundary move wrapped tabs: %v", got)
+			}
+			a.handleKey(right)
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, keys) {
+				t.Fatalf("right shortcut did not restore order: %v", got)
+			}
+			repeat := right
+			repeat.EventType = vaxis.EventRepeat
+			a.handleKey(repeat)
+			movedRight := []string{keys[0], keys[2], keys[1]}
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, movedRight) {
+				t.Fatalf("held move shortcut did not repeat: %v", got)
+			}
+			repeat.EventType = vaxis.EventRelease
+			a.handleKey(repeat)
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, movedRight) {
+				t.Fatalf("release changed tab order: %v", got)
+			}
+			a.handleKey(left)
+			a.openNodeDetail(tuiDetailOverview)
+			a.handleKey(left)
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, keys) {
+				t.Fatalf("reorder shortcut acted outside Shell detail: %v", got)
+			}
+			a.openNodeDetail(tuiDetailShell)
+			if a.state.activeSessionKey() != active {
+				t.Fatal("reordering changed active terminal")
+			}
+			a.handleKey(vaxis.Key{Keycode: vaxis.KeyF06})
+			before := len(term.events)
+			a.handleKey(left)
+			if a.state.focus != tuiFocusTerminal || len(term.events) != before+1 || !reflect.DeepEqual(term.events[before], normalizeTUITerminalEvent(left)) {
+				t.Fatal("focused shell did not receive reorder chord unchanged")
+			}
+			if got := a.sessions.TargetSessionKeys(target); !reflect.DeepEqual(got, keys) {
+				t.Fatalf("focused-shell payload reordered tabs: %v", got)
+			}
+		})
+	}
+}
+
 func TestTUIKeyBindingsRemappedDeleteRetainsCapturedReviewAndPhysicalClaim(t *testing.T) {
 	a, _ := newTestManager(t, 80, 24)
 	a.applyKeyBindings(KeyBindingConfig{"node.delete": {"ctrl+d"}})

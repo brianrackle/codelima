@@ -1,0 +1,13 @@
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_zig.sh 0.16.0 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_pkgconf.sh 2.5.1 '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64' '/Users/brianrackle/personal/codelima/tmp' '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/zig/0.16.0/zig'
+./scripts/install_gopls.sh v0.18.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_golangci_lint.sh 1.64.8 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+./scripts/install_ghostty_vt.sh 82232ecde55405559dec29c5466cb9e39938cb41 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/zig/0.16.0/zig /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go mod download
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/bin/golangci-lint run ./...
+/Users/brianrackle/personal/codelima/.tooling/linux-aarch64/bin/gopls check internal/release/release.go internal/release/kvm_helper_test.go internal/codelima/tui_navigation.go internal/codelima/tui_key_bindings_test.go internal/codelima/tui_overview_render.go internal/codelima/tui_overview_test.go internal/codelima/tui_test.go internal/codelima/cli_command.go
+/Users/brianrackle/personal/codelima/internal/codelima/tui_overview_test.go:205:27-73: Replace append with slices.Clone
+/Users/brianrackle/personal/codelima/internal/codelima/tui_overview_test.go:206:28-74: Replace append with slices.Clone
+/Users/brianrackle/personal/codelima/internal/codelima/tui_test.go:181:3-185:4: Loop can be simplified using slices.Contains
+/Users/brianrackle/personal/codelima/internal/codelima/tui_test.go:191:9-56: Replace append with slices.Clone

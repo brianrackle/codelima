@@ -322,6 +322,11 @@ are not runtime assets or inputs to the native release package.
 This document is for maintainers.
 User-facing setup and usage stay in `README.md`.
 
+`make test-ghostty-vt-schema` provisions jsonschema 4.25.1 in a platform-local
+Python virtual environment before running the upstream ABI verifier. It uses
+the host's `python3` with `venv` support and keeps its dependencies and pip cache
+under `.tooling`. `make init-ghostty-verifier` prepares only that environment.
+
 ## Local Build
 
 For nested Linux arm64 VM qualification, `make init-qemu-guest` downloads and
@@ -331,10 +336,46 @@ documentation links to absent system packages, and publishes only after both
 QEMU executables pass version checks. `make test-qemu-guest` verifies real KVM
 initialization and QMP shutdown. `make run-kvm KVM_ARGS='...'` keeps the current
 UID and adds only process-local KVM group access using passwordless sudo when
-needed. No system package, device permission or persistent group is changed.
+needed. It preserves the caller's CodeLima/Lima settings and restores `TMPDIR`
+after dropping privileges, including with sudo-rs. The native helper regression
+in `make test-qemu-guest` checks device access, the original UID, and isolated
+home/scratch paths. No system package, device permission or persistent group is changed.
 All disposable Lima homes, images, instances and sockets still require cleanup.
 Lima discovers the local executable via PATH and its firmware beside the
 installation ([Lima configuration](https://lima-vm.io/docs/config/environment-variables/)).
+
+For an isolated source-checkout session, start the daemon through the helper
+before launching clients. Stop that isolated daemon and delete its nodes when
+finished. Use a fresh home for this check:
+
+```sh
+make init-qemu-guest test-qemu-guest
+export PATH="$PWD/.tooling/linux-aarch64/qemu/bin:$PATH"
+export CODELIMA_HOME="$PWD/tmp/dev-home"
+export LIMA_HOME="$PWD/tmp/dev-lima"
+make run-kvm KVM_ARGS='./bin/codelima daemon start'
+./bin/codelima .
+```
+
+KVM initialization is a separate check from a guest reaching SSH readiness.
+Verify both before recording a working nested VM environment.
+
+On this Apple-hosted Linux arm64 guest, the default virtual ITS stalls Ubuntu
+in its idle routine before SSH. This opt-in debugging override boots the same
+guest with KVM acceleration:
+
+```sh
+export QEMU_SYSTEM_AARCH64="$PWD/.tooling/linux-aarch64/qemu/bin/qemu-system-aarch64 -machine virt,accel=kvm,its=off"
+make run-kvm KVM_ARGS='./bin/codelima daemon start'
+```
+
+Set it before starting the isolated daemon. Lima replaces its complete machine
+argument when an override supplies one, so `-machine its=off` alone fails.
+This setting is specific to the nested development host. It does not change
+CodeLima's ordinary QEMU defaults. The outer hypervisor's underlying interrupt
+fault remains unidentified. A Lima home on the shared checkout may also need a
+project-rooted native filesystem mount because OpenSSH's socket hard-link
+handoff can fail on VirtioFS even when socket bind succeeds.
 
 CodeLima bootstraps its own local toolchain under `.tooling/<os>-<arch>`.
 Use the make targets from the repository root:
@@ -736,6 +777,15 @@ Qualify that fresh-install path as well as upgrades in QA Flow 11.
 
 ## Releasing
 
+Darwin packaging checks both executable payloads before writing the archive.
+It rejects the known `cs%s%d` string collision involved in the XProtect
+`XProtect_MACOS_FRIENDLYFERRET_SECD` false positive recorded in TODO #4.
+This conservative regression check is not a malware scan. Rebuild and qualify
+the final native macOS artifacts against the current full XProtect rules,
+then complete QA Flow 11 with Gatekeeper enabled. A cross-compiled CLI with
+CGO disabled does not qualify the native Virtualization.framework adapter.
+Developer ID signing and notarization remain tracked separately in TODO #4.
+
 The maintainer requested `v1.0.0` for the shift to a Lima VM manager.
 The release uses the standard three-platform automated gate below. Remaining
 native/manual qualification stays tracked in TODO #57 and the release notes;
@@ -755,7 +805,7 @@ Standard release flow:
    verify the renderer PID/generation stays ready, the prompt returns after
    `Ctrl+c`, and no `queue-full` connection closure or repeated daemon
    reconnection appears. Start it once more in a terminal with an adjacent tab,
-   press `Option+w`, and verify the busy tab disappears immediately without
+   press `F6` then `w`, and verify the busy tab disappears immediately without
    freezing cursor or tab selection while daemon cleanup completes.
 5. Verify both no-argument `daemon update` (which must select the invoking candidate binary) and `daemon update /explicit/candidate/path` while a long-running terminal command is active. For a protocol-changing release, start the old release first and verify the new candidate's update-only compatibility handshake preserves that terminal.
    Fill at least one renderer journal above 900 KiB before one update and

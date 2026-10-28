@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/brianrackle/codelima/internal/testutil"
 )
 
 func TestBuildArchivePackagesOnlyCLIAndStaticRenderer(t *testing.T) {
@@ -80,6 +82,57 @@ func TestBuildArchiveForcesPackagedExecutablesExecutable(t *testing.T) {
 		if got := files[archivePath].mode; got != 0o755 {
 			t.Fatalf("expected %s to be mode 0755, got %#o", archivePath, got)
 		}
+	}
+}
+
+func TestBuildArchiveRejectsKnownDarwinXProtectCollisionBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	for _, executable := range []string{"codelima", "codelima-renderer-worker"} {
+		t.Run(executable, func(t *testing.T) {
+			t.Parallel()
+			root := testutil.TempDir(t, "darwin-collision-")
+			cli, worker := filepath.Join(root, "codelima"), filepath.Join(root, "codelima-renderer-worker")
+			for _, path := range []string{cli, worker} {
+				data := "clean executable"
+				if filepath.Base(path) == executable {
+					data = "ordinary Go strings\x00focus: metrics%s%d %s\x00"
+				}
+				if err := os.WriteFile(path, []byte(data), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			output := filepath.Join(root, "dist", "candidate.tar.gz")
+			_, err := BuildArchive("1.2.3", "darwin", "arm64", cli, worker, strings.Repeat("a", 64), output)
+			if err == nil || !strings.Contains(err.Error(), executable) || !strings.Contains(err.Error(), "XProtect") {
+				t.Fatalf("known collision was not identified for %s: %v", executable, err)
+			}
+			if _, err := os.Stat(filepath.Dir(output)); !os.IsNotExist(err) {
+				t.Fatalf("rejected candidate created output directory: %v", err)
+			}
+			installerWrite(t, output, "previous archive", 0o644)
+			if _, err := BuildArchive("1.2.3", "darwin", "arm64", cli, worker, strings.Repeat("a", 64), output); err == nil {
+				t.Fatal("known collision replaced an existing artifact")
+			}
+			data, err := os.ReadFile(output)
+			if err != nil || string(data) != "previous archive" {
+				t.Fatalf("rejected candidate changed previous archive: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func TestBuildArchiveDoesNotApplyDarwinCollisionGuardToLinux(t *testing.T) {
+	t.Parallel()
+	root := testutil.TempDir(t, "linux-collision-")
+	cli, worker := filepath.Join(root, "codelima"), filepath.Join(root, "codelima-renderer-worker")
+	for _, path := range []string{cli, worker} {
+		if err := os.WriteFile(path, []byte("focus: metrics%s%d %s"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := BuildArchive("1.2.3", "linux", "arm64", cli, worker, strings.Repeat("a", 64), filepath.Join(root, "candidate.tar.gz")); err != nil {
+		t.Fatal(err)
 	}
 }
 

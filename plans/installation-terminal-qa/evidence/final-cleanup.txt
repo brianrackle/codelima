@@ -1,0 +1,5 @@
+Removed owned failed-test directory TestTUIBackgroundNodeOperationDoesNotBlockNavigationOrTerminalFocus4165517173
+Removed owned failed-test directory TestTUIBackgroundOperationsAllowNonConflictingActionsAndRejectConflicts1442982323
+Removed owned failed-test directory TestTUIBackgroundOperationsAllowNonConflictingActionsAndRejectConflicts2900037160
+Removed isolated package and temporary scanner environment
+Runtime QA roots are absent

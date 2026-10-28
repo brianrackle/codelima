@@ -1,0 +1,16 @@
+bash scripts/install_qemu_guest.sh '/Users/brianrackle/personal/codelima/.tooling/linux-aarch64' '/Users/brianrackle/personal/codelima/tmp'
+./scripts/install_go.sh 1.24.1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64 /Users/brianrackle/personal/codelima/tmp
+{"QMP": {"version": {"qemu": {"micro": 1, "minor": 2, "major": 10}, "package": "Debian 1:10.2.1+ds-1ubuntu3.3"}, "capabilities": ["oob"]}}
+{"return": {}}
+{"return": {"enabled": true, "present": true}}
+{"timestamp": {"seconds": 1793161908, "microseconds": 177459}, "event": "SHUTDOWN", "data": {"guest": false, "reason": "host-qmp-quit"}}
+{"return": {}}
+CODELIMA_KVM_TEST=1 /Users/brianrackle/personal/codelima/.tooling/linux-aarch64/go/1.24.1/bin/go test ./internal/release -run '^TestKVMHelper' -count=1
+--- FAIL: TestKVMHelperPreservesCommandEnvironment (0.02s)
+    kvm_helper_test.go:34: KVM helper changed command environment or user:
+        got "\n\n\n\n501\n"
+        want "/tmp/TestKVMHelperPreservesCommandEnvironment3133422606/001/home with spaces\n/tmp/TestKVMHelperPreservesCommandEnvironment3133422606/001/lima with spaces\n/tmp/TestKVMHelperPreservesCommandEnvironment3133422606/001\npreserved caller value\n501\n"
+FAIL
+FAIL	github.com/brianrackle/codelima/internal/release	0.024s
+FAIL
+make: *** [Makefile:107: test-qemu-guest] Error 1

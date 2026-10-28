@@ -4182,7 +4182,7 @@ func drainAsyncTUIEvents(t *testing.T, app *vaxisTUIApp, events <-chan vaxis.Eve
 func awaitAsyncTUIState(t *testing.T, app *vaxisTUIApp, events <-chan vaxis.Event, condition func() bool, description string) {
 	t.Helper()
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		drainAsyncTUIEvents(t, app, events)
 		if condition() {

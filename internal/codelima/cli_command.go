@@ -670,8 +670,8 @@ var cliCommands = []*cliCommand{
 		Positional: "terminal-id",
 		MinArgs:    1,
 		Flags: func(fs *flag.FlagSet) {
-			fs.String("source", "visible", "region to read: visible or scrollback")
-			fs.String("format", "text", "output format: text or styled")
+			fs.String("source", "visible", "region to read: visible, scrollback, or recent")
+			fs.String("format", "text", "output format: text or ansi")
 		},
 		Run: func(ctx context.Context, service *Service, terminalID string, fs *flag.FlagSet, _ []string) (any, error) {
 			source := flagString(fs, "source")

@@ -2,6 +2,7 @@ package release
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -109,6 +110,16 @@ func BuildArchive(version, goos, goarch, binaryPath, rendererPath, rendererBuild
 	rendererData, err := os.ReadFile(rendererPath)
 	if err != nil {
 		return Manifest{}, fmt.Errorf("read renderer binary: %w", err)
+	}
+	if strings.TrimSpace(goos) == "darwin" {
+		for _, executable := range []struct {
+			name string
+			data []byte
+		}{{"codelima", binaryData}, {"codelima-renderer-worker", rendererData}} {
+			if offset := bytes.Index(executable.data, []byte("cs%s%d")); offset >= 0 {
+				return Manifest{}, fmt.Errorf("%s contains the known XProtect_MACOS_FRIENDLYFERRET_SECD collision at byte %d; qualify rebuilt executables against active macOS rules before release", executable.name, offset)
+			}
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return Manifest{}, err

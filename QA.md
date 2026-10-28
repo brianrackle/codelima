@@ -1462,8 +1462,9 @@ verify only `sleep` is interrupted: the terminal tab and guest prompt remain
 open. Paste the two-line block again and verify no literal `^[[200~` or
 `^[[201~` bracketed-paste markers appear.
 
-Immediately after starting a node, toggle between tree and terminal focus with
-`Option+Backtick` or `F6` several times. Verify width growth keeps the prompt
+Enable `shell.mode embedded` before these checks. Immediately after starting
+a node, open its Shell detail and toggle manager/terminal focus with `F6`
+several times. Verify width growth keeps the prompt
 clean without typing literal `^L` characters or clearing earlier terminal
 history.
 
@@ -1482,16 +1483,16 @@ release each focus shortcut in both directions. Focus must change once on
 press and remain there after release. Hold each shortcut through key repeat:
 focus must stay stable until a fresh press. Two quick separate presses must
 toggle twice without a delay or missed press, and no shortcut text should
-appear in the shell. Repeat with legacy escape-prefixed Option input.
+appear in the shell. Repeat in a legacy terminal protocol.
 
-From both tree and terminal focus, tap `Option+t` and `Option+Shift+t`,
+Return to manager focus on Shell detail. Tap `t` and `T`,
 including releasing each key: each tap must add exactly one tab of the requested
 kind. Hold each shortcut through reported repeats; the count must stay fixed
 after its first press. Two rapid separate presses must add two tabs. Tap and
-hold `Option+w`: only the active tab closes, the adjacent tab remains usable,
+hold `w`: only the active tab closes, the adjacent tab remains usable,
 and the release must not close it. Close the final tab and verify its release
-does not produce an error after focus returns to the tree. Repeat with legacy
-Option input and the macOS Option glyph fallbacks. Legacy protocols cannot
+does not produce an error after focus returns to the manager. Repeat with
+legacy input. Legacy protocols cannot
 distinguish hold repeats from fresh presses. Check `terminal list` alongside
 the tab bar: ordinary guest tabs display `shell` and host tabs `host`, without
 node names or numbers, even when several tabs have identical names. Shell
@@ -1558,9 +1559,9 @@ reporting is available. Returning to a tab must show its latest reported state.
 
 Verify the remaining shortcut lifecycles with press/repeat/release reporting:
 
-- Tap and hold `F7`: search stays open after its opening press. A fresh `F7`
-  or `Esc` closes it once without sending followups to the shell. `i` toggles
-  Info once per press from tree focus.
+- With manager focus in Shell detail, tap and hold `F7`: search stays open
+  after its opening press. A fresh `F7` or `Esc` closes it once without sending
+  followups to the shell. With terminal focus, `F7` reaches the guest instead.
 - Open a form with a node/menu shortcut and hold the opening letter: it must
   not type into the form. After release, a fresh press of that same letter
   types normally. Repeat with a menu action that opens another form.
@@ -1604,9 +1605,9 @@ responsive, and no repeated daemon-disconnected/reconnected message appears.
 Press `Ctrl+c`; it must stop only `cmatrix` and return to the existing prompt.
 
 Ensure the node has an adjacent terminal tab, run `cmatrix -u 0` again in the
-active tab, and press `Option+w` while its output is still unthrottled. The busy
+active tab, then press `F6` and `w` while its output is still unthrottled. The busy
 tab must disappear on the next frame, focus must move to the adjacent tab, and
-typing `printf 'close-responsive\n'` there must work immediately. From the
+pressing `F6` and typing `printf 'close-responsive\n'` there must work immediately. From the
 second real terminal, verify the closed terminal ID disappears from
 `./bin/codelima terminal list` after its bounded daemon cleanup. Repeating the
 close shortcut must not produce a reconnect message or close the newly active
@@ -1644,7 +1645,7 @@ terminal ID. No `broken pipe`, `EOF`, ownership warning, or reopen instruction
 may remain. Leave it attached for at least 30 seconds and verify heartbeats do
 not pin a CPU core.
 
-For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. Move the active third tab left with `Option+Shift+Left`, verify it stays active in the second position, then move it right with `Option+Shift+Right`. Move it left once more so the final order differs from creation order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the reordered left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same reordered tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
+For restart and handoff restoration, open at least three tabs on `qa-v3-root` in a recognizable guest/host/guest order. With manager focus in Shell detail, move the active third tab left with `Option+Shift+Left`, verify it stays active in the second position, then move it right with `Option+Shift+Right`. Move it left once more so the final order differs from creation order. In one guest tab, print several lines longer than the visible pane width so they wrap. Quit both TUIs, reopen `./bin/codelima "$QA_ROOT/work/root"`, and verify the three tabs retain the reordered left-to-right order. Quit again, run `./bin/codelima --json daemon update` from the second real terminal, then reopen the TUI at the same window size. Verify the same reordered tab order remains and the wrapped lines have the same row boundaries: no line may be offset, combined with its neighbor, or split using an 80-column stride.
 
 For cross-scope restoration, run `./bin/codelima "$QA_ROOT/work/root"` in one real terminal and `./bin/codelima "$QA_ROOT/work/prefix"` in another. Open two tabs for `qa-v3-root` in the root-scoped TUI and two tabs for `qa-v3-prefix` in the prefix-scoped TUI. Leave both open for at least fifteen seconds so a node-list refresh (pushed on change, or the ten-second fallback tick) has run, quit both processes, and reopen both commands. Again leave them open through a refresh and verify each node still has both tabs; neither scoped window may close the other window's daemon tabs.
 
@@ -1698,9 +1699,11 @@ Verify:
 - `a` opens global configuration management and `g` opens global environment management titled `Environments`; its create, manage, and delete surfaces consistently call each reusable command bundle an environment
 - configuration selectors list only `xsmall`, `small`, `medium`, `large`, `xlarge` in that order, select `small` by default, and render each row as `<name> (<vCPU> vCPU, <RAM> RAM, <disk> disk)` with the expected built-in resources
 - in the configuration update dialog, `Left` and `Right` move the cursor in every editable text and resource field; after moving left, moving right and typing inserts at the expected position, while `Right` still opens the Environments selector
-- `Option+t` opens a fresh guest tab and `Option+Shift+t` opens a fresh host tab for the same node without changing tree/fullscreen focus
-- the host tab is labeled as a host shell, makes the top bar red only while active, and participates in `Option+Left`/`Option+Right` switching and `Option+w` closing like guest tabs
-- `Option+Shift+Left`/`Option+Shift+Right` move the active tab one position without changing the active tab, do not wrap at either edge, and work from both tree and terminal focus
+- With manager focus in Shell detail, `t` opens a fresh guest tab and `T` opens a fresh host tab for the same node
+- the host tab is labeled as a host shell and participates in `[`/`]` switching and `w` closing like guest tabs
+- `Option+Shift+Left`/`Option+Shift+Right` move the active tab one position without changing the active tab and do not wrap at either edge, with manager focus in Shell detail
+- remap `terminal.move_tab_left` and `terminal.move_tab_right`; verify the effective help labels and new bindings change together and the old bindings stop moving tabs
+- with terminal focus, both default and remapped reorder keys reach the shell and leave tab order unchanged
 - `Option+Shift+Backtick` no longer opens or toggles a host terminal
 - routine focus handoffs do not show `terminal input ownership was taken by another client`
 - the first terminal action after every window-focus takeover and after the idle interval succeeds without a broken pipe or `client is observe-only` error
@@ -1711,7 +1714,7 @@ Verify:
 - the cursor follows echoed output monotonically without pre-echo or backward jumps
 - `cmatrix -u 0` runs for at least 15 seconds without renderer replacement,
   terminal error floods, daemon reconnect messages, or loss of `Ctrl+c`
-- `Option+w` removes a busy terminal on the next frame, selects the adjacent
+- `F6` followed by `w` removes a busy terminal on the next frame, selects the adjacent
   tab, and allows immediate input without a duplicate close or reconnect
 - idle daemon and TUI `codelima` processes do not pin a CPU core or scale CPU use with hidden tab count
 - an idle TUI request connection survives beyond its handshake timeout without recurring `tui refresh failed` socket timeouts
@@ -1864,7 +1867,7 @@ In a real host terminal, use the existing isolated QA home and node tabs:
    highlights, and overline agree with the cells displayed. Shift-drag remains
    the outer terminal's selection bypass, including inside a mouse-capturing
    application. Restore any clipboard contents you need after this check.
-2. Press `F7`, search for a repeated word in visible text and scrollback, and
+2. Return to manager focus with `F6`, then press `F7`, search for a repeated word in visible text and scrollback, and
    use Enter/Shift+Enter to navigate. Verify the UI stays responsive while the
    match count catches up; Esc closes search without sending search keystrokes
    to the shell. Repeat after output, resizing and renderer replacement.
@@ -1917,6 +1920,17 @@ adoption release-qualified until its native Linux/macOS and physical-terminal
 checks have actually run.
 
 ## Flow 11: Homebrew installation and regular upgrade
+
+Disable automatic update, cleanup, and autoremove during disposable package
+tests. Save `brew list --versions` before installing and compare it again after
+cleanup so verification cannot remove pre-existing formulae:
+
+```sh
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+export HOMEBREW_NO_AUTOREMOVE=1
+brew list --versions > "$QA_ROOT/brew-before.txt"
+```
 
 Run `make test-release` and `make test-package` first. On each supported native
 Homebrew host, install a locally generated candidate formula from a disposable
