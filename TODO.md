@@ -18,6 +18,12 @@ telemetry interruptions. Advantage: stable continuous charts; disadvantage:
 requires cadence-aware gap handling and compact/wide regression coverage.
 
 Release qualification after the installation/terminal repair remains partial.
+ADR 209's resource-column repair has native running/failed row checks at five
+widths; live provisioning/registration and the full QA.md flow matrix remain
+part of this broader qualification. Automated setup/evidence regressions cover
+the in-progress and unavailable-sample cases. Re-run those native scenarios with
+disposable VMs: advantage, confirms live lifecycle transitions; disadvantage,
+requires additional VM setup beyond the isolated row repair.
 The runtime QA record covers real Linux KVM and macOS VZ guests, embedded
 host/guest terminals, handoff, renderer recovery, and a disposable Homebrew
 candidate. Still run QA 5b's two-window seats, the full manager workflows in

@@ -410,7 +410,10 @@ func (a *vaxisTUIApp) drawFleet(win vaxis.Window, theme tuiTheme) {
 	} else if selected, ok := a.fleetSelected(); ok {
 		if layout.Preview.height > 0 {
 			a.drawNodePreview(win.New(layout.Preview.col, layout.Preview.row, layout.Preview.width, layout.Preview.height), selected, theme)
-		} else {
+		}
+		if context, style := a.fleetRecordContext(selected, theme); context != "" {
+			tuiLine(win.New(layout.Summary.col, layout.Summary.row, layout.Summary.width, 1), 0, selected.Node.Slug+" · "+context, style)
+		} else if layout.Preview.height == 0 {
 			uptime, _ := a.fleetCell(selected, tuiFleetSortUptime, true, 8, theme)
 			ports, _ := a.fleetCell(selected, tuiFleetSortPorts, true, 16, theme)
 			text := a.keyHintsFormat("%s · up %s · ports %s · {node.open} details", selected.Node.Slug, uptime, ports)
@@ -523,48 +526,48 @@ func (a *vaxisTUIApp) drawFleetRecord(win vaxis.Window, record tuiFleetRecord, c
 	}
 	tuiFill(win, style)
 	tuiLine(win.New(0, 0, 2, 1), 0, marker, style)
-	phase := a.fleetPhase(record.Node.ID)
-	showEvidence := record.Status != "running" || record.Setup == "failed" || record.Setup == "provisioning" || record.Setup == "registering" || phase != ""
 	for _, column := range columns {
-		if showEvidence && (column.field == tuiFleetSortCPU || (compact && column.field == tuiFleetSortTemplate)) {
-			text := ""
-			switch record.Status {
-			case "created":
-				text = a.keyHints("never started · {node.toggle} to start")
-			case "stopped":
-				text = "stopped · " + nodeWorkspaceMode(record.Node) + " workspace · s to start"
-			case "failed", "broken":
-				text = a.keyHints("failed · {node.open} details · {node.logs} logs")
-			default:
-				text = record.Status
-			}
-			if record.Setup == "failed" {
-				text = a.keyHints("setup failed · {node.open} details · {node.logs} logs")
-			}
-			for _, operation := range a.entryOperations(tuiTreeEntry{node: record.Node}) {
-				if len(operation.Lines) > 0 {
-					text = operation.Lines[len(operation.Lines)-1]
-				}
-			}
-			if phase != "" {
-				text = phase
-			}
-			if evidence := a.fleetEvidenceLine(record); evidence != "" {
-				text = evidence
-			}
-			_, statusStyle := theme.status(record.Status)
-			if record.Setup == "failed" || record.Setup == "provisioning" || record.Setup == "registering" {
-				statusStyle = theme.setup(record.Setup)
-			}
-			style.Foreground = statusStyle.Foreground
-			tuiLine(win.New(column.col, 0, -1, 1), 0, text, style)
-			break
-		}
 		text, foreground := a.fleetCell(record, column.field, compact, column.width, theme)
 		cellStyle := style
 		cellStyle.Foreground = foreground.Foreground
 		text.draw(win.New(column.col, 0, column.width-1, 1), 0, cellStyle, theme)
 	}
+}
+
+func (a *vaxisTUIApp) fleetRecordContext(record tuiFleetRecord, theme tuiTheme) (string, vaxis.Style) {
+	phase := a.fleetPhase(record.Node.ID)
+	if record.Status == "running" && record.Setup != "failed" && record.Setup != "provisioning" && record.Setup != "registering" && phase == "" {
+		return "", theme.muted
+	}
+	text := record.Status
+	switch record.Status {
+	case "created":
+		text = a.keyHints("never started · {node.toggle} to start")
+	case "stopped":
+		text = a.keyHints("stopped · " + nodeWorkspaceMode(record.Node) + " workspace · {node.toggle} to start")
+	case "failed", "broken":
+		text = a.keyHints("failed · {node.open} details · {node.logs} logs")
+	}
+	_, style := theme.status(record.Status)
+	if record.Setup == "failed" || record.Setup == "provisioning" || record.Setup == "registering" {
+		text = "setup " + record.Setup
+		style = theme.setup(record.Setup)
+		if record.Setup == "failed" {
+			text = a.keyHints("setup failed · {node.open} details · {node.logs} logs")
+		}
+	}
+	for _, operation := range a.entryOperations(tuiTreeEntry{node: record.Node}) {
+		if len(operation.Lines) > 0 {
+			text = operation.Lines[len(operation.Lines)-1]
+		}
+	}
+	if phase != "" {
+		text = phase
+	}
+	if evidence := a.fleetEvidenceLine(record); evidence != "" {
+		text = evidence
+	}
+	return text, style
 }
 
 func (a *vaxisTUIApp) fleetCell(record tuiFleetRecord, field tuiFleetSort, compact bool, width int, theme tuiTheme) (tuiGaugeLine, vaxis.Style) {

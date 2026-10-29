@@ -1,12 +1,80 @@
 package codelima
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"go.rockorager.dev/vaxis"
 )
+
+func TestTUIFleetSetupKeepsResourceCellsAndSeparateContext(t *testing.T) {
+	for _, width := range []int{80, 100, 120, 150, 240} {
+		for _, setup := range []NodeStatus{NodeStatusFailed, NodeStatusProvisioning, NodeStatusRegistering} {
+			t.Run(fmt.Sprintf("%d/%s", width, setup), func(t *testing.T) {
+				a, _ := newTestManager(t, width, 38)
+				node := a.state.nodes[0]
+				node.Status, node.BootstrapCompleted = setup, false
+				cpu := 42.0
+				used, total := uint64(1<<30), uint64(4<<30)
+				for _, sampled := range []bool{true, false} {
+					node.LastRuntimeObservation = &RuntimeObservation{Exists: true, Status: ObservationRunning}
+					if sampled {
+						node.LastRuntimeObservation.CPUUsagePercent = &cpu
+						node.LastRuntimeObservation.MemoryUsedBytes, node.LastRuntimeObservation.MemoryTotalBytes = &used, &total
+						node.LastRuntimeObservation.DiskUsedBytes, node.LastRuntimeObservation.DiskTotalBytes = &used, &total
+					}
+					if err := a.applyReloadedNodes([]Node{node}, ""); err != nil {
+						t.Fatal(err)
+					}
+					a.draw()
+					screen := renderedScreenText(t, a.vx, width, 38)
+					var row []rune
+					for _, line := range strings.Split(screen, "\n") {
+						if strings.Contains(line, node.Slug) && strings.Contains(line, "running") {
+							row = []rune(line)
+							break
+						}
+					}
+					if row == nil {
+						t.Fatalf("missing node row:\n%s", screen)
+					}
+					for _, column := range tuiFleetColumns(width-4, width < 100, !a.fleet.grouped()) {
+						want := ""
+						switch column.field {
+						case tuiFleetSortTemplate:
+							want = "small"
+						case tuiFleetSortCPU:
+							want = "42%"
+						case tuiFleetSortMemory, tuiFleetSortDisk:
+							want = "1/4G"
+							if width < 100 {
+								want = "25%"
+							}
+						default:
+							continue
+						}
+						if !sampled && column.field != tuiFleetSortTemplate {
+							want = "—"
+						}
+						start := column.col + 2 // table origin and left border
+						cell := string(row[start : start+column.width-1])
+						if !strings.Contains(cell, want) {
+							t.Errorf("sampled=%v: %s cell = %q, want %q", sampled, column.title, cell, want)
+						}
+					}
+					if strings.Contains(string(row), "details") || strings.Contains(string(row), "logs") {
+						t.Errorf("actions replaced resource cells: %s", string(row))
+					}
+					if setup == NodeStatusFailed && !strings.Contains(screen, "setup failed · Enter details · l logs") {
+						t.Errorf("lost separate failure context:\n%s", screen)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestTUIFleetSeparatesVMStatusAndSetupAtEveryWidth(t *testing.T) {
 	for _, width := range []int{80, 100, 120, 150} {

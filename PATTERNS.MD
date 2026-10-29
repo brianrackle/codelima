@@ -1050,3 +1050,8 @@ When a development helper briefly needs privilege to assign groups, drop that
 privilege before restoring user-specific paths or launching the command. Test
 the actual command's UID, device access, and isolated environment together.
 Device initialization alone does not prove a guest boots (ADR 207).
+
+Fleet table cells always retain their header's meaning (ADR 209). Render
+failure, lifecycle and shortcut context for the selected node below the table;
+never span metric columns with status prose. Share the same context selection
+and evidence precedence across compact and wide layouts.

@@ -5,6 +5,9 @@
 `make test-node-status` covers independent VM Status/Setup presentation, CLI
 JSON/YAML output, compact/wide columns, setup filtering/sorting and unfinished
 guest-shell readiness. Run it with the normal `make verify` release gates.
+It also checks that failed/in-progress setup preserves template and resource
+cells at compact, medium and wide widths, with separate selected-node context
+(ADR 209). `make test-fleet-evidence` checks retained failures and live phases.
 Integration clients and their built CLI use the same `PACKAGE_VERSION`, so
 `make test-integration PACKAGE_VERSION=1.0.1` preserves exact daemon handshakes.
 

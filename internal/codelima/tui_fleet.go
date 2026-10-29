@@ -366,8 +366,9 @@ func layoutTUIFleet(width, height, rows int) tuiFleetLayout {
 		tableHeight = min(tableHeight, max(0, height-7))
 	}
 	layout.Table = tuiRect{col: 1, row: 2, width: max(0, width-2), height: tableHeight}
+	layout.Summary = tuiRect{col: 2, row: 2 + tableHeight, width: max(0, width-4), height: 1}
 	if layout.Preview.height == 0 {
-		layout.Summary = tuiRect{col: 2, row: 3 + tableHeight, width: max(0, width-4), height: 1}
+		layout.Summary.row++
 	}
 	return layout
 }

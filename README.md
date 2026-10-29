@@ -115,6 +115,9 @@ to the current directory and its descendants. Press `0` to toggle that scope.
 or `failed`. A running VM can have failed setup and still offer `r` to retry
 the failed step. Filter with `status:running setup:failed` to find those VMs.
 Setup also appears in the selected-node preview, Overview, and CLI node list.
+CPU, memory and disk columns keep their readings (or `—` when unavailable)
+during setup failures and operations. Select a node to see its failure or
+progress message below the table; `Enter` opens details and `l` opens logs.
 CLI node show/list JSON exposes the VM state as `status` and setup as
 `setup_status`; unknown or missing VMs remain explicit.
 

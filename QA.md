@@ -495,6 +495,33 @@ VM status and setup (ADR 208):
 5. Run `make test-node-status` and normal verification gates. Clean up all
    disposable nodes, frontends, daemon homes and captures.
 
+Resource columns and selected context (ADR 209):
+
+1. Select a running node with failed setup at 80×24, 100×30, 120×30,
+   150×38 and 240×38. Template, CPU, memory and disk remain under their own
+   headers. Observed metrics remain visible; unavailable readings show `—`.
+   The failure message and Enter/log shortcuts appear below the table.
+2. Move between nodes, group/ungroup and resize. The message follows selection
+   and stays outside both the resource row and wide preview. Mark nodes and
+   confirm the batch preview/summary still describes the marked targets.
+3. During setup or another lifecycle operation, inspect the selected progress
+   below the table. Retained failed-step context must yield to a new operation.
+   Check stopped/missing/unknown nodes also retain their column alignment.
+4. Open details and logs, then return. Check the full table can scroll while
+   keeping its selected context visible. Run `make test-node-status`,
+   `make test-fleet-evidence` and `make verify`.
+
+Local row-repair evidence (2026-10-28): the rebuilt v1.0.2 frontend against the
+existing daemon displayed `codelima` as running/failed with observed CPU, memory
+and disk readings at all five sizes above. Failure context stayed below the
+table, including above the wide preview. Grouping, marking/batch preview,
+Enter details, `l` logs and clean frontend exit were checked. The node.yaml
+SHA-256 was unchanged; neither existing VM was stopped or retried. Automated
+tests additionally cover provisioning/registering, unavailable samples, retained
+failed steps and superseding live operation phases. Broader native release
+qualification remains tracked in TODO.md. `make test-node-status`,
+`make test-fleet-evidence` and `make verify PACKAGE_VERSION=1.0.2` passed.
+
 Local evidence (2026-10-28): rebuilt CLI and PTY frontends against the existing
 running `codelima` and `work` VMs showed running/failed and running/ready.
 `make verify PACKAGE_VERSION=1.0.1` and the CLI integration suite passed.

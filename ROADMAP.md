@@ -7,6 +7,11 @@ fleet columns, preview/detail states and CLI presentation (ADR 208). Four termin
 widths and a disposable native VZ failure/external-stop/start/retry/success cycle
 passed. Release evidence is in plans/status_setup_release_qa.md.
 
+Fleet resource-column repair [complete locally]: template and metric cells stay
+visible during failed/in-progress setup, with selected failure/progress context
+below the table (ADR 209). Regression tests and native PTY inspection at five
+terminal widths cover the reported running/failed row.
+
 This roadmap tracks the current prioritized plan documents for CodeLima. Every linked plan below is a draft. Completed, superseded, and cancelled items have been removed; their history lives in git and the ADRs under `decisions/`. Each renumbered item keeps a `(was N)` breadcrumb because IMPROVEMENT_PLAN.md and PROGRESS.md reference the old numbers.
 
 ## Priorities
